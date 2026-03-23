@@ -1,0 +1,144 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Manrope:wght@500;700&family=Noto+Serif:ital,wght@0,400;0,700;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-headline: "Noto Serif", serif;
+  --font-label: "Manrope", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-primary: #ffb866;
+  --color-primary-fixed-dim: #ffb866;
+  --color-on-background: #e5e2e1;
+  --color-surface: #131313;
+  --color-surface-container-low: #1c1b1b;
+  --color-surface-container-lowest: #0e0e0e;
+  --color-surface-container-high: #2a2a2a;
+  --color-surface-container-highest: #353534;
+  --color-outline: #909097;
+  --color-outline-variant: #45464d;
+  --color-tertiary: #ecc071;
+  --color-secondary: #8dcdff;
+  --color-on-primary-fixed: #2b1700;
+  --color-on-primary-container: #b77100;
+}
+
+@layer base {
+  body {
+    @apply font-sans text-on-background bg-surface antialiased selection:bg-primary selection:text-black overflow-x-hidden;
+  }
+}
+
+@layer utilities {
+  .cinematic-vignette {
+    background: radial-gradient(circle, transparent 20%, rgba(14, 14, 14, 0.8) 100%);
+  }
+  
+  .ghost-border {
+    border: 0.5px solid rgba(144, 144, 151, 0.2);
+  }
+  
+  .glow-text {
+    text-shadow: 0 0 20px rgba(255, 184, 102, 0.3);
+  }
+
+  .glass-panel {
+    background: rgba(14, 14, 14, 0.6);
+    backdrop-filter: blur(20px);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #45464d;
+    border-radius: 10px;
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-[#101622] text-slate-100 antialiased;
+  }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 1cm;
+  }
+  
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Hide UI elements not meant for printing */
+  aside, 
+  header, 
+  button, 
+  .no-print {
+    display: none !important;
+  }
+
+  /* Ensure main content takes full width */
+  main {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: white !important;
+  }
+
+  /* Force grid layout for printing */
+  .grid {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 1rem !important;
+  }
+
+  /* Adjust card styles for print */
+  .group {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 0.5rem !important;
+    padding: 0.5rem !important;
+    background: white !important;
+  }
+
+  .group img {
+    border-radius: 0.25rem !important;
+  }
+
+  /* Override dark mode text colors for print */
+  .text-slate-100, .text-slate-200, .text-slate-300, .text-slate-400, .text-slate-500 {
+    color: #374151 !important;
+  }
+  
+  .bg-slate-800\/50, .bg-slate-900\/50 {
+    background: #f3f4f6 !important;
+  }
+}
+
