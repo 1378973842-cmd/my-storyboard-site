@@ -269,6 +269,9 @@ export default function App() {
   const [showCoverPage, setShowCoverPage] = useState(true);
   const [showImageEditorPage, setShowImageEditorPage] = useState(false);
   const [showNineGridPage, setShowNineGridPage] = useState(false);
+  /** 一旦打开过即保持挂载，避免进主工作室/切回首页后卸载导致草稿丢失 */
+  const [imageEditorKeepAlive, setImageEditorKeepAlive] = useState(false);
+  const [nineGridKeepAlive, setNineGridKeepAlive] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [activeFilter, setActiveFilter] = useState<string>('All');
   const [showLibrary, setShowLibrary] = useState(false);
@@ -583,9 +586,9 @@ export default function App() {
 
   return (
     <>
-      {/* Keep editor mounted when switching to cover page, so draft state persists */}
-      {showImageEditorPage && (
-        <div hidden={showCoverPage}>
+      {/* Keep editor mounted after first open (cover / main studio), so draft persists */}
+      {(showImageEditorPage || imageEditorKeepAlive) && (
+        <div hidden={showCoverPage || !showImageEditorPage}>
           <StandaloneImageEditorPage
             onBack={() => {
               setShowCoverPage(true);
@@ -594,9 +597,9 @@ export default function App() {
         </div>
       )}
 
-      {/* Keep 9-grid mounted when switching to cover page, so draft state persists */}
-      {showNineGridPage && (
-        <div hidden={showCoverPage}>
+      {/* Keep 9-grid mounted after first open (cover / main studio), so history & grids persist */}
+      {(showNineGridPage || nineGridKeepAlive) && (
+        <div hidden={showCoverPage || !showNineGridPage}>
           <NineGridPage
             onBack={() => {
               setShowCoverPage(true);
@@ -615,11 +618,13 @@ export default function App() {
           onOpenImageEditor={() => {
             setShowCoverPage(false);
             setShowImageEditorPage(true);
+            setImageEditorKeepAlive(true);
             setShowNineGridPage(false);
           }}
           onOpenNineGrid={() => {
             setShowCoverPage(false);
             setShowNineGridPage(true);
+            setNineGridKeepAlive(true);
             setShowImageEditorPage(false);
           }}
         />
