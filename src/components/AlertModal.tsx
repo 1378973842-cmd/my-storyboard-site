@@ -37,6 +37,7 @@ export const AlertModal: React.FC<AlertModalProps> = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             className="relative w-full max-w-md bg-[#1a1f2e] border border-white/10 rounded-3xl shadow-2xl overflow-hidden z-10"
+            data-theme-preserve="dark"
           >
             <div className="p-6">
               <div className="flex items-start gap-4">

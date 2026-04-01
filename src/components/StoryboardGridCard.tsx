@@ -1,7 +1,7 @@
 import React from 'react';
 import { Storyboard } from '../types';
 import { cn } from '../lib/utils';
-import { Image as ImageIcon, Maximize2, Sparkles, Trash2 } from 'lucide-react';
+import { Download, Image as ImageIcon, Maximize2, Sparkles, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useStore } from '../store/useStore';
 import { ConfirmationModal } from './ConfirmationModal';
@@ -28,6 +28,25 @@ export const StoryboardGridCard: React.FC<StoryboardGridCardProps> = ({ shot, on
   const { removeStoryboard } = useStore();
   const [isDeleteModalOpen, setIsDeleteModalOpen] = React.useState(false);
   const shotType = getShotType(shot.director_notes);
+
+  const handleDownload = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!shot.image_url) return;
+    try {
+      const response = await fetch(shot.image_url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `shot_${shot.shot_number.toString().padStart(2, '0')}_${Date.now()}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error('Download failed', err);
+    }
+  };
   
   // Extract a short title from the summary (first sentence or up to 20 chars)
   const summaryParts = shot.summary.split(/[。！？.!?]/);
@@ -50,7 +69,10 @@ export const StoryboardGridCard: React.FC<StoryboardGridCardProps> = ({ shot, on
       animate={{ opacity: 1, y: 0 }}
       className="flex flex-col group"
     >
-      <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-[#0a0a0a] border border-white/5 group-hover:border-blue-500/50 transition-all duration-500 shadow-lg group-hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.5)] flex items-center justify-center">
+      <div
+        className="relative w-full aspect-video rounded-2xl overflow-hidden bg-[#0a0a0a] border border-white/5 group-hover:border-blue-500/50 transition-all duration-500 shadow-lg group-hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.5)] flex items-center justify-center cursor-pointer"
+        onClick={onClick}
+      >
         {shot.image_url ? (
           <>
             <img 
@@ -79,13 +101,24 @@ export const StoryboardGridCard: React.FC<StoryboardGridCardProps> = ({ shot, on
               </div>
             )}
           </div>
-          <button 
-            onClick={handleDelete}
-            className="bg-black/60 backdrop-blur-xl text-slate-400 hover:text-red-400 p-1.5 rounded-lg border border-white/10 transition-all opacity-0 group-hover:opacity-100"
-            title="删除此分镜"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {shot.image_url && (
+              <button
+                onClick={handleDownload}
+                className="bg-black/60 backdrop-blur-xl text-slate-300 hover:text-primary p-1.5 rounded-lg border border-white/10 transition-all opacity-0 group-hover:opacity-100"
+                title="下载图片"
+              >
+                <Download className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <button 
+              onClick={handleDelete}
+              className="bg-black/60 backdrop-blur-xl text-slate-400 hover:text-red-400 p-1.5 rounded-lg border border-white/10 transition-all opacity-0 group-hover:opacity-100"
+              title="删除此分镜"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
         
         {/* Bottom Info */}

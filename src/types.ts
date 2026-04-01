@@ -44,6 +44,9 @@ export type StyleBase = 'Pixar' | 'Cyberpunk' | 'Realistic' | 'Anime' | 'Cinemat
 export type ImageSize = '1K' | '2K' | '4K';
 export type AspectRatio = '4:3' | '3:4' | '16:9' | '9:16' | '2:3' | '3:2' | '1:1' | '4:5' | '5:4' | '21:9';
 
+/** 日间：高对比、浅色底；夜间：深色底、降低刺眼 */
+export type UiTheme = 'light' | 'dark';
+
 export interface AppState {
   currentProjectId: string | null;
   projectTitle: string;
@@ -56,7 +59,16 @@ export interface AppState {
   data: GenerationResponse | null;
   references: ReferenceImage[];
   selectedShotNumber: string | null;
-  
+  uiTheme: UiTheme;
+  imageEditor: {
+    isOpen: boolean;
+    target:
+      | { kind: 'reference'; id: string; url: string; title?: string }
+      | { kind: 'shot'; shotNumber: string; url: string; title?: string }
+      | { kind: 'scene'; sceneIndex: number; url: string; title?: string }
+      | null;
+  };
+
   setCurrentProjectId: (id: string | null) => void;
   setProjectTitle: (title: string) => void;
   setContext: (context: string) => void;
@@ -79,5 +91,27 @@ export interface AppState {
   setStoryboardLoading: (shotNumber: string, loading: boolean) => void;
   removeStoryboard: (shotNumber: string) => void;
   setSelectedShotNumber: (shotNumber: string | null) => void;
+  setUiTheme: (theme: UiTheme) => void;
+  openImageEditor: (target: NonNullable<AppState['imageEditor']['target']>) => void;
+  closeImageEditor: () => void;
+  updateGlobalSceneImage: (sceneIndex: number, url: string) => void;
   resetProject: () => void;
+}
+
+const THEME_STORAGE_KEY = 'storyboard-ui-theme';
+
+export function readStoredUiTheme(): UiTheme {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY) === 'light' ? 'light' : 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
+export function persistUiTheme(theme: UiTheme): void {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {
+    /* ignore */
+  }
 }

@@ -1,0 +1,30 @@
+{
+  "project_name": "StoryboardPro",
+  "status": "active",
+  "features": [
+    {
+      "id": "F001",
+      "name": "工程环境初始化",
+      "tasks": [
+        { "desc": "配置工程化文件", "status": "done" },
+        { "desc": "首次 node init.mjs 跑通", "status": "done" }
+      ]
+    },
+    {
+      "id": "F002",
+      "name": "主页「电影炼金术士」视觉合规（DESIGN.md）",
+      "tasks": [
+        { "desc": "分镜列表 StoryboardCard：无边框色阶、spring 悬浮、Noto Serif / Inter 分工", "status": "done" },
+        { "desc": "封面页 Navbar / Hero / Features / Footer：无边框准则、非对称布局、幽灵轮廓与 spring", "status": "done" }
+      ]
+    },
+    {
+      "id": "F003",
+      "name": "每日工作记录（DAILY_LOG + 可选 Git hook）",
+      "tasks": [
+        { "desc": "scripts/daily-log.mjs、npm run log:daily / hooks:install", "status": "done" },
+        { "desc": "PM Agent / .cursorrules 收尾流程接入每日同步", "status": "done" }
+      ]
+    }
+  ]
+}

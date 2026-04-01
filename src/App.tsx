@@ -25,19 +25,24 @@ import {
   Download,
   Layout,
   CheckCircle2,
-  Link as LinkIcon,
   Image as ImageIcon,
-  FileText
+  FileText,
+  Home
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { StyleBase, ReferenceImage } from './types';
 import { STYLES } from './constants';
 import { StoryboardCard } from './components/StoryboardCard';
 import { StoryboardGridCard } from './components/StoryboardGridCard';
+import { ThemeToggle } from './components/ThemeToggle';
 import { ProjectManager } from './components/ProjectManager';
 import { CoverPage } from './components/CoverPage';
 import { FrameDetail } from './components/FrameDetail';
+import { ImageEditorModal } from './components/ImageEditorModal';
+import { StandaloneImageEditorPage } from './components/StandaloneImageEditorPage';
+import { NineGridPage } from './components/NineGridPage';
 import { Folder, Save } from 'lucide-react';
+import { parseApiResponse } from './lib/http';
 
 const ReferenceItem = ({ 
   asset, 
@@ -69,21 +74,15 @@ const ReferenceItem = ({
   allReferences: ReferenceImage[],
   key?: string
 }) => {
-  const [isEditing, setIsEditing] = useState(false);
   const [tempName, setTempName] = useState(asset.name);
   const itemRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
+  const openImageEditor = useStore((s) => s.openImageEditor);
 
-  // Sync tempName with asset.name when not editing
+  // Keep local input in sync when external name changes
   React.useEffect(() => {
-    if (!isEditing) {
-      setTempName(asset.name);
-    }
-  }, [asset.name, isEditing]);
-
-  // Filter references of the same type to calculate grid position
-  const sameTypeRefs = allReferences.filter(r => r.type === asset.type);
-  const typeIndex = sameTypeRefs.findIndex(r => r.id === asset.id);
+    setTempName(asset.name);
+  }, [asset.name]);
 
   return (
     <Reorder.Item 
@@ -95,11 +94,12 @@ const ReferenceItem = ({
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
-      whileHover={{ scale: 1.02 }}
+      whileHover={{ y: -2 }}
       whileTap={{ scale: 0.98, zIndex: 50 }}
-      transition={{ 
-        layout: { type: "spring", stiffness: 500, damping: 40 },
-        opacity: { duration: 0.2 }
+      transition={{
+        layout: { type: "spring", stiffness: 300, damping: 30 },
+        y: { type: "spring", stiffness: 300, damping: 30 },
+        opacity: { duration: 0.2 },
       }}
       onDragStart={() => {
         setDraggedItemIndex(index);
@@ -120,7 +120,7 @@ const ReferenceItem = ({
       onDragLeave={(e) => handleDrag(e, null, true, null as any)}
       onDrop={(e) => handleDrop(e, asset.type, true, asset.id, index)}
       className={cn(
-        "group relative shrink-0 w-20 h-20 cursor-grab active:cursor-grabbing",
+        "group relative shrink-0 w-24 cursor-grab active:cursor-grabbing",
         draggedItemIndex === index && "z-50"
       )}
     >
@@ -133,43 +133,50 @@ const ReferenceItem = ({
       )}
 
       <div className={cn(
-        "w-full h-full rounded-xl overflow-hidden border transition-all duration-200 bg-slate-900/40 flex flex-col",
+        "w-full rounded-xl overflow-hidden transition-all duration-200 bg-surface-container-low/70 flex flex-col outline outline-[0.5px] outline-outline-variant/20",
         replaceTargetId === asset.id 
-          ? "border-blue-500 ring-4 ring-blue-500/10 scale-[1.02]" 
-          : "border-slate-800/50 hover:border-slate-700",
+          ? "ring-4 ring-blue-500/10 scale-[1.02] outline-blue-500/60" 
+          : "hover:outline-outline-variant/40",
         draggedItemIndex === index ? "opacity-60 scale-90 shadow-xl" : "opacity-100 scale-100"
       )}>
         {/* Image Area */}
-        <div className="relative flex-1 cursor-pointer overflow-hidden" onClick={(e) => {
+        <div
+          className="relative h-24 cursor-pointer overflow-hidden"
+          data-theme-preserve="dark"
+          onClick={(e) => {
           if (isDraggingRef.current) {
             e.preventDefault();
             e.stopPropagation();
             return;
           }
           setPreviewImage(asset);
-        }}>
+        }}
+        >
           <img src={asset.url} className="w-full h-full object-cover pointer-events-none" draggable={false} />
           
           {/* Overlay Badges */}
           <div className="absolute top-1 left-1 flex gap-1">
-            <span className="px-1 py-0.5 bg-black/60 backdrop-blur-md rounded text-[8px] font-black text-blue-500 border border-blue-500/30">
+            <span className="px-1.5 py-0.5 bg-black/80 backdrop-blur-md rounded text-[8px] font-black text-white outline outline-[0.5px] outline-white/15">
               #{index + 1}
             </span>
           </div>
 
           {/* Quick Actions Overlay */}
-          <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
-          <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-            <button 
-              onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-              className="p-1 bg-black/60 backdrop-blur-md text-white/80 rounded-full hover:bg-blue-500 hover:text-white transition-all border border-white/10"
-              title="重命名"
+          <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-black/20 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+          <div className="absolute top-1 right-1 flex gap-1 opacity-90 group-hover:opacity-100 transition-opacity z-20">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                openImageEditor({ kind: 'reference', id: asset.id, url: asset.url, title: asset.name });
+              }}
+              className="p-1 bg-black/75 backdrop-blur-md text-white rounded-full hover:bg-primary hover:text-black transition-all outline outline-[0.5px] outline-white/15"
+              title="编辑"
             >
-              <Edit2 className="w-2.5 h-2.5" />
+              <PenTool className="w-2.5 h-2.5" />
             </button>
             <button 
               onClick={(e) => { e.stopPropagation(); removeReference(asset.id); }}
-              className="p-1 bg-black/60 backdrop-blur-md text-white/80 rounded-full hover:bg-red-500 hover:text-white transition-all border border-white/10"
+              className="p-1 bg-black/75 backdrop-blur-md text-white rounded-full hover:bg-red-500 hover:text-white transition-all outline outline-[0.5px] outline-white/15"
               title="删除"
             >
               <X className="w-2.5 h-2.5" />
@@ -177,47 +184,27 @@ const ReferenceItem = ({
           </div>
         </div>
 
-        {/* Name Label */}
-        <div className="h-5 bg-black/40 backdrop-blur-sm px-1.5 flex items-center justify-between border-t border-white/5">
-          {isEditing ? (
-            <div className="flex items-center w-full gap-1">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const newType = asset.type === 'character' ? 'scene' : 'character';
-                  useStore.setState((state) => ({
-                    references: state.references.map(r => r.id === asset.id ? { ...r, type: newType } : r)
-                  }));
-                }}
-                className="shrink-0 px-1 bg-slate-700 rounded-[2px] text-[7px] text-slate-300 hover:bg-slate-600 transition-colors"
-                title="切换类型"
-              >
-                {asset.type === 'character' ? '人' : '景'}
-              </button>
-              <input
-                autoFocus
-                value={tempName}
-                onChange={(e) => setTempName(e.target.value)}
-                onBlur={() => {
-                  setIsEditing(false);
-                  updateReferenceName(asset.id, tempName);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    setIsEditing(false);
-                    updateReferenceName(asset.id, tempName);
-                  }
-                }}
-                className="flex-1 bg-transparent text-[9px] text-slate-300 focus:outline-none text-center"
-                onClick={(e) => e.stopPropagation()}
-                onPointerDown={(e) => e.stopPropagation()}
-              />
-            </div>
-          ) : (
-            <span className="text-[9px] text-slate-400 truncate max-w-full w-full text-center" title={asset.name}>
-              {asset.name || `图片${index + 1}`}
-            </span>
-          )}
+        {/* Name Editor */}
+        <div className="h-8 bg-surface-container-high/55 backdrop-blur-sm px-1.5 border-t border-white/10">
+          <input
+            value={tempName}
+            onChange={(e) => setTempName(e.target.value)}
+            onBlur={() => {
+              const next = tempName.trim() || `图片${index + 1}`;
+              if (next !== asset.name) updateReferenceName(asset.id, next);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const next = tempName.trim() || `图片${index + 1}`;
+                if (next !== asset.name) updateReferenceName(asset.id, next);
+                (e.currentTarget as HTMLInputElement).blur();
+              }
+            }}
+            placeholder={`图片${index + 1}`}
+            className="w-full h-full bg-transparent text-[10px] text-on-surface placeholder:text-on-surface/40 focus:outline-none text-center font-medium"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          />
         </div>
         
         {replaceTargetId === asset.id && (
@@ -257,6 +244,10 @@ export default function App() {
     removeReference,
     projectTitle
   } = useStore();
+  const imageEditor = useStore((s) => s.imageEditor);
+  const closeImageEditor = useStore((s) => s.closeImageEditor);
+  const openImageEditor = useStore((s) => s.openImageEditor);
+  const updateGlobalSceneImage = useStore((s) => s.updateGlobalSceneImage);
 
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -276,9 +267,10 @@ export default function App() {
   const [isScenePreviewOpen, setIsScenePreviewOpen] = useState(false);
   const [isSceneHistoryOpen, setIsSceneHistoryOpen] = useState(false);
   const [showCoverPage, setShowCoverPage] = useState(true);
+  const [showImageEditorPage, setShowImageEditorPage] = useState(false);
+  const [showNineGridPage, setShowNineGridPage] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [activeFilter, setActiveFilter] = useState<string>('All');
-  const [urlInput, setUrlInput] = useState('');
   const [showLibrary, setShowLibrary] = useState(false);
 
   const PRESET_IMAGES = [
@@ -344,7 +336,7 @@ export default function App() {
           index
         })
       });
-      const result = await res.json();
+      const result = await parseApiResponse(res);
       if (!res.ok) throw new Error(result.error || '描述生成失败');
       
       if (data) {
@@ -421,7 +413,7 @@ export default function App() {
           references: filteredReferences
         })
       });
-      const result = await res.json();
+      const result = await parseApiResponse(res);
       if (!res.ok) throw new Error(result.error || '生成失败');
       
       if (data) {
@@ -507,7 +499,7 @@ export default function App() {
         }),
       });
       
-      const result = await res.json();
+      const result = await parseApiResponse(res);
 
       if (!res.ok) {
         throw new Error(result.error || '导演大脑连接失败');
@@ -531,10 +523,14 @@ export default function App() {
       if (replaceId) {
         useStore.getState().updateReference(replaceId, base64);
       } else {
+        const { references: refs } = useStore.getState();
+        const n = refs.filter((r) => r.type === type).length + 1;
+        const label = type === 'character' ? '角色' : '场景';
+        const name = `${label} ${String(n).padStart(2, '0')}`;
         addReference({
           id: Math.random().toString(36).substr(2, 9),
           url: base64,
-          name: file.name,
+          name,
           type: type
         });
       }
@@ -587,10 +583,51 @@ export default function App() {
 
   return (
     <>
+      {/* Keep editor mounted when switching to cover page, so draft state persists */}
+      {showImageEditorPage && (
+        <div hidden={showCoverPage}>
+          <StandaloneImageEditorPage
+            onBack={() => {
+              setShowCoverPage(true);
+            }}
+          />
+        </div>
+      )}
+
+      {/* Keep 9-grid mounted when switching to cover page, so draft state persists */}
+      {showNineGridPage && (
+        <div hidden={showCoverPage}>
+          <NineGridPage
+            onBack={() => {
+              setShowCoverPage(true);
+            }}
+          />
+        </div>
+      )}
+
       {showCoverPage ? (
-        <CoverPage onStart={() => setShowCoverPage(false)} />
-      ) : (
-        <div className="flex h-screen bg-[#101622] text-slate-100 font-sans overflow-hidden">
+        <CoverPage
+          onStart={() => {
+            setShowCoverPage(false);
+            setShowImageEditorPage(false);
+            setShowNineGridPage(false);
+          }}
+          onOpenImageEditor={() => {
+            setShowCoverPage(false);
+            setShowImageEditorPage(true);
+            setShowNineGridPage(false);
+          }}
+          onOpenNineGrid={() => {
+            setShowCoverPage(false);
+            setShowNineGridPage(true);
+            setShowImageEditorPage(false);
+          }}
+        />
+      ) : showImageEditorPage || showNineGridPage ? null : (
+        <div
+          className="flex h-screen bg-surface text-slate-100 font-sans overflow-hidden"
+          data-ui-root
+        >
           <ProjectManager isOpen={isProjectManagerOpen} onClose={() => setIsProjectManagerOpen(false)} />
           
           {/* Left Panel */}
@@ -603,7 +640,7 @@ export default function App() {
               pointerEvents: isSidebarCollapsed ? 'none' : 'auto'
             }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="border-r border-white/5 flex flex-col bg-[#080808] relative overflow-hidden"
+            className="border-r border-white/5 flex flex-col bg-surface-container-lowest relative overflow-hidden"
           >
             {/* Decorative Grid Background */}
             <div className="absolute inset-0 pointer-events-none opacity-[0.03]" 
@@ -627,6 +664,15 @@ export default function App() {
                   </div>
                   
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowCoverPage(true)}
+                      className="p-2 bg-white/5 outline outline-[0.5px] outline-outline-variant/20 rounded-xl text-slate-400 hover:text-primary hover:bg-white/[0.07] transition-all cursor-pointer"
+                      title="回到起始页"
+                    >
+                      <Home className="w-4 h-4" strokeWidth={1.75} />
+                    </button>
+                    <ThemeToggle />
                     <button 
                       onClick={() => setIsSidebarCollapsed(true)}
                       className="p-2 bg-white/5 border border-white/10 rounded-xl text-slate-400 hover:text-primary hover:border-primary/30 transition-all cursor-pointer"
@@ -686,7 +732,7 @@ export default function App() {
                           onChange={(e) => setStyle(e.target.value as any)}
                           className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all appearance-none cursor-pointer hover:bg-white/10"
                         >
-                          {STYLES.map(s => <option key={s} value={s} className="bg-[#0a0a0a]">{s}</option>)}
+                          {STYLES.map(s => <option key={s} value={s} className="bg-surface">{s}</option>)}
                         </select>
                         <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
                       </div>
@@ -753,38 +799,9 @@ export default function App() {
                       <div className="flex items-center justify-between px-1">
                         <div className="flex items-center gap-2">
                           <User className="w-3.5 h-3.5 text-primary" />
-                          <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Characters</span>
+                          <span className="text-[9px] font-bold uppercase tracking-widest text-slate-200">Characters</span>
                         </div>
-                        <span className="text-[8px] font-mono text-slate-600">{characterRefs.length}_ITEMS</span>
-                      </div>
-
-                      {/* Hot-link Input - Integrated for Characters */}
-                      <div className="flex gap-2">
-                        <div className="relative flex-1">
-                          <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500" />
-                          <input 
-                            value={urlInput}
-                            onChange={(e) => setUrlInput(e.target.value)}
-                            placeholder="Hotlink character URL..."
-                            className="w-full bg-white/5 border border-white/10 rounded-xl pl-8 pr-4 py-2 text-[10px] font-mono focus:outline-none focus:border-primary/50 transition-all placeholder:text-slate-700"
-                          />
-                        </div>
-                        <button 
-                          onClick={() => {
-                            if (urlInput.trim()) {
-                              addReference({
-                                id: Math.random().toString(36).substr(2, 9),
-                                url: urlInput,
-                                name: 'Linked Character',
-                                type: 'character'
-                              });
-                              setUrlInput('');
-                            }
-                          }}
-                          className="px-3 bg-primary/20 hover:bg-primary/40 text-primary border border-primary/20 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer"
-                        >
-                          Link
-                        </button>
+                        <span className="text-[8px] font-mono text-slate-400">{characterRefs.length}_ITEMS</span>
                       </div>
 
                       <Reorder.Group 
@@ -796,7 +813,7 @@ export default function App() {
                           useStore.setState({ references: [...newOrder, ...otherRefs] });
                         }}
                         className={cn(
-                          "flex flex-row gap-3 p-3 bg-white/[0.02] border border-dashed rounded-2xl transition-all relative min-h-[104px] overflow-x-auto items-center custom-scrollbar",
+                          "flex flex-row gap-3 p-3 bg-white/[0.03] border border-dashed rounded-2xl transition-all relative min-h-[128px] overflow-x-auto items-center custom-scrollbar",
                           dragActiveType === 'character' ? "border-primary bg-primary/5" : "border-white/10"
                         )}
                         onDragEnter={(e: any) => handleDrag(e, 'character')}
@@ -804,30 +821,28 @@ export default function App() {
                         onDragLeave={(e: any) => handleDrag(e, null)}
                         onDrop={(e: any) => handleDrop(e, 'character')}
                       >
-                        <AnimatePresence mode="popLayout">
-                          {characterRefs.map((ref) => (
-                            <ReferenceItem 
-                              key={ref.id} 
-                              asset={ref} 
-                              index={references.indexOf(ref)} 
-                              total={references.length}
-                              draggedItemIndex={draggedItemIndex}
-                              setDraggedItemIndex={setDraggedItemIndex}
-                              handleDrag={handleDrag}
-                              handleDrop={handleDrop}
-                              replaceTargetId={replaceTargetId}
-                              removeReference={removeReference}
-                              updateReferenceName={updateReferenceName}
-                              reorderReferences={reorderReferences}
-                              setPreviewImage={setPreviewImage}
-                              allReferences={references}
-                            />
-                          ))}
-                        </AnimatePresence>
+                        {characterRefs.map((ref) => (
+                          <ReferenceItem 
+                            key={ref.id} 
+                            asset={ref} 
+                            index={references.indexOf(ref)} 
+                            total={references.length}
+                            draggedItemIndex={draggedItemIndex}
+                            setDraggedItemIndex={setDraggedItemIndex}
+                            handleDrag={handleDrag}
+                            handleDrop={handleDrop}
+                            replaceTargetId={replaceTargetId}
+                            removeReference={removeReference}
+                            updateReferenceName={updateReferenceName}
+                            reorderReferences={reorderReferences}
+                            setPreviewImage={setPreviewImage}
+                            allReferences={references}
+                          />
+                        ))}
                         
                         <button 
                           onClick={() => triggerUpload('character')}
-                          className="shrink-0 w-20 h-20 flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/10 bg-white/5 hover:bg-white/10 hover:border-primary/30 transition-all text-slate-500 hover:text-primary cursor-pointer"
+                          className="shrink-0 w-24 h-24 flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/15 bg-white/[0.06] hover:bg-white/10 hover:border-primary/40 transition-all text-slate-300 hover:text-primary cursor-pointer"
                         >
                           <Plus className="w-4 h-4" />
                           <span className="text-[8px] font-black uppercase tracking-widest">Upload</span>
@@ -840,38 +855,9 @@ export default function App() {
                       <div className="flex items-center justify-between px-1">
                         <div className="flex items-center gap-2">
                           <Map className="w-3.5 h-3.5 text-primary" />
-                          <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Environments</span>
+                          <span className="text-[9px] font-bold uppercase tracking-widest text-slate-200">Environments</span>
                         </div>
-                        <span className="text-[8px] font-mono text-slate-600">{sceneRefs.length}_ITEMS</span>
-                      </div>
-
-                      {/* Hot-link Input - Integrated for Environments */}
-                      <div className="flex gap-2">
-                        <div className="relative flex-1">
-                          <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-500" />
-                          <input 
-                            value={urlInput}
-                            onChange={(e) => setUrlInput(e.target.value)}
-                            placeholder="Hotlink environment URL..."
-                            className="w-full bg-white/5 border border-white/10 rounded-xl pl-8 pr-4 py-2 text-[10px] font-mono focus:outline-none focus:border-primary/50 transition-all placeholder:text-slate-700"
-                          />
-                        </div>
-                        <button 
-                          onClick={() => {
-                            if (urlInput.trim()) {
-                              addReference({
-                                id: Math.random().toString(36).substr(2, 9),
-                                url: urlInput,
-                                name: 'Linked Environment',
-                                type: 'scene'
-                              });
-                              setUrlInput('');
-                            }
-                          }}
-                          className="px-3 bg-primary/20 hover:bg-primary/40 text-primary border border-primary/20 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer"
-                        >
-                          Link
-                        </button>
+                        <span className="text-[8px] font-mono text-slate-400">{sceneRefs.length}_ITEMS</span>
                       </div>
 
                       <Reorder.Group 
@@ -883,7 +869,7 @@ export default function App() {
                           useStore.setState({ references: [...otherRefs, ...newOrder] });
                         }}
                         className={cn(
-                          "flex flex-row gap-3 p-3 bg-white/[0.02] border border-dashed rounded-2xl transition-all relative min-h-[104px] overflow-x-auto items-center custom-scrollbar",
+                          "flex flex-row gap-3 p-3 bg-white/[0.03] border border-dashed rounded-2xl transition-all relative min-h-[128px] overflow-x-auto items-center custom-scrollbar",
                           dragActiveType === 'scene' ? "border-primary bg-primary/5" : "border-white/10"
                         )}
                         onDragEnter={(e: any) => handleDrag(e, 'scene')}
@@ -891,30 +877,28 @@ export default function App() {
                         onDragLeave={(e: any) => handleDrag(e, null)}
                         onDrop={(e: any) => handleDrop(e, 'scene')}
                       >
-                        <AnimatePresence mode="popLayout">
-                          {sceneRefs.map((ref) => (
-                            <ReferenceItem 
-                              key={ref.id} 
-                              asset={ref} 
-                              index={references.indexOf(ref)} 
-                              total={references.length}
-                              draggedItemIndex={draggedItemIndex}
-                              setDraggedItemIndex={setDraggedItemIndex}
-                              handleDrag={handleDrag}
-                              handleDrop={handleDrop}
-                              replaceTargetId={replaceTargetId}
-                              removeReference={removeReference}
-                              updateReferenceName={updateReferenceName}
-                              reorderReferences={reorderReferences}
-                              setPreviewImage={setPreviewImage}
-                              allReferences={references}
-                            />
-                          ))}
-                        </AnimatePresence>
+                        {sceneRefs.map((ref) => (
+                          <ReferenceItem 
+                            key={ref.id} 
+                            asset={ref} 
+                            index={references.indexOf(ref)} 
+                            total={references.length}
+                            draggedItemIndex={draggedItemIndex}
+                            setDraggedItemIndex={setDraggedItemIndex}
+                            handleDrag={handleDrag}
+                            handleDrop={handleDrop}
+                            replaceTargetId={replaceTargetId}
+                            removeReference={removeReference}
+                            updateReferenceName={updateReferenceName}
+                            reorderReferences={reorderReferences}
+                            setPreviewImage={setPreviewImage}
+                            allReferences={references}
+                          />
+                        ))}
                         
                         <button 
                           onClick={() => triggerUpload('scene')}
-                          className="shrink-0 w-20 h-20 flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/10 bg-white/5 hover:bg-white/10 hover:border-primary/30 transition-all text-slate-500 hover:text-primary cursor-pointer"
+                          className="shrink-0 w-24 h-24 flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/15 bg-white/[0.06] hover:bg-white/10 hover:border-primary/40 transition-all text-slate-300 hover:text-primary cursor-pointer"
                         >
                           <Plus className="w-4 h-4" />
                           <span className="text-[8px] font-black uppercase tracking-widest">Upload</span>
@@ -972,21 +956,38 @@ export default function App() {
 
     <AnimatePresence>
       {isSidebarCollapsed && (
-        <motion.button
+        <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -20 }}
-          onClick={() => setIsSidebarCollapsed(false)}
-          className="fixed left-4 top-1/2 -translate-y-1/2 z-[60] w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white shadow-lg hover:bg-blue-500 transition-all active:scale-95 cursor-pointer"
-          title="展开侧边栏"
+          className="fixed left-4 top-1/2 -translate-y-1/2 z-[60] flex flex-col items-center gap-3"
         >
-          <ChevronRight className="w-6 h-6" />
-        </motion.button>
+          <motion.button
+            type="button"
+            onClick={() => setShowCoverPage(true)}
+            className="w-10 h-10 rounded-full flex items-center justify-center bg-surface-container-high/55 backdrop-blur-md text-slate-400 hover:text-primary outline outline-[0.5px] outline-outline-variant/20 shadow-[0_24px_48px_-28px_rgba(0,0,0,0.45)] transition-colors cursor-pointer"
+            title="回到起始页"
+            whileHover={{ y: -2 }}
+            whileTap={{ scale: 0.94 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          >
+            <Home className="w-4 h-4" strokeWidth={1.75} />
+          </motion.button>
+          <ThemeToggle />
+          <motion.button
+            type="button"
+            onClick={() => setIsSidebarCollapsed(false)}
+            className="w-10 h-10 bg-primary rounded-full flex items-center justify-center text-black shadow-[0_0_24px_rgba(255,184,102,0.35)] hover:brightness-110 transition-all active:scale-95 cursor-pointer"
+            title="展开侧边栏"
+          >
+            <ChevronRight className="w-6 h-6" />
+          </motion.button>
+        </motion.div>
       )}
     </AnimatePresence>
 
     {/* Right Panel */}
-      <main className="flex-1 overflow-y-auto bg-[#050505] relative custom-scrollbar">
+      <main className="flex-1 overflow-y-auto bg-surface-container-lowest relative custom-scrollbar">
         {error && (
           <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 bg-red-500/10 border border-red-500/20 px-4 py-2 rounded-full flex items-center gap-2 text-red-400 text-xs font-bold animate-in fade-in slide-in-from-top-4">
             <Info className="w-4 h-4" />
@@ -1006,7 +1007,7 @@ export default function App() {
           <div className="p-8 max-w-[1800px] mx-auto space-y-12 pb-24">
             {/* Key Scene Header - Technical Dashboard Style */}
             {data?.global_assets && (
-              <div className="bg-[#0a0a0a] border border-white/5 rounded-2xl overflow-hidden shadow-2xl no-print">
+              <div className="bg-surface-container-low border border-white/5 rounded-2xl overflow-hidden shadow-2xl no-print">
                 <div className="flex items-center justify-between px-6 py-3 border-b border-white/5 bg-white/[0.02]">
                   <div className="flex items-center gap-3">
                     <div className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-[0_0_8px_rgba(255,184,102,0.5)]" />
@@ -1021,7 +1022,7 @@ export default function App() {
                         className="bg-white/5 text-slate-300 text-[10px] font-mono rounded-md px-2 py-1 border border-white/10 focus:outline-none focus:border-primary/50 transition-colors cursor-pointer"
                       >
                         {data.global_assets.scenes.map((_, i) => (
-                          <option key={i} value={i} className="bg-[#0a0a0a]">SCENE_{i + 1}</option>
+                          <option key={i} value={i} className="bg-surface">SCENE_{i + 1}</option>
                         ))}
                       </select>
                     </div>
@@ -1090,7 +1091,7 @@ export default function App() {
                               className="bg-white/[0.03] text-slate-300 text-[10px] font-mono font-bold rounded-xl px-4 py-2.5 border border-white/5 focus:outline-none focus:border-primary/30 transition-all cursor-pointer hover:bg-white/10 appearance-none min-w-[100px]"
                             >
                               {['1:1', '16:9', '9:16', '4:3', '3:4'].map(ratio => (
-                                <option key={ratio} value={ratio} className="bg-[#0a0a0a]">{ratio}</option>
+                                <option key={ratio} value={ratio} className="bg-surface">{ratio}</option>
                               ))}
                             </select>
                           </div>
@@ -1124,6 +1125,21 @@ export default function App() {
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover/sceneimg:opacity-100 transition-opacity duration-500" />
                           <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover/sceneimg:opacity-100 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] translate-y-2 group-hover/sceneimg:translate-y-0">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openImageEditor({
+                                  kind: 'scene',
+                                  sceneIndex: selectedSceneIndex,
+                                  url: data.global_assets.scenes[selectedSceneIndex].image_url!,
+                                  title: `场景 ${selectedSceneIndex + 1}`,
+                                });
+                              }}
+                              className="p-2.5 bg-black/60 backdrop-blur-xl border border-white/10 rounded-xl text-white hover:bg-primary hover:text-black transition-all"
+                              title="编辑图片"
+                            >
+                              <PenTool className="w-4 h-4" />
+                            </button>
                             {data.global_assets.scenes[selectedSceneIndex].image_history && data.global_assets.scenes[selectedSceneIndex].image_history!.length > 1 && (
                               <button 
                                 onClick={(e) => { e.stopPropagation(); setIsSceneHistoryOpen(!isSceneHistoryOpen); }}
@@ -1210,15 +1226,13 @@ export default function App() {
                 <div className="flex items-center justify-between pb-8">
                   <div className="flex items-center gap-8">
                     <div className="space-y-1">
-                      <h3 className="text-4xl font-serif font-bold tracking-tight text-white">Storyboard List</h3>
-                      <div className="text-[10px] font-mono font-bold text-amber-500 uppercase tracking-widest">
+                      <h3 className="text-4xl font-headline font-bold tracking-[-0.02em] text-on-surface">Storyboard List</h3>
+                      <div className="text-[10px] font-body font-semibold accent-focus uppercase tracking-[0.18em]">
                         NEON_NOIR // SCENE_04 - THE_ALCHEMIST
                       </div>
                     </div>
-                    
-                    <div className="w-px h-12 bg-white/10 mx-4" />
-                    
-                    <div className="flex items-center bg-[#1a1a1a] rounded-full p-1 border border-white/5">
+
+                    <div className="flex items-center bg-surface-container-low rounded-full p-1">
                       {[
                         { id: 'list', label: 'EDITOR_VIEW' },
                         { id: 'grid', label: 'GRID_VIEW' }
@@ -1227,8 +1241,8 @@ export default function App() {
                           key={mode.id}
                           onClick={() => setViewMode(mode.id as 'list' | 'grid')}
                           className={cn(
-                            "px-6 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all cursor-pointer relative",
-                            viewMode === mode.id ? "text-amber-500" : "text-slate-500 hover:text-slate-400"
+                            "px-6 py-2 rounded-full text-[10px] font-body font-semibold uppercase tracking-[0.18em] transition-all cursor-pointer relative",
+                            viewMode === mode.id ? "accent-focus" : "text-slate-500 hover:text-slate-400"
                           )}
                         >
                           {viewMode === mode.id && (
@@ -1246,14 +1260,14 @@ export default function App() {
                   <div className="flex items-center gap-4">
                     <button 
                       onClick={() => window.print()}
-                      className="group flex items-center gap-2 px-6 py-2.5 bg-transparent hover:bg-amber-500/10 border border-amber-500/30 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all cursor-pointer text-amber-500"
+                      className="group flex items-center gap-2 px-6 py-2.5 bg-surface-container-low hover:bg-white/10 rounded-full text-[10px] font-body font-semibold uppercase tracking-[0.18em] transition-all cursor-pointer accent-focus ghost-border"
                     >
                       <FileText className="w-4 h-4" />
                       EXPORT_PDF
                     </button>
                     
                     <button 
-                      className="group flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-amber-400 to-amber-600 hover:from-amber-300 hover:to-amber-500 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all cursor-pointer text-black shadow-[0_0_20px_rgba(245,158,11,0.2)]"
+                      className="group flex items-center gap-2 px-6 py-2.5 accent-focus-bg hover:opacity-90 rounded-full text-[10px] font-body font-semibold uppercase tracking-[0.18em] transition-all cursor-pointer accent-focus-glow"
                     >
                       <Plus className="w-4 h-4" />
                       NEW FRAME
@@ -1301,12 +1315,16 @@ export default function App() {
         <div 
           className="fixed inset-0 z-[100] flex items-center justify-center p-8 bg-black/90 backdrop-blur-md animate-in fade-in duration-200"
           onClick={() => setPreviewImage(null)}
+          data-theme-preserve="dark"
         >
           <button 
-            className="absolute top-6 right-6 p-2 bg-slate-900 rounded-full hover:bg-slate-800 transition-colors"
+            className="absolute top-6 right-6 w-11 h-11 rounded-full flex items-center justify-center bg-surface-container-high/55 backdrop-blur-[30px]
+              outline outline-[0.5px] outline-outline-variant/20 text-white/90 hover:text-white
+              shadow-[0_24px_48px_-28px_rgba(0,0,0,0.55)] transition-colors"
             onClick={() => setPreviewImage(null)}
+            title="关闭"
           >
-            <X className="w-6 h-6" />
+            <X className="w-5 h-5" strokeWidth={1.75} />
           </button>
           
           <div 
@@ -1317,6 +1335,7 @@ export default function App() {
               src={previewImage.url} 
               className="max-w-full max-h-[80vh] object-contain"
               alt={previewImage.name}
+              onClick={() => setPreviewImage(null)}
             />
             <div className="p-4 bg-slate-900 border-t border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -1349,12 +1368,16 @@ export default function App() {
         <div 
           className="fixed inset-0 z-[100] flex items-center justify-center p-8 bg-black/90 backdrop-blur-md animate-in fade-in duration-200"
           onClick={() => setIsScenePreviewOpen(false)}
+          data-theme-preserve="dark"
         >
           <button 
-            className="absolute top-6 right-6 p-2 bg-slate-900 rounded-full hover:bg-slate-800 transition-colors"
+            className="absolute top-6 right-6 w-11 h-11 rounded-full flex items-center justify-center bg-surface-container-high/55 backdrop-blur-[30px]
+              outline outline-[0.5px] outline-outline-variant/20 text-white/90 hover:text-white
+              shadow-[0_24px_48px_-28px_rgba(0,0,0,0.55)] transition-colors"
             onClick={() => setIsScenePreviewOpen(false)}
+            title="关闭"
           >
-            <X className="w-6 h-6" />
+            <X className="w-5 h-5" strokeWidth={1.75} />
           </button>
           
           <div 
@@ -1365,6 +1388,7 @@ export default function App() {
               src={data.global_assets.scenes[selectedSceneIndex].image_url} 
               className="max-w-full max-h-[85vh] object-contain"
               alt="Scene Preview"
+              onClick={() => setIsScenePreviewOpen(false)}
             />
           </div>
         </div>
@@ -1376,6 +1400,28 @@ export default function App() {
       </AnimatePresence>
     </div>
       )}
+
+      <ImageEditorModal
+        isOpen={imageEditor.isOpen}
+        target={imageEditor.target}
+        appReferences={references}
+        onClose={closeImageEditor}
+        onApply={(url) => {
+          const t = imageEditor.target;
+          if (!t) return;
+          if (t.kind === 'reference') {
+            useStore.getState().updateReference(t.id, url);
+            return;
+          }
+          if (t.kind === 'shot') {
+            useStore.getState().updateStoryboardImage(t.shotNumber, url);
+            return;
+          }
+          if (t.kind === 'scene') {
+            updateGlobalSceneImage(t.sceneIndex, url);
+          }
+        }}
+      />
     </>
   );
 }

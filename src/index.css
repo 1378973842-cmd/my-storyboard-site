@@ -21,6 +21,96 @@
   --color-secondary: #8dcdff;
   --color-on-primary-fixed: #2b1700;
   --color-on-primary-container: #b77100;
+  --color-on-surface: #e5e2e1;
+}
+
+/* 夜间：与 @theme 一致，显式标记便于 color-scheme */
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* Dark mode readability baseline: user-entered text should be pure white */
+html[data-theme="dark"] [data-ui-root] input,
+html[data-theme="dark"] [data-ui-root] textarea,
+html[data-theme="dark"] [data-ui-root] select {
+  color: #ffffff;
+}
+html[data-theme="dark"] [data-ui-root] input::placeholder,
+html[data-theme="dark"] [data-ui-root] textarea::placeholder {
+  color: rgb(255 255 255 / 0.58);
+}
+html[data-theme="dark"] [data-ui-root] option {
+  background-color: #131313;
+  color: #ffffff;
+}
+
+/* 日间：暖纸编辑室 + 石色阶抬升（避免冷灰「模板感」），仍对齐琥珀/电蓝叙事光 */
+html[data-theme="light"] {
+  color-scheme: light;
+  --color-surface: #e4dcd2;
+  --color-surface-container-lowest: #fffdf9;
+  --color-surface-container-low: #f5ede4;
+  --color-surface-container-high: #e9e0d6;
+  --color-surface-container-highest: #dcd2c7;
+  --color-on-background: #1c1917;
+  --color-on-surface: #1c1917;
+  --color-outline: #5c554c;
+  --color-outline-variant: #9a9187;
+  /* Light mode: refined/cinematic focus blue + warm amber as support */
+  --color-primary: #3a7f9e;
+  --color-primary-fixed-dim: #2d637c;
+  --color-on-primary-container: #102b38;
+  --color-secondary: #d89a3a;
+  --color-tertiary: #b8860b;
+}
+
+html[data-theme="light"] body {
+  background:
+    radial-gradient(1180px 700px at 5% -10%, rgba(216, 154, 58, 0.26), transparent 58%),
+    radial-gradient(920px 540px at 100% 0%, rgba(85, 151, 186, 0.22), transparent 54%),
+    radial-gradient(1100px 600px at 50% 105%, rgba(161, 132, 95, 0.11), transparent 52%),
+    linear-gradient(162deg, #faf6f0 0%, #f2e9df 34%, #e9edf4 72%, #f4eee6 100%);
+}
+
+/* View Transitions：与琥珀/电蓝气质呼应的轻量交叉（支持时叠加开灯叠层） */
+@supports (view-transition-name: none) {
+  @media (prefers-reduced-motion: no-preference) {
+    ::view-transition-old(root) {
+      animation: vt-theme-fade-out 0.52s cubic-bezier(0.4, 0, 0.2, 1) both;
+    }
+    ::view-transition-new(root) {
+      animation: vt-theme-fade-in 0.58s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+  }
+}
+
+@keyframes vt-theme-fade-out {
+  from {
+    opacity: 1;
+    filter: brightness(1);
+  }
+  to {
+    opacity: 0.88;
+    filter: brightness(0.72);
+  }
+}
+
+@keyframes vt-theme-fade-in {
+  from {
+    opacity: 0.82;
+    filter: brightness(1.18);
+  }
+  to {
+    opacity: 1;
+    filter: brightness(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
 }
 
 @layer base {
@@ -30,6 +120,101 @@
 }
 
 @layer utilities {
+  /* Accent roles: dark=amber focus, light=blue focus */
+  .accent-focus {
+    color: var(--color-primary);
+  }
+  .accent-info {
+    color: var(--color-secondary);
+  }
+  .chip-accent-focus {
+    background-color: rgb(255 184 102 / 0.85);
+    color: #2b1700;
+  }
+  .accent-focus-bg {
+    background-color: var(--color-primary);
+    color: #2b1700;
+  }
+  .accent-focus-outline {
+    outline-color: rgb(255 184 102 / 0.75);
+  }
+  .accent-focus-ring {
+    --tw-ring-color: rgb(255 184 102 / 0.35);
+  }
+
+  html[data-theme="light"] .accent-focus {
+    color: var(--color-primary);
+  }
+  html[data-theme="light"] .accent-info {
+    color: var(--color-secondary);
+  }
+  html[data-theme="light"] .chip-accent-focus {
+    background-color: rgb(47 139 182 / 0.9);
+    color: #f8fafc;
+  }
+  html[data-theme="light"] .accent-focus-bg {
+    background-color: var(--color-primary);
+    color: #f8fafc;
+  }
+  html[data-theme="light"] .accent-focus-outline {
+    outline-color: rgb(47 139 182 / 0.76);
+  }
+  html[data-theme="light"] .accent-focus-ring {
+    --tw-ring-color: rgb(47 139 182 / 0.38);
+  }
+  html[data-theme="light"] [data-ui-root] .text-primary {
+    color: var(--color-primary);
+  }
+  html[data-theme="light"] [data-ui-root] .hover\:text-primary:hover {
+    color: var(--color-primary);
+  }
+  html[data-theme="light"] [data-ui-root] .group:hover .group-hover\/btn\:text-primary {
+    color: var(--color-primary);
+  }
+  html[data-theme="light"] [data-ui-root] .hover\:border-primary\/30:hover {
+    border-color: rgb(47 139 182 / 0.42);
+  }
+  html[data-theme="light"] [data-ui-root] .outline-primary\/80 {
+    outline-color: rgb(47 139 182 / 0.82);
+  }
+  /* Light mode should not jump to amber on hover; keep primary-blue interaction */
+  html[data-theme="light"] [data-ui-root] .hover\:bg-amber-400:hover {
+    background-color: var(--color-primary-fixed-dim);
+  }
+  html[data-theme="light"] [data-ui-root] .hover\:bg-amber-500\/10:hover {
+    background-color: rgb(58 127 158 / 0.12);
+  }
+  html[data-theme="light"] [data-ui-root] .hover\:shadow-\[0_0_30px_rgba\(255\,184\,102\,0\.4\)\]:hover {
+    box-shadow: 0 0 30px rgba(47, 139, 182, 0.34);
+  }
+  html[data-theme="light"] [data-ui-root] .hover\:shadow-\[0_0_32px_rgba\(255\,184\,102\,0\.4\)\]:hover {
+    box-shadow: 0 0 32px rgba(47, 139, 182, 0.34);
+  }
+  html[data-theme="light"] [data-ui-root] .bg-primary.text-black {
+    color: #f8fafc;
+  }
+  .accent-focus-glow {
+    box-shadow: 0 0 12px rgba(255, 184, 102, 0.35);
+  }
+  html[data-theme="light"] .accent-focus-glow {
+    box-shadow: 0 0 12px rgba(47, 139, 182, 0.34);
+  }
+  /* Segmented control selected text contrast */
+  .segmented-active-text {
+    color: #2b1700;
+    text-shadow: 0 0 0.2px rgba(0, 0, 0, 0.18);
+  }
+  .segmented-active-bg {
+    background-color: rgb(255 184 102 / 0.92);
+  }
+  html[data-theme="light"] .segmented-active-text {
+    color: #ffffff;
+    text-shadow: 0 0 0.2px rgba(0, 0, 0, 0.22);
+  }
+  html[data-theme="light"] .segmented-active-bg {
+    background-color: #2f8bb6;
+  }
+
   .cinematic-vignette {
     background: radial-gradient(circle, transparent 20%, rgba(14, 14, 14, 0.8) 100%);
   }
@@ -47,6 +232,29 @@
     backdrop-filter: blur(20px);
   }
 
+  html[data-theme="light"] .glass-panel {
+    background: linear-gradient(
+      152deg,
+      rgba(255, 253, 249, 0.93) 0%,
+      rgba(255, 245, 230, 0.8) 48%,
+      rgba(244, 248, 255, 0.88) 100%
+    );
+    backdrop-filter: blur(36px);
+    box-shadow:
+      0 44px 88px -50px rgba(42, 32, 24, 0.2),
+      0 0 0 0.5px rgba(64, 120, 154, 0.18);
+  }
+
+  html[data-theme="light"] .ghost-border {
+    border: 0.5px solid rgba(90, 86, 80, 0.24);
+  }
+
+  html[data-theme="light"] .glow-text {
+    text-shadow:
+      0 0 32px rgba(255, 176, 92, 0.42),
+      0 0 56px rgba(130, 200, 255, 0.22);
+  }
+
   .custom-scrollbar::-webkit-scrollbar {
     width: 4px;
     height: 4px;
@@ -58,12 +266,170 @@
     background: #45464d;
     border-radius: 10px;
   }
+
+  html[data-theme="light"] .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #c4a882, #a78b6f);
+  }
+
+  html[data-theme="light"] .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #b8956a, #8f7354);
+  }
 }
 
-@layer base {
-  body {
-    @apply bg-[#101622] text-slate-100 antialiased;
-  }
+/* 工作台内仍大量使用 slate / white 工具类：日间映射为深色字与浅底 */
+html[data-theme="light"] [data-ui-root] .text-slate-100 {
+  color: #1c1917;
+}
+html[data-theme="light"] [data-ui-root] .text-slate-200 {
+  color: #292524;
+}
+html[data-theme="light"] [data-ui-root] .text-slate-300 {
+  color: #44403c;
+}
+html[data-theme="light"] [data-ui-root] .text-slate-400 {
+  color: #57534e;
+}
+html[data-theme="light"] [data-ui-root] .text-slate-500 {
+  color: #78716c;
+}
+html[data-theme="light"] [data-ui-root] .text-slate-600 {
+  color: #57534e;
+}
+html[data-theme="light"] [data-ui-root] .text-slate-700 {
+  color: #44403c;
+}
+html[data-theme="light"] [data-ui-root] .text-slate-800 {
+  color: #292524;
+}
+html[data-theme="light"] [data-ui-root] .text-slate-900 {
+  color: #1c1917;
+}
+html[data-theme="light"] [data-ui-root] .text-white {
+  color: #1c1917;
+}
+html[data-theme="light"] [data-ui-root] .text-white\/80 {
+  color: rgb(28 25 23 / 0.85);
+}
+html[data-theme="light"] [data-ui-root] .text-white\/60 {
+  color: rgb(28 25 23 / 0.62);
+}
+html[data-theme="light"] [data-ui-root] .text-white\/50 {
+  color: rgb(28 25 23 / 0.52);
+}
+html[data-theme="light"] [data-ui-root] .text-white\/40 {
+  color: rgb(28 25 23 / 0.42);
+}
+html[data-theme="light"] [data-ui-root] .text-white\/30 {
+  color: rgb(28 25 23 / 0.32);
+}
+
+html[data-theme="light"] [data-ui-root] .bg-white\/5 {
+  background-color: rgb(28 25 23 / 0.045);
+}
+html[data-theme="light"] [data-ui-root] .bg-white\/10 {
+  background-color: rgb(28 25 23 / 0.075);
+}
+html[data-theme="light"] [data-ui-root] .bg-white\/\[0\.02\] {
+  background-color: rgb(28 25 23 / 0.035);
+}
+html[data-theme="light"] [data-ui-root] .bg-white\/\[0\.03\] {
+  background-color: rgb(28 25 23 / 0.045);
+}
+html[data-theme="light"] [data-ui-root] .bg-white\/\[0\.05\] {
+  background-color: rgb(28 25 23 / 0.065);
+}
+
+html[data-theme="light"] [data-ui-root] .border-white\/5 {
+  border-color: rgb(90 75 60 / 0.1);
+}
+html[data-theme="light"] [data-ui-root] .border-white\/10 {
+  border-color: rgb(90 75 60 / 0.14);
+}
+
+html[data-theme="light"] [data-ui-root] .bg-slate-900 {
+  background-color: #ebe3da;
+}
+html[data-theme="light"] [data-ui-root] .bg-slate-900\/50 {
+  background-color: rgb(235 227 218 / 0.78);
+}
+html[data-theme="light"] [data-ui-root] .bg-slate-800\/50 {
+  background-color: rgb(222 212 200 / 0.7);
+}
+html[data-theme="light"] [data-ui-root] .border-slate-800 {
+  border-color: rgb(90 75 60 / 0.12);
+}
+html[data-theme="light"] [data-ui-root] .border-slate-800\/50 {
+  border-color: rgb(90 75 60 / 0.09);
+}
+
+/* 解决日间模式下输入框/下拉项可读性 */
+html[data-theme="light"] [data-ui-root] input,
+html[data-theme="light"] [data-ui-root] textarea,
+html[data-theme="light"] [data-ui-root] select {
+  color: #1c1917;
+}
+html[data-theme="light"] [data-ui-root] input::placeholder,
+html[data-theme="light"] [data-ui-root] textarea::placeholder {
+  color: #78716c;
+}
+html[data-theme="light"] [data-ui-root] option {
+  background-color: #fffdf9;
+  color: #1c1917;
+}
+
+/* 日间模式的卡片层次：更通透但不刺眼 */
+html[data-theme="light"] [data-ui-root] .shadow-2xl {
+  box-shadow:
+    0 32px 72px -44px rgba(35, 28, 22, 0.22),
+    0 0 52px -30px rgba(255, 176, 100, 0.14),
+    0 0 0 0.5px rgba(120, 100, 80, 0.06);
+}
+
+/* 日间：语义色弱对比字提一档（Footer / Nav 等） */
+html[data-theme="light"] [data-ui-root] .text-on-surface\/25 {
+  color: rgb(28 25 23 / 0.46);
+}
+html[data-theme="light"] [data-ui-root] .text-on-surface\/40 {
+  color: rgb(28 25 23 / 0.56);
+}
+html[data-theme="light"] [data-ui-root] .text-on-surface\/50 {
+  color: rgb(28 25 23 / 0.64);
+}
+
+/* 分镜大号数字等：琥珀淡化后在浅底仍可见 */
+html[data-theme="light"] [data-ui-root] .text-primary\/30 {
+  color: rgb(180 83 9 / 0.52);
+}
+html[data-theme="light"] [data-ui-root] .group:hover .group-hover\:text-primary\/30 {
+  color: rgb(217 119 6 / 0.72);
+}
+
+/* 日间：hover 态 slate（工具类在浅底上再加深一档） */
+html[data-theme="light"] [data-ui-root] .hover\:text-slate-300:hover {
+  color: #292524;
+}
+html[data-theme="light"] [data-ui-root] .hover\:text-slate-400:hover {
+  color: #44403c;
+}
+html[data-theme="light"] [data-ui-root] .group:hover .group-hover\:text-slate-300 {
+  color: #292524;
+}
+html[data-theme="light"] [data-ui-root] .group:hover .group-hover\:text-slate-400 {
+  color: #57534e;
+}
+
+/* 深色面板的弹窗仍在日间保持「暗房」可读性（不受 text-white→深字 映射影响） */
+html[data-theme="light"] [data-theme-preserve="dark"] .text-white {
+  color: #f8fafc;
+}
+html[data-theme="light"] [data-theme-preserve="dark"] .text-slate-300 {
+  color: #cbd5e1;
+}
+html[data-theme="light"] [data-theme-preserve="dark"] .text-slate-400 {
+  color: #94a3b8;
+}
+html[data-theme="light"] [data-theme-preserve="dark"] .text-slate-500 {
+  color: #64748b;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
@@ -81,6 +447,14 @@
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #334155;
+}
+
+html[data-theme="light"] .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #c4a882, #a78b6f);
+}
+
+html[data-theme="light"] .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #b8956a, #8f7354);
 }
 
 @media print {

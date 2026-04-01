@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { AppState, GenerationResponse, StyleBase } from '../types';
+import { AppState, GenerationResponse, StyleBase, persistUiTheme, readStoredUiTheme } from '../types';
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>((set, get) => ({
   currentProjectId: null,
   projectTitle: '未命名项目',
   context: '',
@@ -13,6 +13,8 @@ export const useStore = create<AppState>((set) => ({
   data: null,
   references: [],
   selectedShotNumber: null,
+  uiTheme: readStoredUiTheme(),
+  imageEditor: { isOpen: false, target: null },
 
   setCurrentProjectId: (currentProjectId) => set({ currentProjectId }),
   setProjectTitle: (projectTitle) => set({ projectTitle }),
@@ -120,15 +122,76 @@ export const useStore = create<AppState>((set) => ({
 
   setSelectedShotNumber: (selectedShotNumber) => set({ selectedShotNumber }),
 
-  resetProject: () => set({
-    currentProjectId: null,
-    projectTitle: '未命名项目',
-    context: '',
-    script: '',
-    selectedStyle: 'Cinematic',
-    imageSize: '2K',
-    aspectRatio: '16:9',
-    data: null,
-    references: []
-  }),
+  openImageEditor: (target) => set({ imageEditor: { isOpen: true, target } }),
+  closeImageEditor: () => set({ imageEditor: { isOpen: false, target: null } }),
+
+  updateGlobalSceneImage: (sceneIndex, url) =>
+    set((state) => ({
+      data: state.data
+        ? {
+            ...state.data,
+            global_assets: {
+              ...state.data.global_assets,
+              scenes: state.data.global_assets.scenes.map((scene, i) =>
+                i === sceneIndex
+                  ? {
+                      ...scene,
+                      image_url: url,
+                      image_history: [url, ...(scene.image_history || [])],
+                    }
+                  : scene
+              ),
+            },
+          }
+        : null,
+    })),
+
+  setUiTheme: (uiTheme) => {
+    const prev = get().uiTheme;
+    if (prev === uiTheme) return;
+
+    const apply = () => {
+      persistUiTheme(uiTheme);
+      if (typeof document !== 'undefined') {
+        document.documentElement.dataset.theme = uiTheme;
+      }
+      set({ uiTheme });
+    };
+
+    if (typeof window === 'undefined') {
+      apply();
+      return;
+    }
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion) {
+      apply();
+      return;
+    }
+
+    const doc = document as Document & {
+      startViewTransition?: (callback: () => void) => { finished: Promise<void> };
+    };
+
+    if (typeof doc.startViewTransition === 'function') {
+      doc.startViewTransition(apply);
+    } else {
+      apply();
+    }
+  },
+
+  resetProject: () =>
+    set((state) => ({
+      currentProjectId: null,
+      projectTitle: '未命名项目',
+      context: '',
+      script: '',
+      selectedStyle: 'Cinematic',
+      imageSize: '2K',
+      aspectRatio: '16:9',
+      data: null,
+      references: [],
+      uiTheme: state.uiTheme,
+      imageEditor: { isOpen: false, target: null },
+    })),
 }));

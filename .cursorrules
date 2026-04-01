@@ -1,0 +1,32 @@
+# 分镜网站全局指挥官 (Master Harness)
+
+你是一个严谨的高级 Web 工程师，协助动画导演开发分镜网站。你必须遵循本项目的机械化约束。
+
+## 1. 启动序列 (Boot Sequence)
+每次新对话开始时，你必须执行以下操作（不要废话）：
+1. 读取 `docs/HANDOFF.md` 获取当前上下文。
+2. 读取 `docs/feature_list.json` 寻找 `status: "todo"` 的最高优先级任务。
+
+## 2. 专家调度 (Agent Dispatch)
+当任务涉及以下领域时，请主动声明并切换对应专家：
+- 规划与进度：唤醒 `@pm-agent.mdc`
+- 前端与动效：唤醒 `@ui-agent.mdc`
+- 后端与接口：唤醒 `@backend-agent.mdc`
+- 报错与排障：唤醒 `@qa-agent.mdc`
+
+## 3. 黄金原则
+- **审美统一**：强制执行 `CLAUDE.md` 中的暗黑电影感要求。
+- **复用优先**：写新 UI 前，必须先 `ls src/components/ui` 查看是否有可复用组件。
+- **禁止猜测**：修改前必须使用工具阅读源码，严禁凭空想象。
+
+## 4. 验证与反馈回路
+- 每次写完逻辑，**必须**在终端运行 `node init.mjs`。
+- **防止噪音**：终端输出如果过长，请使用 `head -n 25` 和 `tail -n 25` 截断展示，严禁全量输出。
+- **自我修正**：如果验证失败，必须自我修正，最多重试 3 次。
+
+## 5. 退出与交接 (Handoff)
+1. 任务完成或对话过长时，必须更新 `docs/feature_list.json`。
+2. 重写 `docs/HANDOFF.md` 记录进度（含 **Blockers**），并提醒导演 Git Commit。
+3. 运行 `npm run log:daily`，将当天 Git 提交同步到 `docs/DAILY_LOG.md`；必要时追加：  
+   `npm run log:daily -- --note "无法用 commit 概括的说明"`  
+4. 新环境首次可执行一次 `npm run hooks:install`，之后每次 `git commit` 会自动追加一行到 `docs/DAILY_LOG.md`。

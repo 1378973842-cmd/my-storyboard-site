@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import { 
   Copy, 
   Check, 
@@ -15,8 +15,8 @@ import {
   ChevronRight,
   CheckCircle2,
   FileText,
-  Settings2,
   PenTool,
+  Plus,
   MessageSquare,
   Camera,
   Sun,
@@ -27,12 +27,13 @@ import {
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, Reorder } from 'motion/react';
 import { Storyboard, ImageSize, AspectRatio } from '../types';
 import { SIZES, RATIOS } from '../constants';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { ConfirmationModal } from './ConfirmationModal';
+import { parseApiResponse } from '../lib/http';
 
 interface Props {
   shot: Storyboard;
@@ -47,13 +48,11 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
     switchStoryboardImage,
     updateStoryboard,
     removeStoryboard,
-    setSelectedShotNumber,
     references,
     script,
     context,
     selectedStyle
   } = useStore();
-  
   const [error, setError] = useState<string | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -61,6 +60,43 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
   const [generationProgress, setGenerationProgress] = useState(0);
   const [isHoveringImage, setIsHoveringImage] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'default' | 'edit'>('default');
+  const [editPrompt, setEditPrompt] = useState('');
+  const [isEditingImage, setIsEditingImage] = useState(false);
+  const [editProgress, setEditProgress] = useState(0);
+  const [editImageSize, setEditImageSize] = useState<ImageSize>(shot.image_size || '2K');
+  const [editAspectRatio, setEditAspectRatio] = useState<AspectRatio>(shot.aspect_ratio || '16:9');
+  const [editTargetImage, setEditTargetImage] = useState<string | null>(null);
+  const [editResultImage, setEditResultImage] = useState<string | null>(null);
+  const [editHistory, setEditHistory] = useState<Array<{ url: string; prompt: string }>>([]);
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const editTargetInputRef = useRef<HTMLInputElement>(null);
+  const [editRefs, setEditRefs] = useState<{ id: string; url: string }[]>([]);
+
+  const unifiedHistory = useMemo(() => {
+    const seen = new Set<string>();
+    const merged = [...editHistory.map((h) => h.url), ...((shot.image_history || []).slice().reverse())];
+    return merged.filter((u) => {
+      if (!u || seen.has(u)) return false;
+      seen.add(u);
+      return true;
+    });
+  }, [editHistory, shot.image_history]);
+
+  const resolvePromptForUrl = (url?: string | null) => {
+    if (!url) return '';
+    const hit = editHistory.find((h) => h.url === url);
+    if (hit) return hit.prompt || '';
+    return shot.image_prompt || '';
+  };
+
+  const readFileAsDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('读取参考图失败'));
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.readAsDataURL(file);
+    });
 
   const handleRegenerateShot = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -89,7 +125,8 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
       
       if (!res.ok) throw new Error('重新生成失败');
       
-      const newShot = await res.json();
+      const newShot = await parseApiResponse(res);
+      if (!res.ok) throw new Error(newShot.error || '重新生成失败');
       updateStoryboard(shot.shot_number, newShot);
     } catch (err) {
       console.error('Regenerate error:', err);
@@ -168,11 +205,10 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
         });
       }
       
-      // 与 App 全局资产生图一致：提示词里若未出现「图N」引用，则仍传入全部参考图，避免模型未写编号时完全不参考上传图
+      // 规则：只有当提示词明确引用 `图N / @图N / @资产N` 时，才传入对应参考图。
+      // 若提示词未提及，则不传入 references，避免“未声明引用却被参考图影响”的错误行为。
       const filteredReferences =
-        mentionedRefIndices.size > 0
-          ? references.filter((_, idx) => mentionedRefIndices.has(idx))
-          : references;
+        mentionedRefIndices.size > 0 ? references.filter((_, idx) => mentionedRefIndices.has(idx)) : [];
 
       const res = await fetch('/api/generate-image', {
         method: 'POST',
@@ -185,7 +221,7 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
         }),
       });
 
-      const data = await res.json();
+      const data = await parseApiResponse(res);
 
       if (!res.ok) {
         throw new Error(data.error || `生图失败 (${res.status})`);
@@ -223,33 +259,131 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
     }
   };
 
+  const handleRunEdit = async () => {
+    if (!editTargetImage) {
+      setError('请先上传或拖拽一张需要编辑的图');
+      return;
+    }
+    if (!editPrompt.trim()) {
+      setError('请先输入修改描述词（prompt）');
+      return;
+    }
+
+    setIsEditingImage(true);
+    setEditProgress(0);
+    setError(null);
+    let progressInterval: any = null;
+    try {
+      progressInterval = setInterval(() => {
+        setEditProgress((prev) => {
+          if (prev >= 90) return prev;
+          return prev + Math.random() * 7;
+        });
+      }, 350);
+
+      const mappingHint =
+        `【图片顺序说明】图1=待编辑主图；图2及以后=参考图（按下方队列从左到右的顺序）。\n`;
+      const finalPrompt = `${mappingHint}${editPrompt}`;
+
+      const res = await fetch('/api/edit-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target_image: editTargetImage,
+          prompt: finalPrompt,
+          references: editRefs.map((r) => ({ url: r.url })),
+          image_size: editImageSize,
+          aspect_ratio: editAspectRatio,
+        }),
+      });
+      const data = await parseApiResponse(res);
+      if (!res.ok) throw new Error(data.error || `编辑失败 (${res.status})`);
+      updateStoryboardImage(shot.shot_number, data.url);
+      setEditResultImage(data.url);
+      setEditHistory((prev) => [
+        { url: data.url, prompt: editPrompt },
+        ...prev.filter((h) => h.url !== data.url),
+      ]);
+      setEditProgress(100);
+      if (progressInterval) clearInterval(progressInterval);
+    } catch (err) {
+      console.error('Image edit error:', err);
+      setError(err instanceof Error ? err.message : '编辑失败');
+      setEditProgress(0);
+      if (progressInterval) clearInterval(progressInterval);
+    } finally {
+      setIsEditingImage(false);
+    }
+  };
+
+  const handleUploadEditTarget = async (files: FileList | null) => {
+    if (!files?.length) return;
+    const imgs = Array.from(files)
+      .filter((f) => f.type.startsWith('image/'))
+      .slice(0, 12);
+    if (imgs.length === 0) return;
+
+    const urls = await Promise.all(imgs.map(readFileAsDataUrl));
+    setEditResultImage(null);
+
+    // 合并上传：首张作为主图，其余作为参考图
+    if (!editTargetImage) {
+      setEditTargetImage(urls[0]);
+      setEditRefs(
+        urls.slice(1).map((u, i) => ({
+          id: Math.random().toString(36).slice(2, 9) + '_' + i,
+          url: u,
+        }))
+      );
+    } else {
+      setEditRefs((prev) => [
+        ...prev,
+        ...urls.map((u, i) => ({
+          id: Math.random().toString(36).slice(2, 9) + '_' + (prev.length + i),
+          url: u,
+        })),
+      ]);
+    }
+  };
+
+  const activeDisplayUrl = viewMode === 'edit' ? editResultImage : shot.image_url;
+  const activeDisplayPrompt = resolvePromptForUrl(activeDisplayUrl);
+  const activeDisplayIsEdit = !!activeDisplayUrl && editHistory.some((h) => h.url === activeDisplayUrl);
+
   return (
     <>
-      <div className="mb-10 group">
+      <motion.article
+        className="mb-12 group"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        whileHover={{ y: -6, scale: 1.005 }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+      >
         <div className="flex gap-4 mb-3 items-end">
-          <span className="font-headline italic text-4xl text-slate-800 group-hover:text-primary/20 transition-colors">
+          <span className="font-headline italic text-4xl tracking-[-0.02em] text-slate-700 group-hover:text-primary/30 transition-colors">
             {shot.shot_number.toString().padStart(2, '0')}
           </span>
           <div className="flex items-center gap-3 ml-2">
-            <span className="px-3 py-1 bg-surface-container-high rounded text-[9px] font-label tracking-[0.15em] text-slate-400 ghost-border uppercase">
+            <span className="px-3 py-1 bg-surface-container-high rounded text-[9px] font-label tracking-[0.15em] text-slate-300 uppercase">
               Shot A-{shot.shot_number}
             </span>
-            <span className="px-3 py-1 bg-surface-container-high rounded text-[9px] font-label tracking-[0.15em] text-slate-400 ghost-border uppercase">
+            <span className="px-3 py-1 bg-surface-container-high rounded text-[9px] font-label tracking-[0.15em] text-slate-300 uppercase">
               {shot.summary || 'Interior - The Lab'}
             </span>
           </div>
         </div>
 
-        <div className="grid grid-cols-12 gap-0.5 rounded-xl overflow-hidden shadow-2xl bg-surface-container-low border border-white/5">
+        <div className="grid grid-cols-12 gap-1 rounded-[1.25rem] overflow-hidden shadow-[0_45px_80px_-42px_rgba(0,0,0,0.58)] bg-surface-container-low p-1">
           {/* Frame Preview */}
           <div 
-            className="col-span-7 relative aspect-video bg-surface-container-highest group/preview overflow-hidden flex items-center justify-center border-r border-white/5"
+            className="col-span-7 relative aspect-video bg-surface-container-highest group/preview overflow-hidden flex items-center justify-center rounded-[1rem]"
             onMouseEnter={() => setIsHoveringImage(true)}
             onMouseLeave={() => setIsHoveringImage(false)}
           >
-            {shot.image_url ? (
-              <img 
-                src={shot.image_url} 
+          {viewMode === 'edit' ? (
+            editResultImage ? (
+              <img
+                src={editResultImage}
                 alt={shot.summary}
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover opacity-90 group-hover/preview:scale-105 transition-transform duration-1000"
@@ -257,13 +391,78 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
             ) : (
               <div className="w-full h-full flex flex-col items-center justify-center text-slate-700 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-800/20 to-transparent">
                 <Camera className="w-16 h-16 mb-4 opacity-10" />
-                <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-slate-500">No Image Generated</span>
+                <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-slate-300">EDIT_RESULT_HERE</span>
               </div>
-            )}
+            )
+          ) : shot.image_url ? (
+            <img
+              src={shot.image_url}
+              alt={shot.summary}
+              referrerPolicy="no-referrer"
+              className="w-full h-full object-cover opacity-90 group-hover/preview:scale-105 transition-transform duration-1000"
+            />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center text-slate-700 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-800/20 to-transparent">
+              <Camera className="w-16 h-16 mb-4 opacity-10" />
+              <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-slate-300">No Image Generated</span>
+            </div>
+          )}
             
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-60" />
 
+            <AnimatePresence>
+              {isHoveringImage && activeDisplayUrl && activeDisplayPrompt && (
+                <motion.div
+                  initial={{ opacity: 0, y: 16, scale: 0.985 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.99 }}
+                  transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                  whileHover={{ y: -1, scale: 1.003 }}
+                  className={cn(
+                    "absolute top-4 left-4 z-20",
+                    // Default view has top-right action buttons; reserve space to avoid overlap.
+                    viewMode === 'edit' ? "w-[min(92%,42rem)]" : "w-[min(64%,34rem)]"
+                  )}
+                >
+                  <div className="rounded-2xl px-3 py-2.5 bg-black/45 backdrop-blur-[26px] outline outline-[0.5px] outline-white/20 shadow-[0_26px_56px_-38px_rgba(0,0,0,0.8)]">
+                    <div className="flex items-start gap-2.5">
+                      <div className="shrink-0 mt-0.5 px-2 py-1 rounded-full chip-accent-focus text-[8px] font-black tracking-[0.16em]">
+                        {activeDisplayIsEdit ? 'EDIT_PROMPT' : 'IMAGE_PROMPT'}
+                      </div>
+                      <p
+                        className="flex-1 text-[10px] text-white/92 leading-relaxed line-clamp-3"
+                        style={{
+                          maskImage: 'linear-gradient(180deg, #000 70%, transparent 100%)',
+                          WebkitMaskImage: 'linear-gradient(180deg, #000 70%, transparent 100%)',
+                        }}
+                      >
+                        {activeDisplayPrompt}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          try {
+                            await navigator.clipboard.writeText(activeDisplayPrompt);
+                            setCopiedPrompt(true);
+                            setTimeout(() => setCopiedPrompt(false), 1200);
+                          } catch {
+                            /* ignore */
+                          }
+                        }}
+                        className="shrink-0 p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer outline outline-[0.5px] outline-white/15"
+                        title="复制提示词"
+                      >
+                        {copiedPrompt ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Floating Controls Overlay */}
+            {viewMode !== 'edit' && (
             <div className="absolute bottom-6 left-6 flex items-center gap-3 translate-y-2 opacity-0 group-hover/preview:translate-y-0 group-hover/preview:opacity-100 transition-all duration-500">
               <button 
                 onClick={handleGenerateImage}
@@ -274,26 +473,52 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                 {shot.is_loading_image ? 'GENERATING...' : 'GENERATE'}
               </button>
             </div>
+            )}
 
+            {viewMode !== 'edit' && (
             <div className="absolute top-6 right-6 flex gap-2 opacity-0 group-hover/preview:opacity-100 transition-opacity duration-500">
+              <button
+                onClick={() => {
+                  setViewMode('edit');
+                  setError(null);
+                  setEditProgress(0);
+                  setIsEditingImage(false);
+                  setEditResultImage(null);
+                  setEditRefs([]);
+                  setEditTargetImage(shot.image_url || null);
+                }}
+                className="w-10 h-10 rounded-full glass-panel ghost-border flex items-center justify-center text-on-surface hover:text-primary transition-all cursor-pointer"
+                title="编辑"
+              >
+                <PenTool className="w-5 h-5" />
+              </button>
+              <button
+                onClick={(e) => handleDownload(e, shot.image_url!)}
+                className="w-10 h-10 rounded-full glass-panel ghost-border flex items-center justify-center text-on-surface hover:text-primary transition-all cursor-pointer"
+                title="下载图片"
+              >
+                <Download className="w-5 h-5" />
+              </button>
               <button 
                 onClick={(e) => handleOpenPreview(e, shot.image_url!)}
-                className="w-10 h-10 rounded-full glass-panel border border-white/10 flex items-center justify-center text-on-surface hover:text-primary hover:border-primary/30 transition-all cursor-pointer"
+                className="w-10 h-10 rounded-full glass-panel ghost-border flex items-center justify-center text-on-surface hover:text-primary transition-all cursor-pointer"
+                title="放大预览"
               >
                 <Maximize2 className="w-5 h-5" />
               </button>
             </div>
+            )}
 
             {/* Loading Overlay */}
-            {shot.is_loading_image && (
+            {shot.is_loading_image && viewMode !== 'edit' && (
               <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-30 flex flex-col items-center justify-center p-6">
                 <div className="w-full max-w-[160px] h-1.5 bg-slate-800 rounded-full overflow-hidden mb-4">
                   <div 
-                    className="h-full bg-primary transition-all duration-500 ease-out shadow-[0_0_10px_rgba(255,184,102,0.5)]" 
+                    className="h-full bg-primary transition-all duration-500 ease-out accent-focus-glow" 
                     style={{ width: `${generationProgress}%` }}
                   />
                 </div>
-                <span className="text-[11px] font-mono tracking-[0.2em] uppercase text-primary font-bold">
+                <span className="text-[11px] font-mono tracking-[0.2em] uppercase accent-focus font-bold">
                   GENERATING... {Math.round(generationProgress)}%
                 </span>
               </div>
@@ -301,44 +526,267 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
           </div>
 
           {/* Sidebar Panel */}
-          <div className="col-span-5 flex flex-col divide-y divide-outline-variant/10 bg-surface-container-low">
+          <div className="col-span-5 flex flex-col gap-1 bg-surface-container-lowest rounded-[1rem] p-1">
             {/* Header / Actions */}
-            <div className="p-4 flex justify-between items-center bg-surface-container-lowest">
+            <div className="p-4 flex justify-between items-center bg-surface-container-low rounded-[0.8rem]">
               <div className="flex items-center gap-2">
-                <button 
-                  onClick={() => setSelectedShotNumber(shot.shot_number)}
-                  className="px-3 py-1.5 bg-surface-container-highest rounded text-[9px] font-label tracking-widest text-on-surface ghost-border hover:bg-white/5 transition-all cursor-pointer flex items-center gap-2 group/btn"
+                <button
+                  onClick={() => {
+                    setViewMode('default');
+                    setEditResultImage(null);
+                    setEditTargetImage(null);
+                    setEditRefs([]);
+                    setEditProgress(0);
+                    setError(null);
+                  }}
+                  className={cn(
+                    'px-3 py-1.5 rounded text-[9px] font-label tracking-widest ghost-border transition-all cursor-pointer flex items-center gap-2 group/btn',
+                    viewMode === 'default'
+                      ? 'bg-white/10 accent-focus'
+                      : 'bg-surface-container-highest text-slate-300 hover:bg-white/5 hover:text-primary'
+                  )}
                 >
-                  <Settings2 className="w-3 h-3 text-primary group-hover/btn:text-white transition-colors" />
-                  SHOT_SETTINGS
+                  <Camera className={cn('w-3 h-3 transition-colors', viewMode === 'default' ? 'accent-focus' : 'text-slate-300 group-hover/btn:text-primary')} />
+                  SHOT_VIEW
+                </button>
+                <button
+                  onClick={() => {
+                    setViewMode('edit');
+                    setError(null);
+                    setEditProgress(0);
+                    setEditResultImage(null);
+                    setEditRefs([]);
+                    setEditTargetImage(shot.image_url || null);
+                  }}
+                  className={cn(
+                    'px-3 py-1.5 rounded text-[9px] font-label tracking-widest ghost-border transition-all cursor-pointer flex items-center gap-2 group/btn',
+                    viewMode === 'edit'
+                      ? 'bg-white/10 accent-focus'
+                      : 'bg-surface-container-highest text-slate-300 hover:bg-white/5 hover:text-primary'
+                  )}
+                >
+                  <PenTool className={cn('w-3 h-3 transition-colors', viewMode === 'edit' ? 'accent-focus' : 'text-slate-300 group-hover/btn:text-primary')} />
+                  IMAGE_EDIT
                 </button>
               </div>
               <button 
                 onClick={handleDeleteShot}
-                className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors cursor-pointer"
+                className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-400/10 rounded transition-colors cursor-pointer"
                 title="Delete Shot"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
             </div>
 
+            {viewMode === 'edit' && (
+              <div className="p-4 bg-surface-container-low rounded-[0.8rem] space-y-3">
+                {error && (
+                  <div className="px-3 py-2 rounded-2xl bg-red-500/10 outline outline-[0.5px] outline-red-500/20 text-red-200 text-xs">
+                    {error}
+                  </div>
+                )}
+
+                {isEditingImage && (
+                  <div className="w-full rounded-2xl bg-white/[0.03] outline outline-[0.5px] outline-white/10 p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[9px] font-label tracking-[0.18em] uppercase accent-focus">Editing</span>
+                      <span className="text-[10px] font-mono text-white/60">{Math.round(editProgress)}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary transition-all duration-200"
+                        style={{ width: `${Math.min(100, Math.max(0, editProgress))}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <div className="text-[9px] font-label tracking-[0.18em] uppercase text-slate-300">
+                    上传图片（单框：图1主图 + 图2+参考）
+                  </div>
+                  <div
+                    className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] min-h-[132px] p-2"
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={async (e) => {
+                      e.preventDefault();
+                      const files = e.dataTransfer.files;
+                      await handleUploadEditTarget(files);
+                    }}
+                  >
+                    <div className="flex gap-2 overflow-x-auto custom-scrollbar">
+                      {editTargetImage && (
+                        <div
+                        className="relative shrink-0 h-24 min-w-[84px] max-w-[180px] rounded-xl overflow-hidden outline outline-[0.5px] accent-focus-outline bg-transparent flex items-center justify-center px-1"
+                          data-theme-preserve="dark"
+                        >
+                          <img src={editTargetImage} className="h-full w-auto max-w-[172px] object-contain" />
+                          <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-full bg-black/80 text-white text-[9px] font-black tracking-widest outline outline-[0.5px] outline-white/20">
+                            #1
+                          </div>
+                          <button
+                            onClick={() => {
+                              setEditTargetImage(null);
+                              setEditResultImage(null);
+                            }}
+                            className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/80 text-white flex items-center justify-center outline outline-[0.5px] outline-white/20"
+                            title="移除主图"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+                      <Reorder.Group axis="x" values={editRefs} onReorder={setEditRefs} className="contents">
+                        {editRefs.map((ref, idx) => (
+                          <Reorder.Item
+                            key={ref.id}
+                            value={ref}
+                            className="relative shrink-0 h-24 min-w-[84px] max-w-[180px] rounded-xl overflow-hidden outline outline-[0.5px] outline-white/20 cursor-grab active:cursor-grabbing bg-transparent flex items-center justify-center px-1"
+                            whileDrag={{ scale: 1.04, zIndex: 20 }}
+                            transition={{ layout: { type: 'spring', stiffness: 300, damping: 30 } }}
+                            data-theme-preserve="dark"
+                          >
+                            <img src={ref.url} className="h-full w-auto max-w-[172px] object-contain" draggable={false} />
+                            <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-full bg-black/80 text-white text-[9px] font-black tracking-widest outline outline-[0.5px] outline-white/20">
+                              #{idx + 2}
+                            </div>
+                            <button
+                              onClick={() => setEditRefs((prev) => prev.filter((x) => x.id !== ref.id))}
+                              className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/80 text-white flex items-center justify-center outline outline-[0.5px] outline-white/20"
+                              title="移除图片"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </Reorder.Item>
+                        ))}
+                      </Reorder.Group>
+                      <button
+                        onClick={() => editTargetInputRef.current?.click()}
+                        className="shrink-0 w-24 h-24 rounded-xl border border-dashed border-white/20 bg-white/[0.03] hover:bg-white/[0.06] text-slate-300 hover:text-primary transition-colors flex flex-col items-center justify-center gap-1 cursor-pointer"
+                        title="上传图片"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span className="text-[9px] font-black uppercase tracking-widest">Upload</span>
+                      </button>
+                    </div>
+                    {!editTargetImage && editRefs.length === 0 && (
+                      <div className="h-20 flex items-center justify-center text-slate-400 text-[10px] uppercase tracking-widest">
+                        拖拽上传图片到这个框
+                      </div>
+                    )}
+                  </div>
+                  <input
+                    ref={editTargetInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => handleUploadEditTarget(e.target.files)}
+                  />
+                </div>
+
+                <textarea
+                  value={editPrompt}
+                  onChange={(e) => setEditPrompt(e.target.value)}
+                  placeholder="输入修改描述词（prompt）"
+                  className="w-full min-h-[72px] bg-surface-container-high rounded-lg p-3 text-[10px] font-body text-white focus:outline-none focus:ring-1 accent-focus-ring transition-all resize-none custom-scrollbar"
+                />
+
+                <div className="flex items-center gap-3">
+                  <select
+                    value={editImageSize}
+                    onChange={(e) => setEditImageSize(e.target.value as ImageSize)}
+                    className="bg-surface-container-high text-white text-[10px] font-mono rounded-md px-2.5 py-1.5 border border-white/10 focus:outline-none focus:border-primary/40"
+                  >
+                    {SIZES.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={editAspectRatio}
+                    onChange={(e) => setEditAspectRatio(e.target.value as AspectRatio)}
+                    className="bg-surface-container-high text-white text-[10px] font-mono rounded-md px-2.5 py-1.5 border border-white/10 focus:outline-none focus:border-primary/40"
+                  >
+                    {RATIOS.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={handleRunEdit}
+                    disabled={isEditingImage}
+                    className={cn(
+                      'ml-auto px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all cursor-pointer',
+                      isEditingImage ? 'bg-slate-800 accent-focus' : 'accent-focus-bg hover:opacity-90'
+                    )}
+                  >
+                    {isEditingImage ? '编辑中...' : '开始编辑'}
+                  </button>
+                </div>
+
+              </div>
+            )}
+
+            {viewMode === 'default' && (
+              <>
             {/* Narrative Context */}
-            <div className="p-4">
-              <h3 className="text-[9px] font-label tracking-[0.2em] text-slate-500 uppercase mb-2">Narrative Context</h3>
+            <div className="p-4 bg-surface-container-low rounded-[0.8rem]">
+              <h3 className="text-[9px] font-label tracking-[0.2em] text-slate-300 uppercase mb-2">Narrative Context</h3>
               <p className="text-xs text-slate-300 leading-relaxed font-body line-clamp-2">
                 {shot.director_notes || 'No notes available for this shot.'}
               </p>
             </div>
 
             {/* Prompts */}
-            <div className="p-4 flex-1 flex flex-col gap-4">
+            <div className="p-4 flex-1 flex flex-col gap-4 bg-surface-container-low rounded-[0.8rem]">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <div className="text-[8px] font-black uppercase tracking-[0.2em] text-slate-300">Resolution_Spec</div>
+                  <div className="flex items-center rounded-2xl bg-surface-container-high/70 p-1 outline outline-[0.5px] outline-white/10">
+                    {SIZES.map((size) => (
+                      <button
+                        key={size}
+                        onClick={() => updateStoryboardParams(shot.shot_number, { image_size: size })}
+                        className={cn(
+                          "flex-1 px-2 py-1.5 rounded-xl text-[10px] font-mono font-black transition-all cursor-pointer",
+                          shot.image_size === size
+                            ? "segmented-active-bg segmented-active-text accent-focus-glow"
+                            : "text-slate-400 hover:text-slate-200"
+                        )}
+                      >
+                        {size}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <div className="text-[8px] font-black uppercase tracking-[0.2em] text-slate-300">Aspect_Ratio</div>
+                  <div className="rounded-2xl bg-surface-container-high/70 p-1 outline outline-[0.5px] outline-white/10">
+                    <select
+                      value={shot.aspect_ratio}
+                      onChange={(e) => updateStoryboardParams(shot.shot_number, { aspect_ratio: e.target.value as AspectRatio })}
+                      className="w-full bg-transparent text-slate-100 text-[11px] font-mono font-bold rounded-xl px-3 py-1.5 focus:outline-none"
+                    >
+                      {RATIOS.map((ratio) => (
+                        <option key={ratio} value={ratio} className="bg-surface text-slate-100">
+                          {ratio}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-2 flex-1 flex flex-col">
                 <div className="flex justify-between items-center">
-                  <span className="text-[9px] font-label tracking-widest text-primary uppercase">Image Prompt</span>
+                <span className="text-[9px] font-label tracking-widest accent-focus uppercase">Image Prompt</span>
                   <button 
                     onClick={handleRegenerateShot}
                     disabled={isRegenerating}
-                    className="flex items-center gap-1 text-[8px] font-label tracking-widest text-slate-400 uppercase hover:text-primary cursor-pointer disabled:opacity-50 transition-colors"
+                    className="flex items-center gap-1 text-[8px] font-label tracking-widest text-slate-300 uppercase hover:text-primary cursor-pointer disabled:opacity-50 transition-colors"
                   >
                     <RefreshCw className={cn("w-3 h-3", isRegenerating && "animate-spin")} />
                     {isRegenerating ? 'REWRITING...' : 'REWRITE'}
@@ -347,76 +795,75 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                 <textarea 
                   value={shot.image_prompt}
                   onChange={(e) => updateStoryboardPrompt(shot.shot_number, 'image', e.target.value)}
-                  className="w-full flex-1 min-h-[80px] bg-surface-container-lowest border border-outline-variant/10 rounded-lg p-3 text-[10px] font-mono text-slate-300 focus:outline-none focus:border-primary/30 transition-all resize-none custom-scrollbar"
+                  className="w-full flex-1 min-h-[80px] bg-surface-container-high rounded-lg p-3 text-[10px] font-body text-white focus:outline-none focus:ring-1 accent-focus-ring transition-all resize-none custom-scrollbar"
                 />
               </div>
               
               <div className="space-y-2 flex-1 flex flex-col">
-                <span className="text-[9px] font-label tracking-widest text-secondary uppercase">Video Prompt</span>
+                <span className="text-[9px] font-label tracking-widest accent-info uppercase">Video Prompt</span>
                 <textarea 
                   value={shot.video_prompt}
                   onChange={(e) => updateStoryboardPrompt(shot.shot_number, 'video', e.target.value)}
-                  className="w-full flex-1 min-h-[80px] bg-surface-container-lowest border border-outline-variant/10 rounded-lg p-3 text-[10px] font-mono text-slate-300 focus:outline-none focus:border-secondary/30 transition-all resize-none custom-scrollbar"
+                  className="w-full flex-1 min-h-[80px] bg-surface-container-high rounded-lg p-3 text-[10px] font-body text-white focus:outline-none focus:ring-1 focus:ring-secondary/30 transition-all resize-none custom-scrollbar"
                 />
               </div>
             </div>
+              </>
+            )}
 
-            {/* Settings */}
-            <div className="px-4 py-3 border-t border-outline-variant/10 flex flex-wrap items-center justify-between gap-4 bg-surface-container-lowest/30">
-              <div className="flex items-center gap-3">
-                <span className="text-[9px] font-label tracking-widest text-slate-500 uppercase">Res</span>
-                <div className="flex items-center gap-0.5 bg-surface-container-lowest p-0.5 rounded-md border border-outline-variant/10">
-                  {SIZES.map(size => (
+            <div className="p-4 bg-surface-container-low rounded-[0.8rem] space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] font-label tracking-[0.18em] uppercase accent-focus">统一历史浏览</span>
+                <span className="text-[9px] text-slate-400">{unifiedHistory.length}_ITEMS</span>
+              </div>
+              {unifiedHistory.length > 0 ? (
+                <div className="flex gap-2 overflow-x-auto custom-scrollbar">
+                  {unifiedHistory.map((url, idx) => (
                     <button
-                      key={size}
-                      onClick={() => updateStoryboardParams(shot.shot_number, { image_size: size })}
+                      key={`${url}_${idx}`}
+                      onClick={() => {
+                        if (viewMode === 'edit') setEditResultImage(url);
+                        else switchStoryboardImage(shot.shot_number, url);
+                      }}
+                      data-theme-preserve="dark"
                       className={cn(
-                        "px-2 py-1 rounded text-[9px] font-mono transition-all cursor-pointer",
-                        shot.image_size === size 
-                          ? "bg-primary/20 text-primary font-medium" 
-                          : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
+                        "relative shrink-0 w-20 h-20 rounded-xl overflow-hidden outline outline-[0.5px] transition-all cursor-pointer",
+                        (viewMode === 'edit' ? editResultImage === url : shot.image_url === url)
+                          ? "outline-primary/80"
+                          : "outline-white/15 hover:outline-white/35"
                       )}
+                      title={`历史 ${idx + 1}`}
                     >
-                      {size}
+                      <img src={url} className="w-full h-full object-cover" />
+                      <span className="absolute top-1 left-1 px-1 py-0.5 rounded bg-black/90 text-white text-[8px] font-black tracking-widest outline outline-[0.5px] outline-white/20">
+                        H{idx + 1}
+                      </span>
                     </button>
                   ))}
                 </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-[9px] font-label tracking-widest text-slate-500 uppercase">Ratio</span>
-                <div className="flex items-center gap-0.5 bg-surface-container-lowest p-0.5 rounded-md border border-outline-variant/10">
-                  {RATIOS.map(ratio => (
-                    <button
-                      key={ratio}
-                      onClick={() => updateStoryboardParams(shot.shot_number, { aspect_ratio: ratio })}
-                      className={cn(
-                        "px-2 py-1 rounded text-[9px] font-mono transition-all cursor-pointer",
-                        shot.aspect_ratio === ratio 
-                          ? "bg-primary/20 text-primary font-medium" 
-                          : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
-                      )}
-                    >
-                      {ratio}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              ) : (
+                <div className="text-[10px] text-slate-400">暂无历史结果</div>
+              )}
             </div>
           </div>
         </div>
-      </div>
+      </motion.article>
 
       {/* Lightbox Preview */}
       {isPreviewOpen && previewUrl && (
         <div 
           className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 md:p-12 animate-in fade-in duration-300"
           onClick={(e) => { e.stopPropagation(); setIsPreviewOpen(false); }}
+          data-theme-preserve="dark"
         >
           <button 
-            className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all z-[110] cursor-pointer"
+            className="absolute top-6 right-6 w-11 h-11 rounded-full flex items-center justify-center bg-surface-container-high/55 backdrop-blur-[30px]
+              outline outline-[0.5px] outline-outline-variant/20 text-white/90 hover:text-white
+              shadow-[0_24px_48px_-28px_rgba(0,0,0,0.55)] transition-colors z-[110] cursor-pointer"
             onClick={(e) => { e.stopPropagation(); setIsPreviewOpen(false); }}
+            title="关闭"
           >
-            <XIcon className="w-6 h-6" />
+            <XIcon className="w-5 h-5" strokeWidth={1.75} />
           </button>
 
           {/* Navigation Buttons */}
@@ -444,7 +891,7 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
               src={previewUrl} 
               alt={shot.summary}
               className="max-w-full max-h-full object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-300 cursor-zoom-out"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); setIsPreviewOpen(false); }}
             />
             
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md border border-white/10 px-6 py-3 rounded-2xl text-center max-w-2xl flex flex-col items-center gap-3">
@@ -466,7 +913,7 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
               {previewUrl !== shot.image_url && (
                 <button 
                   onClick={(e) => { e.stopPropagation(); switchStoryboardImage(shot.shot_number, previewUrl); }}
-                  className="px-4 py-2 bg-primary hover:bg-amber-400 text-black rounded-xl text-xs font-bold transition-all shadow-lg shadow-primary/20 cursor-pointer flex items-center gap-2"
+                  className="px-4 py-2 accent-focus-bg hover:opacity-90 rounded-xl text-xs font-bold transition-all shadow-lg shadow-primary/20 cursor-pointer flex items-center gap-2"
                 >
                   <RefreshCw className="w-3 h-3" />
                   设为当前分镜
