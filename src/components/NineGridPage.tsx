@@ -1,8 +1,11 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, Reorder } from 'motion/react';
-import { Loader2, Plus, X, Grid3X3, Download, Home, Scissors, Sparkles } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { Loader2, Plus, X, Grid3X3, Download, Scissors, Sparkles, ArrowLeft } from 'lucide-react';
+import { cn, uniqueRefItemId } from '../lib/utils';
 import { parseApiResponse } from '../lib/http';
+import { useRefThumbPreview } from '../hooks/useRefThumbPreview';
+import { ReferenceImageLightbox } from './ReferenceImageLightbox';
+import { ZoomableLightboxImage } from './ZoomableLightboxImage';
 
 type RefItem = { id: string; url: string; name?: string };
 type GridHistoryItem = {
@@ -13,10 +16,6 @@ type GridHistoryItem = {
 };
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
-
-function uid(prefix = 'ref') {
-  return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
-}
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -61,6 +60,18 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
   const [history, setHistory] = useState<GridHistoryItem[]>([]);
   const [preview, setPreview] = useState<{ type: 'result'; url?: string } | { type: 'crop'; idx: number } | null>(null);
 
+  const { previewUrl: refThumbPreviewUrl, setPreviewUrl: setRefThumbPreviewUrl, handlersFor: refThumbHandlers } =
+    useRefThumbPreview();
+
+  useEffect(() => {
+    if (!preview) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreview(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [preview]);
+
   const canBuildPrompts = story.trim().length >= 10 && refs.length >= 1 && !isRunning;
   const canGenerateImage =
     refs.length >= 1 &&
@@ -86,7 +97,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
       return [
         ...prev,
         ...urls.map((u, idx) => ({
-          id: uid(),
+          id: uniqueRefItemId('ref'),
           url: u,
           name: `角色${String(base + idx + 1).padStart(2, '0')}`,
         })),
@@ -196,7 +207,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
         setCroppedUrls(autoCropped);
         setHistory((prev) => [
           {
-            id: uid('hist'),
+            id: uniqueRefItemId('hist'),
             createdAt: Date.now(),
             gridUrl: imageData.url,
             shots: autoCropped,
@@ -210,7 +221,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
         // keep manual crop available when upstream image url disallows canvas read
         setHistory((prev) => [
           {
-            id: uid('hist'),
+            id: uniqueRefItemId('hist'),
             createdAt: Date.now(),
             gridUrl: imageData.url,
             shots: [],
@@ -457,8 +468,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt,
-          target_image: target,
-          references: refs.map((r) => ({ url: r.url })),
+          images: [target, ...refs.map((r) => r.url)],
           image_size: '2K',
           aspect_ratio: '16:9',
         }),
@@ -476,32 +486,69 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
   };
 
   return (
-    <div className="min-h-screen bg-surface text-slate-100 font-sans overflow-hidden" data-ui-root>
-      <div className="p-6 max-w-[1400px] mx-auto">
-        <div className="flex items-center justify-between mb-5">
-          <button
-            type="button"
-            onClick={onBack}
-            className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-primary transition-colors cursor-pointer text-[10px] font-label tracking-widest uppercase"
-          >
-            <Home className="w-4 h-4" />
-            返回起始页
-          </button>
-          <div className="flex items-center gap-2 text-[10px] font-label tracking-[0.18em] uppercase accent-info">
-            <Grid3X3 className="w-4 h-4 accent-focus" />
-            9_GRID
+    <div className="min-h-screen bg-surface text-on-background font-sans overflow-hidden relative" data-ui-root>
+      <div className="pointer-events-none fixed inset-0 z-0 opacity-[0.48]" aria-hidden>
+        <div className="absolute -top-36 right-[-10%] h-[min(48vw,480px)] w-[min(62vw,560px)] rounded-full bg-secondary/[0.09] blur-[105px]" />
+        <div className="absolute bottom-[-12%] left-[-8%] h-[380px] w-[min(70vw,620px)] rounded-full bg-primary/[0.07] blur-[95px]" />
+        <div className="absolute top-[42%] left-[35%] h-[200px] w-[280px] rounded-full bg-primary/[0.04] blur-[70px]" />
+      </div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={spring}
+        className="relative z-10 p-6 md:p-8 lg:p-10 max-w-[1680px] mx-auto"
+      >
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between mb-8 lg:mb-10">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-8">
+            <button
+              type="button"
+              onClick={onBack}
+              className="group/bak inline-flex w-fit items-center gap-2.5 px-5 py-2.5 rounded-full glass-panel ghost-border text-on-surface/75 hover:text-primary transition-colors cursor-pointer text-[10px] font-label tracking-widest uppercase shadow-[0_40px_80px_-50px_rgba(0,0,0,0.75)]"
+            >
+              <ArrowLeft className="w-4 h-4 opacity-65 group-hover/bak:-translate-x-0.5 transition-transform duration-300" />
+              返回起始页
+            </button>
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-surface-container-high/80 outline outline-[0.5px] outline-white/10 shadow-[0_20px_40px_-24px_rgba(0,0,0,0.65)]">
+                <Grid3X3 className="w-5 h-5 accent-focus" />
+              </div>
+              <div>
+                <h1 className="font-headline text-2xl sm:text-3xl tracking-[-0.02em] text-on-surface italic leading-tight">
+                  九宫叙事台
+                </h1>
+                <p className="mt-1 font-label text-[9px] tracking-[0.26em] uppercase text-on-surface/35">
+                  Nine-beat storyboard
+                </p>
+              </div>
+            </div>
           </div>
+          <span className="inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 glass-panel ghost-border font-label text-[9px] tracking-[0.2em] uppercase text-secondary/90">
+            <span className="h-1 w-1 rounded-full bg-secondary/90 shadow-[0_0_14px_rgba(141,205,255,0.4)]" />
+            3×3 Pipeline
+          </span>
         </div>
 
-        <div className="grid grid-cols-12 gap-6">
-          <div className="col-span-7 bg-surface-container-low rounded-[1.25rem] p-4 outline outline-[0.5px] outline-white/5 shadow-[0_45px_80px_-42px_rgba(0,0,0,0.58)]">
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-[9px] font-label tracking-[0.2em] uppercase text-slate-400">Result</div>
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.18fr)_minmax(0,0.9fr)] gap-8 lg:gap-10 xl:gap-12">
+          <motion.div
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ ...spring, delay: 0.04 }}
+            className="bg-surface-container-low/88 backdrop-blur-sm rounded-[1.5rem] p-5 md:p-6 outline outline-[0.5px] outline-white/[0.07] shadow-[0_56px_100px_-48px_rgba(0,0,0,0.78)]"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="h-8 w-px rounded-full bg-gradient-to-b from-secondary/55 to-transparent shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-[9px] font-label tracking-[0.22em] uppercase text-on-surface/40">主画布</div>
+                  <div className="font-headline text-sm italic text-on-surface/80 truncate">Result viewport</div>
+                </div>
+              </div>
               {resultUrl && (
                 <div className="flex items-center gap-2">
                   <button
                     onClick={cropToNine}
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 hover:text-primary transition-colors outline outline-[0.5px] outline-white/10 cursor-pointer text-[10px] font-semibold"
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full glass-panel ghost-border text-on-surface/80 hover:text-primary transition-colors cursor-pointer text-[10px] font-label font-semibold uppercase tracking-widest shadow-[0_20px_44px_-36px_rgba(0,0,0,0.65)]"
                     title="裁切成 9 张"
                   >
                     {isCropping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Scissors className="w-4 h-4" />}
@@ -509,7 +556,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
                   </button>
                   <button
                     onClick={download}
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 hover:text-primary transition-colors outline outline-[0.5px] outline-white/10 cursor-pointer text-[10px] font-semibold"
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full glass-panel ghost-border text-on-surface/80 hover:text-primary transition-colors cursor-pointer text-[10px] font-label font-semibold uppercase tracking-widest shadow-[0_20px_44px_-36px_rgba(0,0,0,0.65)]"
                   >
                     <Download className="w-4 h-4" />
                     下载
@@ -519,16 +566,16 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
             </div>
 
             {shotsPreview.length === 9 ? (
-              <div className="rounded-2xl bg-surface-container-high/70 p-3 outline outline-[0.5px] outline-white/10">
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <span className="text-[10px] text-slate-400">
-                  已进入 9 格编辑台：每格下方可单独改提示词；生图后自动裁切并回填到对应格子。
-                  </span>
+              <div className="rounded-[1.25rem] bg-surface-container-high/55 backdrop-blur-sm p-4 md:p-5 outline outline-[0.5px] outline-white/[0.08] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <p className="text-[10px] text-on-surface/45 leading-relaxed max-w-[46ch]">
+                    九格工作台：逐格润色提示词；成片后自动裁切回填，可单格精修或批量导出。
+                  </p>
                   {croppedUrls.length === 9 && (
                     <button
                       type="button"
                       onClick={downloadAllCropped}
-                      className="shrink-0 inline-flex items-center gap-2 px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-slate-200 hover:text-primary transition-colors outline outline-[0.5px] outline-white/12 cursor-pointer text-[10px] font-semibold"
+                      className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[linear-gradient(135deg,var(--color-primary),var(--color-on-primary-container))] text-on-primary-fixed text-[10px] font-label font-bold uppercase tracking-widest hover:opacity-95 cursor-pointer accent-focus-glow shadow-[0_24px_48px_-28px_rgba(255,184,102,0.35)]"
                       title="下载全部切图"
                     >
                       <Download className="w-4 h-4" />
@@ -536,13 +583,16 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
                     </button>
                   )}
                 </div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
                   {shotsPreview.map((shot, idx) => (
                     <motion.div
                       key={`${shot.n}_${idx}`}
                       layout
-                      transition={spring}
-                      className="rounded-xl bg-surface-container-low p-2 outline outline-[0.5px] outline-white/10 shadow-[0_18px_34px_-22px_rgba(0,0,0,0.6)]"
+                      initial={{ opacity: 0, y: 14 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ ...spring, delay: Math.min(idx * 0.035, 0.24) }}
+                      whileHover={{ y: -2 }}
+                      className="rounded-[1rem] bg-surface-container-low/90 p-2.5 outline outline-[0.5px] outline-white/[0.09] shadow-[0_22px_44px_-28px_rgba(0,0,0,0.72)]"
                     >
                       <div className="mb-1 flex items-center justify-between gap-1">
                         <div className="text-[9px] font-label tracking-[0.16em] uppercase accent-focus">格子 {shot.n}</div>
@@ -604,7 +654,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
                             prev.map((s, i) => (i === idx ? { ...s, prompt: e.target.value } : s)),
                           )
                         }
-                        className="mt-2 w-full min-h-[96px] bg-surface-container-high rounded-lg p-2 text-[11px] font-body text-white placeholder:text-white/40 focus:outline-none focus:ring-1 accent-focus-ring transition-all resize-y custom-scrollbar"
+                        className="mt-2 w-full min-h-[96px] bg-surface-container-high/90 rounded-xl p-2.5 text-[11px] font-body text-white placeholder:text-white/40 focus:outline-none focus-visible:ring-2 accent-focus-ring transition-all resize-y custom-scrollbar outline outline-[0.5px] outline-white/[0.06]"
                         placeholder={`请输入格子 ${shot.n} 的提示词`}
                       />
                     </motion.div>
@@ -612,33 +662,44 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
                 </div>
               </div>
             ) : (
-              <div className="relative aspect-video rounded-2xl overflow-hidden bg-surface-container-highest flex items-center justify-center">
+              <div className="relative aspect-video rounded-[1.15rem] overflow-hidden bg-surface-container-highest/95 flex items-center justify-center shadow-[inset_0_0_100px_rgba(0,0,0,0.4)] outline outline-[0.5px] outline-white/[0.06]">
                 {resultUrl ? (
                   <button
                     type="button"
                     onClick={() => setPreview({ type: 'result', url: resultUrl || '' })}
-                    className="w-full h-full cursor-zoom-in"
+                    className="w-full h-full cursor-zoom-in group/vp"
                     title="点击放大"
                   >
-                    <img src={resultUrl} className="w-full h-full object-cover" />
+                    <img
+                      src={resultUrl}
+                      className="w-full h-full object-cover transition-transform duration-500 group-hover/vp:scale-[1.02]"
+                    />
                   </button>
                 ) : (
-                  <div className="text-slate-400 text-[10px] uppercase tracking-[0.3em] font-bold">
-                    点击“生成提示词”后，左侧会分裂成 9 个格子
+                  <div className="flex flex-col items-center gap-2 px-6 text-center">
+                    <span className="font-headline text-base italic text-on-surface/35">等待分镜裂变</span>
+                    <span className="text-[10px] font-label uppercase tracking-[0.22em] text-on-surface/28">
+                      右侧生成提示词后，画布将裂变为 3×3
+                    </span>
                   </div>
                 )}
 
                 {isRunning && (
-                  <div className="absolute inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center">
-                    <div className="w-[240px]">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-black tracking-[0.14em] uppercase chip-accent-focus">
+                  <div className="absolute inset-0 bg-black/58 backdrop-blur-[18px] flex items-center justify-center">
+                    <div className="w-[min(88%,260px)] rounded-2xl glass-panel ghost-border px-4 py-4 shadow-[0_40px_80px_-40px_rgba(0,0,0,0.85)]">
+                      <div className="flex items-center justify-between mb-2.5">
+                        <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black tracking-[0.14em] uppercase chip-accent-focus">
                           {phase === 'text' ? '文本生成中...' : phase === 'image' ? '生图中...' : 'Generating'}
                         </span>
-                        <span className="text-[11px] font-mono text-white">{Math.round(progress)}%</span>
+                        <span className="text-[11px] font-mono text-white tabular-nums">{Math.round(progress)}%</span>
                       </div>
-                      <div className="h-1.5 rounded-full overflow-hidden bg-slate-800/80">
-                        <div className="h-full bg-primary transition-all duration-200" style={{ width: `${progress}%` }} />
+                      <div className="h-1.5 rounded-full overflow-hidden bg-slate-900/80">
+                        <motion.div
+                          className="h-full bg-primary shadow-[0_0_14px_rgba(255,184,102,0.45)]"
+                          initial={false}
+                          animate={{ width: `${progress}%` }}
+                          transition={{ type: 'spring', stiffness: 120, damping: 22 }}
+                        />
                       </div>
                     </div>
                   </div>
@@ -653,25 +714,37 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
             )}
 
             {/* Crop pipeline now runs in background; no extra bottom panel shown */}
-          </div>
+          </motion.div>
 
-          <div className="col-span-5 flex flex-col gap-4">
-            <div className="bg-surface-container-low rounded-[1.25rem] p-4 outline outline-[0.5px] outline-white/5">
-              <div className="text-[9px] font-label tracking-[0.2em] uppercase accent-info mb-2">Story</div>
+          <motion.div
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ ...spring, delay: 0.1 }}
+            className="flex flex-col gap-6"
+          >
+            <div className="bg-surface-container-low/90 backdrop-blur-sm rounded-[1.35rem] p-5 md:p-6 outline outline-[0.5px] outline-white/[0.06] shadow-[0_40px_72px_-52px_rgba(0,0,0,0.68)]">
+              <div className="flex items-end gap-3 mb-3">
+                <span className="text-[9px] font-label tracking-[0.22em] uppercase text-secondary/90 shrink-0">剧本母本</span>
+                <span className="h-px flex-1 mb-1 bg-gradient-to-r from-secondary/25 to-transparent" />
+              </div>
               <textarea
                 value={story}
                 onChange={(e) => setStory(e.target.value)}
-                placeholder="粘贴你的剧本故事（支持长文本）。"
-                className="w-full min-h-[160px] bg-surface-container-high rounded-2xl p-4 text-[11px] font-body text-white placeholder:text-white/40 focus:outline-none focus:ring-1 accent-focus-ring transition-all resize-none custom-scrollbar"
+                placeholder="粘贴长剧本、梗概或分场——模型会据此写出九格提示词。"
+                className="w-full min-h-[168px] bg-surface-container-high/90 rounded-2xl p-4 text-[11px] font-body text-white placeholder:text-white/40 focus:outline-none focus-visible:ring-2 accent-focus-ring transition-all resize-none custom-scrollbar outline outline-[0.5px] outline-white/[0.07]"
               />
             </div>
 
-            <div className="bg-surface-container-low rounded-[1.25rem] p-4 outline outline-[0.5px] outline-white/5">
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-[9px] font-label tracking-[0.2em] uppercase accent-info">References</div>
+            <div className="bg-surface-container-low/90 backdrop-blur-sm rounded-[1.35rem] p-5 md:p-6 outline outline-[0.5px] outline-white/[0.06] shadow-[0_40px_72px_-52px_rgba(0,0,0,0.68)]">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div className="flex items-end gap-3 flex-1 min-w-0">
+                  <span className="text-[9px] font-label tracking-[0.22em] uppercase text-secondary/90 shrink-0">角色参考</span>
+                  <span className="h-px flex-1 mb-1 bg-gradient-to-r from-secondary/22 to-transparent min-w-[2rem]" />
+                </div>
                 <button
+                  data-ref-preview-ignore
                   onClick={() => fileRef.current?.click()}
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 hover:text-primary transition-colors outline outline-[0.5px] outline-white/10 cursor-pointer text-[10px] font-semibold"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass-panel ghost-border text-on-surface/80 hover:text-primary transition-colors cursor-pointer text-[10px] font-label font-semibold uppercase tracking-widest shrink-0"
                 >
                   <Plus className="w-4 h-4" />
                   上传
@@ -686,36 +759,43 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
                 />
               </div>
 
-              <div className="text-[10px] text-slate-400 mb-3">{hint}</div>
+              <p className="text-[10px] text-on-surface/42 mb-3 leading-relaxed">{hint}</p>
 
               <div
-                className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] min-h-[120px] p-2"
+                className="rounded-2xl outline outline-dashed outline-[0.5px] outline-white/14 bg-surface-container-highest/22 min-h-[128px] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={handleDrop}
               >
                 {refs.length > 0 ? (
-                  <Reorder.Group axis="x" values={refs} onReorder={setRefs} className="flex gap-2 overflow-x-auto custom-scrollbar">
+                  <Reorder.Group as="div" axis="x" values={refs} onReorder={setRefs} className="flex gap-2 overflow-x-auto custom-scrollbar">
                     {refs.map((r, idx) => (
                       <Reorder.Item
+                        as="div"
                         key={r.id}
                         value={r}
                         whileDrag={{ scale: 1.04, zIndex: 20 }}
                         transition={{ layout: spring }}
-                        className="relative shrink-0 h-24 min-w-[120px] max-w-[220px] rounded-xl overflow-hidden outline outline-[0.5px] outline-white/20 cursor-grab active:cursor-grabbing bg-transparent flex items-center justify-center px-1"
+                        className="relative shrink-0 h-24 min-w-[120px] max-w-[220px] rounded-xl overflow-hidden outline outline-[0.5px] outline-white/20 cursor-grab active:cursor-grabbing bg-transparent flex items-center justify-center px-1 cursor-zoom-in"
                         data-theme-preserve="dark"
+                        {...refThumbHandlers(r.url)}
                       >
-                        <img src={r.url} className="h-full w-auto max-w-[172px] object-contain" draggable={false} />
-                        <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-full bg-black/80 text-white text-[9px] font-black tracking-widest outline outline-[0.5px] outline-white/20">
+                        <img src={r.url} className="h-full w-auto max-w-[172px] object-contain pointer-events-none" draggable={false} />
+                        <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-full bg-black/80 text-white text-[9px] font-black tracking-widest outline outline-[0.5px] outline-white/20 pointer-events-none">
                           图{idx + 1}
                         </div>
                         <button
-                          onClick={() => setRefs((prev) => prev.filter((x) => x.id !== r.id))}
+                          data-ref-preview-ignore
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const id = r.id;
+                            setRefs((prev) => prev.filter((x) => x.id !== id));
+                          }}
                           className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/80 text-white flex items-center justify-center outline outline-[0.5px] outline-white/20"
                           title="移除图片"
                         >
                           <X className="w-3 h-3" />
                         </button>
-                        <div className="absolute bottom-1 left-1 right-1">
+                        <div className="absolute bottom-1 left-1 right-1" data-ref-preview-ignore>
                           <input
                             value={r.name || ''}
                             onClick={(e) => e.stopPropagation()}
@@ -736,18 +816,19 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
                     ))}
                   </Reorder.Group>
                 ) : (
-                  <div className="h-20 flex items-center justify-center text-slate-400 text-[10px] uppercase tracking-widest">
-                    拖拽上传参考图到这个框
+                  <div className="h-20 flex flex-col items-center justify-center gap-1 text-on-surface/35 text-[10px] font-label uppercase tracking-[0.2em]">
+                    <span>拖放参考图至此处</span>
+                    <span className="text-[9px] normal-case tracking-normal text-on-surface/28">可命名、排序，映射到「图1 / 图2…」</span>
                   </div>
                 )}
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-2">
+              <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button
                   onClick={runPromptPhase}
                   disabled={!canBuildPrompts}
                   className={cn(
-                    'w-full px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.18em] transition-all cursor-pointer flex items-center justify-center gap-2 outline outline-[0.5px] outline-outline-variant/60',
+                    'w-full px-4 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-[0.18em] transition-all cursor-pointer flex items-center justify-center gap-2 outline outline-[0.5px] outline-outline-variant/50 shadow-[0_24px_48px_-32px_rgba(0,0,0,0.55)]',
                     isRunning
                       ? phase === 'text'
                         ? 'accent-focus-bg text-white accent-focus-glow opacity-95'
@@ -765,7 +846,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
                   onClick={startNewBatch}
                   disabled={isRunning}
                   className={cn(
-                    'w-full px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.18em] transition-all cursor-pointer flex items-center justify-center gap-2 outline outline-[0.5px] outline-white/15',
+                    'w-full px-4 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-[0.18em] transition-all cursor-pointer flex items-center justify-center gap-2 glass-panel ghost-border',
                     isRunning
                       ? 'bg-surface-container-low text-slate-400 cursor-not-allowed'
                       : 'bg-surface-container-high text-slate-200 hover:text-primary hover:bg-white/5',
@@ -780,7 +861,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
                 onClick={runImagePhase}
                 disabled={!canGenerateImage}
                 className={cn(
-                  'mt-2 w-full px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.18em] transition-all cursor-pointer flex items-center justify-center gap-2 outline outline-[0.5px] outline-outline-variant/60',
+                  'mt-3 w-full px-4 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-[0.18em] transition-all cursor-pointer flex items-center justify-center gap-2 outline outline-[0.5px] outline-outline-variant/50 shadow-[0_28px_56px_-32px_rgba(255,184,102,0.18)]',
                   isRunning
                     ? phase === 'image'
                       ? 'accent-focus-bg text-white accent-focus-glow opacity-95'
@@ -794,67 +875,107 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
                 {isRunning && phase === 'image' ? '生图中...' : '生成 9 宫格'}
               </button>
 
-              <div className="mt-3 text-[10px] text-slate-400 leading-relaxed">
-                两步工作流：先生成 9 格提示词并逐条修改，再合并生图；出图后自动裁切并回填到对应格子。
-              </div>
+              <p className="mt-4 text-[10px] text-on-surface/38 leading-relaxed">
+                两步走：先「生成提示词」逐格打磨，再「生成 9 宫格」出主图；系统会尝试自动裁切并填入各格。
+              </p>
 
               {history.length > 0 && (
-                <div className="mt-4 rounded-2xl bg-surface-container-high p-3 outline outline-[0.5px] outline-white/10">
-                  <div className="mb-2 flex items-center justify-between">
-                    <div className="text-[9px] font-label tracking-[0.18em] uppercase accent-info">9Grid History</div>
-                    <div className="text-[9px] text-slate-500">{history.length} 批</div>
+                <div className="mt-5 rounded-[1.15rem] bg-surface-container-high/55 backdrop-blur-sm p-4 outline outline-[0.5px] outline-white/[0.08]">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div className="text-[9px] font-label tracking-[0.2em] uppercase text-secondary/85">历史批次</div>
+                    <div className="font-mono text-[9px] text-on-surface/35 tabular-nums">{history.length} 批</div>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 max-h-[260px] overflow-y-auto custom-scrollbar pr-1">
+                  <div className="grid grid-cols-2 gap-2.5 max-h-[260px] overflow-y-auto custom-scrollbar pr-1">
                     {history.map((h, i) => (
-                      <button
+                      <motion.button
                         key={h.id}
                         type="button"
                         onClick={() => setPreview({ type: 'result', url: h.gridUrl })}
-                        className="relative rounded-xl overflow-hidden outline outline-[0.5px] outline-white/10 hover:outline-white/30 transition-all cursor-zoom-in"
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.99 }}
+                        transition={spring}
+                        className="relative rounded-xl overflow-hidden outline outline-[0.5px] outline-white/12 hover:outline-secondary/35 transition-shadow cursor-zoom-in shadow-[0_18px_36px_-24px_rgba(0,0,0,0.65)]"
                         title="点击放大查看"
                       >
                         <img src={h.gridUrl} className="w-full aspect-video object-cover" />
                         <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded-full bg-black/80 text-white text-[9px] font-black tracking-widest outline outline-[0.5px] outline-white/20">
                           #{history.length - i}
                         </div>
-                      </button>
+                      </motion.button>
                     ))}
                   </div>
                 </div>
               )}
             </div>
-          </div>
+          </motion.div>
         </div>
-      </div>
+      </motion.div>
+
+      <ReferenceImageLightbox url={refThumbPreviewUrl} onClose={() => setRefThumbPreviewUrl(null)} zIndexClass="z-[98]" />
 
       {preview && (
-        <button
-          type="button"
-          onClick={() => setPreview(null)}
-          className="fixed inset-0 z-[90] bg-black/85 backdrop-blur-sm p-6 flex items-center justify-center cursor-zoom-out"
-          title="点击返回"
+        <motion.div
+          role="presentation"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={spring}
+          className="fixed inset-0 z-[90]"
         >
-          <div className="relative max-w-[96vw] max-h-[92vh]">
-            <img
-              src={preview.type === 'result' ? preview.url || resultUrl || '' : croppedUrls[preview.idx] || ''}
-              className="max-w-[96vw] max-h-[92vh] object-contain rounded-2xl outline outline-[0.5px] outline-white/20 shadow-[0_40px_100px_-40px_rgba(0,0,0,0.8)]"
-            />
-            {preview.type === 'crop' && (
+          <button
+            type="button"
+            className="absolute inset-0 cursor-zoom-out bg-black/88 backdrop-blur-[26px]"
+            onClick={() => setPreview(null)}
+            aria-label="关闭预览"
+          />
+          <div className="pointer-events-none absolute inset-0 flex flex-col p-3 sm:p-4">
+            <div className="pointer-events-auto absolute right-3 top-3 z-20 sm:right-4 sm:top-4">
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  downloadCropped(preview.idx);
-                }}
-                className="absolute top-3 right-3 inline-flex items-center gap-2 px-3 py-2 rounded-full bg-black/70 hover:bg-black/85 text-white hover:text-primary transition-colors outline outline-[0.5px] outline-white/25 cursor-pointer text-[10px] font-semibold"
-                title={`下载 图${preview.idx + 1}`}
+                onClick={() => setPreview(null)}
+                className="flex h-11 w-11 items-center justify-center rounded-full bg-surface-container-high/55 text-white/90 outline outline-[0.5px] outline-outline-variant/20 backdrop-blur-[30px] transition-colors hover:text-white cursor-pointer"
+                title="关闭 (Esc)"
+                aria-label="关闭"
               >
-                <Download className="w-4 h-4" />
-                下载图{preview.idx + 1}
+                <X className="h-5 w-5" strokeWidth={1.75} />
               </button>
-            )}
+            </div>
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-12">
+              <motion.div
+                initial={{ opacity: 0, y: 14, scale: 0.985 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={spring}
+                className="pointer-events-auto relative min-h-0 min-w-0 flex-1"
+              >
+                <ZoomableLightboxImage
+                  url={
+                    preview.type === 'result' ? preview.url || resultUrl || '' : croppedUrls[preview.idx] || ''
+                  }
+                  resetKey={
+                    preview.type === 'result'
+                      ? `r:${preview.url || resultUrl || ''}`
+                      : `c:${preview.idx}:${croppedUrls[preview.idx] || ''}`
+                  }
+                  className="h-full w-full"
+                  imgClassName="rounded-2xl outline outline-[0.5px] outline-white/18 shadow-[0_48px_120px_-40px_rgba(0,0,0,0.88)]"
+                />
+                {preview.type === 'crop' && (
+                  <button
+                    type="button"
+                    onClick={() => downloadCropped(preview.idx)}
+                    className="absolute left-3 top-3 z-10 inline-flex items-center gap-2 rounded-full glass-panel ghost-border px-4 py-2.5 text-on-surface shadow-[0_24px_48px_-32px_rgba(0,0,0,0.85)] transition-colors cursor-pointer text-[10px] font-label font-bold uppercase tracking-widest hover:text-primary sm:left-4 sm:top-4"
+                    title={`下载 图${preview.idx + 1}`}
+                  >
+                    <Download className="h-4 w-4" />
+                    下载图{preview.idx + 1}
+                  </button>
+                )}
+              </motion.div>
+              <p className="pointer-events-none shrink-0 pt-2 text-center text-[10px] font-label tracking-[0.14em] text-white/40 uppercase">
+                滚轮缩放 · 中键拖拽 · 点空白或 ✕ 关闭
+              </p>
+            </div>
           </div>
-        </button>
+        </motion.div>
       )}
     </div>
   );

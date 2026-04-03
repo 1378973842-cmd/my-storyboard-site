@@ -1,9 +1,11 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { motion, Reorder } from 'motion/react';
 import { ImageIcon, Upload, Sparkles, Loader2, X, GripHorizontal, Plus } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, uniqueRefItemId } from '../lib/utils';
 import { parseApiResponse } from '../lib/http';
 import { GenerationResponse, ReferenceImage } from '../types';
+import { useRefThumbPreview } from '../hooks/useRefThumbPreview';
+import { ReferenceImageLightbox } from './ReferenceImageLightbox';
 
 type StudioRef = { id: string; url: string; name: string };
 
@@ -15,10 +17,6 @@ type Props = {
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
-function uid() {
-  return Math.random().toString(36).slice(2, 10);
-}
-
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -29,14 +27,16 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 export const ImageEditorStudio: React.FC<Props> = ({ references, data, addReference }) => {
-  const targetInputRef = useRef<HTMLInputElement>(null);
-  const refsInputRef = useRef<HTMLInputElement>(null);
-  const [targetImage, setTargetImage] = useState<string | null>(null);
+  const queueInputRef = useRef<HTMLInputElement>(null);
   const [prompt, setPrompt] = useState('');
-  const [editRefs, setEditRefs] = useState<StudioRef[]>([]);
+  /** 从左到右为图1、图2…（仅顺序；具体角色由用户在 prompt 中描述） */
+  const [editQueue, setEditQueue] = useState<StudioRef[]>([]);
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { previewUrl: refThumbPreviewUrl, setPreviewUrl: setRefThumbPreviewUrl, handlersFor: refThumbHandlers } =
+    useRefThumbPreview();
 
   const library = useMemo(() => {
     const items: StudioRef[] = [];
@@ -84,53 +84,52 @@ export const ImageEditorStudio: React.FC<Props> = ({ references, data, addRefere
     );
   };
 
-  const handleDropTarget = async (e: React.DragEvent) => {
-    e.preventDefault();
-    setError(null);
-    const file = e.dataTransfer.files?.[0];
-    if (file && file.type.startsWith('image/')) {
-      setTargetImage(await readFileAsDataUrl(file));
-      return;
-    }
-    const url = parseDroppedUrl(e);
-    if (url && (url.startsWith('http') || url.startsWith('data:image'))) setTargetImage(url);
-  };
-
-  const handleDropRefs = async (e: React.DragEvent) => {
+  const handleDropQueue = async (e: React.DragEvent) => {
     e.preventDefault();
     setError(null);
     const files = e.dataTransfer.files;
     if (files?.length) {
       const imgs = Array.from(files as FileList)
         .filter((f: File) => f.type.startsWith('image/'))
-        .slice(0, 8);
+        .slice(0, 12);
+      if (!imgs.length) return;
       const urls = await Promise.all(imgs.map(readFileAsDataUrl));
-      setEditRefs((prev) => [...prev, ...urls.map((u, i) => ({ id: uid(), url: u, name: `参考 ${prev.length + i + 1}` }))]);
+      setEditQueue((prev) => [
+        ...prev,
+        ...urls.map((u, i) => ({
+          id: uniqueRefItemId('ref'),
+          url: u,
+          name: `图${prev.length + i + 1}`,
+        })),
+      ]);
       return;
     }
     const url = parseDroppedUrl(e);
     if (url && (url.startsWith('http') || url.startsWith('data:image'))) {
-      setEditRefs((prev) => [...prev, { id: uid(), url, name: `参考 ${prev.length + 1}` }]);
+      setEditQueue((prev) => [
+        ...prev,
+        { id: uniqueRefItemId('ref'), url, name: `图${prev.length + 1}` },
+      ]);
     }
   };
 
-  const uploadTarget = async (files: FileList | null) => {
-    const file = files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) return;
-    setTargetImage(await readFileAsDataUrl(file));
-  };
-
-  const uploadRefs = async (files: FileList | null) => {
+  const uploadQueue = async (files: FileList | null) => {
     if (!files?.length) return;
-    const imgs = Array.from(files).filter((f) => f.type.startsWith('image/')).slice(0, 8);
+    const imgs = Array.from(files).filter((f) => f.type.startsWith('image/')).slice(0, 12);
     const urls = await Promise.all(imgs.map(readFileAsDataUrl));
-    setEditRefs((prev) => [...prev, ...urls.map((u, i) => ({ id: uid(), url: u, name: `参考 ${prev.length + i + 1}` }))]);
+    setEditQueue((prev) => [
+      ...prev,
+      ...urls.map((u, i) => ({
+        id: uniqueRefItemId('ref'),
+        url: u,
+        name: `图${prev.length + i + 1}`,
+      })),
+    ]);
   };
 
   const runEdit = async () => {
-    if (!targetImage) {
-      setError('请先设置待编辑图片（拖拽或上传）。');
+    if (editQueue.length === 0) {
+      setError('请先上传至少一张图片（图1、图2…仅为顺序，关系写在提示词里）');
       return;
     }
     if (!prompt.trim()) {
@@ -144,9 +143,8 @@ export const ImageEditorStudio: React.FC<Props> = ({ references, data, addRefere
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          target_image: targetImage,
           prompt,
-          references: editRefs.map((r) => ({ url: r.url })),
+          images: editQueue.map((r) => r.url),
         }),
       });
       const payload = await parseApiResponse(res);
@@ -176,38 +174,56 @@ export const ImageEditorStudio: React.FC<Props> = ({ references, data, addRefere
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="space-y-2">
-            <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Target Image</div>
+            <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400">顺序首图预览（图1）</div>
             <div
               className="relative aspect-video rounded-2xl bg-white/[0.02] outline outline-[0.5px] outline-white/10 overflow-hidden"
               onDragOver={(e) => e.preventDefault()}
-              onDrop={handleDropTarget}
+              onDrop={handleDropQueue}
             >
-              {targetImage ? (
-                <img src={targetImage} className="w-full h-full object-cover" />
+              {editQueue[0] ? (
+                <img src={editQueue[0].url} className="w-full h-full object-cover" alt="" />
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 gap-2">
                   <ImageIcon className="w-6 h-6" />
-                  <span className="text-[10px] uppercase tracking-widest">拖拽图片到这里</span>
+                  <span className="text-[10px] uppercase tracking-widest">先在下栏排队列或拖图到此处</span>
                 </div>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => targetInputRef.current?.click()}
+                type="button"
+                onClick={() => queueInputRef.current?.click()}
                 className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-[10px] font-bold uppercase tracking-widest transition-colors cursor-pointer"
               >
                 <Upload className="w-3 h-3 inline mr-1" />
-                Upload Target
+                上传图片
               </button>
               {resultImage && (
                 <button
-                  onClick={() => setTargetImage(resultImage)}
+                  type="button"
+                  onClick={() =>
+                    setEditQueue((prev) => [
+                      {
+                        id: uniqueRefItemId('ref'),
+                        url: resultImage,
+                        name: '编辑结果',
+                      },
+                      ...prev,
+                    ])
+                  }
                   className="px-3 py-2 rounded-xl bg-primary/20 hover:bg-primary/30 text-primary text-[10px] font-bold uppercase tracking-widest transition-colors cursor-pointer"
                 >
-                  使用结果图继续编辑
+                  将结果图插到队首（成为图1）
                 </button>
               )}
-              <input ref={targetInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => uploadTarget(e.target.files)} />
+              <input
+                ref={queueInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => uploadQueue(e.target.files)}
+              />
             </div>
           </div>
 
@@ -227,7 +243,7 @@ export const ImageEditorStudio: React.FC<Props> = ({ references, data, addRefere
                 <button
                   onClick={() =>
                     addReference({
-                      id: uid(),
+                      id: uniqueRefItemId('ref'),
                       url: resultImage,
                       name: `编辑结果 ${Date.now().toString().slice(-4)}`,
                       type: 'scene',
@@ -253,38 +269,41 @@ export const ImageEditorStudio: React.FC<Props> = ({ references, data, addRefere
         </div>
 
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Reference Stack</div>
-            <button
-              onClick={() => refsInputRef.current?.click()}
-              className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-[10px] font-bold uppercase tracking-widest transition-colors cursor-pointer"
-            >
-              <Upload className="w-3 h-3 inline mr-1" />
-              Upload Refs
-            </button>
-            <input ref={refsInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => uploadRefs(e.target.files)} />
+          <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
+            图片队列（图1、图2…，可拖拽排序）
           </div>
 
           <div
             className="min-h-[92px] p-3 rounded-2xl bg-white/[0.02] border border-dashed border-white/10"
             onDragOver={(e) => e.preventDefault()}
-            onDrop={handleDropRefs}
+            onDrop={handleDropQueue}
           >
-            <Reorder.Group axis="x" values={editRefs} onReorder={setEditRefs} className="flex gap-2 overflow-x-auto custom-scrollbar">
-              {editRefs.map((r) => (
+            <Reorder.Group as="div" axis="x" values={editQueue} onReorder={setEditQueue} className="flex gap-2 overflow-x-auto custom-scrollbar">
+              {editQueue.map((r, idx) => (
                 <Reorder.Item
+                  as="div"
                   key={r.id}
                   value={r}
                   whileDrag={{ scale: 1.04, zIndex: 20 }}
                   transition={{ layout: spring }}
-                  className="relative shrink-0 w-16 h-16 rounded-xl overflow-hidden outline outline-[0.5px] outline-white/10 cursor-grab active:cursor-grabbing"
+                  className="relative shrink-0 w-16 h-16 rounded-xl overflow-hidden outline outline-[0.5px] outline-white/10 cursor-grab active:cursor-grabbing cursor-zoom-in"
+                  {...refThumbHandlers(r.url)}
                 >
-                  <img src={r.url} className="w-full h-full object-cover" />
-                  <div className="absolute inset-x-0 top-0 p-1 flex items-center justify-between">
+                  <img src={r.url} className="w-full h-full object-cover pointer-events-none" draggable={false} />
+                  <div className="absolute bottom-0 left-0 right-0 py-0.5 text-center text-[8px] font-black text-white bg-black/70 pointer-events-none">
+                    {idx + 1}
+                  </div>
+                  <div className="absolute inset-x-0 top-0 p-1 flex items-center justify-between pointer-events-none">
                     <GripHorizontal className="w-3 h-3 text-white/90" />
                     <button
-                      onClick={() => setEditRefs((prev) => prev.filter((x) => x.id !== r.id))}
-                      className="w-4 h-4 rounded-full bg-black/70 text-white flex items-center justify-center"
+                      data-ref-preview-ignore
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const id = r.id;
+                        setEditQueue((prev) => prev.filter((x) => x.id !== id));
+                      }}
+                      className="w-4 h-4 rounded-full bg-black/70 text-white flex items-center justify-center pointer-events-auto"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -292,16 +311,16 @@ export const ImageEditorStudio: React.FC<Props> = ({ references, data, addRefere
                 </Reorder.Item>
               ))}
             </Reorder.Group>
-            {editRefs.length === 0 && (
+            {editQueue.length === 0 && (
               <div className="h-[64px] flex items-center justify-center text-slate-600 text-[10px] uppercase tracking-widest">
-                拖拽上传或从图库拖入参考图
+                拖拽上传或从图库拖入（首张为图1）
               </div>
             )}
           </div>
         </div>
 
         <div className="space-y-2">
-          <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Library (Drag Into Target / Refs)</div>
+          <div className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Library（拖入上方队列）</div>
           <div className="grid grid-cols-6 md:grid-cols-8 gap-2 max-h-[180px] overflow-y-auto custom-scrollbar p-1">
             {library.map((item) => (
               <motion.div
@@ -336,6 +355,8 @@ export const ImageEditorStudio: React.FC<Props> = ({ references, data, addRefere
           </button>
         </div>
       </div>
+
+      <ReferenceImageLightbox url={refThumbPreviewUrl} onClose={() => setRefThumbPreviewUrl(null)} />
     </section>
   );
 };

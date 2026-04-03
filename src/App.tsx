@@ -41,6 +41,7 @@ import { FrameDetail } from './components/FrameDetail';
 import { ImageEditorModal } from './components/ImageEditorModal';
 import { StandaloneImageEditorPage } from './components/StandaloneImageEditorPage';
 import { NineGridPage } from './components/NineGridPage';
+import { ZoomableLightboxImage } from './components/ZoomableLightboxImage';
 import { Folder, Save } from 'lucide-react';
 import { parseApiResponse } from './lib/http';
 
@@ -1317,32 +1318,38 @@ export default function App() {
 
       {/* Image Preview Modal */}
       {previewImage && (
-        <div 
-          className="fixed inset-0 z-[100] flex items-center justify-center p-8 bg-black/90 backdrop-blur-md animate-in fade-in duration-200"
-          onClick={() => setPreviewImage(null)}
-          data-theme-preserve="dark"
-        >
-          <button 
-            className="absolute top-6 right-6 w-11 h-11 rounded-full flex items-center justify-center bg-surface-container-high/55 backdrop-blur-[30px]
-              outline outline-[0.5px] outline-outline-variant/20 text-white/90 hover:text-white
-              shadow-[0_24px_48px_-28px_rgba(0,0,0,0.55)] transition-colors"
+        <div className="fixed inset-0 z-[100] animate-in fade-in duration-200" data-theme-preserve="dark">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/90 backdrop-blur-md cursor-zoom-out"
             onClick={() => setPreviewImage(null)}
-            title="关闭"
-          >
-            <X className="w-5 h-5" strokeWidth={1.75} />
-          </button>
-          
-          <div 
-            className="relative max-w-4xl max-h-full bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border border-slate-800 animate-in zoom-in-95 duration-200"
-            onClick={e => e.stopPropagation()}
-          >
-            <img 
-              src={previewImage.url} 
-              className="max-w-full max-h-[80vh] object-contain"
-              alt={previewImage.name}
+            aria-label="关闭预览"
+          />
+          <div className="pointer-events-none absolute inset-0 flex justify-center p-3 sm:p-5">
+            <button
+              type="button"
+              className="pointer-events-auto absolute right-4 top-4 z-[120] flex h-11 w-11 items-center justify-center rounded-full bg-surface-container-high/55 text-white/90 outline outline-[0.5px] outline-outline-variant/20 backdrop-blur-[30px] shadow-[0_24px_48px_-28px_rgba(0,0,0,0.55)] transition-colors hover:text-white cursor-pointer sm:right-7 sm:top-7"
               onClick={() => setPreviewImage(null)}
-            />
-            <div className="p-4 bg-slate-900 border-t border-slate-800 flex items-center justify-between">
+              title="关闭 (Esc)"
+              aria-label="关闭"
+            >
+              <X className="h-5 w-5" strokeWidth={1.75} />
+            </button>
+            <div
+              className="pointer-events-auto mt-10 flex h-[min(calc(100dvh-56px),calc(100vh-56px))] w-full max-w-4xl min-h-0 flex-col overflow-hidden rounded-2xl bg-slate-900 shadow-2xl outline outline-[0.5px] outline-white/10 animate-in zoom-in-95 duration-200 sm:mt-12"
+            >
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col px-2 pt-3 pb-1">
+              <ZoomableLightboxImage
+                url={previewImage.url}
+                resetKey={previewImage.id}
+                className="h-full w-full min-h-0"
+                imgClassName="rounded-lg object-contain"
+              />
+              <p className="shrink-0 pt-1 text-center text-[9px] text-slate-500 font-label tracking-widest uppercase">
+                滚轮缩放 · 中键拖拽 · 点空白或 ✕ 关闭
+              </p>
+            </div>
+            <div className="shrink-0 flex items-center justify-between border-t border-slate-800 bg-slate-900 p-4">
               <div className="flex items-center gap-3">
                 <div className={cn(
                   "p-2 rounded-lg",
@@ -1364,37 +1371,45 @@ export default function App() {
                 删除此参考
               </button>
             </div>
+            </div>
           </div>
         </div>
       )}
 
       {/* Scene Image Preview Modal */}
       {isScenePreviewOpen && data?.global_assets.scenes[selectedSceneIndex]?.image_url && (
-        <div 
-          className="fixed inset-0 z-[100] flex items-center justify-center p-8 bg-black/90 backdrop-blur-md animate-in fade-in duration-200"
-          onClick={() => setIsScenePreviewOpen(false)}
-          data-theme-preserve="dark"
-        >
-          <button 
-            className="absolute top-6 right-6 w-11 h-11 rounded-full flex items-center justify-center bg-surface-container-high/55 backdrop-blur-[30px]
-              outline outline-[0.5px] outline-outline-variant/20 text-white/90 hover:text-white
-              shadow-[0_24px_48px_-28px_rgba(0,0,0,0.55)] transition-colors"
+        <div className="fixed inset-0 z-[100] animate-in fade-in duration-200" data-theme-preserve="dark">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/90 backdrop-blur-md cursor-zoom-out"
             onClick={() => setIsScenePreviewOpen(false)}
-            title="关闭"
-          >
-            <X className="w-5 h-5" strokeWidth={1.75} />
-          </button>
-          
-          <div 
-            className="relative max-w-5xl max-h-full bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border border-slate-800 animate-in zoom-in-95 duration-200"
-            onClick={e => e.stopPropagation()}
-          >
-            <img 
-              src={data.global_assets.scenes[selectedSceneIndex].image_url} 
-              className="max-w-full max-h-[85vh] object-contain"
-              alt="Scene Preview"
+            aria-label="关闭预览"
+          />
+          <div className="pointer-events-none absolute inset-0 flex justify-center p-3 sm:p-5">
+            <button
+              type="button"
+              className="pointer-events-auto absolute right-4 top-4 z-[120] flex h-11 w-11 items-center justify-center rounded-full bg-surface-container-high/55 text-white/90 outline outline-[0.5px] outline-outline-variant/20 backdrop-blur-[30px] shadow-[0_24px_48px_-28px_rgba(0,0,0,0.55)] transition-colors hover:text-white cursor-pointer sm:right-7 sm:top-7"
               onClick={() => setIsScenePreviewOpen(false)}
-            />
+              title="关闭 (Esc)"
+              aria-label="关闭"
+            >
+              <X className="h-5 w-5" strokeWidth={1.75} />
+            </button>
+            <div
+              className="pointer-events-auto mt-10 flex h-[min(calc(100dvh-56px),calc(100vh-56px))] w-full max-w-5xl min-h-0 flex-col overflow-hidden rounded-2xl bg-slate-900 shadow-2xl outline outline-[0.5px] outline-white/10 animate-in zoom-in-95 duration-200 sm:mt-12"
+            >
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col px-2 pt-3 pb-3">
+              <ZoomableLightboxImage
+                url={data.global_assets.scenes[selectedSceneIndex].image_url}
+                resetKey={`scene-${selectedSceneIndex}-${data.global_assets.scenes[selectedSceneIndex].image_url}`}
+                className="h-full w-full min-h-0"
+                imgClassName="rounded-lg object-contain"
+              />
+              <p className="shrink-0 pt-2 text-center text-[9px] text-slate-500 font-label tracking-widest uppercase">
+                滚轮缩放 · 中键拖拽 · 点空白或 ✕ 关闭
+              </p>
+            </div>
+            </div>
           </div>
         </div>
       )}

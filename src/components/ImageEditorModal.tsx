@@ -1,9 +1,11 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Upload, Sparkles, Loader2, Plus } from 'lucide-react';
+import { X, Upload, Sparkles, Loader2, Plus, Maximize2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ReferenceImage } from '../types';
 import { parseApiResponse } from '../lib/http';
+import { useRefThumbPreview } from '../hooks/useRefThumbPreview';
+import { ReferenceImageLightbox } from './ReferenceImageLightbox';
 
 type Target =
   | { kind: 'reference'; id: string; url: string; title?: string }
@@ -36,6 +38,8 @@ export const ImageEditorModal: React.FC<Props> = ({ isOpen, target, appReference
   const [selectedRefIds, setSelectedRefIds] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { previewUrl: refModalPreviewUrl, setPreviewUrl: setRefModalPreviewUrl, handlersFor: refThumbHandlers } =
+    useRefThumbPreview();
 
   const selectedAppRefs = useMemo(() => {
     if (!selectedRefIds.size) return [];
@@ -77,8 +81,7 @@ export const ImageEditorModal: React.FC<Props> = ({ isOpen, target, appReference
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt,
-          target_image: target.url,
-          references: allRefs.map((url) => ({ url })),
+          images: [target.url, ...allRefs],
         }),
       });
       const data = await parseApiResponse(res);
@@ -93,6 +96,7 @@ export const ImageEditorModal: React.FC<Props> = ({ isOpen, target, appReference
   };
 
   return (
+    <>
     <AnimatePresence>
       {isOpen && target && (
         <motion.div
@@ -162,7 +166,7 @@ export const ImageEditorModal: React.FC<Props> = ({ isOpen, target, appReference
                   <textarea
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
-                    placeholder="例如：把氛围调成更电影感，光比更强，人物更靠近镜头，背景更干净..."
+                    placeholder="例如：参考图1的光线，把图2里的人挪到画面中央…（图1、图2 与下方图片从左到右顺序一致）"
                     className={cn(
                       'w-full min-h-[120px] rounded-2xl p-4 text-xs leading-relaxed',
                       'bg-white/[0.03] outline outline-[0.5px] outline-white/10',
@@ -172,9 +176,13 @@ export const ImageEditorModal: React.FC<Props> = ({ isOpen, target, appReference
                 </div>
 
                 <div className="space-y-3">
+                  <p className="text-[10px] text-white/45 leading-relaxed">
+                    左侧 Target 为图1，其余参考依次为图2、图3…；不固定「谁必须被改」，在上方 Prompt 里写清关系即可。
+                  </p>
                   <div className="flex items-center justify-between">
                     <div className="text-[9px] font-bold uppercase tracking-widest text-white/70">References</div>
                     <button
+                      data-ref-preview-ignore
                       onClick={handlePickFiles}
                       className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-colors outline outline-[0.5px] outline-white/10 cursor-pointer text-[10px] font-semibold"
                     >
@@ -199,33 +207,51 @@ export const ImageEditorModal: React.FC<Props> = ({ isOpen, target, appReference
                         {appReferences.slice(0, 18).map((r) => {
                           const active = selectedRefIds.has(r.id);
                           return (
-                            <button
+                            <div
                               key={r.id}
-                              type="button"
-                              onClick={() =>
-                                setSelectedRefIds((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(r.id)) next.delete(r.id);
-                                  else next.add(r.id);
-                                  return next;
-                                })
-                              }
                               className={cn(
-                                'relative aspect-square rounded-xl overflow-hidden cursor-pointer transition-all',
+                                'relative aspect-square rounded-xl overflow-hidden transition-all cursor-pointer',
                                 'outline outline-[0.5px]',
                                 active ? 'outline-primary/70 shadow-[0_0_0_3px_rgba(255,184,102,0.18)]' : 'outline-white/10 hover:outline-white/20'
                               )}
                               title={r.name}
                             >
-                              <img src={r.url} className="w-full h-full object-cover" />
-                              {active && (
-                                <div className="absolute inset-0 bg-primary/18 flex items-center justify-center">
-                                  <div className="w-7 h-7 rounded-full bg-primary text-black flex items-center justify-center shadow-lg">
-                                    <Plus className="w-4 h-4" />
+                              <button
+                                type="button"
+                                data-ref-preview-ignore
+                                className="absolute inset-0 z-0"
+                                aria-pressed={active}
+                                onClick={() =>
+                                  setSelectedRefIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(r.id)) next.delete(r.id);
+                                    else next.add(r.id);
+                                    return next;
+                                  })
+                                }
+                              >
+                                <img src={r.url} className="w-full h-full object-cover pointer-events-none" alt="" draggable={false} />
+                                {active && (
+                                  <div className="absolute inset-0 bg-primary/18 flex items-center justify-center">
+                                    <div className="w-7 h-7 rounded-full bg-primary text-black flex items-center justify-center shadow-lg">
+                                      <Plus className="w-4 h-4" />
+                                    </div>
                                   </div>
-                                </div>
-                              )}
-                            </button>
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                data-ref-preview-ignore
+                                className="absolute bottom-1 right-1 z-10 flex h-7 w-7 items-center justify-center rounded-lg bg-black/70 text-white outline outline-[0.5px] outline-white/25 hover:bg-black/85 transition-colors cursor-pointer"
+                                title="放大查看"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setRefModalPreviewUrl(r.url);
+                                }}
+                              >
+                                <Maximize2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           );
                         })}
                       </div>
@@ -241,9 +267,10 @@ export const ImageEditorModal: React.FC<Props> = ({ isOpen, target, appReference
                       {localRefs.map((u, i) => (
                         <div
                           key={`${u.slice(0, 24)}_${i}`}
-                          className="relative aspect-square rounded-xl overflow-hidden outline outline-[0.5px] outline-white/10"
+                          className="relative aspect-square cursor-zoom-in rounded-xl overflow-hidden outline outline-[0.5px] outline-white/10"
+                          {...refThumbHandlers(u)}
                         >
-                          <img src={u} className="w-full h-full object-cover" />
+                          <img src={u} className="w-full h-full object-cover pointer-events-none" alt="" draggable={false} />
                         </div>
                       ))}
                     </div>
@@ -279,6 +306,12 @@ export const ImageEditorModal: React.FC<Props> = ({ isOpen, target, appReference
         </motion.div>
       )}
     </AnimatePresence>
+    <ReferenceImageLightbox
+      url={refModalPreviewUrl}
+      onClose={() => setRefModalPreviewUrl(null)}
+      zIndexClass="z-[135]"
+    />
+    </>
   );
 };
 

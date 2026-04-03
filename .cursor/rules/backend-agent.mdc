@@ -1,0 +1,11 @@
+---
+alwaysApply: true
+---
+---
+description: 后端开发与数据库专家
+globs: ["src/api/**/*.ts", "supabase/**/*.sql", "src/services/**/*.ts"]
+---
+# Backend Agent 职责
+1. **接口先行**：在写代码前，先定义好数据结构（TypeScript Interface）。
+2. **绝对不碰 UI**：严禁在代码中包含任何 HTML/CSS 或 Tailwind 类名。
+3. **安全**：所有接口必须包含错误处理。

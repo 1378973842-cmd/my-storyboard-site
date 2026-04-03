@@ -1069,11 +1069,12 @@ ${pixarInstruction}
 
   // Step 2.1: Edit Image (Third-party API)
   app.post("/api/edit-image", async (req, res) => {
-    const { prompt, target_image, references, image_size, aspect_ratio } = req.body;
+    const { prompt, target_image, references, images, image_size, aspect_ratio } = req.body;
     console.log("Received image edit request:", {
       prompt_preview: typeof prompt === "string" ? prompt.slice(0, 80) : "",
       has_target: typeof target_image === "string" && target_image.length > 0,
       references_count: Array.isArray(references) ? references.length : 0,
+      images_count: Array.isArray(images) ? images.length : 0,
       image_size,
       aspect_ratio,
     });
@@ -1097,8 +1098,26 @@ ${pixarInstruction}
     if (typeof prompt !== "string" || prompt.trim().length === 0) {
       return res.status(400).json({ error: "缺少 prompt" });
     }
-    if (typeof target_image !== "string" || target_image.trim().length === 0) {
-      return res.status(400).json({ error: "缺少 target_image" });
+
+    const refUrlsFromLegacy = Array.isArray(references)
+      ? references
+          .map((r: { url?: string } | string) => (typeof r === "string" ? r : r?.url))
+          .filter((u: unknown): u is string => typeof u === "string" && u.trim().length > 0)
+      : [];
+
+    let orderedImageUrls: string[] = [];
+    if (Array.isArray(images) && images.length > 0) {
+      orderedImageUrls = images
+        .map((x: unknown) => (typeof x === "string" ? x : (x as { url?: string })?.url))
+        .filter((u): u is string => typeof u === "string" && u.trim().length > 0);
+    } else if (typeof target_image === "string" && target_image.trim().length > 0) {
+      orderedImageUrls = [target_image.trim(), ...refUrlsFromLegacy];
+    }
+
+    if (orderedImageUrls.length === 0) {
+      return res.status(400).json({
+        error: "缺少图片：请传 images（按顺序的 url 数组），或传 target_image（可与 references 搭配）",
+      });
     }
 
     try {
@@ -1106,15 +1125,9 @@ ${pixarInstruction}
 
       // 上传侧（data URL）payload 往往更大，上游处理更慢；
       // 对 data URL 自动放宽超时，避免只因为“慢”就触发连续失败链。
-      const targetIsDataUrl = typeof target_image === "string" && target_image.trim().startsWith("data:image/");
-      const referencesHasDataUrl =
-        Array.isArray(references) &&
-        references.some((r: any) => {
-          const u = typeof r === "string" ? r : r?.url;
-          return typeof u === "string" && u.trim().startsWith("data:image/");
-        });
+      const anyDataUrl = orderedImageUrls.some((u) => u.trim().startsWith("data:image/"));
 
-      const timeoutMs = targetIsDataUrl || referencesHasDataUrl ? Math.max(baseTimeoutMs, 180000) : baseTimeoutMs;
+      const timeoutMs = anyDataUrl ? Math.max(baseTimeoutMs, 180000) : baseTimeoutMs;
 
       const envCandidates = [String(process.env.IMAGE_EDIT_MODEL || "").trim(), String(process.env.IMAGE_MODEL || "").trim()].filter(
         (x) => x.length > 0
@@ -1123,28 +1136,25 @@ ${pixarInstruction}
       // 只使用 .env 指定模型：避免 token 对硬编码候选不具备权限（403），导致“全失败”。
       const modelCandidates = Array.from(new Set(envCandidates.length ? envCandidates : ["gemini-3.1-flash-image-preview-2k"]));
 
-      console.log("[edit-image] modelCandidates:", modelCandidates, "timeoutMs:", timeoutMs, "targetIsDataUrl:", targetIsDataUrl);
+      console.log("[edit-image] modelCandidates:", modelCandidates, "timeoutMs:", timeoutMs, "imageCount:", orderedImageUrls.length);
 
-      const target = await imageInputToBlob(target_image);
-      const refInputs = Array.isArray(references)
-        ? references
-            .map((r: { url?: string } | string) => (typeof r === "string" ? r : r?.url))
-            .filter((u: unknown): u is string => typeof u === "string" && u.trim().length > 0)
-        : [];
-      const refBlobs = await Promise.all(refInputs.map(imageInputToBlob));
+      const imageBlobs = await Promise.all(orderedImageUrls.map((u) => imageInputToBlob(u)));
+
+      const orderHint =
+        "【多图顺序】以下请求附件中的图片按先后顺序依次为图1、图2、图3…（仅为编号，不预设哪一张必须被编辑、哪一张只能作参考）。具体要参照哪张、修改或融合哪张，完全以用户下文为准。\n\n";
+      const fullPrompt = orderHint + String(prompt).trim();
 
       const buildForm = (modelName: string) => {
         const form = new FormData();
         form.set("model", modelName);
-        form.set("prompt", String(prompt));
+        form.set("prompt", fullPrompt);
         form.set("response_format", "url");
         if (aspect_ratio) form.set("aspect_ratio", String(aspect_ratio));
         // 对 /images/edits：image_size 在网关侧是可用参数，且未传时会有默认（截图显示默认 4K）。
         // 为了避免编辑在错误分辨率下更慢导致超时：只要前端传了就直接透传。
         if (image_size) form.set("image_size", String(image_size));
-        form.append("image", target.blob, target.filename);
-        for (const r of refBlobs) {
-          form.append("image", r.blob, r.filename);
+        for (const b of imageBlobs) {
+          form.append("image", b.blob, b.filename);
         }
         return form;
       };

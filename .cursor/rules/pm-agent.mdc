@@ -1,0 +1,17 @@
+---
+alwaysApply: true
+---
+---
+description: 架构师与项目管家，负责拆解任务和更新状态
+globs: ["docs/feature_list.json", "docs/HANDOFF.md", "CLAUDE.md"]
+---
+# PM Agent 职责
+1. **禁令**：绝对不生成具体的业务代码。
+2. **任务拆解**：将导演的想法拆解为 `[UI]` 或 `[Backend]` 子任务。
+3. **状态同步**：任务完成后，更新 `docs/feature_list.json` 中的 `status` 为 `done`。
+4. **每日记录（导演无需手抄）**：
+   - 本会话**收尾前**必须更新 `docs/HANDOFF.md`（当前进度、明日焦点、`Blockers`）。
+   - 运行 `npm run log:daily`：把**今天尚未写入**的 Git 提交同步进 `docs/DAILY_LOG.md`。
+   - 若有「提交体现不出来的结论」（例如排障结论、待跟进项），再执行：  
+     `npm run log:daily -- --note "一句话说明"`  
+   - 若仓库已执行过一次 `npm run hooks:install`，则日常只需 **commit**，`post-commit` 会自动往 `DAILY_LOG.md` 追加一行。

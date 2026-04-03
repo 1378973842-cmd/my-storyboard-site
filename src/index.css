@@ -457,6 +457,83 @@ html[data-theme="light"] .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(180deg, #b8956a, #8f7354);
 }
 
+/* Premium editor palette mapping (dark reference -> logical light counterpart) */
+.ai-editor-page {
+  --editor-bg-0: #0f1523;
+  --editor-bg-1: #172743;
+  --editor-panel: rgba(28, 40, 62, 0.72);
+  --editor-panel-soft: rgba(33, 49, 76, 0.6);
+  --editor-canvas: rgba(25, 38, 60, 0.9);
+  --editor-line: rgba(170, 190, 222, 0.22);
+  --editor-accent-a: #77cbff;
+  --editor-accent-b: #9b92ff;
+}
+
+html[data-theme="light"] .ai-editor-page {
+  --editor-bg-0: #fbf5ea;
+  --editor-bg-1: #f4e7d3;
+  --editor-panel: rgba(255, 250, 241, 0.82);
+  --editor-panel-soft: rgba(250, 238, 218, 0.9);
+  --editor-canvas: rgba(246, 234, 212, 0.94);
+  --editor-line: rgba(156, 125, 82, 0.22);
+  --editor-accent-a: #efbf7b;
+  --editor-accent-b: #d79a55;
+}
+
+.ai-editor-atmosphere {
+  background:
+    radial-gradient(900px 520px at 10% 0%, rgba(114, 184, 255, 0.22), transparent 58%),
+    radial-gradient(700px 390px at 84% 10%, rgba(156, 136, 255, 0.2), transparent 66%),
+    radial-gradient(980px 540px at 50% 108%, rgba(102, 156, 234, 0.15), transparent 62%),
+    radial-gradient(520px 260px at 34% 48%, rgba(255, 192, 120, 0.06), transparent 72%),
+    linear-gradient(170deg, var(--editor-bg-0) 0%, var(--editor-bg-1) 100%);
+}
+
+.ai-editor-panel {
+  background: linear-gradient(154deg, var(--editor-panel) 0%, var(--editor-panel-soft) 100%);
+  backdrop-filter: blur(24px);
+  outline: 0.5px solid var(--editor-line);
+}
+
+.ai-editor-canvas {
+  background:
+    radial-gradient(ellipse at 50% 5%, rgba(144, 200, 255, 0.16), transparent 46%),
+    radial-gradient(ellipse at 50% 100%, rgba(255, 184, 102, 0.06), transparent 58%),
+    linear-gradient(180deg, rgba(28, 42, 66, 0.66) 0%, var(--editor-canvas) 100%);
+  outline: 0.5px solid rgba(174, 201, 238, 0.24);
+}
+
+.ai-editor-glass {
+  background: linear-gradient(152deg, rgba(34, 51, 77, 0.68) 0%, rgba(28, 44, 68, 0.54) 100%);
+  backdrop-filter: blur(22px);
+  border: 0.5px solid rgba(174, 197, 229, 0.24);
+  box-shadow:
+    0 28px 56px -42px rgba(0, 0, 0, 0.72),
+    0 0 0 0.5px rgba(151, 179, 219, 0.08);
+}
+
+.ai-editor-input,
+.ai-editor-select {
+  background: linear-gradient(156deg, rgba(38, 54, 80, 0.74) 0%, rgba(30, 46, 70, 0.64) 100%);
+  outline: 0.5px solid rgba(170, 192, 223, 0.24);
+}
+
+.ai-editor-generate {
+  background: linear-gradient(135deg, var(--editor-accent-a), var(--editor-accent-b));
+  color: #f7fbff;
+}
+
+html[data-theme="light"] .ai-editor-glass {
+  background: linear-gradient(150deg, rgba(255, 251, 243, 0.92) 0%, rgba(250, 240, 221, 0.82) 100%);
+  border-color: rgba(163, 125, 75, 0.27);
+}
+
+html[data-theme="light"] .ai-editor-input,
+html[data-theme="light"] .ai-editor-select {
+  background: linear-gradient(154deg, rgba(255, 250, 239, 0.95) 0%, rgba(248, 236, 213, 0.92) 100%);
+  outline-color: rgba(170, 132, 83, 0.23);
+}
+
 @media print {
   @page {
     size: A4 landscape;

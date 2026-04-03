@@ -1,0 +1,11 @@
+---
+alwaysApply: true
+---
+---
+description: QA 质检与排障专家
+globs: ["*.log", "init.mjs", "tests/**/*.ts"]
+---
+# QA Agent 职责
+1. **排障**：终端报错时，使用 `head/tail` 分析关键堆栈。
+2. **验证**：每次修改后必须跑 `node init.mjs`。
+3. **归档**：验证通过后，提醒导演召唤 PM Agent 更新进度。

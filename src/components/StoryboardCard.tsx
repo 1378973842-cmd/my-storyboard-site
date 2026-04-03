@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { 
   Copy, 
   Check, 
@@ -30,10 +30,13 @@ import {
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import { Storyboard, ImageSize, AspectRatio } from '../types';
 import { SIZES, RATIOS } from '../constants';
-import { cn } from '../lib/utils';
+import { cn, uniqueRefItemId } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { ConfirmationModal } from './ConfirmationModal';
 import { parseApiResponse } from '../lib/http';
+import { useRefThumbPreview } from '../hooks/useRefThumbPreview';
+import { ReferenceImageLightbox } from './ReferenceImageLightbox';
+import { ZoomableLightboxImage } from './ZoomableLightboxImage';
 
 interface Props {
   shot: Storyboard;
@@ -66,12 +69,22 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
   const [editProgress, setEditProgress] = useState(0);
   const [editImageSize, setEditImageSize] = useState<ImageSize>(shot.image_size || '2K');
   const [editAspectRatio, setEditAspectRatio] = useState<AspectRatio>(shot.aspect_ratio || '16:9');
-  const [editTargetImage, setEditTargetImage] = useState<string | null>(null);
   const [editResultImage, setEditResultImage] = useState<string | null>(null);
   const [editHistory, setEditHistory] = useState<Array<{ url: string; prompt: string }>>([]);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const editTargetInputRef = useRef<HTMLInputElement>(null);
   const [editRefs, setEditRefs] = useState<{ id: string; url: string }[]>([]);
+  const { previewUrl: refQueuePreviewUrl, setPreviewUrl: setRefQueuePreviewUrl, handlersFor: refThumbHandlers } =
+    useRefThumbPreview();
+
+  useEffect(() => {
+    if (!isPreviewOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsPreviewOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isPreviewOpen]);
 
   const unifiedHistory = useMemo(() => {
     const seen = new Set<string>();
@@ -260,8 +273,8 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
   };
 
   const handleRunEdit = async () => {
-    if (!editTargetImage) {
-      setError('请先上传或拖拽一张需要编辑的图');
+    if (editRefs.length === 0) {
+      setError('请先上传或拖拽至少一张图片（图1、图2…仅为顺序，关系写在提示词里）');
       return;
     }
     if (!editPrompt.trim()) {
@@ -281,17 +294,12 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
         });
       }, 350);
 
-      const mappingHint =
-        `【图片顺序说明】图1=待编辑主图；图2及以后=参考图（按下方队列从左到右的顺序）。\n`;
-      const finalPrompt = `${mappingHint}${editPrompt}`;
-
       const res = await fetch('/api/edit-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          target_image: editTargetImage,
-          prompt: finalPrompt,
-          references: editRefs.map((r) => ({ url: r.url })),
+          prompt: editPrompt,
+          images: editRefs.map((r) => r.url),
           image_size: editImageSize,
           aspect_ratio: editAspectRatio,
         }),
@@ -326,24 +334,13 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
     const urls = await Promise.all(imgs.map(readFileAsDataUrl));
     setEditResultImage(null);
 
-    // 合并上传：首张作为主图，其余作为参考图
-    if (!editTargetImage) {
-      setEditTargetImage(urls[0]);
-      setEditRefs(
-        urls.slice(1).map((u, i) => ({
-          id: Math.random().toString(36).slice(2, 9) + '_' + i,
-          url: u,
-        }))
-      );
-    } else {
-      setEditRefs((prev) => [
-        ...prev,
-        ...urls.map((u, i) => ({
-          id: Math.random().toString(36).slice(2, 9) + '_' + (prev.length + i),
-          url: u,
-        })),
-      ]);
-    }
+    setEditRefs((prev) => [
+      ...prev,
+      ...urls.map((u) => ({
+        id: uniqueRefItemId('ref'),
+        url: u,
+      })),
+    ]);
   };
 
   const activeDisplayUrl = viewMode === 'edit' ? editResultImage : shot.image_url;
@@ -484,8 +481,11 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                   setEditProgress(0);
                   setIsEditingImage(false);
                   setEditResultImage(null);
-                  setEditRefs([]);
-                  setEditTargetImage(shot.image_url || null);
+                  setEditRefs(
+                    shot.image_url
+                      ? [{ id: uniqueRefItemId('ref'), url: shot.image_url }]
+                      : [],
+                  );
                 }}
                 className="w-10 h-10 rounded-full glass-panel ghost-border flex items-center justify-center text-on-surface hover:text-primary transition-all cursor-pointer"
                 title="编辑"
@@ -534,7 +534,6 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                   onClick={() => {
                     setViewMode('default');
                     setEditResultImage(null);
-                    setEditTargetImage(null);
                     setEditRefs([]);
                     setEditProgress(0);
                     setError(null);
@@ -555,8 +554,11 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                     setError(null);
                     setEditProgress(0);
                     setEditResultImage(null);
-                    setEditRefs([]);
-                    setEditTargetImage(shot.image_url || null);
+                    setEditRefs(
+                      shot.image_url
+                        ? [{ id: uniqueRefItemId('ref'), url: shot.image_url }]
+                        : [],
+                    );
                   }}
                   className={cn(
                     'px-3 py-1.5 rounded text-[9px] font-label tracking-widest ghost-border transition-all cursor-pointer flex items-center gap-2 group/btn',
@@ -603,7 +605,7 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
 
                 <div className="space-y-2">
                   <div className="text-[9px] font-label tracking-[0.18em] uppercase text-slate-300">
-                    上传图片（单框：图1主图 + 图2+参考）
+                    上传图片（从左到右图1、图2…；谁参考谁、改哪张，写在提示词里）
                   </div>
                   <div
                     className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] min-h-[132px] p-2"
@@ -615,43 +617,29 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                     }}
                   >
                     <div className="flex gap-2 overflow-x-auto custom-scrollbar">
-                      {editTargetImage && (
-                        <div
-                        className="relative shrink-0 h-24 min-w-[84px] max-w-[180px] rounded-xl overflow-hidden outline outline-[0.5px] accent-focus-outline bg-transparent flex items-center justify-center px-1"
-                          data-theme-preserve="dark"
-                        >
-                          <img src={editTargetImage} className="h-full w-auto max-w-[172px] object-contain" />
-                          <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-full bg-black/80 text-white text-[9px] font-black tracking-widest outline outline-[0.5px] outline-white/20">
-                            #1
-                          </div>
-                          <button
-                            onClick={() => {
-                              setEditTargetImage(null);
-                              setEditResultImage(null);
-                            }}
-                            className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/80 text-white flex items-center justify-center outline outline-[0.5px] outline-white/20"
-                            title="移除主图"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      )}
-                      <Reorder.Group axis="x" values={editRefs} onReorder={setEditRefs} className="contents">
+                      <Reorder.Group as="div" axis="x" values={editRefs} onReorder={setEditRefs} className="flex gap-2 flex-none shrink-0">
                         {editRefs.map((ref, idx) => (
                           <Reorder.Item
+                            as="div"
                             key={ref.id}
                             value={ref}
-                            className="relative shrink-0 h-24 min-w-[84px] max-w-[180px] rounded-xl overflow-hidden outline outline-[0.5px] outline-white/20 cursor-grab active:cursor-grabbing bg-transparent flex items-center justify-center px-1"
+                            className="relative shrink-0 h-24 min-w-[84px] max-w-[180px] rounded-xl overflow-hidden cursor-grab active:cursor-grabbing bg-transparent flex items-center justify-center px-1 cursor-zoom-in outline outline-[0.5px] outline-white/20"
                             whileDrag={{ scale: 1.04, zIndex: 20 }}
                             transition={{ layout: { type: 'spring', stiffness: 300, damping: 30 } }}
                             data-theme-preserve="dark"
+                            {...refThumbHandlers(ref.url)}
                           >
-                            <img src={ref.url} className="h-full w-auto max-w-[172px] object-contain" draggable={false} />
-                            <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-full bg-black/80 text-white text-[9px] font-black tracking-widest outline outline-[0.5px] outline-white/20">
-                              #{idx + 2}
+                            <img src={ref.url} className="h-full w-auto max-w-[172px] object-contain pointer-events-none" draggable={false} />
+                            <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-full bg-black/80 text-white text-[9px] font-black tracking-widest outline outline-[0.5px] outline-white/20 pointer-events-none">
+                              #{idx + 1}
                             </div>
                             <button
-                              onClick={() => setEditRefs((prev) => prev.filter((x) => x.id !== ref.id))}
+                              data-ref-preview-ignore
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const id = ref.id;
+                                setEditRefs((prev) => prev.filter((x) => x.id !== id));
+                              }}
                               className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/80 text-white flex items-center justify-center outline outline-[0.5px] outline-white/20"
                               title="移除图片"
                             >
@@ -661,6 +649,7 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                         ))}
                       </Reorder.Group>
                       <button
+                        data-ref-preview-ignore
                         onClick={() => editTargetInputRef.current?.click()}
                         className="shrink-0 w-24 h-24 rounded-xl border border-dashed border-white/20 bg-white/[0.03] hover:bg-white/[0.06] text-slate-300 hover:text-primary transition-colors flex flex-col items-center justify-center gap-1 cursor-pointer"
                         title="上传图片"
@@ -669,9 +658,9 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                         <span className="text-[9px] font-black uppercase tracking-widest">Upload</span>
                       </button>
                     </div>
-                    {!editTargetImage && editRefs.length === 0 && (
+                    {editRefs.length === 0 && (
                       <div className="h-20 flex items-center justify-center text-slate-400 text-[10px] uppercase tracking-widest">
-                        拖拽上传图片到这个框
+                        拖拽上传图片到这个框（从左到右为图1、图2…）
                       </div>
                     )}
                   </div>
@@ -851,53 +840,64 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
 
       {/* Lightbox Preview */}
       {isPreviewOpen && previewUrl && (
-        <div 
-          className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 md:p-12 animate-in fade-in duration-300"
-          onClick={(e) => { e.stopPropagation(); setIsPreviewOpen(false); }}
-          data-theme-preserve="dark"
-        >
-          <button 
-            className="absolute top-6 right-6 w-11 h-11 rounded-full flex items-center justify-center bg-surface-container-high/55 backdrop-blur-[30px]
-              outline outline-[0.5px] outline-outline-variant/20 text-white/90 hover:text-white
-              shadow-[0_24px_48px_-28px_rgba(0,0,0,0.55)] transition-colors z-[110] cursor-pointer"
-            onClick={(e) => { e.stopPropagation(); setIsPreviewOpen(false); }}
-            title="关闭"
-          >
-            <XIcon className="w-5 h-5" strokeWidth={1.75} />
-          </button>
+        <div className="fixed inset-0 z-[100] animate-in fade-in duration-300" data-theme-preserve="dark">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/95 backdrop-blur-xl cursor-zoom-out"
+            onClick={() => setIsPreviewOpen(false)}
+            aria-label="关闭预览"
+          />
+          <div className="pointer-events-none absolute inset-0">
+            <div className="pointer-events-auto absolute right-4 top-4 z-[120] sm:right-6 sm:top-6">
+              <button
+                type="button"
+                className="flex h-11 w-11 items-center justify-center rounded-full bg-surface-container-high/55 text-white/90 outline outline-[0.5px] outline-outline-variant/20 backdrop-blur-[30px] shadow-[0_24px_48px_-28px_rgba(0,0,0,0.55)] transition-colors hover:text-white cursor-pointer"
+                onClick={() => setIsPreviewOpen(false)}
+                title="关闭 (Esc)"
+                aria-label="关闭"
+              >
+                <XIcon className="h-5 w-5" strokeWidth={1.75} />
+              </button>
+            </div>
 
-          {/* Navigation Buttons */}
-          {shot.image_history && shot.image_history.length > 1 && (
-            <>
-              <button 
-                className="absolute left-6 top-1/2 -translate-y-1/2 p-4 bg-white/5 hover:bg-white/10 rounded-full text-white transition-all z-[110] cursor-pointer disabled:opacity-20"
-                onClick={handlePrevPreview}
-                disabled={shot.image_history.indexOf(previewUrl) === 0}
-              >
-                <ChevronLeftIcon className="w-8 h-8" />
-              </button>
-              <button 
-                className="absolute right-6 top-1/2 -translate-y-1/2 p-4 bg-white/5 hover:bg-white/10 rounded-full text-white transition-all z-[110] cursor-pointer disabled:opacity-20"
-                onClick={handleNextPreview}
-                disabled={shot.image_history.indexOf(previewUrl) === shot.image_history.length - 1}
-              >
-                <ChevronRightIcon className="w-8 h-8" />
-              </button>
-            </>
-          )}
-          
-          <div className="relative max-w-full max-h-full flex items-center justify-center">
-            <img 
-              src={previewUrl} 
-              alt={shot.summary}
-              className="max-w-full max-h-full object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-300 cursor-zoom-out"
-              onClick={(e) => { e.stopPropagation(); setIsPreviewOpen(false); }}
-            />
-            
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md border border-white/10 px-6 py-3 rounded-2xl text-center max-w-2xl flex flex-col items-center gap-3">
+            {shot.image_history && shot.image_history.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  className="pointer-events-auto absolute left-3 top-1/2 z-[120] -translate-y-1/2 rounded-full bg-white/5 p-4 text-white transition-all hover:bg-white/10 disabled:opacity-20 sm:left-6 cursor-pointer"
+                  onClick={handlePrevPreview}
+                  disabled={shot.image_history.indexOf(previewUrl) === 0}
+                >
+                  <ChevronLeftIcon className="h-8 w-8" />
+                </button>
+                <button
+                  type="button"
+                  className="pointer-events-auto absolute right-3 top-1/2 z-[120] -translate-y-1/2 rounded-full bg-white/5 p-4 text-white transition-all hover:bg-white/10 disabled:opacity-20 sm:right-6 cursor-pointer"
+                  onClick={handleNextPreview}
+                  disabled={shot.image_history.indexOf(previewUrl) === shot.image_history.length - 1}
+                >
+                  <ChevronRightIcon className="h-8 w-8" />
+                </button>
+              </>
+            )}
+
+            <div className="pointer-events-auto absolute inset-x-10 top-14 bottom-40 min-h-0 sm:inset-x-16 sm:top-16">
+              <ZoomableLightboxImage
+                url={previewUrl}
+                resetKey={previewUrl}
+                className="h-full w-full"
+                imgClassName="rounded-lg shadow-2xl outline outline-[0.5px] outline-white/15"
+              />
+            </div>
+
+            <div className="pointer-events-auto absolute bottom-4 left-1/2 z-[120] max-w-2xl -translate-x-1/2 rounded-2xl bg-black/60 px-6 py-3 text-center outline outline-[0.5px] outline-white/10 backdrop-blur-md flex flex-col items-center gap-3">
               <div>
                 <p className="text-white font-medium mb-1">{shot.summary}</p>
-                <div className="flex items-center justify-center gap-2">
+                <div className="flex flex-col items-center justify-center gap-1">
+                  <span className="text-[9px] text-white/45 font-label tracking-widest uppercase">
+                    滚轮缩放 · 中键拖拽平移
+                  </span>
+                  <div className="flex items-center justify-center gap-2">
                   <span className="text-primary text-[10px] font-bold uppercase tracking-widest">
                     IMAGE {shot.image_history?.indexOf(previewUrl)! + 1} / {shot.image_history?.length}
                   </span>
@@ -907,6 +907,7 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                       Current
                     </span>
                   )}
+                </div>
                 </div>
               </div>
 
@@ -923,6 +924,12 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
           </div>
         </div>
       )}
+
+      <ReferenceImageLightbox
+        url={refQueuePreviewUrl}
+        onClose={() => setRefQueuePreviewUrl(null)}
+        zIndexClass="z-[105]"
+      />
 
       <ConfirmationModal
         isOpen={isDeleteModalOpen}
