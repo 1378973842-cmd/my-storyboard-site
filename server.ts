@@ -38,11 +38,56 @@ function getThirdPartyEnv(): { apiBase: string; apiKey: string } {
   };
 }
 
-function getGridEnv(): { apiBase: string; apiKey: string } {
-  const base = (process.env.IMAGE_GRID_API_BASE ?? process.env.THIRD_PARTY_API_BASE ?? "").trim();
-  let key = (process.env.IMAGE_GRID_API_KEY ?? process.env.THIRD_PARTY_API_KEY ?? "").trim();
+function getGptEditEnv(): { apiBase: string; apiKey: string } {
+  const base =
+    (process.env.GPT_IMAGE_EDIT_API_BASE ?? "").trim() ||
+    (process.env.THIRD_PARTY_API_BASE ?? "").trim();
+  let key = (process.env.GPT_IMAGE_EDIT_API_KEY ?? "").trim();
   if (/^bearer\s+/i.test(key)) key = key.replace(/^bearer\s+/i, "").trim();
+  if (!key) {
+    key = (process.env.THIRD_PARTY_API_KEY ?? "").trim();
+    if (/^bearer\s+/i.test(key)) key = key.replace(/^bearer\s+/i, "").trim();
+  }
   return { apiBase: base, apiKey: key };
+}
+
+function getGridEnv(): { apiBase: string; apiKey: string } {
+  const gridBase = (process.env.IMAGE_GRID_API_BASE ?? "").trim();
+  const tpBase = (process.env.THIRD_PARTY_API_BASE ?? "").trim();
+  const apiBase = gridBase || tpBase;
+
+  let key = (process.env.IMAGE_GRID_API_KEY ?? "").trim();
+  if (/^bearer\s+/i.test(key)) key = key.replace(/^bearer\s+/i, "").trim();
+  if (!key) {
+    key = (process.env.THIRD_PARTY_API_KEY ?? "").trim();
+    if (/^bearer\s+/i.test(key)) key = key.replace(/^bearer\s+/i, "").trim();
+  }
+  return { apiBase, apiKey: key };
+}
+
+/** 九宫格 Phase A（剧本→9 条 prompt）：可与主页 THIRD_PARTY 使用不同令牌 */
+function getNineGridTextEnv(): { apiBase: string; apiKey: string } {
+  const base =
+    (process.env.NINE_GRID_TEXT_API_BASE ?? "").trim() ||
+    (process.env.THIRD_PARTY_API_BASE ?? "").trim();
+  let key = (process.env.NINE_GRID_TEXT_API_KEY ?? "").trim();
+  if (/^bearer\s+/i.test(key)) key = key.replace(/^bearer\s+/i, "").trim();
+  if (!key) {
+    key = (process.env.THIRD_PARTY_API_KEY ?? "").trim();
+    if (/^bearer\s+/i.test(key)) key = key.replace(/^bearer\s+/i, "").trim();
+  }
+  return { apiBase: base, apiKey: key };
+}
+
+/**
+ * /images/generations 与剧本、对话通常走同一套 THIRD_PARTY 网关。
+ * 若同时配置了 IMAGE_GRID_*（九宫格/edits 专用），优先用 THIRD_PARTY，避免文生图误打到仅支持 edits 的地址。
+ * 仅当 THIRD_PARTY 未配全时，再回退到 getGridEnv()。
+ */
+function getGenerateImageEnv(): { apiBase: string; apiKey: string } {
+  const tp = getThirdPartyEnv();
+  if (tp.apiBase && tp.apiKey) return tp;
+  return getGridEnv();
 }
 
 function readPromptFile(relativePath: string): string {
@@ -67,6 +112,13 @@ function isUpstreamOverloaded(status: number, payload: any): boolean {
       : String(payload || "")
     ).toLowerCase();
   return msg.includes("负载") || msg.includes("饱和") || msg.includes("rate") || msg.includes("too many") || msg.includes("overload");
+}
+
+/** 网关 504：多为上游生图过久，中转在限时内未收到响应而断开 */
+function appendImageEdit504Hint(details: string): string {
+  const d = String(details || "").trim();
+  if (!d || !/\b504\b/i.test(d)) return d || details;
+  return `${d}\n\n【说明】HTTP 504 通常为 API 网关在超时时间内未等到上游生图完成。可尝试：GPT 输出尺寸改小（如 1024）；参考图只留 1 张；稍后重试；或向中转方确认 gpt-image-2 的 /images/edits 超时与队列策略。`;
 }
 
 // Increase headers timeout to 5 minutes to prevent HeadersTimeoutError from slow APIs
@@ -149,6 +201,30 @@ function normalizeReferenceImageForUpstream(url: string): string {
   return m[1].replace(/\s/g, "");
 }
 
+/**
+ * 分镜文案里常见的 @资产N_、@图N_ 前缀易被生图模型判为无效或触发策略，导致 422。
+ * 过长提示也可能被拒。
+ */
+function sanitizeImagePromptForGemini(prompt: string): string {
+  let s = String(prompt || "").trim();
+  s = s.replace(/@资产\s*\d+\s*_[^：:\n\r]+[：:]\s*/gi, "");
+  s = s.replace(/@图\s*\d+\s*_[^，。\n\r]+[，,]?\s*/gi, "");
+  s = s.replace(/[ \t]+/g, " ");
+  s = s.replace(/\n{3,}/g, "\n\n");
+  const max = Number(process.env.IMAGE_PROMPT_MAX_CHARS || "12000");
+  if (max > 0 && s.length > max) {
+    s = `${s.slice(0, max).trim()}\n…（已截断至约 ${max} 字以适配生图接口）`;
+  }
+  return s.trim();
+}
+
+function appendGeminiImage422Guidance(msg: string): string {
+  const m = (msg || "").trim();
+  if (!m) return m;
+  if (/【可尝试】/.test(m)) return m;
+  return `${m}\n\n【可尝试】① 去掉暴力/色情/名人肖像等敏感描述；② 缩短提示词；③ 删除「图1」「@资产1」等参考图引用后重试（服务端会在 422 时自动去掉参考图再试一次）；④ 更换宽高比，或调整 .env 中 IMAGE_MODEL。`;
+}
+
 /** 从各兼容形态里取出可给前端的图片地址（https 或 data URL） */
 function extractGeneratedImageFromResponse(responseData: any): string | null {
   if (!responseData || typeof responseData !== "object") return null;
@@ -182,6 +258,40 @@ function extractGeneratedImageFromResponse(responseData: any): string | null {
   }
 
   return null;
+}
+
+/**
+ * 某些网关返回的 url 带临时签名或防盗链，浏览器直接加载会失败（出现 alt 文本）。
+ * 这里在服务端尝试把远端图片转成 data URL，前端可稳定展示。
+ */
+async function stabilizeImageUrlForClient(imageUrl: string): Promise<string> {
+  const input = String(imageUrl || "").trim();
+  if (!input) return input;
+  if (input.startsWith("data:")) return input;
+  if (!/^https?:\/\//i.test(input)) return input;
+
+  const maxBytes = Number(process.env.UPSTREAM_IMAGE_PROXY_MAX_BYTES || 10 * 1024 * 1024);
+  const timeoutMs = Number(process.env.UPSTREAM_IMAGE_PROXY_TIMEOUT_MS || 20000);
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new Error(`UPSTREAM_IMAGE_PROXY_TIMEOUT_${timeoutMs}ms`)), timeoutMs);
+  try {
+    const r = await fetch(input, { signal: ctrl.signal });
+    if (!r.ok) return input;
+    const ct = (r.headers.get("content-type") || "").toLowerCase();
+    if (!ct.includes("image/")) return input;
+
+    const arr = await r.arrayBuffer();
+    if (arr.byteLength <= 0 || arr.byteLength > maxBytes) return input;
+
+    const b64 = Buffer.from(arr).toString("base64");
+    const mime = ct.split(";")[0] || "image/png";
+    return `data:${mime};base64,${b64}`;
+  } catch {
+    return input;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function guessExtFromMime(mime: string): string {
@@ -222,9 +332,37 @@ async function imageInputToBlob(input: string): Promise<{ blob: globalThis.Blob;
   throw new Error("不支持的图片输入格式（需要 dataURL / http(s) URL / base64）");
 }
 
+function resolveGptImage2Size(
+  imageSize: unknown,
+  aspectRatio: unknown
+): "1024x1024" | "1536x1024" | "1024x1536" | "2048x2048" | "2048x1152" | "3840x2160" | "2160x3840" {
+  const rawSize = String(imageSize ?? "").trim().toUpperCase();
+  if (rawSize === "1024X1024") return "1024x1024";
+  if (rawSize === "1536X1024") return "1536x1024";
+  if (rawSize === "1024X1536") return "1024x1536";
+  if (rawSize === "2048X2048") return "2048x2048";
+  if (rawSize === "2048X1152") return "2048x1152";
+  if (rawSize === "3840X2160") return "3840x2160";
+  if (rawSize === "2160X3840") return "2160x3840";
+  if (rawSize === "1K") return "1024x1024";
+  if (rawSize === "2K") return "2048x2048";
+  if (rawSize === "4K") return "3840x2160";
+
+  const ratio = String(aspectRatio ?? "").trim();
+  if (ratio === "1:1") return "1024x1024";
+  if (ratio === "9:16") return "2160x3840";
+  if (ratio === "16:9") return "3840x2160";
+
+  // gpt-image-2 常用 landscape / portrait 规格；按前端比例做方向映射。
+  const portraitRatios = new Set(["3:4", "9:16", "2:3", "4:5"]);
+  return portraitRatios.has(ratio) ? "1024x1536" : "1536x1024";
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  /** 与脚本文件同级（打包后为项目根），避免从其它目录启动时 cwd 错误导致页面/静态资源 404 */
+  const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
   const tp = getThirdPartyEnv();
   if (!tp.apiBase || !tp.apiKey) {
@@ -234,7 +372,7 @@ async function startServer() {
   }
 
   // Initialize Database
-  const db = new Database("projects.db");
+  const db = new Database(path.join(projectRoot, "projects.db"));
   db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
@@ -346,6 +484,9 @@ async function startServer() {
 
     // 智能处理 Base URL
     let cleanBase = apiBase.replace(/\/+$/, "");
+    if (!cleanBase.startsWith("http://") && !cleanBase.startsWith("https://")) {
+      cleanBase = `https://${cleanBase}`;
+    }
     // 如果用户没填 /v1，且不是以 v1 结尾的，自动补全（针对 OpenAI 兼容供应商的常见习惯）
     if (!cleanBase.endsWith("/v1") && !cleanBase.includes("/v1/")) {
       cleanBase = `${cleanBase}/v1`;
@@ -414,53 +555,138 @@ ${pixarInstruction}
 当前画风基调设定：${style}`;
 
     try {
-      const response = await fetch(`${cleanBase}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: process.env.TEXT_MODEL || "gemini-3-pro-preview",
-          messages: [
-            { role: "system", content: systemInstruction },
-            { 
-              role: "user", 
-              content: `前情提要（全局设定）：${context || '无'}\n\n剧本大纲：${script}\n\n参考资产列表：\n${references && references.length > 0 
-                ? references.map((r: any) => `- 图${r.index} (${r.name}): ${r.type === 'character' ? '角色' : '场景'}`).join('\n') 
-                : '无'}` 
-            }
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.7
-        })
+      const maxRetries = Number(process.env.TEXT_API_RETRIES || 4);
+      const baseDelayMs = Number(process.env.TEXT_API_RETRY_BASE_DELAY_MS || 1200);
+      const textTimeoutMs = Number(process.env.TEXT_API_TIMEOUT_MS || 120000);
+
+      const chatBody = JSON.stringify({
+        model: process.env.TEXT_MODEL || "gemini-3.1-pro-preview",
+        messages: [
+          { role: "system", content: systemInstruction },
+          {
+            role: "user",
+            content: `前情提要（全局设定）：${context || "无"}\n\n剧本大纲：${script}\n\n参考资产列表：\n${
+              references && references.length > 0
+                ? references
+                    .map((r: any) => `- 图${r.index} (${r.name}): ${r.type === "character" ? "角色" : "场景"}`)
+                    .join("\n")
+                : "无"
+            }`,
+          },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.7,
       });
 
-      const contentType = response.headers.get("content-type");
-      
-      if (!response.ok) {
-        if (contentType && contentType.includes("application/json")) {
-          const errorData = await response.json();
-          return res.status(response.status).json({ 
-            error: errorData.error?.message || `API 错误 (${response.status}): ${response.statusText}` 
+      let data: any = null;
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(
+            () => ctrl.abort(new Error(`TEXT_API_TIMEOUT_${textTimeoutMs}ms`)),
+            textTimeoutMs
+          );
+          const response = await fetch(`${cleanBase}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: chatBody,
+            signal: ctrl.signal,
           });
-        } else {
-          const errorText = await response.text();
-          return res.status(response.status).json({ 
-            error: `API 返回了非 JSON 响应 (可能是 HTML 错误页)。状态码: ${response.status}。内容摘要: ${errorText.slice(0, 100)}...` 
-          });
+          clearTimeout(timer);
+
+          const raw = await response.text();
+          const contentType = response.headers.get("content-type");
+
+          if (!response.ok) {
+            let payload: any = {};
+            if (contentType?.includes("application/json") && raw) {
+              try {
+                payload = JSON.parse(raw);
+              } catch {
+                payload = { error: { message: raw.slice(0, 300) } };
+              }
+            } else {
+              payload = { error: { message: raw.slice(0, 300) } };
+            }
+
+            if (isUpstreamOverloaded(response.status, payload) && attempt < maxRetries) {
+              const jitter = Math.floor(Math.random() * 260);
+              const delay = Math.min(12000, baseDelayMs * Math.pow(2, attempt) + jitter);
+              console.warn("[generate-script] upstream overloaded, retrying...", {
+                status: response.status,
+                attempt,
+                delay,
+              });
+              await sleep(delay);
+              continue;
+            }
+
+            const errMsg =
+              (typeof payload?.error?.message === "string" && payload.error.message) ||
+              (typeof payload?.message === "string" && payload.message) ||
+              `API 错误 (${response.status}): ${response.statusText}`;
+            return res.status(response.status).json({ error: errMsg });
+          }
+
+          if (!contentType?.includes("application/json")) {
+            throw new Error(`预期返回 JSON 但收到了: ${raw.slice(0, 100)}...`);
+          }
+
+          data = JSON.parse(raw);
+          break;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          const retryable =
+            msg.startsWith("TEXT_API_TIMEOUT_") || /fetch failed|network|ECONNRESET|aborted/i.test(msg);
+          if (retryable && attempt < maxRetries) {
+            const jitter = Math.floor(Math.random() * 260);
+            const delay = Math.min(12000, baseDelayMs * Math.pow(2, attempt) + jitter);
+            console.warn("[generate-script] transient error, retrying...", { msg, attempt, delay });
+            await sleep(delay);
+            continue;
+          }
+          console.error("Script generation error:", err);
+          return res.status(500).json({ error: msg });
         }
       }
 
-      if (!contentType || !contentType.includes("application/json")) {
-        const text = await response.text();
-        throw new Error(`预期返回 JSON 但收到了: ${text.slice(0, 100)}...`);
+      if (!data) {
+        return res.status(503).json({
+          error:
+            "分镜生成多次重试后仍失败，上游可能持续过载。请稍后再试；也可在 .env 提高 TEXT_API_RETRIES 或 TEXT_API_TIMEOUT_MS。",
+        });
       }
 
-      const data = await response.json();
-      const content = data.choices[0].message.content;
-      
+      const content = data.choices?.[0]?.message?.content;
+      if (typeof content !== "string" || !content.trim()) {
+        return res.status(500).json({ error: "文本模型未返回有效内容（choices[0].message.content 为空）" });
+      }
+
       const parsedJSON = extractJSON(content);
+      if (!parsedJSON || typeof parsedJSON !== "object") {
+        return res.status(500).json({ error: "模型输出无法解析为 JSON 对象" });
+      }
+      if (!Array.isArray(parsedJSON.storyboards) || parsedJSON.storyboards.length === 0) {
+        return res.status(500).json({ error: "模型返回缺少分镜列表 storyboards，请重试或缩短剧本" });
+      }
+      if (!parsedJSON.global_assets || !Array.isArray(parsedJSON.global_assets.scenes)) {
+        parsedJSON.global_assets = { scenes: [{ description: "", image_url: "" }] };
+      }
+      parsedJSON.storyboards = parsedJSON.storyboards.map((s: any, i: number) => ({
+        ...s,
+        shot_number: String(s?.shot_number ?? `镜头 ${String(i + 1).padStart(2, "0")}`),
+        summary: typeof s?.summary === "string" ? s.summary : "",
+        director_notes: typeof s?.director_notes === "string" ? s.director_notes : "",
+        image_prompt: typeof s?.image_prompt === "string" ? s.image_prompt : "",
+        video_prompt: typeof s?.video_prompt === "string" ? s.video_prompt : "",
+      }));
+      if (!Array.isArray(parsedJSON.qa_check)) {
+        parsedJSON.qa_check = [];
+      }
       res.json(parsedJSON);
     } catch (error) {
       console.error("Script generation error:", error);
@@ -479,12 +705,15 @@ ${pixarInstruction}
     }
 
     let cleanBase = apiBase.replace(/\/+$/, "");
+    if (!cleanBase.startsWith("http://") && !cleanBase.startsWith("https://")) {
+      cleanBase = `https://${cleanBase}`;
+    }
     if (!cleanBase.endsWith("/v1") && !cleanBase.includes("/v1/")) {
       cleanBase = `${cleanBase}/v1`;
     }
 
-    const pixarInstruction = style === 'Pixar' 
-      ? "\n\n## 🎨 画风特定约束\n由于当前画风是 Pixar，你必须在 `description` 的最开头严格包含以下文字：'迪士尼皮克斯 3D 风格，8k 分辨率，极致细节，电影感照明，虚幻引擎 5 渲染质感，电影级调色。'" 
+    const pixarInstruction = style === 'Pixar'
+      ? "\n\n## 🎨 画风特定约束\n由于当前画风是 Pixar，你必须在 `description` 的最开头严格包含以下文字：'迪士尼皮克斯 3D 风格，8k 分辨率，极致细节，电影感照明，虚幻引擎 5 渲染质感，电影级调色。'"
       : "";
 
     const systemInstruction = `
@@ -509,7 +738,7 @@ ${pixarInstruction}
           'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: process.env.TEXT_MODEL || "gemini-3-pro-preview",
+          model: process.env.TEXT_MODEL || "gemini-3.1-pro-preview",
           messages: [
             { role: "system", content: systemInstruction },
             { 
@@ -546,12 +775,15 @@ ${pixarInstruction}
     }
 
     let cleanBase = apiBase.replace(/\/+$/, "");
+    if (!cleanBase.startsWith("http://") && !cleanBase.startsWith("https://")) {
+      cleanBase = `https://${cleanBase}`;
+    }
     if (!cleanBase.endsWith("/v1") && !cleanBase.includes("/v1/")) {
       cleanBase = `${cleanBase}/v1`;
     }
 
-    const pixarInstruction = style === 'Pixar' 
-      ? "\n\n## 🎨 画风特定约束\n由于当前画风是 Pixar，你必须在 `image_prompt` 的最开头严格包含以下文字：'迪士尼皮克斯 3D 风格，8k 分辨率，极致细节，电影感照明，虚幻引擎 5 渲染质感，电影级调色。'" 
+    const pixarInstruction = style === 'Pixar'
+      ? "\n\n## 🎨 画风特定约束\n由于当前画风是 Pixar，你必须在 `image_prompt` 的最开头严格包含以下文字：'迪士尼皮克斯 3D 风格，8k 分辨率，极致细节，电影感照明，虚幻引擎 5 渲染质感，电影级调色。'"
       : "";
 
     const imagePromptDesc = style === 'Pixar'
@@ -585,7 +817,7 @@ ${pixarInstruction}
           'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: process.env.TEXT_MODEL || "gemini-3-pro-preview",
+          model: process.env.TEXT_MODEL || "gemini-3.1-pro-preview",
           messages: [
             { role: "system", content: systemInstruction },
             { 
@@ -617,10 +849,13 @@ ${pixarInstruction}
   app.post("/api/generate-image", async (req, res) => {
     const { prompt, image_size, aspect_ratio, references } = req.body;
     console.log("Received image generation request:", { prompt, image_size, aspect_ratio });
-    const { apiBase, apiKey } = getThirdPartyEnv();
+    const { apiBase, apiKey } = getGenerateImageEnv();
 
     if (!apiBase || !apiKey) {
-      return res.status(400).json({ error: "缺少 API 配置。请在项目根目录的 .env 中设置 THIRD_PARTY_API_BASE 和 THIRD_PARTY_API_KEY，保存后重启 npm run dev。" });
+      return res.status(400).json({
+        error:
+          "缺少生图 API 配置。请在项目根目录 .env 中设置 THIRD_PARTY_API_BASE / THIRD_PARTY_API_KEY（推荐，与剧本接口一致），或仅配置 IMAGE_GRID_API_BASE / IMAGE_GRID_API_KEY，保存后重启 npm run dev。",
+      });
     }
 
     // 智能处理 Base URL
@@ -665,7 +900,7 @@ ${pixarInstruction}
       const timeoutMs = Number(process.env.IMAGE_API_TIMEOUT_MS || 60000);
       
       // 构造请求体，严格遵循用户提供的 OpenAPI 规范
-      const modelName = process.env.IMAGE_MODEL || "gemini-3.1-flash-image-preview-2k";
+      const modelName = process.env.IMAGE_MODEL || "nano-banana-pro-2k";
       const requestBody: any = {
         model: modelName,
         prompt: enhancedPrompt,
@@ -673,8 +908,8 @@ ${pixarInstruction}
         aspect_ratio: aspect_ratio || "16:9"
       };
 
-      // 供应商文档：image_size 仅 nano-banana-2 系列支持；后台模型名可能带后缀
-      if (/nano-banana-2/i.test(modelName)) {
+      // 供应商文档：image_size 仅 nano-banana 系列支持；后台模型名可能带 pro / 2k 等后缀
+      if (/nano-banana/i.test(modelName)) {
         requestBody.image_size = image_size || "4K";
       }
 
@@ -691,57 +926,78 @@ ${pixarInstruction}
         }
       }
 
-      let response;
-      let retries = 3;
-      let lastError = null;
-
-      while (retries > 0) {
-        try {
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(new Error(`IMAGE_API_TIMEOUT_${timeoutMs}ms`)), timeoutMs);
-          response = await fetch(`${cleanBase}/images/generations`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify(requestBody),
-            signal: ctrl.signal,
-          });
-          clearTimeout(timer);
-
-          if (response.ok) {
-            break; // Success, exit retry loop
+      const readUpstreamBody = async (r: Response): Promise<any> => {
+        const ct = r.headers.get("content-type");
+        if (ct && ct.includes("application/json")) {
+          try {
+            return await r.json();
+          } catch {
+            return null;
           }
+        }
+        return await r.text();
+      };
 
-          // If not 502/503/504, don't retry, just break and handle error
-          if (![502, 503, 504].includes(response.status)) {
-            break;
+      const executeImageGen = async (body: Record<string, any>): Promise<Response> => {
+        let retries = 3;
+        let lastResponse: Response | undefined;
+        let lastError: unknown = null;
+        while (retries > 0) {
+          try {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(new Error(`IMAGE_API_TIMEOUT_${timeoutMs}ms`)), timeoutMs);
+            const r = await fetch(`${cleanBase}/images/generations`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${apiKey}`,
+              },
+              body: JSON.stringify(body),
+              signal: ctrl.signal,
+            });
+            clearTimeout(timer);
+            lastResponse = r;
+            if (r.ok) return r;
+            if (![502, 503, 504].includes(r.status)) return r;
+            console.warn(`API returned ${r.status}, retrying... (${retries} left)`);
+          } catch (err) {
+            lastError = err;
+            console.warn(`Network error, retrying... (${retries} left)`, err);
           }
+          retries--;
+          if (retries > 0) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
+        }
+        if (!lastResponse) {
+          throw lastError instanceof Error ? lastError : new Error("请求失败，已达到最大重试次数");
+        }
+        return lastResponse;
+      };
 
-          console.warn(`API returned ${response.status}, retrying... (${retries} left)`);
-        } catch (err) {
-          lastError = err;
-          console.warn(`Network error, retrying... (${retries} left)`, err);
-        }
-        
-        retries--;
-        if (retries > 0) {
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
-        }
+      let workingBody: Record<string, any> = { ...requestBody };
+      let response = await executeImageGen(workingBody);
+      let responseData: any = await readUpstreamBody(response);
+
+      // Gemini 常见 422：参考图与文案不匹配、或提示词含剧本标记；先去掉参考图再试一次
+      if (!response.ok && response.status === 422 && Array.isArray(workingBody.image) && workingBody.image.length > 0) {
+        console.warn("[generate-image] upstream 422, retrying without reference images");
+        const { image: _drop, ...rest } = workingBody;
+        workingBody = rest;
+        response = await executeImageGen(workingBody);
+        responseData = await readUpstreamBody(response);
       }
 
-      if (!response) {
-        throw lastError || new Error("请求失败，已达到最大重试次数");
-      }
-
-      const contentType = response.headers.get("content-type");
-      let responseData: any;
-
-      if (contentType && contentType.includes("application/json")) {
-        responseData = await response.json();
-      } else {
-        responseData = await response.text();
+      // 仍 422：用清理后的纯画面描述再试（去掉 @资产 / @图 等模板前缀）
+      if (!response.ok && response.status === 422) {
+        const sanitized = sanitizeImagePromptForGemini(enhancedPrompt);
+        if (sanitized !== enhancedPrompt && sanitized.length > 20) {
+          console.warn("[generate-image] upstream 422, retrying with sanitized prompt (no refs)");
+          workingBody = { ...workingBody, prompt: sanitized };
+          delete workingBody.image;
+          response = await executeImageGen(workingBody);
+          responseData = await readUpstreamBody(response);
+        }
       }
 
       if (!response.ok) {
@@ -749,10 +1005,13 @@ ${pixarInstruction}
         console.error("API Error Response Headers:", Object.fromEntries(response.headers.entries()));
         console.error("API Error Response Body:", responseData);
         let errorMessage = `生图 API 错误 (${response.status}): `;
-        if (typeof responseData === 'object') {
+        if (typeof responseData === "object" && responseData !== null) {
           errorMessage += responseData.error?.message || responseData.message || JSON.stringify(responseData);
         } else {
-          errorMessage += responseData ? responseData.slice(0, 500) : "无响应内容 (可能是网关超时或代理错误)";
+          errorMessage += responseData ? String(responseData).slice(0, 500) : "无响应内容 (可能是网关超时或代理错误)";
+        }
+        if (response.status === 422) {
+          errorMessage = appendGeminiImage422Guidance(errorMessage);
         }
         throw new Error(errorMessage);
       }
@@ -760,7 +1019,8 @@ ${pixarInstruction}
       const imageUrl = extractGeneratedImageFromResponse(responseData);
 
       if (imageUrl) {
-        res.json({ url: imageUrl });
+        const stableUrl = await stabilizeImageUrlForClient(imageUrl);
+        res.json({ url: stableUrl });
       } else {
         console.error("API response missing image url/b64:", JSON.stringify(responseData).slice(0, 2000));
         res.status(500).json({
@@ -776,25 +1036,28 @@ ${pixarInstruction}
 
   // Step 2.2: Generate 3x3 storyboard grid (script -> 9 prompts -> one 3x3 image)
   app.post("/api/generate-9grid", async (req, res) => {
-    const { story, references, mode, imagePrompt: imagePromptInput } = req.body as {
+    const { story, references, mode, imagePrompt: imagePromptInput, imageModel } = req.body as {
       story?: string;
       references?: Array<{ url?: string; name?: string } | string>;
       mode?: "prompts_only" | "image_only" | "full";
       imagePrompt?: string;
+      imageModel?: string;
     };
     const runMode = mode || "full";
+    const requestedImageModel = String(imageModel || "").trim() || (process.env.IMAGE_GRID_MODEL || "nano-banana-pro-2k").trim();
+    const useGptImage2Requested = /^gpt-image-2$/i.test(requestedImageModel);
 
-    const { apiBase: textApiBase, apiKey: textApiKey } = getThirdPartyEnv();
+    const { apiBase: textApiBase, apiKey: textApiKey } = getNineGridTextEnv();
     const { apiBase: gridApiBase, apiKey: gridApiKey } = getGridEnv();
 
     if ((runMode === "prompts_only" || runMode === "full") && (!textApiBase || !textApiKey)) {
       return res.status(400).json({
         error:
-          "缺少文本模型 API 配置。请在项目根目录的 .env 中设置 THIRD_PARTY_API_BASE 与 THIRD_PARTY_API_KEY，保存后重启 npm run dev。",
+          "缺少九宫格文本 API 配置。请在项目根目录 .env 中设置 NINE_GRID_TEXT_API_BASE（可选）与 NINE_GRID_TEXT_API_KEY，或设置 THIRD_PARTY_API_BASE 与 THIRD_PARTY_API_KEY 作为回退，保存后重启 npm run dev。",
       });
     }
 
-    if ((runMode === "image_only" || runMode === "full") && (!gridApiBase || !gridApiKey)) {
+    if ((runMode === "image_only" || runMode === "full") && !useGptImage2Requested && (!gridApiBase || !gridApiKey)) {
       return res.status(400).json({
         error:
           "缺少 9 宫格生图 API 配置。请在项目根目录的 .env 中设置 IMAGE_GRID_API_BASE（可选）与 IMAGE_GRID_API_KEY（必填），保存后重启 npm run dev。",
@@ -811,14 +1074,6 @@ ${pixarInstruction}
     }
     if (!cleanTextBase.endsWith("/v1") && !cleanTextBase.includes("/v1/")) {
       cleanTextBase = `${cleanTextBase}/v1`;
-    }
-
-    let cleanGridBase = gridApiBase.replace(/\/+$/, "");
-    if (!cleanGridBase.startsWith("http://") && !cleanGridBase.startsWith("https://")) {
-      cleanGridBase = `https://${cleanGridBase}`;
-    }
-    if (!cleanGridBase.endsWith("/v1") && !cleanGridBase.includes("/v1/")) {
-      cleanGridBase = `${cleanGridBase}/v1`;
     }
 
     const refItems = Array.isArray(references)
@@ -854,8 +1109,13 @@ ${pixarInstruction}
                 .join("\n")
             : "无";
 
+        const resolvedNineGridTextModel =
+          (process.env.NINE_GRID_TEXT_MODEL || "").trim() ||
+          process.env.TEXT_MODEL ||
+          "gemini-3.1-pro-preview";
+
         const textReqBody = {
-          model: process.env.TEXT_MODEL || "gemini-3-pro-preview",
+          model: resolvedNineGridTextModel,
           messages: [
             { role: "system", content: systemInstruction },
             {
@@ -870,6 +1130,15 @@ ${pixarInstruction}
         const maxRetries = Number(process.env.TEXT_API_RETRIES || 4);
         const baseDelayMs = Number(process.env.TEXT_API_RETRY_BASE_DELAY_MS || 1200);
         const textTimeoutMs = Number(process.env.TEXT_API_TIMEOUT_MS || 60000);
+
+        const textKeySource = (process.env.NINE_GRID_TEXT_API_KEY ?? "").trim()
+          ? "NINE_GRID_TEXT_API_KEY"
+          : "THIRD_PARTY_API_KEY";
+        console.log("[9grid] Phase A chat/completions", {
+          model: resolvedNineGridTextModel,
+          apiBase: cleanTextBase,
+          keySource: textKeySource,
+        });
 
         let textPayload: any = null;
         let lastStatus = 0;
@@ -961,10 +1230,10 @@ ${pixarInstruction}
         `九格必须无任何分隔线、无边框、无留白、无黑边、无白边、无拼接缝；` +
         `九格彼此紧贴，像一张完整画布被分为九个镜头。` +
         `以参考图为主体，保持环境空间布局一致、人物与物品相对位置合理，并通过不同角度推进剧情连贯发展。` +
-        `全图要求4K极致分辨率、超高清细节、电影级质感、风格高度一致。` +
+        `全图要求高分辨率、超高清细节、电影级质感、风格高度一致。` +
         `负向约束：禁止任何文字元素、禁止字幕、禁止对白台词字卡、禁止标题字、禁止 logo、禁止水印、禁止网格线、禁止边框、禁止任何装饰性分割元素。` +
         `如果模型倾向添加文字，必须改为纯画面表达，画面中不得出现可读字符。` +
-        ` "image_generation_model": "gemini-3.1-flash-image-preview-4k", "grid_layout": "3x3", "grid_aspect_ratio": "16:9"。\n`;
+        ` "image_generation_model": "${requestedImageModel}", "grid_layout": "3x3", "grid_aspect_ratio": "16:9"。\n`;
 
         const refMapLines =
           refItems.length > 0
@@ -980,24 +1249,60 @@ ${pixarInstruction}
         return res.status(400).json({ error: "缺少 imagePrompt" });
       }
 
-      // Phase B: image model -> one grid image
-      const modelName = (process.env.IMAGE_GRID_MODEL || "gemini-3.1-flash-image-preview-4k").trim();
-      const timeoutMs = Number(process.env.IMAGE_API_TIMEOUT_MS || 180000);
+      // Phase B: image model -> one grid image（支持 nano 与 gpt-image-2）
+      const modelName = String(imageModel || "").trim() || (process.env.IMAGE_GRID_MODEL || "nano-banana-pro-2k").trim();
+      const useGptImage2 = /^gpt-image-2$/i.test(modelName);
+      const baseImageTimeoutMs = Number(process.env.IMAGE_API_TIMEOUT_MS || 180000);
+      const timeoutMs = useGptImage2
+        ? Math.max(baseImageTimeoutMs, Number(process.env.NINE_GRID_GPT_IMAGE_TIMEOUT_MS || 420000))
+        : baseImageTimeoutMs;
       if (refUrls.length === 0) {
         return res.status(400).json({ error: "请至少上传 1 张参考图（图1）用于九宫格生成" });
       }
 
-      // 网关文档显示 4K 模型使用 /images/edits 且必须 multipart/form-data 传 file
+      // 网关 /images/edits：multipart/form-data；image_size 与模型名中的 2K/4K 对齐
+      const gridImageSize = /4k/i.test(modelName) ? "4K" : /2k/i.test(modelName) ? "2K" : "4K";
       const blobs = await Promise.all(refUrls.map(imageInputToBlob));
+      const { apiBase: imageApiBaseRaw, apiKey: imageApiKey } = useGptImage2 ? getGptEditEnv() : getGridEnv();
+      if (!imageApiBaseRaw || !imageApiKey) {
+        return res.status(400).json({
+          error: useGptImage2
+            ? "缺少 GPT 生图 API 配置。请检查 GPT_IMAGE_EDIT_API_BASE / GPT_IMAGE_EDIT_API_KEY（或 THIRD_PARTY_API_BASE / THIRD_PARTY_API_KEY）后重试。"
+            : "缺少 9 宫格生图 API 配置。请在项目根目录的 .env 中设置 IMAGE_GRID_API_BASE（可选）与 IMAGE_GRID_API_KEY（必填），保存后重启 npm run dev。",
+        });
+      }
+      let cleanImageBase = imageApiBaseRaw.replace(/\/+$/, "");
+      if (!cleanImageBase.startsWith("http://") && !cleanImageBase.startsWith("https://")) {
+        cleanImageBase = `https://${cleanImageBase}`;
+      }
+      if (!cleanImageBase.endsWith("/v1") && !cleanImageBase.includes("/v1/")) {
+        cleanImageBase = `${cleanImageBase}/v1`;
+      }
+
       const form = new FormData();
       form.set("model", modelName);
       form.set("prompt", imagePrompt);
-      form.set("response_format", "url");
-      form.set("aspect_ratio", "16:9");
-      form.set("image_size", "4K");
+      if (useGptImage2) {
+        form.set("response_format", "b64_json");
+        form.set("size", "3840x2160");
+        form.set("n", "1");
+      } else {
+        form.set("response_format", "url");
+        form.set("aspect_ratio", "16:9");
+        form.set("image_size", gridImageSize);
+      }
       for (const b of blobs) {
         form.append("image", b.blob, b.filename);
       }
+
+      console.log("[9grid] Phase B images/edits", {
+        model: modelName,
+        apiBase: cleanImageBase,
+        timeoutMs,
+        referencesCount: blobs.length,
+        promptLength: imagePrompt.length,
+        fixedSize: useGptImage2 ? "3840x2160" : undefined,
+      });
 
       const imageRetries = Number(process.env.IMAGE_API_RETRIES || 2);
       const imageRetryBaseMs = Number(process.env.IMAGE_API_RETRY_BASE_DELAY_MS || 2200);
@@ -1008,10 +1313,10 @@ ${pixarInstruction}
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(new Error(`IMAGE_API_TIMEOUT_${timeoutMs}ms`)), timeoutMs);
         try {
-          const imgRes = await fetch(`${cleanGridBase}/images/edits`, {
+          const imgRes = await fetch(`${cleanImageBase}/images/edits`, {
             method: "POST",
             headers: {
-              Authorization: `Bearer ${gridApiKey}`,
+              Authorization: `Bearer ${imageApiKey}`,
             },
             body: form as any,
             signal: ctrl.signal,
@@ -1031,6 +1336,14 @@ ${pixarInstruction}
               typeof imgPayload === "object"
                 ? imgPayload.error?.message || imgPayload.message || JSON.stringify(imgPayload)
                 : String(imgPayload || "").slice(0, 500);
+            console.error("[9grid] image request failed (non-retryable or max retry)", {
+              status: imgRes.status,
+              attempt,
+              model: modelName,
+              referencesCount: blobs.length,
+              promptLength: imagePrompt.length,
+              detail: String(detail).slice(0, 800),
+            });
             return res.status(500).json({ error: `九宫格生图失败 (${imgRes.status})：${detail}` });
           }
 
@@ -1042,6 +1355,14 @@ ${pixarInstruction}
           clearTimeout(timer);
           const msg = err instanceof Error ? err.message : String(err);
           if (attempt === imageRetries) {
+            console.error("[9grid] image request threw error (max retry reached)", {
+              attempt,
+              model: modelName,
+              timeoutMs,
+              referencesCount: blobs.length,
+              promptLength: imagePrompt.length,
+              message: msg,
+            });
             return res.status(500).json({ error: `九宫格生图失败：${msg}` });
           }
           const jitter = Math.floor(Math.random() * 300);
@@ -1060,7 +1381,8 @@ ${pixarInstruction}
         return res.status(500).json({ error: "九宫格生图失败：未解析到图片 url/b64_json" });
       }
 
-      return res.json({ url, shots });
+      const stableUrl = await stabilizeImageUrlForClient(url);
+      return res.json({ url: stableUrl, shots });
     } catch (e) {
       console.error("Generate 9-grid error:", e);
       return res.status(500).json({ error: e instanceof Error ? e.message : "九宫格生成失败" });
@@ -1069,7 +1391,7 @@ ${pixarInstruction}
 
   // Step 2.1: Edit Image (Third-party API)
   app.post("/api/edit-image", async (req, res) => {
-    const { prompt, target_image, references, images, image_size, aspect_ratio } = req.body;
+    const { prompt, target_image, references, images, image_size, aspect_ratio, model, response_format } = req.body;
     console.log("Received image edit request:", {
       prompt_preview: typeof prompt === "string" ? prompt.slice(0, 80) : "",
       has_target: typeof target_image === "string" && target_image.length > 0,
@@ -1077,8 +1399,12 @@ ${pixarInstruction}
       images_count: Array.isArray(images) ? images.length : 0,
       image_size,
       aspect_ratio,
+      model,
+      response_format,
     });
-    const { apiBase, apiKey } = getThirdPartyEnv();
+    const requestModel = typeof model === "string" ? model.trim() : "";
+    const gptRequested = /^gpt-image-2$/i.test(requestModel);
+    const { apiBase, apiKey } = gptRequested ? getGptEditEnv() : getThirdPartyEnv();
 
     if (!apiBase || !apiKey) {
       return res.status(400).json({
@@ -1127,33 +1453,82 @@ ${pixarInstruction}
       // 对 data URL 自动放宽超时，避免只因为“慢”就触发连续失败链。
       const anyDataUrl = orderedImageUrls.some((u) => u.trim().startsWith("data:image/"));
 
-      const timeoutMs = anyDataUrl ? Math.max(baseTimeoutMs, 180000) : baseTimeoutMs;
-
+      const timeoutMs = gptRequested
+        ? Math.max(baseTimeoutMs, anyDataUrl ? 300000 : 240000)
+        : anyDataUrl
+          ? Math.max(baseTimeoutMs, 180000)
+          : baseTimeoutMs;
       const envCandidates = [String(process.env.IMAGE_EDIT_MODEL || "").trim(), String(process.env.IMAGE_MODEL || "").trim()].filter(
         (x) => x.length > 0
       );
 
-      // 只使用 .env 指定模型：避免 token 对硬编码候选不具备权限（403），导致“全失败”。
-      const modelCandidates = Array.from(new Set(envCandidates.length ? envCandidates : ["gemini-3.1-flash-image-preview-2k"]));
+      // 显式传 model（例如 GPT 编辑）时，严格只打该模型，不做回退。
+      // 未显式传 model（旧编辑模式）时，仍保留 env 候选回退以提高可用性。
+      const modelCandidates = requestModel
+        ? [requestModel]
+        : Array.from(new Set([...(envCandidates.length ? envCandidates : ["nano-banana-pro-2k"])].filter(Boolean)));
 
       console.log("[edit-image] modelCandidates:", modelCandidates, "timeoutMs:", timeoutMs, "imageCount:", orderedImageUrls.length);
 
       const imageBlobs = await Promise.all(orderedImageUrls.map((u) => imageInputToBlob(u)));
 
-      const orderHint =
-        "【多图顺序】以下请求附件中的图片按先后顺序依次为图1、图2、图3…（仅为编号，不预设哪一张必须被编辑、哪一张只能作参考）。具体要参照哪张、修改或融合哪张，完全以用户下文为准。\n\n";
-      const fullPrompt = orderHint + String(prompt).trim();
+      const userPrompt = String(prompt).trim();
 
-      const buildForm = (modelName: string) => {
+      const formatUpstreamError = (status: number, responseData: any): string => {
+        if (responseData == null) return `HTTP ${status}，无响应体`;
+        if (typeof responseData === "string") {
+          const t = responseData.trim();
+          return t.length > 0 ? t.slice(0, 1200) : `HTTP ${status}，空文本响应`;
+        }
+        const o = responseData as Record<string, unknown>;
+        const err = o.error as Record<string, unknown> | undefined;
+        const parts: string[] = [];
+        if (err) {
+          if (typeof err.message === "string") parts.push(err.message);
+          if (typeof (err as { code?: string }).code === "string") parts.push("code: " + (err as { code: string }).code);
+          if (typeof (err as { type?: string }).type === "string") parts.push("type: " + (err as { type: string }).type);
+        }
+        if (typeof o.message === "string") parts.push(o.message);
+        if (parts.length) return `HTTP ${status}：${parts.join("；").slice(0, 1200)}`;
+        try {
+          return `HTTP ${status}：${JSON.stringify(responseData).slice(0, 1200)}`;
+        } catch {
+          return `HTTP ${status}，无法解析错误体`;
+        }
+      };
+      const isRetryableStatus = (status: number): boolean =>
+        [408, 425, 429, 500, 502, 503, 504, 524].includes(status);
+
+      const buildForm = (
+        modelName: string,
+        blobs: Array<{ blob: globalThis.Blob; filename: string }>,
+        options?: { responseFormatOverride?: string; gptPlainPrompt?: boolean }
+      ) => {
+        const isGptImage2 = /^gpt-image-2$/i.test(modelName.trim());
+        const requestResponseFormat = typeof response_format === "string" ? response_format.trim() : "";
+        const editResponseFormat = String(process.env.IMAGE_EDIT_RESPONSE_FORMAT || "").trim();
+        const responseFormat =
+          options?.responseFormatOverride ||
+          requestResponseFormat ||
+          editResponseFormat ||
+          (isGptImage2 ? "b64_json" : "url");
         const form = new FormData();
         form.set("model", modelName);
-        form.set("prompt", fullPrompt);
-        form.set("response_format", "url");
-        if (aspect_ratio) form.set("aspect_ratio", String(aspect_ratio));
-        // 对 /images/edits：image_size 在网关侧是可用参数，且未传时会有默认（截图显示默认 4K）。
-        // 为了避免编辑在错误分辨率下更慢导致超时：只要前端传了就直接透传。
-        if (image_size) form.set("image_size", String(image_size));
-        for (const b of imageBlobs) {
+        // gpt-image-2 按标准 /images/edits 字段发送：image + prompt + model + size + response_format
+        const promptForForm =
+          isGptImage2 && options?.gptPlainPrompt !== false
+            ? userPrompt
+            : userPrompt;
+        form.set("prompt", promptForForm);
+        form.set("response_format", responseFormat);
+        if (isGptImage2) {
+          form.set("size", resolveGptImage2Size(image_size, aspect_ratio));
+          form.set("n", "1");
+        } else {
+          if (aspect_ratio) form.set("aspect_ratio", String(aspect_ratio));
+          if (image_size) form.set("image_size", String(image_size));
+        }
+        for (const b of blobs) {
           form.append("image", b.blob, b.filename);
         }
         return form;
@@ -1164,58 +1539,131 @@ ${pixarInstruction}
       const errors: string[] = [];
 
       for (const modelName of modelCandidates) {
+        const isGpt2Model = /^gpt-image-2$/i.test(modelName.trim());
+        const blobVariants: Array<{ label: string; blobs: Array<{ blob: globalThis.Blob; filename: string }> }> = isGpt2Model
+          ? [
+              { label: "all_images", blobs: imageBlobs },
+              ...(imageBlobs.length > 2 ? [{ label: "first_2_images", blobs: imageBlobs.slice(0, 2) }] : []),
+              ...(imageBlobs.length > 1 ? [{ label: "first_1_image", blobs: imageBlobs.slice(0, 1) }] : []),
+            ]
+          : [{ label: "default", blobs: imageBlobs }];
+
         for (const endpoint of endpoints) {
-          const ctrl = new AbortController();
-          const timer = setTimeout(
-            () => ctrl.abort(new Error(`IMAGE_API_TIMEOUT_${timeoutMs}ms`)),
-            timeoutMs
-          );
-          try {
-            const response = await fetch(`${cleanBase}${endpoint}`, {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-              },
-              body: buildForm(modelName) as any,
-              signal: ctrl.signal,
-            });
+          const isGpt2 = /^gpt-image-2$/i.test(modelName.trim());
+          const attemptConfigs: Array<{ label: string; formOpts?: { responseFormatOverride?: string } }> = [
+            { label: "primary" },
+            ...(isGpt2
+              ? ([{ label: "retry_url_format", formOpts: { responseFormatOverride: "url" } }] as const)
+              : []),
+          ];
 
-            const contentType = response.headers.get("content-type");
-            const responseData =
-              contentType && contentType.includes("application/json")
-                ? await response.json()
-                : await response.text();
+          for (const variant of blobVariants) {
+            for (const cfg of attemptConfigs) {
+            const maxHttpRetries = Number(process.env.IMAGE_EDIT_HTTP_RETRIES || 2);
+            for (let httpAttempt = 0; httpAttempt <= maxHttpRetries; httpAttempt++) {
+              console.log("[edit-image] upstream request", {
+                endpoint,
+                model: modelName,
+                variant: variant.label,
+                attempt: cfg.label,
+                retry: httpAttempt,
+                response_format:
+                  cfg.formOpts?.responseFormatOverride ||
+                  (typeof response_format === "string" ? response_format : ""),
+                image_count: variant.blobs.length,
+                aspect_ratio: aspect_ratio ? String(aspect_ratio) : "",
+                image_size: image_size ? String(image_size) : "",
+                prompt_len: userPrompt.length,
+              });
+              const ctrl = new AbortController();
+              const timer = setTimeout(
+                () => ctrl.abort(new Error(`IMAGE_API_TIMEOUT_${timeoutMs}ms`)),
+                timeoutMs
+              );
+              try {
+                const response = await fetch(`${cleanBase}${endpoint}`, {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${apiKey}`,
+                  },
+                  body: buildForm(modelName, variant.blobs, cfg.formOpts) as any,
+                  signal: ctrl.signal,
+                });
 
-            if (!response.ok) {
-              const detail =
-                typeof responseData === "object"
-                  ? responseData.error?.message ||
-                    responseData.message ||
-                    JSON.stringify(responseData)
-                  : responseData || "无响应内容";
-              errors.push(`${modelName} @ ${endpoint} -> ${response.status}: ${String(detail).slice(0, 220)}`);
-              continue;
+                const contentType = response.headers.get("content-type");
+                const responseData =
+                  contentType && contentType.includes("application/json")
+                    ? await response.json()
+                    : await response.text();
+
+                if (!response.ok) {
+                  const detail = formatUpstreamError(response.status, responseData);
+                  errors.push(`${modelName} @ ${endpoint} [${variant.label}/${cfg.label}#${httpAttempt}] -> ${detail}`);
+                  const canRetry = isRetryableStatus(response.status) && httpAttempt < maxHttpRetries;
+                  if (canRetry) {
+                    const delay = Math.min(12000, 1800 * Math.pow(2, httpAttempt));
+                    console.warn("[edit-image] retryable upstream error, retrying...", {
+                      status: response.status,
+                      attempt: cfg.label,
+                      retry: httpAttempt,
+                      delay,
+                    });
+                    await sleep(delay);
+                    continue;
+                  }
+                  break;
+                }
+
+                const imageUrl = extractGeneratedImageFromResponse(responseData);
+                if (imageUrl) {
+                  console.log("Image edit success with:", {
+                    model: modelName,
+                    endpoint,
+                    variant: variant.label,
+                    attempt: cfg.label,
+                    retry: httpAttempt,
+                  });
+                  const stableUrl = await stabilizeImageUrlForClient(imageUrl);
+                  return res.json({
+                    url: stableUrl,
+                    meta: isGpt2Model ? { model: modelName, image_count_used: variant.blobs.length } : undefined,
+                  });
+                }
+                errors.push(`${modelName} @ ${endpoint} [${variant.label}/${cfg.label}#${httpAttempt}] -> 200 但未解析到图片字段`);
+                break;
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                errors.push(`${modelName} @ ${endpoint} [${variant.label}/${cfg.label}#${httpAttempt}] -> ${msg}`);
+                const canRetry = /timeout|timed out|aborted|fetch failed|network|ECONNRESET|ENOTFOUND/i.test(msg) && httpAttempt < maxHttpRetries;
+                if (canRetry) {
+                  const delay = Math.min(12000, 1800 * Math.pow(2, httpAttempt));
+                  console.warn("[edit-image] transient error, retrying...", {
+                    attempt: cfg.label,
+                    retry: httpAttempt,
+                    delay,
+                    msg,
+                  });
+                  await sleep(delay);
+                  continue;
+                }
+                break;
+              } finally {
+                clearTimeout(timer);
+              }
             }
-
-            const imageUrl = extractGeneratedImageFromResponse(responseData);
-            if (imageUrl) {
-              console.log("Image edit success with:", { model: modelName, endpoint });
-              return res.json({ url: imageUrl });
             }
-            errors.push(`${modelName} @ ${endpoint} -> 200 但未解析到图片字段`);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            errors.push(`${modelName} @ ${endpoint} -> ${msg}`);
-            console.warn("Image edit attempt failed:", { model: modelName, endpoint, msg });
-            continue;
-          } finally {
-            clearTimeout(timer);
           }
         }
       }
 
+      const joinedErrors = appendImageEdit504Hint(errors.join(" | "));
+      if (requestModel) {
+        return res.status(500).json({
+          error: `编辑失败：指定模型 ${requestModel} 调用失败。原因：${joinedErrors || "上游未返回可解析错误信息"}`,
+        });
+      }
       return res.status(500).json({
-        error: `编辑失败：已尝试多模型与接口组合，均未成功。${errors.join(" | ")}`,
+        error: `编辑失败：已尝试多模型与接口组合，均未成功。${joinedErrors}`,
       });
     } catch (error) {
       console.error("Image edit error:", error);
@@ -1225,12 +1673,13 @@ ${pixarInstruction}
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
+      root: projectRoot,
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
+    const distPath = path.join(projectRoot, "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));

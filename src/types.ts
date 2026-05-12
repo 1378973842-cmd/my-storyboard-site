@@ -46,6 +46,17 @@ export type AspectRatio = '4:3' | '3:4' | '16:9' | '9:16' | '2:3' | '3:2' | '1:1
 
 /** 日间：高对比、浅色底；夜间：深色底、降低刺眼 */
 export type UiTheme = 'light' | 'dark';
+export type SystemNotice = {
+  id: string;
+  message: string;
+  level?: 'success' | 'info' | 'error';
+  createdAt: number;
+  action?:
+    | { type: 'open-main' }
+    | { type: 'open-editor' }
+    | { type: 'open-nine-grid' }
+    | { type: 'open-shot'; shotNumber: string };
+};
 
 export interface AppState {
   currentProjectId: string | null;
@@ -68,6 +79,7 @@ export interface AppState {
       | { kind: 'scene'; sceneIndex: number; url: string; title?: string }
       | null;
   };
+  notices: SystemNotice[];
 
   setCurrentProjectId: (id: string | null) => void;
   setProjectTitle: (title: string) => void;
@@ -95,23 +107,17 @@ export interface AppState {
   openImageEditor: (target: NonNullable<AppState['imageEditor']['target']>) => void;
   closeImageEditor: () => void;
   updateGlobalSceneImage: (sceneIndex: number, url: string) => void;
+  addNotice: (message: string, level?: SystemNotice['level'], action?: SystemNotice['action']) => void;
+  removeNotice: (id: string) => void;
   resetProject: () => void;
 }
 
-const THEME_STORAGE_KEY = 'storyboard-ui-theme';
-
+/** 首屏主题：跟随系统浅色/深色，不写 localStorage */
 export function readStoredUiTheme(): UiTheme {
+  if (typeof window === 'undefined') return 'dark';
   try {
-    return localStorage.getItem(THEME_STORAGE_KEY) === 'light' ? 'light' : 'dark';
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
   } catch {
     return 'dark';
-  }
-}
-
-export function persistUiTheme(theme: UiTheme): void {
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, theme);
-  } catch {
-    /* ignore */
   }
 }

@@ -15,7 +15,7 @@ export const FrameDetail: React.FC = () => {
 
   if (!data || !selectedShotNumber) return null;
 
-  const shots = data.storyboards;
+  const shots = Array.isArray(data.storyboards) ? data.storyboards : [];
   const currentIndex = shots.findIndex(s => s.shot_number === selectedShotNumber);
   const shot = shots[currentIndex];
 

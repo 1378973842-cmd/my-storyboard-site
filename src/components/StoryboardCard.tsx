@@ -51,6 +51,7 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
     switchStoryboardImage,
     updateStoryboard,
     removeStoryboard,
+    addNotice,
     references,
     script,
     context,
@@ -141,6 +142,10 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
       const newShot = await parseApiResponse(res);
       if (!res.ok) throw new Error(newShot.error || '重新生成失败');
       updateStoryboard(shot.shot_number, newShot);
+      addNotice(`分镜 ${shot.shot_number}：提示词重写成功（点击前往）`, 'success', {
+        type: 'open-shot',
+        shotNumber: shot.shot_number,
+      });
     } catch (err) {
       console.error('Regenerate error:', err);
       setError('重新生成失败');
@@ -185,7 +190,10 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
 
   const handleGenerateImage = async (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (shot.is_loading_image) return;
+    if (shot.is_loading_image) {
+      addNotice(`分镜 ${shot.shot_number}：正在生成中，请稍候`, 'info');
+      return;
+    }
 
     setStoryboardLoading(shot.shot_number, true);
     setError(null);
@@ -199,29 +207,22 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
     }, 500);
 
     try {
-      const pixarPrefix = "迪士尼皮克斯 3D 风格，8k 分辨率，极致细节，电影感照明，虚幻引擎 5 渲染质感，电影级调色。";
-      const finalPrompt = selectedStyle === 'Pixar' && !shot.image_prompt.includes('迪士尼皮克斯')
-        ? `${pixarPrefix}${shot.image_prompt}`
-        : shot.image_prompt;
-
-      const mentionedRefIndices = new Set<number>();
-      const matches = finalPrompt.match(/[图@](?:资产)?\s*(\d+)/g);
-      if (matches) {
-        matches.forEach(match => {
-          const numMatch = match.match(/\d+/);
-          if (numMatch) {
-            const num = parseInt(numMatch[0]);
-            if (!isNaN(num) && num > 0 && num <= references.length) {
-              mentionedRefIndices.add(num - 1);
-            }
-          }
-        });
+      const imgPrompt = shot.image_prompt ?? '';
+      if (!imgPrompt.trim()) {
+        const msg = `分镜 ${shot.shot_number}：缺少生图提示词。请在右侧 Image Prompt 中填写内容，或点 REWRITE 重新生成。`;
+        setError(msg);
+        addNotice(msg, 'error');
+        setStoryboardLoading(shot.shot_number, false);
+        return;
       }
-      
-      // 规则：只有当提示词明确引用 `图N / @图N / @资产N` 时，才传入对应参考图。
-      // 若提示词未提及，则不传入 references，避免“未声明引用却被参考图影响”的错误行为。
-      const filteredReferences =
-        mentionedRefIndices.size > 0 ? references.filter((_, idx) => mentionedRefIndices.has(idx)) : [];
+
+      const pixarPrefix = "迪士尼皮克斯 3D 风格，8k 分辨率，极致细节，电影感照明，虚幻引擎 5 渲染质感，电影级调色。";
+      const finalPrompt = selectedStyle === 'Pixar' && !imgPrompt.includes('迪士尼皮克斯')
+        ? `${pixarPrefix}${imgPrompt}`
+        : imgPrompt;
+
+      // 传完整 references，由服务端按提示词中的「图N / @图N」下标挑选附件；
+      // 若前端先 filter 再传，会导致「图2」对应下标 1 在长度为 1 的数组中越界，参考图永远挂不上。
 
       const res = await fetch('/api/generate-image', {
         method: 'POST',
@@ -230,7 +231,7 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
           prompt: finalPrompt,
           image_size: shot.image_size,
           aspect_ratio: shot.aspect_ratio,
-          references: filteredReferences
+          references,
         }),
       });
 
@@ -242,6 +243,10 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
 
       updateStoryboardImage(shot.shot_number, data.url);
       setGenerationProgress(100);
+      addNotice(`分镜 ${shot.shot_number}：生图完成（点击前往）`, 'success', {
+        type: 'open-shot',
+        shotNumber: shot.shot_number,
+      });
     } catch (err) {
       console.error('Image generation error:', err);
       setError(err instanceof Error ? err.message : '生成失败');
@@ -306,6 +311,13 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
       });
       const data = await parseApiResponse(res);
       if (!res.ok) throw new Error(data.error || `编辑失败 (${res.status})`);
+      if (!data?.url) {
+        throw new Error(
+          typeof data?.error === 'string' && data.error
+            ? data.error
+            : '编辑完成但未返回图片地址（请确认 .env 中 API 与模型权限，或查看服务端日志）',
+        );
+      }
       updateStoryboardImage(shot.shot_number, data.url);
       setEditResultImage(data.url);
       setEditHistory((prev) => [
@@ -313,6 +325,10 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
         ...prev.filter((h) => h.url !== data.url),
       ]);
       setEditProgress(100);
+      addNotice(`分镜 ${shot.shot_number}：编辑完成（点击前往）`, 'success', {
+        type: 'open-shot',
+        shotNumber: shot.shot_number,
+      });
       if (progressInterval) clearInterval(progressInterval);
     } catch (err) {
       console.error('Image edit error:', err);
@@ -460,8 +476,9 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
 
             {/* Floating Controls Overlay */}
             {viewMode !== 'edit' && (
-            <div className="absolute bottom-6 left-6 flex items-center gap-3 translate-y-2 opacity-0 group-hover/preview:translate-y-0 group-hover/preview:opacity-100 transition-all duration-500">
+            <div className="absolute bottom-6 left-6 flex items-center gap-3 translate-y-0 opacity-90 sm:translate-y-2 sm:opacity-0 sm:group-hover/preview:translate-y-0 sm:group-hover/preview:opacity-100 transition-all duration-500">
               <button 
+                type="button"
                 onClick={handleGenerateImage}
                 disabled={shot.is_loading_image}
                 className="flex items-center gap-2 px-4 py-2 rounded-full glass-panel border border-white/10 text-[9px] font-label tracking-widest text-on-surface hover:bg-white/10 hover:border-primary/30 transition-all cursor-pointer group/btn"
@@ -473,7 +490,7 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
             )}
 
             {viewMode !== 'edit' && (
-            <div className="absolute top-6 right-6 flex gap-2 opacity-0 group-hover/preview:opacity-100 transition-opacity duration-500">
+            <div className="absolute top-6 right-6 flex gap-2 opacity-90 sm:opacity-0 sm:group-hover/preview:opacity-100 transition-opacity duration-500">
               <button
                 onClick={() => {
                   setViewMode('edit');
@@ -580,14 +597,14 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
               </button>
             </div>
 
+            {error && (
+              <div className="mx-1 px-3 py-2.5 rounded-2xl bg-red-500/10 outline outline-[0.5px] outline-red-500/20 text-red-200 text-xs leading-relaxed">
+                {error}
+              </div>
+            )}
+
             {viewMode === 'edit' && (
               <div className="p-4 bg-surface-container-low rounded-[0.8rem] space-y-3">
-                {error && (
-                  <div className="px-3 py-2 rounded-2xl bg-red-500/10 outline outline-[0.5px] outline-red-500/20 text-red-200 text-xs">
-                    {error}
-                  </div>
-                )}
-
                 {isEditingImage && (
                   <div className="w-full rounded-2xl bg-white/[0.03] outline outline-[0.5px] outline-white/10 p-3">
                     <div className="flex items-center justify-between mb-2">

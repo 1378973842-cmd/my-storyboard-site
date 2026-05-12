@@ -42,8 +42,10 @@ import { ImageEditorModal } from './components/ImageEditorModal';
 import { StandaloneImageEditorPage } from './components/StandaloneImageEditorPage';
 import { NineGridPage } from './components/NineGridPage';
 import { ZoomableLightboxImage } from './components/ZoomableLightboxImage';
+import { GlobalNoticeCenter } from './components/GlobalNoticeCenter';
 import { Folder, Save } from 'lucide-react';
 import { parseApiResponse } from './lib/http';
+import { SystemNotice } from './types';
 
 const ReferenceItem = ({ 
   asset, 
@@ -250,6 +252,35 @@ export default function App() {
   const openImageEditor = useStore((s) => s.openImageEditor);
   const updateGlobalSceneImage = useStore((s) => s.updateGlobalSceneImage);
 
+  const jumpByNotice = (notice: SystemNotice) => {
+    const action = notice.action;
+    if (!action) return;
+    if (action.type === 'open-editor') {
+      setShowCoverPage(false);
+      setShowImageEditorPage(true);
+      setImageEditorKeepAlive(true);
+      setShowNineGridPage(false);
+      return;
+    }
+    if (action.type === 'open-nine-grid') {
+      setShowCoverPage(false);
+      setShowNineGridPage(true);
+      setNineGridKeepAlive(true);
+      setShowImageEditorPage(false);
+      return;
+    }
+    if (action.type === 'open-shot') {
+      setShowCoverPage(false);
+      setShowImageEditorPage(false);
+      setShowNineGridPage(false);
+      setSelectedShotNumber(action.shotNumber);
+      return;
+    }
+    setShowCoverPage(false);
+    setShowImageEditorPage(false);
+    setShowNineGridPage(false);
+  };
+
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadType, setUploadType] = useState<'character' | 'scene'>('character');
@@ -381,25 +412,7 @@ export default function App() {
         .replace(/[\x00-\x1F\x7F]/g, '')
         .trim();
       
-      // 识别提示词中提到的参考图编号 (支持 图1, 图 1, @资产1, @1 等格式)
-      const mentionedRefIndices = new Set<number>();
-      const matches = prompt.match(/[图@](?:资产)?\s*(\d+)/g);
-      if (matches) {
-        matches.forEach(match => {
-          const numMatch = match.match(/\d+/);
-          if (numMatch) {
-            const num = parseInt(numMatch[0]);
-            if (!isNaN(num) && num > 0 && num <= references.length) {
-              mentionedRefIndices.add(num - 1);
-            }
-          }
-        });
-      }
-      
-      // 如果提示词中没有提到任何参考图，则默认发送所有参考图
-      const filteredReferences = mentionedRefIndices.size > 0 
-        ? references.filter((_, idx) => mentionedRefIndices.has(idx))
-        : references;
+      // 传完整 references：服务端按提示词中的图N 下标挂载参考图；前端预过滤会破坏「图2」与数组下标对齐
 
       // 如果是 Pixar 画风，且提示词中没有包含该风格，则自动增强提示词
       const pixarPrefix = "迪士尼皮克斯 3D 风格，8k 分辨率，极致细节，电影感照明，虚幻引擎 5 渲染质感，电影级调色。";
@@ -414,7 +427,7 @@ export default function App() {
           prompt: finalPrompt,
           image_size: sceneImageSize,
           aspect_ratio: sceneAspectRatio,
-          references: filteredReferences
+          references,
         })
       });
       const result = await parseApiResponse(res);
@@ -587,12 +600,24 @@ export default function App() {
 
   return (
     <>
+      <GlobalNoticeCenter onNoticeClick={jumpByNotice} />
       {/* Keep editor mounted after first open (cover / main studio), so draft persists */}
       {(showImageEditorPage || imageEditorKeepAlive) && (
         <div hidden={showCoverPage || !showImageEditorPage}>
           <StandaloneImageEditorPage
             onBack={() => {
               setShowCoverPage(true);
+            }}
+            onOpenStoryboard={() => {
+              setShowCoverPage(false);
+              setShowImageEditorPage(false);
+              setShowNineGridPage(false);
+            }}
+            onOpenNineGrid={() => {
+              setShowCoverPage(false);
+              setShowNineGridPage(true);
+              setNineGridKeepAlive(true);
+              setShowImageEditorPage(false);
             }}
           />
         </div>
@@ -604,6 +629,17 @@ export default function App() {
           <NineGridPage
             onBack={() => {
               setShowCoverPage(true);
+            }}
+            onOpenStoryboard={() => {
+              setShowCoverPage(false);
+              setShowImageEditorPage(false);
+              setShowNineGridPage(false);
+            }}
+            onOpenImageEditor={() => {
+              setShowCoverPage(false);
+              setShowImageEditorPage(true);
+              setImageEditorKeepAlive(true);
+              setShowNineGridPage(false);
             }}
           />
         </div>
@@ -1238,6 +1274,39 @@ export default function App() {
                       </div>
                     </div>
 
+                    <div className="inline-flex items-center gap-1.5 rounded-full bg-surface-container-high/45 p-1.5 outline outline-[0.5px] outline-white/10">
+                      <button
+                        type="button"
+                        className="px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase segmented-active-bg segmented-active-text shadow-[0_10px_20px_-12px_rgba(0,0,0,0.45)] cursor-default"
+                      >
+                        Storyboard
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCoverPage(false);
+                          setShowImageEditorPage(true);
+                          setImageEditorKeepAlive(true);
+                          setShowNineGridPage(false);
+                        }}
+                        className="px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase text-on-surface/70 hover:text-on-surface transition-colors cursor-pointer"
+                      >
+                        图片编辑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCoverPage(false);
+                          setShowNineGridPage(true);
+                          setNineGridKeepAlive(true);
+                          setShowImageEditorPage(false);
+                        }}
+                        className="px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase text-on-surface/70 hover:text-on-surface transition-colors cursor-pointer"
+                      >
+                        九宫格
+                      </button>
+                    </div>
+
                     <div className="flex items-center bg-surface-container-low rounded-full p-1">
                       {[
                         { id: 'list', label: 'EDITOR_VIEW' },
@@ -1288,7 +1357,7 @@ export default function App() {
                 </div>
               ) : viewMode === 'list' ? (
                 <div className="space-y-8">
-                  {data?.storyboards.map((shot) => (
+                  {(data?.storyboards ?? []).map((shot) => (
                     <StoryboardCard 
                       key={shot.shot_number} 
                       shot={shot} 

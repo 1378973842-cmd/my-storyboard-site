@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
-import { Copy, Check, Camera, Loader2, X, Plus, Download, Maximize2, ArrowLeft } from 'lucide-react';
+import { Copy, Check, Camera, Loader2, X, Plus, Download, Maximize2, ArrowLeft, ImageDown, ClipboardCopy } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { parseApiResponse } from '../lib/http';
 import { cn, uniqueRefItemId } from '../lib/utils';
@@ -11,8 +11,36 @@ import { ReferenceImageLightbox } from './ReferenceImageLightbox';
 import { ZoomableLightboxImage } from './ZoomableLightboxImage';
 
 type EditRef = { id: string; url: string };
-type EditHistoryItem = { url: string; prompt: string };
-type UnifiedHistoryItem = { url: string; mode: 'edit' | 'generate' | 'source' };
+type EditRunMode = 'edit' | 'edit_gpt2' | 'generate';
+type EditHistoryItem = { url: string; prompt: string; refs?: string[]; mode: 'edit' | 'edit_gpt2' | 'generate' };
+type UnifiedHistoryItem = { url: string; mode: EditRunMode | 'source' };
+type ContextMenuState = {
+  open: boolean;
+  x: number;
+  y: number;
+  url: string | null;
+  mode: EditRunMode | 'source';
+};
+
+type EditSizeOption =
+  | '1024x1024'
+  | '1536x1024'
+  | '1024x1536'
+  | '2048x2048'
+  | '2048x1152'
+  | '3840x2160'
+  | '2160x3840';
+const EDIT_SIZE_OPTIONS: EditSizeOption[] = ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2048x1152', '3840x2160', '2160x3840'];
+
+const GPT_SIZE_RATIO_LABELS: Record<EditSizeOption, string> = {
+  '1024x1024': '1:1 (1K)',
+  '1536x1024': '3:2 (1.5K 横向)',
+  '1024x1536': '2:3 (1.5K 竖向)',
+  '2048x2048': '1:1 (2K)',
+  '2048x1152': '16:9 (2K 横向)',
+  '3840x2160': '16:9 (4K 横向)',
+  '2160x3840': '9:16 (4K 竖向)',
+};
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
@@ -27,10 +55,13 @@ function readFileAsDataUrl(file: File): Promise<string> {
 
 type Props = {
   onBack: () => void;
+  onOpenStoryboard: () => void;
+  onOpenNineGrid: () => void;
 };
 
-export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
+export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpenNineGrid }) => {
   const { data, references } = useStore();
+  const addNotice = useStore((s) => s.addNotice);
 
   const [isHoveringImage, setIsHoveringImage] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +70,7 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
 
   const [editPrompt, setEditPrompt] = useState('');
   const [editImageSize, setEditImageSize] = useState<ImageSize>('2K');
+  const [gptEditSize, setGptEditSize] = useState<EditSizeOption>('1536x1024');
   const [editAspectRatio, setEditAspectRatio] = useState<AspectRatio>('16:9');
 
   const [editResultImageEdit, setEditResultImageEdit] = useState<string | null>(null);
@@ -50,11 +82,18 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
 
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
-  const [runMode, setRunMode] = useState<'edit' | 'generate'>('edit');
-
-  const editResultImage = runMode === 'edit' ? editResultImageEdit : editResultImageGenerate;
-  const editRefs = runMode === 'edit' ? editRefsEdit : editRefsGenerate;
-  const editHistory = runMode === 'edit' ? editHistoryEdit : editHistoryGenerate;
+  const [runMode, setRunMode] = useState<EditRunMode>('edit');
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>({
+    open: false,
+    x: 0,
+    y: 0,
+    url: null,
+    mode: 'source',
+  });
+  const isEditLikeMode = runMode === 'edit' || runMode === 'edit_gpt2';
+  const editResultImage = runMode === 'generate' ? editResultImageGenerate : editResultImageEdit;
+  const editRefs = runMode === 'generate' ? editRefsGenerate : editRefsEdit;
+  const editHistory = runMode === 'generate' ? editHistoryGenerate : editHistoryEdit;
   const allModeHistory = [...editHistoryEdit, ...editHistoryGenerate];
 
   const editTargetInputRef = useRef<HTMLInputElement>(null);
@@ -69,6 +108,15 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [imagePreviewOpen]);
+
+  useEffect(() => {
+    if (!contextMenu.open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu((s) => ({ ...s, open: false }));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [contextMenu.open]);
 
   const downloadImageUrl = async (url: string, baseName = 'image_edit') => {
     try {
@@ -85,6 +133,27 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
       window.URL.revokeObjectURL(blobUrl);
     } catch {
       setError('下载失败，请稍后重试');
+    }
+  };
+
+  const copyImageToClipboard = async (url: string) => {
+    try {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      // Some browsers block image clipboard without secure context; fallback to text copy.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ClipboardItemCtor = (window as any).ClipboardItem as any;
+      if (ClipboardItemCtor && navigator.clipboard?.write) {
+        await navigator.clipboard.write([new ClipboardItemCtor({ [blob.type || 'image/png']: blob })]);
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+    } catch {
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        setError('复制失败（浏览器权限限制）');
+      }
     }
   };
 
@@ -112,11 +181,24 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
     return map;
   }, [data]);
 
+  const urlToHistoryRefs = useMemo(() => {
+    const map = new Map<string, { mode: EditRunMode; refs: string[] }>();
+    editHistoryEdit.forEach((h) => {
+      if (!h.url || !h.refs?.length) return;
+      map.set(h.url, { mode: h.mode, refs: h.refs });
+    });
+    editHistoryGenerate.forEach((h) => {
+      if (!h.url || !h.refs?.length) return;
+      map.set(h.url, { mode: 'generate', refs: h.refs });
+    });
+    return map;
+  }, [editHistoryEdit, editHistoryGenerate]);
+
   const unifiedHistory = useMemo(() => {
     const items: UnifiedHistoryItem[] = [];
 
     // Edited results
-    items.push(...editHistoryEdit.map((h) => ({ url: h.url, mode: 'edit' as const })));
+    items.push(...editHistoryEdit.map((h) => ({ url: h.url, mode: h.mode })));
     items.push(...editHistoryGenerate.map((h) => ({ url: h.url, mode: 'generate' as const })));
 
     // Generated images from project
@@ -139,8 +221,7 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
 
     const seen = new Set<string>();
     return items
-      .filter((item) => item.url && !seen.has(item.url) && (seen.add(item.url), true))
-      .slice(0, 24);
+      .filter((item) => item.url && !seen.has(item.url) && (seen.add(item.url), true));
   }, [data, editHistoryEdit, editHistoryGenerate, references]);
 
   const resolvePromptForUrl = (url?: string | null) => {
@@ -162,10 +243,10 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
     if (imgs.length === 0) return;
 
     const urls = await Promise.all(imgs.map(readFileAsDataUrl));
-    if (runMode === 'edit') setEditResultImageEdit(null);
-    else setEditResultImageGenerate(null);
+    if (runMode === 'generate') setEditResultImageGenerate(null);
+    else setEditResultImageEdit(null);
 
-    if (runMode === 'edit') {
+    if (runMode !== 'generate') {
       setEditRefsEdit((prev) => [
         ...prev,
         ...urls.map((u) => ({
@@ -190,7 +271,7 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
       setError('请先输入修改描述词（prompt）');
       return;
     }
-    if (runMode === 'edit' && editRefsEdit.length === 0) {
+    if (isEditLikeMode && editRefsEdit.length === 0) {
       setError('编辑模式下请至少上传一张图片（可多张；图1、图2…仅为顺序，关系由你在提示词里说明）');
       return;
     }
@@ -209,21 +290,30 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
         });
       }, 350);
 
-      const res = await fetch(runMode === 'edit' ? '/api/edit-image' : '/api/generate-image', {
+      const res = await fetch(runMode === 'generate' ? '/api/generate-image' : '/api/edit-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
-          runMode === 'edit'
+          runMode === 'generate'
+            ? {
+                prompt: editPrompt,
+                references: editRefsGenerate.map((r) => ({ url: r.url })),
+                image_size: editImageSize,
+                aspect_ratio: editAspectRatio,
+              }
+            : runMode === 'edit_gpt2'
             ? {
                 prompt: editPrompt,
                 images: editRefsEdit.map((r) => r.url),
-                image_size: editImageSize,
+                image_size: gptEditSize,
+                model: 'gpt-image-2',
+                response_format: 'b64_json',
                 aspect_ratio: editAspectRatio,
               }
             : {
                 prompt: editPrompt,
-                references: editRefsGenerate.map((r) => ({ url: r.url })),
                 image_size: editImageSize,
+                images: editRefsEdit.map((r) => r.url),
                 aspect_ratio: editAspectRatio,
               },
         ),
@@ -246,13 +336,54 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
   };
 
   const updateOnSuccess = (url: string) => {
-    if (runMode === 'edit') {
+    if (runMode !== 'generate') {
       setEditResultImageEdit(url);
-      setEditHistoryEdit((prev) => [{ url, prompt: editPrompt }, ...prev.filter((h) => h.url !== url)]);
+      setEditHistoryEdit((prev) => [
+        {
+          url,
+          prompt: editPrompt,
+          refs: editRefsEdit.map((r) => r.url).filter(Boolean),
+          mode: runMode === 'edit_gpt2' ? 'edit_gpt2' : 'edit',
+        },
+        ...prev.filter((h) => h.url !== url),
+      ]);
+      addNotice(runMode === 'edit_gpt2' ? 'GPT 编辑模式：图片生成成功（点击前往）' : '编辑模式：图片生成成功（点击前往）', 'success', { type: 'open-editor' });
       return;
     }
     setEditResultImageGenerate(url);
-    setEditHistoryGenerate((prev) => [{ url, prompt: editPrompt }, ...prev.filter((h) => h.url !== url)]);
+    setEditHistoryGenerate((prev) => [
+      { url, prompt: editPrompt, refs: editRefsGenerate.map((r) => r.url).filter(Boolean), mode: 'generate' },
+      ...prev.filter((h) => h.url !== url),
+    ]);
+    addNotice('生图模式：图片生成成功（点击前往）', 'success', { type: 'open-editor' });
+  };
+
+  const openContextMenu = (e: React.MouseEvent, url: string | null, mode: EditRunMode | 'source') => {
+    e.preventDefault();
+    if (!url) return;
+    setContextMenu({
+      open: true,
+      x: Math.min(window.innerWidth - 260, Math.max(12, e.clientX)),
+      y: Math.min(window.innerHeight - 210, Math.max(12, e.clientY)),
+      url,
+      mode,
+    });
+  };
+
+  const applyHistoryRefs = (url: string) => {
+    const hit = urlToHistoryRefs.get(url);
+    if (!hit?.refs?.length) {
+      setError('该历史图片没有记录可复用的参考图');
+      return;
+    }
+    setError(null);
+    setRunMode(hit.mode);
+    const refs = hit.refs
+      .filter(Boolean)
+      .slice(0, 12)
+      .map((u) => ({ id: uniqueRefItemId('ref'), url: u }));
+    if (hit.mode === 'generate') setEditRefsGenerate(refs);
+    else setEditRefsEdit(refs);
   };
 
   const handleUnifiedDrop = async (e: React.DragEvent) => {
@@ -267,10 +398,10 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
     const url = e.dataTransfer.getData('text/plain');
     if (!url) return;
 
-    if (runMode === 'edit') setEditResultImageEdit(null);
-    else setEditResultImageGenerate(null);
+    if (runMode === 'generate') setEditResultImageGenerate(null);
+    else setEditResultImageEdit(null);
 
-    if (runMode === 'edit') {
+    if (runMode !== 'generate') {
       setEditRefsEdit((prev) => [...prev, { id: uniqueRefItemId('ref'), url }]);
       return;
     }
@@ -301,6 +432,28 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
               <ArrowLeft className="w-4 h-4 opacity-65 group-hover/bak:-translate-x-0.5 transition-transform duration-300" />
               返回起始页
             </button>
+            <div className="inline-flex items-center gap-1.5 rounded-full bg-surface-container-high/45 p-1.5 outline outline-[0.5px] outline-white/10">
+              <button
+                type="button"
+                onClick={onOpenStoryboard}
+                className="px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase text-on-surface/70 hover:text-on-surface transition-colors cursor-pointer"
+              >
+                Storyboard
+              </button>
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase segmented-active-bg segmented-active-text shadow-[0_10px_20px_-12px_rgba(0,0,0,0.45)] cursor-default"
+              >
+                图片编辑
+              </button>
+              <button
+                type="button"
+                onClick={onOpenNineGrid}
+                className="px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase text-on-surface/70 hover:text-on-surface transition-colors cursor-pointer"
+              >
+                九宫格
+              </button>
+            </div>
             <div>
               <h1 className="font-headline text-2xl sm:text-3xl md:text-[2.15rem] tracking-[-0.02em] text-on-surface italic leading-tight">
                 Premium AI Image Editor
@@ -329,6 +482,7 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
               className="relative min-h-[280px] h-[min(75vh,720px)] max-h-[min(75vh,720px)] ai-editor-canvas group/preview overflow-hidden flex items-center justify-center rounded-[1.15rem] p-3 shadow-[inset_0_0_80px_rgba(0,0,0,0.35)]"
               onMouseEnter={() => setIsHoveringImage(true)}
               onMouseLeave={() => setIsHoveringImage(false)}
+              onContextMenu={(e) => openContextMenu(e, editResultImage, runMode)}
             >
               {editResultImage ? (
                 <>
@@ -500,6 +654,18 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
                   </button>
                   <button
                     type="button"
+                    onClick={() => setRunMode('edit_gpt2')}
+                    className={cn(
+                      'px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase transition-all cursor-pointer',
+                      runMode === 'edit_gpt2'
+                        ? 'segmented-active-bg segmented-active-text shadow-[0_10px_20px_-12px_rgba(0,0,0,0.45)]'
+                        : 'text-on-surface/45 hover:text-on-surface/75',
+                    )}
+                  >
+                    GPT编辑
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => {
                       setRunMode('generate');
                     }}
@@ -520,7 +686,7 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
                   <span className="h-px flex-1 mb-1 bg-gradient-to-r from-white/14 to-transparent" />
                 </div>
                 <p className="text-[10px] text-on-surface/45 leading-relaxed -mt-1">
-                  {runMode === 'edit'
+                  {isEditLikeMode
                     ? '从左到右依次为图1、图2…（仅表示顺序）。谁在提示词里是「要改的」、谁是「参考」，由你自己写清楚，例如「参考图1修改图2」。支持拖拽排序与拖入历史。'
                     : '从左到右为图1、图2…（可为空，仅凭 prompt 生图）。支持拖拽排序。'}
                 </p>
@@ -535,7 +701,7 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
                       as="div"
                       axis="x"
                       values={editRefs}
-                      onReorder={runMode === 'edit' ? setEditRefsEdit : setEditRefsGenerate}
+                      onReorder={runMode === 'generate' ? setEditRefsGenerate : setEditRefsEdit}
                       className="flex gap-2 flex-none shrink-0"
                     >
                       {editRefs.map((ref, idx) => (
@@ -558,7 +724,7 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
                             onClick={(e) => {
                               e.stopPropagation();
                               const id = ref.id;
-                              if (runMode === 'edit') {
+                              if (runMode !== 'generate') {
                                 setEditRefsEdit((prev) => prev.filter((x) => x.id !== id));
                               } else {
                                 setEditRefsGenerate((prev) => prev.filter((x) => x.id !== id));
@@ -586,9 +752,9 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
 
                   {editRefs.length === 0 && (
                     <div className="h-20 flex flex-col items-center justify-center gap-1 text-on-surface/40 text-[10px] font-label uppercase tracking-[0.2em]">
-                      <span>{runMode === 'edit' ? '拖放图片到此处（从左到右为图1、图2…）' : '可直接开始生图（可选参考图）'}</span>
+                      <span>{isEditLikeMode ? '拖放图片到此处（从左到右为图1、图2…）' : '可直接开始生图（可选参考图）'}</span>
                       <span className="text-[9px] normal-case tracking-normal text-on-surface/30">
-                        {runMode === 'edit' ? '或点击右侧 +' : '也可先上传参考图再生成'}
+                        {isEditLikeMode ? '或点击右侧 +' : '也可先上传参考图再生成'}
                       </span>
                     </div>
                   )}
@@ -619,26 +785,40 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
 
               <div className="flex flex-wrap items-center gap-3 mt-4">
                 <select
-                  value={editImageSize}
-                  onChange={(e) => setEditImageSize(e.target.value as ImageSize)}
+                  value={runMode === 'edit_gpt2' ? gptEditSize : editImageSize}
+                  onChange={(e) => {
+                    if (runMode === 'edit_gpt2') setGptEditSize(e.target.value as EditSizeOption);
+                    else setEditImageSize(e.target.value as ImageSize);
+                  }}
                   className="ai-editor-select text-white text-[10px] font-mono rounded-full px-3.5 py-2 focus:outline-none focus-visible:ring-2 accent-focus-ring cursor-pointer"
                 >
-                  {SIZES.map((s) => (
+                  {(runMode === 'edit_gpt2' ? EDIT_SIZE_OPTIONS : SIZES).map((s) => (
                     <option key={s} value={s}>
                       {s}
                     </option>
                   ))}
                 </select>
                 <select
-                  value={editAspectRatio}
-                  onChange={(e) => setEditAspectRatio(e.target.value as AspectRatio)}
-                  className="ai-editor-select text-white text-[10px] font-mono rounded-full px-3.5 py-2 focus:outline-none focus-visible:ring-2 accent-focus-ring cursor-pointer"
+                  value={runMode === 'edit_gpt2' ? GPT_SIZE_RATIO_LABELS[gptEditSize] : editAspectRatio}
+                  onChange={(e) => {
+                    if (runMode !== 'edit_gpt2') setEditAspectRatio(e.target.value as AspectRatio);
+                  }}
+                  disabled={runMode === 'edit_gpt2'}
+                  className={cn(
+                    'ai-editor-select text-white text-[10px] font-mono rounded-full px-3.5 py-2 focus:outline-none focus-visible:ring-2 accent-focus-ring cursor-pointer',
+                    runMode === 'edit_gpt2' ? 'opacity-85 cursor-default' : '',
+                  )}
+                  title={runMode === 'edit_gpt2' ? '仅用于观察，随 GPT size 自动对应' : undefined}
                 >
-                  {RATIOS.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
+                  {runMode === 'edit_gpt2' ? (
+                    <option value={GPT_SIZE_RATIO_LABELS[gptEditSize]}>{GPT_SIZE_RATIO_LABELS[gptEditSize]}</option>
+                  ) : (
+                    RATIOS.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))
+                  )}
                 </select>
                 <button
                   onClick={handleRunEdit}
@@ -653,10 +833,10 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
                   {isEditingImage ? (
                     <span className="inline-flex items-center gap-2">
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      {runMode === 'edit' ? '编辑中...' : '生图中...'}
+                      {isEditLikeMode ? '编辑中...' : '生图中...'}
                     </span>
                   ) : (
-                    runMode === 'edit' ? '开始编辑' : '开始生图'
+                    isEditLikeMode ? '开始编辑' : '开始生图'
                   )}
                 </button>
               </div>
@@ -671,15 +851,28 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
                   </span>
                 </div>
                 <span className="font-mono text-[9px] text-on-surface/38 tabular-nums shrink-0">
-                  {String(unifiedHistory.length).padStart(2, '0')} / 24
+                  共 {String(unifiedHistory.length).padStart(2, '0')} 张
                 </span>
               </div>
 
               {unifiedHistory.length > 0 ? (
-                <div className="flex gap-2.5 overflow-x-auto custom-scrollbar pb-1">
+                <div
+                  className="flex gap-2.5 overflow-x-auto custom-scrollbar pb-1"
+                  style={{ touchAction: 'pan-x' }}
+                  onWheelCapture={(e) => {
+                    // Lock wheel to horizontal scrolling inside timeline only.
+                    // Capture-phase prevents parent/page vertical scrolling.
+                    const target = e.currentTarget;
+                    const raw = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+                    if (!raw) return;
+                    const step = raw * 0.8; // finer control
+                    e.preventDefault();
+                    e.stopPropagation();
+                    target.scrollLeft += step;
+                  }}
+                >
                   {unifiedHistory.map((item, idx) => {
                     const { url, mode } = item;
-                    const isEdited = mode === 'edit' || mode === 'generate';
                     return (
                       <motion.button
                         key={`${url}_${idx}`}
@@ -690,9 +883,10 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
                           e.dataTransfer.effectAllowed = 'copy';
                         }}
                         onClick={() => {
-                          if (runMode === 'edit') setEditResultImageEdit(url);
-                          else setEditResultImageGenerate(url);
+                          if (runMode === 'generate') setEditResultImageGenerate(url);
+                          else setEditResultImageEdit(url);
                         }}
+                        onContextMenu={(e) => openContextMenu(e, url, mode)}
                         data-theme-preserve="dark"
                         whileHover={{ y: -3, scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
@@ -706,6 +900,8 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
                         title={
                           mode === 'edit'
                             ? `编辑模式历史 ${idx + 1}`
+                            : mode === 'edit_gpt2'
+                              ? `GPT编辑历史 ${idx + 1}`
                             : mode === 'generate'
                               ? `生图模式历史 ${idx + 1}`
                               : `来源历史 ${idx + 1}`
@@ -720,12 +916,14 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
                             'absolute bottom-1 right-1 px-1 py-0.5 rounded-md text-[8px] font-black tracking-widest outline outline-[0.5px]',
                             mode === 'edit'
                               ? 'bg-primary/90 text-black outline-white/25'
+                              : mode === 'edit_gpt2'
+                                ? 'bg-violet-400/90 text-black outline-white/25'
                               : mode === 'generate'
                                 ? 'bg-secondary/90 text-black outline-white/25'
                                 : 'bg-black/72 text-white/85 outline-white/20',
                           )}
                         >
-                          {mode === 'edit' ? 'E' : mode === 'generate' ? 'G' : 'S'}
+                          {mode === 'edit' ? 'E' : mode === 'edit_gpt2' ? 'GPT' : mode === 'generate' ? 'G' : 'S'}
                         </span>
                       </motion.button>
                     );
@@ -745,6 +943,58 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ onBack }) => {
       </motion.div>
 
       <ReferenceImageLightbox url={refThumbPreviewUrl} onClose={() => setRefThumbPreviewUrl(null)} zIndexClass="z-[97]" />
+
+      {contextMenu.open && contextMenu.url && (
+        <div className="fixed inset-0 z-[110]" role="presentation" onMouseDown={() => setContextMenu((s) => ({ ...s, open: false }))}>
+          <div
+            className="pointer-events-auto fixed min-w-[220px] rounded-2xl bg-surface-container-high/70 backdrop-blur-[28px] outline outline-[0.5px] outline-outline-variant/20 shadow-[0_32px_72px_-44px_rgba(0,0,0,0.88)] overflow-hidden"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="w-full px-4 py-3 flex items-center gap-3 text-left text-[12px] text-on-surface/90 hover:bg-white/[0.06] transition-colors cursor-pointer"
+              onClick={() => {
+                setContextMenu((s) => ({ ...s, open: false }));
+                void downloadImageUrl(contextMenu.url!, 'image');
+              }}
+            >
+              <ImageDown className="h-4 w-4 text-on-surface/70" />
+              下载图片
+            </button>
+            <button
+              type="button"
+              className="w-full px-4 py-3 flex items-center gap-3 text-left text-[12px] text-on-surface/90 hover:bg-white/[0.06] transition-colors cursor-pointer"
+              onClick={() => {
+                setContextMenu((s) => ({ ...s, open: false }));
+                void copyImageToClipboard(contextMenu.url!);
+              }}
+            >
+              <ClipboardCopy className="h-4 w-4 text-on-surface/70" />
+              复制图片
+            </button>
+            <button
+              type="button"
+              className={cn(
+                'w-full px-4 py-3 flex items-center gap-3 text-left text-[12px] transition-colors cursor-pointer',
+                urlToHistoryRefs.has(contextMenu.url)
+                  ? 'text-on-surface/90 hover:bg-white/[0.06]'
+                  : 'text-on-surface/35 cursor-not-allowed',
+              )}
+              disabled={!urlToHistoryRefs.has(contextMenu.url)}
+              onClick={() => {
+                const url = contextMenu.url!;
+                setContextMenu((s) => ({ ...s, open: false }));
+                applyHistoryRefs(url);
+              }}
+              title={urlToHistoryRefs.has(contextMenu.url) ? '使用该历史图当时的参考图' : '该图片没有记录参考图（仅编辑页历史支持）'}
+            >
+              <Plus className="h-4 w-4" />
+              用作参考图
+            </button>
+          </div>
+        </div>
+      )}
 
       {imagePreviewOpen && editResultImage && (
         <motion.div

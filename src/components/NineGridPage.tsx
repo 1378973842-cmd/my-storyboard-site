@@ -3,6 +3,7 @@ import { motion, Reorder } from 'motion/react';
 import { Loader2, Plus, X, Grid3X3, Download, Scissors, Sparkles, ArrowLeft } from 'lucide-react';
 import { cn, uniqueRefItemId } from '../lib/utils';
 import { parseApiResponse } from '../lib/http';
+import { useStore } from '../store/useStore';
 import { useRefThumbPreview } from '../hooks/useRefThumbPreview';
 import { ReferenceImageLightbox } from './ReferenceImageLightbox';
 import { ZoomableLightboxImage } from './ZoomableLightboxImage';
@@ -28,6 +29,8 @@ function readFileAsDataUrl(file: File): Promise<string> {
 
 type Props = {
   onBack: () => void;
+  onOpenStoryboard: () => void;
+  onOpenImageEditor: () => void;
 };
 
 const GRID_PREFIX =
@@ -36,12 +39,14 @@ const GRID_PREFIX =
   `九格必须无任何分隔线、无边框、无留白、无黑边、无白边、无拼接缝；` +
   `九格彼此紧贴，像一张完整画布被分为九个镜头。` +
   `以参考图为主体，保持环境空间布局一致、人物与物品相对位置合理，并通过不同角度推进剧情连贯发展。` +
-  `全图要求4K极致分辨率、超高清细节、电影级质感、风格高度一致。` +
+  `全图要求高分辨率、超高清细节、电影级质感、风格高度一致。` +
   `负向约束：禁止任何文字元素、禁止字幕、禁止对白台词字卡、禁止标题字、禁止 logo、禁止水印、禁止网格线、禁止边框、禁止任何装饰性分割元素。` +
-  `如果模型倾向添加文字，必须改为纯画面表达，画面中不得出现可读字符。` +
-  ` "image_generation_model": "gemini-3.1-flash-image-preview-4k", "grid_layout": "3x3", "grid_aspect_ratio": "16:9"。`;
+  `如果模型倾向添加文字，必须改为纯画面表达，画面中不得出现可读字符。`;
 
-export const NineGridPage: React.FC<Props> = ({ onBack }) => {
+type NineGridImageModel = 'nano-banana-pro-4k' | 'gpt-image-2';
+
+export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpenImageEditor }) => {
+  const addNotice = useStore((s) => s.addNotice);
   const fileRef = useRef<HTMLInputElement>(null);
   const [story, setStory] = useState('');
   const [refs, setRefs] = useState<RefItem[]>([]);
@@ -56,9 +61,10 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
   const [isCropping, setIsCropping] = useState(false);
   const [croppedUrls, setCroppedUrls] = useState<string[]>([]);
   const [cropError, setCropError] = useState<string | null>(null);
-  const [cellEditLoadingIdx, setCellEditLoadingIdx] = useState<number | null>(null);
+  const [cellEditingSet, setCellEditingSet] = useState<Set<number>>(new Set());
   const [history, setHistory] = useState<GridHistoryItem[]>([]);
   const [preview, setPreview] = useState<{ type: 'result'; url?: string } | { type: 'crop'; idx: number } | null>(null);
+  const [imageModel, setImageModel] = useState<NineGridImageModel>('nano-banana-pro-4k');
 
   const { previewUrl: refThumbPreviewUrl, setPreviewUrl: setRefThumbPreviewUrl, handlersFor: refThumbHandlers } =
     useRefThumbPreview();
@@ -66,11 +72,25 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
   useEffect(() => {
     if (!preview) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPreview(null);
+      if (e.key === 'Escape') {
+        setPreview(null);
+        return;
+      }
+      if (preview.type !== 'crop' || croppedUrls.length === 0) return;
+      const prevKeys = new Set(['ArrowLeft', 'ArrowUp']);
+      const nextKeys = new Set(['ArrowRight', 'ArrowDown']);
+      if (!prevKeys.has(e.key) && !nextKeys.has(e.key)) return;
+      e.preventDefault();
+      const delta = prevKeys.has(e.key) ? -1 : 1;
+      const max = croppedUrls.length - 1;
+      const next = Math.min(max, Math.max(0, preview.idx + delta));
+      if (next !== preview.idx) {
+        setPreview({ type: 'crop', idx: next });
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [preview]);
+  }, [preview, croppedUrls]);
 
   const canBuildPrompts = story.trim().length >= 10 && refs.length >= 1 && !isRunning;
   const canGenerateImage =
@@ -78,6 +98,12 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
     shotsPreview.length === 9 &&
     shotsPreview.every((s) => s.prompt.trim().length >= 12) &&
     !isRunning;
+
+  const getFallbackSlicePosition = (idx: number) => {
+    const row = Math.floor(idx / 3);
+    const col = idx % 3;
+    return { row, col };
+  };
 
   const hint = useMemo(() => {
     if (refs.length === 0) return '上传参考图并命名（按顺序：图1/图2/...）。';
@@ -191,6 +217,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
         body: JSON.stringify({
           mode: 'image_only',
           imagePrompt: mergedPrompt,
+          imageModel,
           references: refs.map((r, idx) => ({
             url: r.url,
             name: (r.name || '').trim() || `角色${String(idx + 1).padStart(2, '0')}`,
@@ -202,6 +229,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
       if (!imageRes.ok) throw new Error(imageData.error || `九宫格生图失败 (${imageRes.status})`);
       if (!imageData?.url) throw new Error('未返回图片 URL');
       setResultUrl(imageData.url);
+      addNotice('九宫格：主图生成成功（点击前往）', 'success', { type: 'open-nine-grid' });
       try {
         const autoCropped = await splitToNine(imageData.url, 0, 0);
         setCroppedUrls(autoCropped);
@@ -219,6 +247,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
         setCropError(null);
       } catch {
         // keep manual crop available when upstream image url disallows canvas read
+        setCropError('自动裁切受跨域限制，已切换到预览切片模式（仍可放大查看主图）');
         setHistory((prev) => [
           {
             id: uniqueRefItemId('hist'),
@@ -443,7 +472,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
     setCroppedUrls([]);
     setCropError(null);
     setError(null);
-    setCellEditLoadingIdx(null);
+    setCellEditingSet(new Set());
     setProgress(0);
     setPhase('idle');
   };
@@ -456,18 +485,20 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
   };
 
   const runCellEdit = async (idx: number) => {
-    const target = croppedUrls[idx];
+    const target = croppedUrls[idx] || resultUrl || '';
     const prompt = shotsPreview[idx]?.prompt?.trim() || '';
-    if (!target || !prompt || cellEditLoadingIdx !== null) return;
+    if (!target || !prompt || cellEditingSet.has(idx)) return;
 
     try {
-      setCellEditLoadingIdx(idx);
+      setCellEditingSet((prev) => new Set(prev).add(idx));
       setError(null);
       const res = await fetch('/api/edit-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt,
+          prompt: croppedUrls[idx]
+            ? prompt
+            : `只编辑九宫格第${idx + 1}格对应内容，其余8格保持不变。${prompt}`,
           images: [target, ...refs.map((r) => r.url)],
           image_size: '2K',
           aspect_ratio: '16:9',
@@ -478,10 +509,15 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
       if (!data?.url) throw new Error('单格编辑失败：未返回图片 URL');
 
       setCroppedUrls((prev) => prev.map((u, i) => (i === idx ? data.url : u)));
+      addNotice(`九宫格：图${idx + 1}编辑完成（点击前往）`, 'success', { type: 'open-nine-grid' });
     } catch (e) {
       setError(e instanceof Error ? e.message : '单格编辑失败');
     } finally {
-      setCellEditLoadingIdx(null);
+      setCellEditingSet((prev) => {
+        const next = new Set(prev);
+        next.delete(idx);
+        return next;
+      });
     }
   };
 
@@ -509,6 +545,28 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
               <ArrowLeft className="w-4 h-4 opacity-65 group-hover/bak:-translate-x-0.5 transition-transform duration-300" />
               返回起始页
             </button>
+            <div className="inline-flex items-center gap-1.5 rounded-full bg-surface-container-high/45 p-1.5 outline outline-[0.5px] outline-white/10">
+              <button
+                type="button"
+                onClick={onOpenStoryboard}
+                className="px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase text-on-surface/70 hover:text-on-surface transition-colors cursor-pointer"
+              >
+                Storyboard
+              </button>
+              <button
+                type="button"
+                onClick={onOpenImageEditor}
+                className="px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase text-on-surface/70 hover:text-on-surface transition-colors cursor-pointer"
+              >
+                图片编辑
+              </button>
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase segmented-active-bg segmented-active-text shadow-[0_10px_20px_-12px_rgba(0,0,0,0.45)] cursor-default"
+              >
+                九宫格
+              </button>
+            </div>
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-surface-container-high/80 outline outline-[0.5px] outline-white/10 shadow-[0_20px_40px_-24px_rgba(0,0,0,0.65)]">
                 <Grid3X3 className="w-5 h-5 accent-focus" />
@@ -599,18 +657,18 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
                         <button
                           type="button"
                           onClick={() => runCellEdit(idx)}
-                          disabled={!croppedUrls[idx] || cellEditLoadingIdx !== null}
+                          disabled={!(croppedUrls[idx] || resultUrl) || cellEditingSet.has(idx)}
                           className={cn(
                             'px-2 py-1 rounded-full text-[9px] font-black tracking-widest outline outline-[0.5px] transition-all',
-                            cellEditLoadingIdx === idx
+                            cellEditingSet.has(idx)
                               ? 'bg-surface-container-high text-slate-200 outline-white/20 cursor-wait'
-                              : croppedUrls[idx]
+                              : (croppedUrls[idx] || resultUrl)
                                 ? 'accent-focus-bg text-white outline-white/30 hover:opacity-90 cursor-pointer'
                                 : 'bg-surface-container-high text-slate-400 outline-white/10 cursor-not-allowed',
                           )}
-                          title="使用当前提示词编辑该格"
+                          title={croppedUrls[idx] ? '使用当前提示词编辑该格' : '自动裁切失败时，将基于主图对该格进行定向编辑'}
                         >
-                          {cellEditLoadingIdx === idx ? '编辑中' : '编辑'}
+                          {cellEditingSet.has(idx) ? '编辑中' : '编辑'}
                         </button>
                       </div>
                       <button
@@ -628,7 +686,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
                       >
                         {croppedUrls[idx] ? (
                           <div className="relative w-full h-full">
-                            <img src={croppedUrls[idx]} className="w-full h-full object-cover" />
+                            <img src={croppedUrls[idx]} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                             <button
                               type="button"
                               onClick={(e) => {
@@ -640,6 +698,22 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
                             >
                               下载
                             </button>
+                          </div>
+                        ) : resultUrl ? (
+                          <div className="relative h-full w-full overflow-hidden">
+                            <img
+                              src={resultUrl}
+                              referrerPolicy="no-referrer"
+                              className="absolute h-[300%] w-[300%] max-w-none object-cover"
+                              style={{
+                                left: `-${getFallbackSlicePosition(idx).col * 100}%`,
+                                top: `-${getFallbackSlicePosition(idx).row * 100}%`,
+                              }}
+                            />
+                            <div className="absolute inset-0 bg-black/15" />
+                            <div className="absolute bottom-1 right-1 rounded-full bg-black/75 px-2 py-0.5 text-[8px] font-bold tracking-widest text-white">
+                              PREVIEW
+                            </div>
                           </div>
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-[9px] text-slate-500 tracking-widest uppercase">
@@ -857,23 +931,38 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
                 </button>
               </div>
 
-              <button
-                onClick={runImagePhase}
-                disabled={!canGenerateImage}
-                className={cn(
-                  'mt-3 w-full px-4 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-[0.18em] transition-all cursor-pointer flex items-center justify-center gap-2 outline outline-[0.5px] outline-outline-variant/50 shadow-[0_28px_56px_-32px_rgba(255,184,102,0.18)]',
-                  isRunning
-                    ? phase === 'image'
-                      ? 'accent-focus-bg text-white accent-focus-glow opacity-95'
-                      : 'bg-surface-container-low text-slate-300 cursor-not-allowed'
-                    : canGenerateImage
-                      ? 'accent-focus-bg text-white hover:opacity-90 accent-focus-glow'
-                      : 'bg-surface-container-low text-slate-300 cursor-not-allowed',
-                )}
-              >
-                {isRunning && phase === 'image' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Grid3X3 className="w-4 h-4" />}
-                {isRunning && phase === 'image' ? '生图中...' : '生成 9 宫格'}
-              </button>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                <button
+                  onClick={runImagePhase}
+                  disabled={!canGenerateImage}
+                  className={cn(
+                    'w-full sm:flex-1 px-4 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-[0.18em] transition-all cursor-pointer flex items-center justify-center gap-2 outline outline-[0.5px] outline-outline-variant/50 shadow-[0_28px_56px_-32px_rgba(255,184,102,0.18)]',
+                    isRunning
+                      ? phase === 'image'
+                        ? 'accent-focus-bg text-white accent-focus-glow opacity-95'
+                        : 'bg-surface-container-low text-slate-300 cursor-not-allowed'
+                      : canGenerateImage
+                        ? 'accent-focus-bg text-white hover:opacity-90 accent-focus-glow'
+                        : 'bg-surface-container-low text-slate-300 cursor-not-allowed',
+                  )}
+                >
+                  {isRunning && phase === 'image' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Grid3X3 className="w-4 h-4" />}
+                  {isRunning && phase === 'image' ? '生图中...' : '生成 9 宫格'}
+                </button>
+                <select
+                  value={imageModel}
+                  onChange={(e) => setImageModel(e.target.value as NineGridImageModel)}
+                  disabled={isRunning}
+                  className={cn(
+                    'ai-editor-select min-w-[14.5rem] text-white text-[10px] font-mono rounded-2xl px-3.5 py-3 focus:outline-none focus-visible:ring-2 accent-focus-ring cursor-pointer',
+                    isRunning ? 'opacity-65 cursor-not-allowed' : '',
+                  )}
+                  title={imageModel === 'gpt-image-2' ? 'gpt-image-2 固定 size=3840x2160' : 'nano 模型走 IMAGE_GRID_* 配置'}
+                >
+                  <option value="nano-banana-pro-4k">nano-banana-pro-4k（默认）</option>
+                  <option value="gpt-image-2">gpt-image-2（固定 3840x2160）</option>
+                </select>
+              </div>
 
               <p className="mt-4 text-[10px] text-on-surface/38 leading-relaxed">
                 两步走：先「生成提示词」逐格打磨，再「生成 9 宫格」出主图；系统会尝试自动裁切并填入各格。
@@ -897,7 +986,14 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
                         className="relative rounded-xl overflow-hidden outline outline-[0.5px] outline-white/12 hover:outline-secondary/35 transition-shadow cursor-zoom-in shadow-[0_18px_36px_-24px_rgba(0,0,0,0.65)]"
                         title="点击放大查看"
                       >
-                        <img src={h.gridUrl} className="w-full aspect-video object-cover" />
+                        <img
+                          src={h.gridUrl}
+                          referrerPolicy="no-referrer"
+                          className="w-full aspect-video object-cover"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.opacity = '0.08';
+                          }}
+                        />
                         <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded-full bg-black/80 text-white text-[9px] font-black tracking-widest outline outline-[0.5px] outline-white/20">
                           #{history.length - i}
                         </div>
@@ -971,7 +1067,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack }) => {
                 )}
               </motion.div>
               <p className="pointer-events-none shrink-0 pt-2 text-center text-[10px] font-label tracking-[0.14em] text-white/40 uppercase">
-                滚轮缩放 · 中键拖拽 · 点空白或 ✕ 关闭
+                滚轮缩放 · 中键拖拽 · 方向键切图 · 点空白或 ✕ 关闭
               </p>
             </div>
           </div>
