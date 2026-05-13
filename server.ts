@@ -1,11 +1,50 @@
 import { config as loadDotenv } from "dotenv";
-import { existsSync, readFileSync } from "fs";
+import { createHmac, randomUUID, timingSafeEqual } from "crypto";
+import { existsSync, mkdirSync, readFileSync } from "fs";
+import { writeFile } from "fs/promises";
 import express from "express";
 import Database from "better-sqlite3";
 import { Agent, setGlobalDispatcher, FormData } from "undici";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
+
+/** HttpOnly Cookie，与生图接口门禁共用（校验暗号成功后下发） */
+const GATE_COOKIE_NAME = "sb_gate_v1";
+
+function parseCookieHeader(header: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    out[k] = decodeURIComponent(v);
+  }
+  return out;
+}
+
+/** 请求时读取 ACCESS_CODE（需在 loadDotenv 之后调用） */
+function resolvedAccessCode(): string {
+  const v = (process.env.ACCESS_CODE ?? "").trim();
+  return v.length > 0 ? v : "liu888";
+}
+
+function signedGateToken(): string {
+  return createHmac("sha256", `gate|${resolvedAccessCode()}`).update("granted").digest("hex");
+}
+
+function verifyGateCookie(token: string | undefined): boolean {
+  if (!token) return false;
+  const expected = signedGateToken();
+  if (token.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(token, "utf8"), Buffer.from(expected, "utf8"));
+  } catch {
+    return false;
+  }
+}
 
 /** 从当前脚本所在目录向上查找 .env（不依赖 process.cwd，避免从别的目录启动时读不到配置） */
 function loadEnvFromProject(): void {
@@ -90,9 +129,8 @@ function getGenerateImageEnv(): { apiBase: string; apiKey: string } {
   return getGridEnv();
 }
 
-function readPromptFile(relativePath: string): string {
+function readPromptFile(relativePath: string, baseDir: string): string {
   try {
-    const baseDir = path.dirname(fileURLToPath(import.meta.url));
     const full = path.join(baseDir, relativePath);
     return readFileSync(full, "utf8");
   } catch (e) {
@@ -261,37 +299,77 @@ function extractGeneratedImageFromResponse(responseData: any): string | null {
 }
 
 /**
- * 某些网关返回的 url 带临时签名或防盗链，浏览器直接加载会失败（出现 alt 文本）。
- * 这里在服务端尝试把远端图片转成 data URL，前端可稳定展示。
+ * 将 AI 返回的图片（http(s) URL / data URL / 纯 base64）落盘到 public/uploads，
+ * 返回前端可用的站内路径（如 /uploads/xxx.png），并写入 generated_images 表。
  */
-async function stabilizeImageUrlForClient(imageUrl: string): Promise<string> {
+async function persistAiImageToLocalStorage(
+  imageUrl: string,
+  projectRoot: string,
+  db: InstanceType<typeof Database>
+): Promise<string> {
+  const uploadsAbs = path.join(projectRoot, "public", "uploads");
+  mkdirSync(uploadsAbs, { recursive: true });
+
   const input = String(imageUrl || "").trim();
-  if (!input) return input;
-  if (input.startsWith("data:")) return input;
-  if (!/^https?:\/\//i.test(input)) return input;
+  if (!input) throw new Error("空图片内容");
 
-  const maxBytes = Number(process.env.UPSTREAM_IMAGE_PROXY_MAX_BYTES || 10 * 1024 * 1024);
-  const timeoutMs = Number(process.env.UPSTREAM_IMAGE_PROXY_TIMEOUT_MS || 20000);
-
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(new Error(`UPSTREAM_IMAGE_PROXY_TIMEOUT_${timeoutMs}ms`)), timeoutMs);
-  try {
-    const r = await fetch(input, { signal: ctrl.signal });
-    if (!r.ok) return input;
-    const ct = (r.headers.get("content-type") || "").toLowerCase();
-    if (!ct.includes("image/")) return input;
-
-    const arr = await r.arrayBuffer();
-    if (arr.byteLength <= 0 || arr.byteLength > maxBytes) return input;
-
-    const b64 = Buffer.from(arr).toString("base64");
-    const mime = ct.split(";")[0] || "image/png";
-    return `data:${mime};base64,${b64}`;
-  } catch {
-    return input;
-  } finally {
-    clearTimeout(timer);
+  if (input.startsWith("/uploads/")) {
+    const relFile = input.slice("/uploads/".length).replace(/\\/g, "/");
+    if (!relFile || relFile.includes("..")) throw new Error("非法图片路径");
+    const uploadsRoot = path.join(projectRoot, "public", "uploads");
+    const abs = path.join(uploadsRoot, relFile);
+    if (abs.startsWith(uploadsRoot) && existsSync(abs)) return input;
   }
+
+  let buffer: Buffer;
+  let mime = "image/png";
+
+  if (input.startsWith("data:")) {
+    const m = /^data:(image\/[^;]+);base64,(.+)$/is.exec(input);
+    if (!m) throw new Error("无法解析 data URL 图片");
+    mime = m[1];
+    buffer = Buffer.from(m[2].replace(/\s/g, ""), "base64");
+  } else if (/^https?:\/\//i.test(input)) {
+    const maxBytes = Number(process.env.UPSTREAM_IMAGE_PROXY_MAX_BYTES || 10 * 1024 * 1024);
+    const timeoutMs = Number(process.env.UPSTREAM_IMAGE_PROXY_TIMEOUT_MS || 120000);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(new Error(`IMAGE_PERSIST_FETCH_TIMEOUT_${timeoutMs}ms`)), timeoutMs);
+    try {
+      const r = await fetch(input, { signal: ctrl.signal });
+      if (!r.ok) throw new Error(`下载图片失败 (${r.status})`);
+      const ct = (r.headers.get("content-type") || "").toLowerCase();
+      if (ct.includes("image/")) mime = ct.split(";")[0].trim() || mime;
+      const arr = await r.arrayBuffer();
+      if (arr.byteLength <= 0 || arr.byteLength > maxBytes) {
+        throw new Error("图片过大或为空");
+      }
+      buffer = Buffer.from(arr);
+    } finally {
+      clearTimeout(timer);
+    }
+  } else if (/^[a-z0-9+/=\r\n]+$/i.test(input) && input.length > 200) {
+    buffer = Buffer.from(input.replace(/\s/g, ""), "base64");
+  } else {
+    throw new Error("不支持的图片格式（需要 http(s) / data URL / base64）");
+  }
+
+  const ext = guessExtFromMime(mime);
+  const id = randomUUID();
+  const filename = `${id}.${ext}`;
+  const relativeWebPath = `/uploads/${filename}`;
+  const absPath = path.join(uploadsAbs, filename);
+
+  await writeFile(absPath, buffer);
+
+  try {
+    db.prepare(
+      `INSERT INTO generated_images (id, relative_path, source_kind, bytes, mime) VALUES (?, ?, ?, ?, ?)`
+    ).run(id, relativeWebPath, "ai", buffer.length, mime);
+  } catch (e) {
+    console.warn("[persist-image] generated_images insert skipped:", e);
+  }
+
+  return relativeWebPath;
 }
 
 function guessExtFromMime(mime: string): string {
@@ -360,9 +438,15 @@ function resolveGptImage2Size(
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
-  /** 与脚本文件同级（打包后为项目根），避免从其它目录启动时 cwd 错误导致页面/静态资源 404 */
-  const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+  const PORT = Number(process.env.PORT) || 3000;
+  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+  /**
+   * 开发：入口一般在仓库根（.dev-server.mjs），与静态资源、DB 同级。
+   * 生产：入口在 dist-server/server.mjs，静态与数据库仍以仓库根为准；PM2 请设置 cwd 为仓库根，或通过 APP_ROOT 覆盖。
+   */
+  const projectRoot =
+    (process.env.APP_ROOT && String(process.env.APP_ROOT).trim()) ||
+    (process.env.NODE_ENV === "production" ? process.cwd() : scriptDir);
 
   const tp = getThirdPartyEnv();
   if (!tp.apiBase || !tp.apiKey) {
@@ -371,7 +455,14 @@ async function startServer() {
     );
   }
 
-  // Initialize Database
+  mkdirSync(path.join(projectRoot, "public", "uploads"), { recursive: true });
+
+  /**
+   * SQLite 与前端结构对齐说明：
+   * - projects：一条记录 = 一个导演项目；references_json = ReferenceImage[]；
+   *   data_json = GenerationResponse（global_assets.scenes[*].image_url、storyboards[*].image_url / image_history 等）。
+   * - generated_images：每次后端落盘的 AI 生成图元数据（路径与 projects.data_json 中的 /uploads/... 对应）。
+   */
   const db = new Database(path.join(projectRoot, "projects.db"));
   db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
@@ -385,7 +476,18 @@ async function startServer() {
       references_json TEXT,
       data_json TEXT,
       updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
+    );
+
+    CREATE TABLE IF NOT EXISTS generated_images (
+      id TEXT PRIMARY KEY,
+      relative_path TEXT NOT NULL UNIQUE,
+      source_kind TEXT,
+      bytes INTEGER,
+      mime TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_generated_images_created ON generated_images(created_at);
   `);
 
   // Migration: Add context column if it doesn't exist
@@ -397,6 +499,40 @@ async function startServer() {
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  app.use(express.static(path.join(projectRoot, "public")));
+
+  app.get("/api/auth/status", (req, res) => {
+    const cookies = parseCookieHeader(req.headers.cookie);
+    res.json({ ok: verifyGateCookie(cookies[GATE_COOKIE_NAME]) });
+  });
+
+  app.post("/api/auth", (req, res) => {
+    const raw = typeof req.body?.code === "string" ? req.body.code.trim() : "";
+    const expected = resolvedAccessCode();
+    if (!expected) {
+      return res.status(503).json({ error: "服务器未配置 ACCESS_CODE" });
+    }
+    if (raw.length !== expected.length || raw !== expected) {
+      return res.status(401).json({ error: "暗号错误" });
+    }
+    const token = signedGateToken();
+    // 会话 Cookie：关闭浏览器后失效；每次新开站点需重新输入暗号
+    res.setHeader("Set-Cookie", `${GATE_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax`);
+    res.json({ ok: true });
+  });
+
+  function requireImageGate(req: express.Request, res: express.Response, next: express.NextFunction) {
+    // 九宫格「仅生成提示词」不走生图，允许未登录（仍消耗文本 API，可按需改为全程门禁）
+    if (req.method === "POST" && req.originalUrl.split("?")[0] === "/api/generate-9grid") {
+      const mode = (req.body as { mode?: string })?.mode;
+      if (mode === "prompts_only") return next();
+    }
+    const cookies = parseCookieHeader(req.headers.cookie);
+    if (!verifyGateCookie(cookies[GATE_COOKIE_NAME])) {
+      return res.status(401).json({ error: "请先通过暗号校验后再使用生图功能" });
+    }
+    next();
+  }
 
   // Project Management Routes
   app.get("/api/projects", (req, res) => {
@@ -846,7 +982,7 @@ ${pixarInstruction}
   });
 
   // Step 2: Generate Image (Third-party API)
-  app.post("/api/generate-image", async (req, res) => {
+  app.post("/api/generate-image", requireImageGate, async (req, res) => {
     const { prompt, image_size, aspect_ratio, references } = req.body;
     console.log("Received image generation request:", { prompt, image_size, aspect_ratio });
     const { apiBase, apiKey } = getGenerateImageEnv();
@@ -1019,8 +1155,8 @@ ${pixarInstruction}
       const imageUrl = extractGeneratedImageFromResponse(responseData);
 
       if (imageUrl) {
-        const stableUrl = await stabilizeImageUrlForClient(imageUrl);
-        res.json({ url: stableUrl });
+        const localUrl = await persistAiImageToLocalStorage(imageUrl, projectRoot, db);
+        res.json({ url: localUrl });
       } else {
         console.error("API response missing image url/b64:", JSON.stringify(responseData).slice(0, 2000));
         res.status(500).json({
@@ -1035,7 +1171,7 @@ ${pixarInstruction}
   });
 
   // Step 2.2: Generate 3x3 storyboard grid (script -> 9 prompts -> one 3x3 image)
-  app.post("/api/generate-9grid", async (req, res) => {
+  app.post("/api/generate-9grid", requireImageGate, async (req, res) => {
     const { story, references, mode, imagePrompt: imagePromptInput, imageModel } = req.body as {
       story?: string;
       references?: Array<{ url?: string; name?: string } | string>;
@@ -1089,7 +1225,7 @@ ${pixarInstruction}
       : [];
     const refUrls = refItems.map((r) => r.url);
 
-    const systemBase = readPromptFile("./prompts/nine_grid_system_prompt.txt");
+    const systemBase = readPromptFile("./prompts/nine_grid_system_prompt.txt", projectRoot);
     const systemInstruction =
       `${systemBase}\n\n` +
       `【额外强制输出约束】你必须且只能输出一个合法 JSON，对象结构必须为：\n` +
@@ -1381,8 +1517,8 @@ ${pixarInstruction}
         return res.status(500).json({ error: "九宫格生图失败：未解析到图片 url/b64_json" });
       }
 
-      const stableUrl = await stabilizeImageUrlForClient(url);
-      return res.json({ url: stableUrl, shots });
+      const localUrl = await persistAiImageToLocalStorage(url, projectRoot, db);
+      return res.json({ url: localUrl, shots });
     } catch (e) {
       console.error("Generate 9-grid error:", e);
       return res.status(500).json({ error: e instanceof Error ? e.message : "九宫格生成失败" });
@@ -1390,7 +1526,7 @@ ${pixarInstruction}
   });
 
   // Step 2.1: Edit Image (Third-party API)
-  app.post("/api/edit-image", async (req, res) => {
+  app.post("/api/edit-image", requireImageGate, async (req, res) => {
     const { prompt, target_image, references, images, image_size, aspect_ratio, model, response_format } = req.body;
     console.log("Received image edit request:", {
       prompt_preview: typeof prompt === "string" ? prompt.slice(0, 80) : "",
@@ -1623,9 +1759,9 @@ ${pixarInstruction}
                     attempt: cfg.label,
                     retry: httpAttempt,
                   });
-                  const stableUrl = await stabilizeImageUrlForClient(imageUrl);
+                  const localUrl = await persistAiImageToLocalStorage(imageUrl, projectRoot, db);
                   return res.json({
-                    url: stableUrl,
+                    url: localUrl,
                     meta: isGpt2Model ? { model: modelName, image_count_used: variant.blobs.length } : undefined,
                   });
                 }

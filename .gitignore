@@ -3,8 +3,12 @@ node_modules/
 .tools/
 build/
 dist/
+dist-server/
+logs/
 coverage/
 .DS_Store
 *.log
 .env*
 !.env.example
+public/uploads/*
+!public/uploads/.gitkeep

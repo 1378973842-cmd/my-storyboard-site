@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=.dev-server.mjs && node --import dotenv/config .dev-server.mjs",
     "build": "vite build",
+    "build:server": "esbuild server.ts --bundle --platform=node --format=esm --packages=external --minify --outfile=dist-server/server.mjs",
+    "build:prod": "npm run build && npm run build:server",
+    "start": "NODE_ENV=production node ./dist-server/server.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
