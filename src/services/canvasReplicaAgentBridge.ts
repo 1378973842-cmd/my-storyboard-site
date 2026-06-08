@@ -1,5 +1,5 @@
 import type { Express, Request } from "express";
-import { randomUUID } from "crypto";
+import { v4 as uuidv4 } from "uuid";
 import { existsSync, readFileSync } from "fs";
 import path from "path";
 import sharp from "sharp";
@@ -601,7 +601,7 @@ export function registerCanvasReplicaAgentRoutes(app: Express, deps: ReplicaAgen
       return res.status(400).json({ error: "缺少 background_image_url（图1 背景/构图参考）" });
     }
 
-    const taskId = `replica_${randomUUID().replace(/-/g, "")}`;
+    const taskId = `replica_${uuidv4().replace(/-/g, "")}`;
     const now = Date.now();
     tasks.set(taskId, {
       id: taskId,

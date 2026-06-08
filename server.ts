@@ -1,5 +1,6 @@
 import { config as loadDotenv } from "dotenv";
-import { createHmac, randomUUID, timingSafeEqual } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
+import { v4 as uuidv4 } from "uuid";
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { writeFile } from "fs/promises";
 import express from "express";
@@ -361,7 +362,7 @@ async function persistAiImageToLocalStorage(
   }
 
   const ext = guessExtFromMime(mime);
-  const id = randomUUID();
+  const id = uuidv4();
   const filename = `${id}.${ext}`;
   const relativeWebPath = `/uploads/${filename}`;
   const absPath = path.join(uploadsAbs, filename);

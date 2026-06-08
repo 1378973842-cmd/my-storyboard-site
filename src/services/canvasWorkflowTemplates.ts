@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "fs";
 import path from "path";
-import { randomUUID } from "crypto";
+import { v4 as uuidv4 } from "uuid";
 
 export type WorkflowTemplateRecord = {
   id: string;
@@ -403,7 +403,7 @@ export function saveUserWorkflowTemplate(payload: {
   roleTemplate?: Record<string, "background" | "character">;
 }) {
   const now = Date.now();
-  const id = `wf_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  const id = `wf_${uuidv4().replace(/-/g, "").slice(0, 12)}`;
   const doc: WorkflowTemplateRecord = {
     id,
     title: String(payload.title || "我的工作流").slice(0, 80),

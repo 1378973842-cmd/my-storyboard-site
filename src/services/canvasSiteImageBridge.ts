@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from "express";
-import { randomUUID } from "crypto";
+import { v4 as uuidv4 } from "uuid";
 import {
   getStoryboardImageEnv,
   isMidjourneyV81Model,
@@ -387,7 +387,7 @@ async function runCanvasImageTask(
 export function registerCanvasSiteImageRoutes(app: Express, deps: CanvasImageBridgeDeps) {
   app.post("/api/canvas-image-tasks", (req, res) => {
     const payload = (req.body || {}) as CanvasOnlineImagePayload;
-    const taskId = `canvas_img_${randomUUID().replace(/-/g, "")}`;
+    const taskId = `canvas_img_${uuidv4().replace(/-/g, "")}`;
     const now = Date.now();
     tasks.set(taskId, {
       id: taskId,

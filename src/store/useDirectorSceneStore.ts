@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { v4 as uuidv4 } from 'uuid';
 
 import { uniformScaleTuple } from '../lib/director/gizmoTransform';
 
@@ -314,7 +315,7 @@ function createCharacterObject(
 
   return {
 
-    id: crypto.randomUUID(),
+    id: uuidv4(),
 
     type: 'character',
 
@@ -350,7 +351,7 @@ function createSceneCamera(index: number): SceneCamera {
 
   return {
 
-    id: crypto.randomUUID(),
+    id: uuidv4(),
 
     position: [Math.cos(angle) * 4, 2.5, Math.sin(angle) * 4],
 
@@ -638,7 +639,7 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
 
       const next: SceneObject = {
 
-        id: crypto.randomUUID(),
+        id: uuidv4(),
 
         type: 'customModel',
 
@@ -680,7 +681,7 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
 
       const next: SceneObject = {
 
-        id: crypto.randomUUID(),
+        id: uuidv4(),
 
         type: 'image',
 
@@ -960,7 +961,7 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
 
       const pose: SavedPose = {
 
-        id: crypto.randomUUID(),
+        id: uuidv4(),
 
         name: name ?? `姿势 ${state.savedPoses.length + 1}`,
 

@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { v4 as uuidv4 } from 'uuid';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -7,8 +8,5 @@ export function cn(...inputs: ClassValue[]) {
 
 /** Stable unique id for reorder lists / React keys (avoids duplicate weak random ids). */
 export function uniqueRefItemId(prefix = 'ref'): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `${prefix}_${crypto.randomUUID()}`;
-  }
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+  return `${prefix}_${uuidv4()}`;
 }

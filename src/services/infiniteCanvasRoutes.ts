@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import multer from "multer";
 import path from "path";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
-import { randomUUID } from "crypto";
+import { v4 as uuidv4 } from "uuid";
 import {
   createCanvas,
   getCanvas,
@@ -271,7 +271,7 @@ export function registerInfiniteCanvasRoutes(
       } else {
         if (!ext || ![".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(ext)) ext = ".png";
       }
-      const filename = `canvas_${randomUUID().replace(/-/g, "").slice(0, 12)}${ext}`;
+      const filename = `canvas_${uuidv4().replace(/-/g, "").slice(0, 12)}${ext}`;
       const abs = path.join(uploadsDir, filename);
       writeFileSync(abs, file.buffer);
       uploaded.push({

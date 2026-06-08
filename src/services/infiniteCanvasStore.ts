@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import path from "path";
-import { randomUUID } from "crypto";
+import { v4 as uuidv4 } from "uuid";
 
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -188,7 +188,7 @@ export function createCanvas(payload: { title?: string; icon?: string; kind?: st
   const kind = normalizeKind(payload.kind);
   const ts = nowMs();
   const doc: CanvasDocument = {
-    id: randomUUID().replace(/-/g, ""),
+    id: uuidv4().replace(/-/g, ""),
     title: (payload.title || (kind === "smart" ? "智能画布" : "未命名画布")).slice(0, 80),
     icon: (payload.icon || (kind === "smart" ? "sparkles" : "🧩")).slice(0, 32),
     kind,
