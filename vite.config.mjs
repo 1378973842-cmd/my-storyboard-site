@@ -24,6 +24,17 @@ export default defineConfig(({ mode }) => {
         process.env.DISABLE_HMR === 'true'
           ? false
           : { host: 'localhost', port: 24679 },
+      /** 画布 JSON 存于 data/，保存/删除时不触发整页 reload */
+      watch: {
+        ignored: ['**/data/**'],
+      },
+      /** 无限画布 API 仍走原版 FastAPI（默认 canvas_source 启动在 3000） */
+      proxy: {
+        '/api': {
+          target: process.env.CANVAS_API_ORIGIN || 'http://127.0.0.1:3000',
+          changeOrigin: true,
+        },
+      },
     },
   };
 });

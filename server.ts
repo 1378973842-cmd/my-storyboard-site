@@ -8,6 +8,13 @@ import { Agent, setGlobalDispatcher, FormData } from "undici";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
+import { registerInfiniteCanvasRoutes } from "./src/services/infiniteCanvasRoutes.js";
+import {
+  getStoryboardImageEnv,
+  runStoryboardRunningHubGenerateJob,
+  runStoryboardRunningHubG2Job,
+  runStoryboardRunningHubJob,
+} from "./src/services/runningHubStoryboardImage.js";
 
 /** HttpOnly Cookie，与生图接口门禁共用（校验暗号成功后下发） */
 const GATE_COOKIE_NAME = "sb_gate_v1";
@@ -410,16 +417,28 @@ async function imageInputToBlob(input: string): Promise<{ blob: globalThis.Blob;
   throw new Error("不支持的图片输入格式（需要 dataURL / http(s) URL / base64）");
 }
 
-function resolveGptImage2Size(
-  imageSize: unknown,
-  aspectRatio: unknown
-): "1024x1024" | "1536x1024" | "1024x1536" | "2048x2048" | "2048x1152" | "3840x2160" | "2160x3840" {
+type GptImage2Size =
+  | "1024x1024"
+  | "1536x1024"
+  | "1024x1536"
+  | "2048x2048"
+  | "2048x1152"
+  | "2016x864"
+  | "720x1280"
+  | "1152x2048"
+  | "3840x2160"
+  | "2160x3840";
+
+function resolveGptImage2Size(imageSize: unknown, aspectRatio: unknown): GptImage2Size {
   const rawSize = String(imageSize ?? "").trim().toUpperCase();
   if (rawSize === "1024X1024") return "1024x1024";
   if (rawSize === "1536X1024") return "1536x1024";
   if (rawSize === "1024X1536") return "1024x1536";
   if (rawSize === "2048X2048") return "2048x2048";
   if (rawSize === "2048X1152") return "2048x1152";
+  if (rawSize === "2016X864") return "2016x864";
+  if (rawSize === "720X1280") return "720x1280";
+  if (rawSize === "1152X2048") return "1152x2048";
   if (rawSize === "3840X2160") return "3840x2160";
   if (rawSize === "2160X3840") return "2160x3840";
   if (rawSize === "1K") return "1024x1024";
@@ -500,6 +519,12 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
   app.use(express.static(path.join(projectRoot, "public")));
+
+  /** 无限画布：内置存储（data/canvases），无需单独启动 canvas_source Python */
+  registerInfiniteCanvasRoutes(app, projectRoot, {
+    persistImage: (url) => persistAiImageToLocalStorage(url, projectRoot, db),
+  });
+  mkdirSync(path.join(projectRoot, "data", "canvases"), { recursive: true });
 
   app.get("/api/auth/status", (req, res) => {
     const cookies = parseCookieHeader(req.headers.cookie);
@@ -981,10 +1006,34 @@ ${pixarInstruction}
     }
   });
 
-  // Step 2: Generate Image (Third-party API)
+  // Step 2: Generate Image (RunningHub storyboard 或 Third-party 回退)
   app.post("/api/generate-image", requireImageGate, async (req, res) => {
-    const { prompt, image_size, aspect_ratio, references } = req.body;
-    console.log("Received image generation request:", { prompt, image_size, aspect_ratio });
+    const { prompt, image_size, aspect_ratio, references, scope } = req.body;
+    console.log("Received image generation request:", { prompt, image_size, aspect_ratio, scope });
+
+    const rhEnv = getStoryboardImageEnv();
+    if (rhEnv) {
+      try {
+        if (typeof prompt !== "string" || !prompt.trim()) {
+          return res.status(400).json({ error: "缺少 prompt" });
+        }
+        const url = await runStoryboardRunningHubGenerateJob({
+          prompt: prompt.trim(),
+          image_size,
+          aspect_ratio,
+          references: Array.isArray(references) ? references : [],
+          projectRoot,
+        });
+        const localUrl = await persistAiImageToLocalStorage(url, projectRoot, db);
+        return res.json({ url: localUrl });
+      } catch (error) {
+        console.error("[generate-image/runninghub] error:", error);
+        return res.status(500).json({
+          error: error instanceof Error ? error.message : "生图失败（RunningHub）",
+        });
+      }
+    }
+
     const { apiBase, apiKey } = getGenerateImageEnv();
 
     if (!apiBase || !apiKey) {
@@ -1036,7 +1085,7 @@ ${pixarInstruction}
       const timeoutMs = Number(process.env.IMAGE_API_TIMEOUT_MS || 60000);
       
       // 构造请求体，严格遵循用户提供的 OpenAPI 规范
-      const modelName = process.env.IMAGE_MODEL || "nano-banana-pro-2k";
+      const modelName = process.env.IMAGE_MODEL || "nano-banana-pro-稳定";
       const requestBody: any = {
         model: modelName,
         prompt: enhancedPrompt,
@@ -1180,7 +1229,7 @@ ${pixarInstruction}
       imageModel?: string;
     };
     const runMode = mode || "full";
-    const requestedImageModel = String(imageModel || "").trim() || (process.env.IMAGE_GRID_MODEL || "nano-banana-pro-2k").trim();
+    const requestedImageModel = String(imageModel || "").trim() || (process.env.IMAGE_GRID_MODEL || "nano-banana-pro-稳定").trim();
     const useGptImage2Requested = /^gpt-image-2$/i.test(requestedImageModel);
 
     const { apiBase: textApiBase, apiKey: textApiKey } = getNineGridTextEnv();
@@ -1386,7 +1435,7 @@ ${pixarInstruction}
       }
 
       // Phase B: image model -> one grid image（支持 nano 与 gpt-image-2）
-      const modelName = String(imageModel || "").trim() || (process.env.IMAGE_GRID_MODEL || "nano-banana-pro-2k").trim();
+      const modelName = String(imageModel || "").trim() || (process.env.IMAGE_GRID_MODEL || "nano-banana-pro-稳定").trim();
       const useGptImage2 = /^gpt-image-2$/i.test(modelName);
       const baseImageTimeoutMs = Number(process.env.IMAGE_API_TIMEOUT_MS || 180000);
       const timeoutMs = useGptImage2
@@ -1582,6 +1631,38 @@ ${pixarInstruction}
       });
     }
 
+    const rhEnv = getStoryboardImageEnv();
+    if (rhEnv) {
+      try {
+        const userPrompt = String(prompt).trim();
+        const url = gptRequested
+          ? await runStoryboardRunningHubG2Job({
+              prompt: userPrompt,
+              images: orderedImageUrls,
+              image_size,
+              aspect_ratio,
+              projectRoot,
+            })
+          : await runStoryboardRunningHubJob({
+              prompt: userPrompt,
+              images: orderedImageUrls,
+              image_size,
+              aspect_ratio,
+              projectRoot,
+            });
+        const localUrl = await persistAiImageToLocalStorage(url, projectRoot, db);
+        return res.json({
+          url: localUrl,
+          meta: gptRequested ? { model: requestModel || "gpt-image-2" } : undefined,
+        });
+      } catch (error) {
+        console.error(gptRequested ? "[edit-image/runninghub-g2] error:" : "[edit-image/runninghub] error:", error);
+        return res.status(500).json({
+          error: error instanceof Error ? error.message : "编辑失败（RunningHub）",
+        });
+      }
+    }
+
     try {
       const baseTimeoutMs = Number(process.env.IMAGE_API_TIMEOUT_MS || 60000);
 
@@ -1602,7 +1683,7 @@ ${pixarInstruction}
       // 未显式传 model（旧编辑模式）时，仍保留 env 候选回退以提高可用性。
       const modelCandidates = requestModel
         ? [requestModel]
-        : Array.from(new Set([...(envCandidates.length ? envCandidates : ["nano-banana-pro-2k"])].filter(Boolean)));
+        : Array.from(new Set([...(envCandidates.length ? envCandidates : ["nano-banana-pro-稳定"])].filter(Boolean)));
 
       console.log("[edit-image] modelCandidates:", modelCandidates, "timeoutMs:", timeoutMs, "imageCount:", orderedImageUrls.length);
 
@@ -1807,10 +1888,67 @@ ${pixarInstruction}
     }
   });
 
+  /**
+   * 可选：将未内置的画布 API 转发到原 Python 服务。
+   * 设置 CANVAS_API_ORIGIN=http://127.0.0.1:3000 且 CANVAS_USE_PYTHON_PROXY=1 时启用。
+   */
+  const canvasApiOrigin = (process.env.CANVAS_API_ORIGIN || "http://127.0.0.1:3000").replace(/\/$/, "");
+  const canvasProxyEnabled = process.env.CANVAS_USE_PYTHON_PROXY === "1";
+  const canvasApiPrefixes = [
+    "/api/view",
+    "/api/runninghub",
+    "/api/providers",
+    "/api/models",
+    "/api/conversations",
+    "/api/download-output",
+    "/api/app-info",
+    "/api/update-",
+  ];
+  app.use(async (req, res, next) => {
+    if (!canvasProxyEnabled) return next();
+    const p = req.path;
+    const shouldProxy = canvasApiPrefixes.some(
+      (prefix) => p === prefix || p.startsWith(`${prefix}/`) || (prefix.endsWith("/") && p.startsWith(prefix))
+    );
+    if (!shouldProxy) return next();
+    try {
+      const url = `${canvasApiOrigin}${req.originalUrl}`;
+      const headers = new Headers();
+      for (const [key, value] of Object.entries(req.headers)) {
+        if (!value || key === "host" || key === "connection" || key === "content-length") continue;
+        if (Array.isArray(value)) value.forEach((v) => headers.append(key, v));
+        else headers.set(key, value);
+      }
+      const method = req.method || "GET";
+      const hasBody = method !== "GET" && method !== "HEAD";
+      let body: string | undefined;
+      if (hasBody && req.body !== undefined) {
+        headers.set("content-type", headers.get("content-type") || "application/json");
+        body = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+      }
+      const upstream = await fetch(url, { method, headers, body });
+      res.status(upstream.status);
+      upstream.headers.forEach((val, key) => {
+        if (key === "transfer-encoding" || key === "connection") return;
+        res.setHeader(key, val);
+      });
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      res.send(buf);
+    } catch (err) {
+      console.error("[canvas-proxy]", err);
+      res.status(502).json({
+        error: "画布服务未连接，请先运行 canvas_source 目录下的「启动服务.bat」（默认 http://127.0.0.1:3000）",
+      });
+    }
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       root: projectRoot,
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        watch: { ignored: ["**/data/**"] },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);

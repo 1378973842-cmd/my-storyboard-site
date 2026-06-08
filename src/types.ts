@@ -44,6 +44,24 @@ export type StyleBase = 'Pixar' | 'Cyberpunk' | 'Realistic' | 'Anime' | 'Cinemat
 export type ImageSize = '1K' | '2K' | '4K';
 export type AspectRatio = '4:3' | '3:4' | '16:9' | '9:16' | '2:3' | '3:2' | '1:1' | '4:5' | '5:4' | '21:9';
 
+/** RunningHub rhart-image-g-2 宽高比 */
+export type RunningHubG2AspectRatio =
+  | '1:1'
+  | '1:2'
+  | '2:1'
+  | '1:3'
+  | '3:1'
+  | '2:3'
+  | '3:2'
+  | '3:4'
+  | '4:3'
+  | '4:5'
+  | '5:4'
+  | '9:16'
+  | '16:9'
+  | '21:9'
+  | '9:21';
+
 /** 日间：高对比、浅色底；夜间：深色底、降低刺眼 */
 export type UiTheme = 'light' | 'dark';
 export type SystemNotice = {
@@ -110,6 +128,26 @@ export interface AppState {
   addNotice: (message: string, level?: SystemNotice['level'], action?: SystemNotice['action']) => void;
   removeNotice: (id: string) => void;
   resetProject: () => void;
+}
+
+/** 导演工作台三维坐标（米制场景） */
+export type SceneVec3 = [number, number, number];
+
+/** LLM / 外部 JSON 驱动的场景快照（字段可部分提供，未提供则保持 store 原值） */
+export interface SceneData {
+  camera?: {
+    position?: SceneVec3;
+    fov?: number;
+  };
+  characters?: SceneDataCharacter[];
+}
+
+export interface SceneDataCharacter {
+  id: string;
+  position?: SceneVec3;
+  rotation?: SceneVec3;
+  /** 预设姿势：匹配 savedPoses 的 id 或 name */
+  posePreset?: string;
 }
 
 /** 首屏主题：跟随系统浅色/深色，不写 localStorage */

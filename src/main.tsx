@@ -1,10 +1,10 @@
-import { StrictMode, lazy, Suspense } from 'react';
+import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { LoginGate } from './components/LoginGate.tsx';
+import { ShellNavigationProvider } from './shell/ShellNavigation.tsx';
+import App from './App.tsx';
+import './store/useStudioBackgroundStore.ts';
 import './index.css';
-
-/** 延迟加载主应用，避免首屏被大包阻塞导致「看不到暗号层」；通过暗号后再拉取 App 分包 */
-const App = lazy(() => import('./App.tsx'));
 
 // 仅清理旧版遗留键；切勿包含 storyboard_gate_ok_v1（门禁标记由 LoginGate 独占）
 const LEGACY_LOCAL_STORAGE_KEYS = [
@@ -13,23 +13,12 @@ const LEGACY_LOCAL_STORAGE_KEYS = [
   'storyboard-ui-theme',
 ];
 
-function AppLoadingFallback() {
-  return (
-    <div className="fixed inset-0 z-[2147483646] flex items-center justify-center bg-[#0e0e0e] text-sm text-[#e5e2e1]/80">
-      <div className="flex flex-col items-center gap-3">
-        <div className="h-9 w-9 animate-spin rounded-full border-2 border-[#ffb866]/30 border-t-[#ffb866]" aria-hidden />
-        <span>加载工作台…</span>
-      </div>
-    </div>
-  );
-}
-
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <LoginGate>
-      <Suspense fallback={<AppLoadingFallback />}>
+      <ShellNavigationProvider>
         <App />
-      </Suspense>
+      </ShellNavigationProvider>
     </LoginGate>
   </StrictMode>,
 );

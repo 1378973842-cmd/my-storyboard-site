@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, Reorder } from 'motion/react';
-import { Loader2, Plus, X, Grid3X3, Download, Scissors, Sparkles, ArrowLeft } from 'lucide-react';
+import { Loader2, Plus, X, Grid3X3, Download, Scissors, Sparkles } from 'lucide-react';
 import { cn, uniqueRefItemId } from '../lib/utils';
 import { parseApiResponse } from '../lib/http';
 import { useStore } from '../store/useStore';
 import { useRefThumbPreview } from '../hooks/useRefThumbPreview';
 import { ReferenceImageLightbox } from './ReferenceImageLightbox';
 import { ZoomableLightboxImage } from './ZoomableLightboxImage';
+import { StudioConvergePiece } from './motion/StudioConverge';
 
 type RefItem = { id: string; url: string; name?: string };
 type GridHistoryItem = {
@@ -28,9 +29,8 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 type Props = {
-  onBack: () => void;
-  onOpenStoryboard: () => void;
-  onOpenImageEditor: () => void;
+  onBack?: () => void;
+  enterKey?: number;
 };
 
 const GRID_PREFIX =
@@ -45,7 +45,7 @@ const GRID_PREFIX =
 
 type NineGridImageModel = 'nano-banana-pro-4k' | 'gpt-image-2';
 
-export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpenImageEditor }) => {
+export const NineGridPage: React.FC<Props> = ({ enterKey = 0 }) => {
   const addNotice = useStore((s) => s.addNotice);
   const fileRef = useRef<HTMLInputElement>(null);
   const [story, setStory] = useState('');
@@ -522,126 +522,75 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
   };
 
   return (
-    <div className="min-h-screen bg-surface text-on-background font-sans overflow-hidden relative" data-ui-root>
-      <div className="pointer-events-none fixed inset-0 z-0 opacity-[0.48]" aria-hidden>
-        <div className="absolute -top-36 right-[-10%] h-[min(48vw,480px)] w-[min(62vw,560px)] rounded-full bg-secondary/[0.09] blur-[105px]" />
-        <div className="absolute bottom-[-12%] left-[-8%] h-[380px] w-[min(70vw,620px)] rounded-full bg-primary/[0.07] blur-[95px]" />
-        <div className="absolute top-[42%] left-[35%] h-[200px] w-[280px] rounded-full bg-primary/[0.04] blur-[70px]" />
-      </div>
+    <div
+      className="h-[100dvh] overflow-y-auto lg:overflow-hidden relative ai-editor-page nine-grid-page studio-page-shell flex flex-col"
+      data-ui-root
+      data-cover-page
+      data-studio-page
+    >
+      <div className="studio-page-bg pointer-events-none fixed inset-0 z-0" aria-hidden />
+      <div className="studio-page-scrim pointer-events-none fixed inset-0 z-0" aria-hidden />
+      <div className="studio-page-glow pointer-events-none fixed inset-0 z-0 cover-ambient" aria-hidden />
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={spring}
-        className="relative z-10 p-6 md:p-8 lg:p-10 max-w-[1680px] mx-auto"
-      >
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between mb-8 lg:mb-10">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-8">
-            <button
-              type="button"
-              onClick={onBack}
-              className="group/bak inline-flex w-fit items-center gap-2.5 px-5 py-2.5 rounded-full glass-panel ghost-border text-on-surface/75 hover:text-primary transition-colors cursor-pointer text-[10px] font-label tracking-widest uppercase shadow-[0_40px_80px_-50px_rgba(0,0,0,0.75)]"
-            >
-              <ArrowLeft className="w-4 h-4 opacity-65 group-hover/bak:-translate-x-0.5 transition-transform duration-300" />
-              返回起始页
-            </button>
-            <div className="inline-flex items-center gap-1.5 rounded-full bg-surface-container-high/45 p-1.5 outline outline-[0.5px] outline-white/10">
-              <button
-                type="button"
-                onClick={onOpenStoryboard}
-                className="px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase text-on-surface/70 hover:text-on-surface transition-colors cursor-pointer"
-              >
-                Storyboard
-              </button>
-              <button
-                type="button"
-                onClick={onOpenImageEditor}
-                className="px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase text-on-surface/70 hover:text-on-surface transition-colors cursor-pointer"
-              >
-                图片编辑
-              </button>
-              <button
-                type="button"
-                className="px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase segmented-active-bg segmented-active-text shadow-[0_10px_20px_-12px_rgba(0,0,0,0.45)] cursor-default"
-              >
-                九宫格
-              </button>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-surface-container-high/80 outline outline-[0.5px] outline-white/10 shadow-[0_20px_40px_-24px_rgba(0,0,0,0.65)]">
-                <Grid3X3 className="w-5 h-5 accent-focus" />
-              </div>
-              <div>
-                <h1 className="font-headline text-2xl sm:text-3xl tracking-[-0.02em] text-on-surface italic leading-tight">
-                  九宫叙事台
-                </h1>
-                <p className="mt-1 font-label text-[9px] tracking-[0.26em] uppercase text-on-surface/35">
-                  Nine-beat storyboard
-                </p>
-              </div>
-            </div>
+      <div className="studio-page-content ai-editor-layout relative z-10 flex flex-col flex-1 min-h-0 w-full mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 pb-4 md:pb-5">
+        <StudioConvergePiece origin="top" enterKey={enterKey} delay={0.03}>
+        <header className="shrink-0 mb-4 lg:mb-5 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+          <div>
+            <h1 className="cover-tools-headline text-[1.75rem] sm:text-[2rem] lg:text-[2.15rem] tracking-[-0.035em] leading-[1.08]">
+              九宫格
+            </h1>
+            <p className="cover-tools-subhead mt-1 text-[14px] sm:text-[15px] leading-snug">
+              剧本裂变九格分镜，批量生图与单格精修。
+            </p>
           </div>
-          <span className="inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 glass-panel ghost-border font-label text-[9px] tracking-[0.2em] uppercase text-secondary/90">
-            <span className="h-1 w-1 rounded-full bg-secondary/90 shadow-[0_0_14px_rgba(141,205,255,0.4)]" />
-            3×3 Pipeline
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.18fr)_minmax(0,0.9fr)] gap-8 lg:gap-10 xl:gap-12">
-          <motion.div
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ ...spring, delay: 0.04 }}
-            className="bg-surface-container-low/88 backdrop-blur-sm rounded-[1.5rem] p-5 md:p-6 outline outline-[0.5px] outline-white/[0.07] shadow-[0_56px_100px_-48px_rgba(0,0,0,0.78)]"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="h-8 w-px rounded-full bg-gradient-to-b from-secondary/55 to-transparent shrink-0" />
-                <div className="min-w-0">
-                  <div className="text-[9px] font-label tracking-[0.22em] uppercase text-on-surface/40">主画布</div>
-                  <div className="font-headline text-sm italic text-on-surface/80 truncate">Result viewport</div>
-                </div>
-              </div>
-              {resultUrl && (
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={cropToNine}
-                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full glass-panel ghost-border text-on-surface/80 hover:text-primary transition-colors cursor-pointer text-[10px] font-label font-semibold uppercase tracking-widest shadow-[0_20px_44px_-36px_rgba(0,0,0,0.65)]"
-                    title="裁切成 9 张"
-                  >
-                    {isCropping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Scissors className="w-4 h-4" />}
-                    裁切9张
-                  </button>
-                  <button
-                    onClick={download}
-                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full glass-panel ghost-border text-on-surface/80 hover:text-primary transition-colors cursor-pointer text-[10px] font-label font-semibold uppercase tracking-widest shadow-[0_20px_44px_-36px_rgba(0,0,0,0.65)]"
-                  >
-                    <Download className="w-4 h-4" />
-                    下载
-                  </button>
-                </div>
-              )}
+          {resultUrl && (
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={cropToNine}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-black/50 backdrop-blur-md text-white text-[12px] font-medium outline outline-[0.5px] outline-white/15 hover:bg-black/60 transition-colors cursor-pointer"
+                title="裁切成 9 张"
+              >
+                {isCropping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Scissors className="w-3.5 h-3.5" />}
+                裁切9张
+              </button>
+              <button
+                onClick={download}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/90 text-[#1d1d1f] text-[12px] font-medium outline outline-[0.5px] outline-white/30 hover:bg-white transition-colors cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                下载
+              </button>
             </div>
+          )}
+        </header>
+        </StudioConvergePiece>
 
+        <div className="ai-editor-workspace flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1.38fr)_minmax(340px,440px)] xl:grid-cols-[minmax(0,1.42fr)_minmax(380px,480px)] 2xl:grid-cols-[minmax(0,1.48fr)_minmax(400px,520px)] gap-4 lg:gap-5 xl:gap-6">
+          <StudioConvergePiece
+            origin="left"
+            enterKey={enterKey}
+            delay={0.07}
+            className="relative rounded-[1.15rem] overflow-hidden ai-editor-canvas min-h-[220px] lg:min-h-0 h-full flex flex-col min-h-0"
+          >
             {shotsPreview.length === 9 ? (
-              <div className="rounded-[1.25rem] bg-surface-container-high/55 backdrop-blur-sm p-4 md:p-5 outline outline-[0.5px] outline-white/[0.08] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <p className="text-[10px] text-on-surface/45 leading-relaxed max-w-[46ch]">
-                    九格工作台：逐格润色提示词；成片后自动裁切回填，可单格精修或批量导出。
+              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-3 md:p-4">
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="ai-editor-body line-clamp-2">
+                    逐格润色提示词；成片后自动裁切回填，可单格精修或批量导出。
                   </p>
                   {croppedUrls.length === 9 && (
                     <button
                       type="button"
                       onClick={downloadAllCropped}
-                      className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[linear-gradient(135deg,var(--color-primary),var(--color-on-primary-container))] text-on-primary-fixed text-[10px] font-label font-bold uppercase tracking-widest hover:opacity-95 cursor-pointer accent-focus-glow shadow-[0_24px_48px_-28px_rgba(255,184,102,0.35)]"
+                      className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-full cover-hero-cta text-[12px] font-medium cursor-pointer"
                       title="下载全部切图"
                     >
-                      <Download className="w-4 h-4" />
+                      <Download className="w-3.5 h-3.5" />
                       下载全部
                     </button>
                   )}
                 </div>
-                <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
+                <div className="grid grid-cols-3 gap-2 sm:gap-2.5">
                   {shotsPreview.map((shot, idx) => (
                     <motion.div
                       key={`${shot.n}_${idx}`}
@@ -650,21 +599,21 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ ...spring, delay: Math.min(idx * 0.035, 0.24) }}
                       whileHover={{ y: -2 }}
-                      className="rounded-[1rem] bg-surface-container-low/90 p-2.5 outline outline-[0.5px] outline-white/[0.09] shadow-[0_22px_44px_-28px_rgba(0,0,0,0.72)]"
+                      className="rounded-xl ai-editor-panel p-2 outline outline-[0.5px] outline-white/10"
                     >
                       <div className="mb-1 flex items-center justify-between gap-1">
-                        <div className="text-[9px] font-label tracking-[0.16em] uppercase accent-focus">格子 {shot.n}</div>
+                        <div className="cover-section-label mb-0 text-[12px]">格子 {shot.n}</div>
                         <button
                           type="button"
                           onClick={() => runCellEdit(idx)}
                           disabled={!(croppedUrls[idx] || resultUrl) || cellEditingSet.has(idx)}
                           className={cn(
-                            'px-2 py-1 rounded-full text-[9px] font-black tracking-widest outline outline-[0.5px] transition-all',
+                            'px-2 py-0.5 rounded-full text-[11px] font-medium transition-all',
                             cellEditingSet.has(idx)
-                              ? 'bg-surface-container-high text-slate-200 outline-white/20 cursor-wait'
+                              ? 'ai-editor-btn-disabled'
                               : (croppedUrls[idx] || resultUrl)
-                                ? 'accent-focus-bg text-white outline-white/30 hover:opacity-90 cursor-pointer'
-                                : 'bg-surface-container-high text-slate-400 outline-white/10 cursor-not-allowed',
+                                ? 'bg-white/90 text-[#1d1d1f] hover:bg-white cursor-pointer'
+                                : 'ai-editor-btn-disabled',
                           )}
                           title={croppedUrls[idx] ? '使用当前提示词编辑该格' : '自动裁切失败时，将基于主图对该格进行定向编辑'}
                         >
@@ -680,7 +629,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
                           'w-full aspect-video rounded-lg overflow-hidden outline outline-[0.5px] transition-all',
                           croppedUrls[idx]
                             ? 'outline-white/15 hover:outline-white/30 cursor-zoom-in'
-                            : 'outline-white/8 cursor-default bg-surface-container-highest',
+                            : 'outline-white/8 cursor-default bg-black/20',
                         )}
                         title={croppedUrls[idx] ? `查看图${idx + 1}` : '生图后自动回填到此格'}
                       >
@@ -693,7 +642,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
                                 e.stopPropagation();
                                 downloadCropped(idx);
                               }}
-                              className="absolute bottom-1 right-1 px-2 py-1 rounded-full accent-focus-bg text-white text-[9px] font-black tracking-widest outline outline-[0.5px] outline-white/30 hover:opacity-90 transition-all cursor-pointer shadow-[0_8px_22px_-12px_rgba(0,0,0,0.55)]"
+                              className="absolute bottom-1 right-1 px-2 py-0.5 rounded-full bg-white/90 text-[#1d1d1f] text-[10px] font-medium hover:bg-white transition-all cursor-pointer"
                               title={`下载 图${idx + 1}`}
                             >
                               下载
@@ -711,13 +660,13 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
                               }}
                             />
                             <div className="absolute inset-0 bg-black/15" />
-                            <div className="absolute bottom-1 right-1 rounded-full bg-black/75 px-2 py-0.5 text-[8px] font-bold tracking-widest text-white">
-                              PREVIEW
+                            <div className="absolute bottom-1 right-1 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium text-white">
+                              预览
                             </div>
                           </div>
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center text-[9px] text-slate-500 tracking-widest uppercase">
-                            Waiting
+                          <div className="w-full h-full flex items-center justify-center text-[12px] ai-editor-body">
+                            等待生图
                           </div>
                         )}
                       </button>
@@ -728,7 +677,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
                             prev.map((s, i) => (i === idx ? { ...s, prompt: e.target.value } : s)),
                           )
                         }
-                        className="mt-2 w-full min-h-[96px] bg-surface-container-high/90 rounded-xl p-2.5 text-[11px] font-body text-white placeholder:text-white/40 focus:outline-none focus-visible:ring-2 accent-focus-ring transition-all resize-y custom-scrollbar outline outline-[0.5px] outline-white/[0.06]"
+                        className="mt-1.5 w-full min-h-[72px] max-h-[88px] ai-editor-input rounded-lg p-2 text-[13px] leading-relaxed focus:outline-none focus-visible:ring-2 accent-focus-ring resize-y custom-scrollbar"
                         placeholder={`请输入格子 ${shot.n} 的提示词`}
                       />
                     </motion.div>
@@ -736,40 +685,41 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
                 </div>
               </div>
             ) : (
-              <div className="relative aspect-video rounded-[1.15rem] overflow-hidden bg-surface-container-highest/95 flex items-center justify-center shadow-[inset_0_0_100px_rgba(0,0,0,0.4)] outline outline-[0.5px] outline-white/[0.06]">
+              <div className="relative flex-1 min-h-[200px] flex items-center justify-center p-3 md:p-4">
                 {resultUrl ? (
                   <button
                     type="button"
                     onClick={() => setPreview({ type: 'result', url: resultUrl || '' })}
-                    className="w-full h-full cursor-zoom-in group/vp"
+                    className="w-full h-full cursor-zoom-in group/vp flex items-center justify-center"
                     title="点击放大"
                   >
                     <img
                       src={resultUrl}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover/vp:scale-[1.02]"
+                      className="max-w-full max-h-full object-contain transition-transform duration-500 group-hover/vp:scale-[1.02]"
+                      referrerPolicy="no-referrer"
                     />
                   </button>
                 ) : (
                   <div className="flex flex-col items-center gap-2 px-6 text-center">
-                    <span className="font-headline text-base italic text-on-surface/35">等待分镜裂变</span>
-                    <span className="text-[10px] font-label uppercase tracking-[0.22em] text-on-surface/28">
+                    <span className="cover-tools-subhead text-[15px]">等待分镜裂变</span>
+                    <span className="ai-editor-body text-[13px]">
                       右侧生成提示词后，画布将裂变为 3×3
                     </span>
                   </div>
                 )}
 
                 {isRunning && (
-                  <div className="absolute inset-0 bg-black/58 backdrop-blur-[18px] flex items-center justify-center">
-                    <div className="w-[min(88%,260px)] rounded-2xl glass-panel ghost-border px-4 py-4 shadow-[0_40px_80px_-40px_rgba(0,0,0,0.85)]">
+                  <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px] flex items-center justify-center">
+                    <div className="w-[min(88%,260px)] rounded-xl ai-editor-panel px-4 py-4">
                       <div className="flex items-center justify-between mb-2.5">
-                        <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black tracking-[0.14em] uppercase chip-accent-focus">
-                          {phase === 'text' ? '文本生成中...' : phase === 'image' ? '生图中...' : 'Generating'}
+                        <span className="cover-section-label mb-0">
+                          {phase === 'text' ? '文本生成中' : phase === 'image' ? '生图中' : '处理中'}
                         </span>
-                        <span className="text-[11px] font-mono text-white tabular-nums">{Math.round(progress)}%</span>
+                        <span className="ai-editor-stat text-[13px]">{Math.round(progress)}%</span>
                       </div>
-                      <div className="h-1.5 rounded-full overflow-hidden bg-slate-900/80">
+                      <div className="h-1 rounded-full overflow-hidden bg-white/10">
                         <motion.div
-                          className="h-full bg-primary shadow-[0_0_14px_rgba(255,184,102,0.45)]"
+                          className="h-full bg-white/85"
                           initial={false}
                           animate={{ width: `${progress}%` }}
                           transition={{ type: 'spring', stiffness: 120, damping: 22 }}
@@ -782,64 +732,62 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
             )}
 
             {error && (
-              <div className="mt-4 px-4 py-3 rounded-2xl bg-red-500/10 outline outline-[0.5px] outline-red-500/20 text-red-200 text-xs">
+              <div className="shrink-0 mx-3 mb-3 px-3 py-2 rounded-xl bg-red-500/15 outline outline-[0.5px] outline-red-400/25 text-red-200 text-[13px] leading-snug">
                 {error}
               </div>
             )}
-
-            {/* Crop pipeline now runs in background; no extra bottom panel shown */}
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ ...spring, delay: 0.1 }}
-            className="flex flex-col gap-6"
-          >
-            <div className="bg-surface-container-low/90 backdrop-blur-sm rounded-[1.35rem] p-5 md:p-6 outline outline-[0.5px] outline-white/[0.06] shadow-[0_40px_72px_-52px_rgba(0,0,0,0.68)]">
-              <div className="flex items-end gap-3 mb-3">
-                <span className="text-[9px] font-label tracking-[0.22em] uppercase text-secondary/90 shrink-0">剧本母本</span>
-                <span className="h-px flex-1 mb-1 bg-gradient-to-r from-secondary/25 to-transparent" />
+            {cropError && (
+              <div className="shrink-0 mx-3 mb-3 px-3 py-2 rounded-xl bg-amber-500/15 outline outline-[0.5px] outline-amber-400/25 text-amber-100 text-[13px] leading-snug">
+                {cropError}
               </div>
-              <textarea
-                value={story}
-                onChange={(e) => setStory(e.target.value)}
-                placeholder="粘贴长剧本、梗概或分场——模型会据此写出九格提示词。"
-                className="w-full min-h-[168px] bg-surface-container-high/90 rounded-2xl p-4 text-[11px] font-body text-white placeholder:text-white/40 focus:outline-none focus-visible:ring-2 accent-focus-ring transition-all resize-none custom-scrollbar outline outline-[0.5px] outline-white/[0.07]"
-              />
-            </div>
+            )}
+          </StudioConvergePiece>
 
-            <div className="bg-surface-container-low/90 backdrop-blur-sm rounded-[1.35rem] p-5 md:p-6 outline outline-[0.5px] outline-white/[0.06] shadow-[0_40px_72px_-52px_rgba(0,0,0,0.68)]">
-              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-                <div className="flex items-end gap-3 flex-1 min-w-0">
-                  <span className="text-[9px] font-label tracking-[0.22em] uppercase text-secondary/90 shrink-0">角色参考</span>
-                  <span className="h-px flex-1 mb-1 bg-gradient-to-r from-secondary/22 to-transparent min-w-[2rem]" />
-                </div>
-                <button
-                  data-ref-preview-ignore
-                  onClick={() => fileRef.current?.click()}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass-panel ghost-border text-on-surface/80 hover:text-primary transition-colors cursor-pointer text-[10px] font-label font-semibold uppercase tracking-widest shrink-0"
-                >
-                  <Plus className="w-4 h-4" />
-                  上传
-                </button>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => handleFiles(e.target.files)}
+          <StudioConvergePiece
+            origin="right"
+            enterKey={enterKey}
+            delay={0.11}
+            className="ai-editor-sidebar min-h-0 h-full lg:max-h-none"
+          >
+            <div className="ai-editor-panel ai-editor-sidebar-panel rounded-[1.15rem] p-4 md:p-5 h-full min-h-0 flex flex-col gap-3 overflow-hidden">
+              <div className="shrink-0">
+                <div className="cover-section-label">剧本母本</div>
+                <textarea
+                  value={story}
+                  onChange={(e) => setStory(e.target.value)}
+                  placeholder="粘贴长剧本、梗概或分场——模型会据此写出九格提示词。"
+                  className="mt-2 w-full min-h-[88px] max-h-[120px] ai-editor-input rounded-xl p-3 text-[14px] leading-relaxed focus:outline-none focus-visible:ring-2 accent-focus-ring resize-none custom-scrollbar"
                 />
               </div>
 
-              <p className="text-[10px] text-on-surface/42 mb-3 leading-relaxed">{hint}</p>
+              <div className="shrink-0 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="cover-section-label mb-0">角色参考</div>
+                  <button
+                    data-ref-preview-ignore
+                    onClick={() => fileRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full ai-editor-btn-secondary text-[12px] font-medium transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    上传
+                  </button>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => handleFiles(e.target.files)}
+                  />
+                </div>
 
-              <div
-                className="rounded-2xl outline outline-dashed outline-[0.5px] outline-white/14 bg-surface-container-highest/22 min-h-[128px] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={handleDrop}
-              >
+                <p className="ai-editor-body line-clamp-2">{hint}</p>
+
+                <div
+                  className="ai-editor-dropzone ai-editor-dropzone--compact"
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={handleDrop}
+                >
                 {refs.length > 0 ? (
                   <Reorder.Group as="div" axis="x" values={refs} onReorder={setRefs} className="flex gap-2 overflow-x-auto custom-scrollbar">
                     {refs.map((r, idx) => (
@@ -849,12 +797,12 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
                         value={r}
                         whileDrag={{ scale: 1.04, zIndex: 20 }}
                         transition={{ layout: spring }}
-                        className="relative shrink-0 h-24 min-w-[120px] max-w-[220px] rounded-xl overflow-hidden outline outline-[0.5px] outline-white/20 cursor-grab active:cursor-grabbing bg-transparent flex items-center justify-center px-1 cursor-zoom-in"
+                        className="relative shrink-0 h-[4.5rem] min-w-[108px] max-w-[180px] rounded-xl overflow-hidden ai-editor-ref-tile cursor-grab active:cursor-grabbing bg-transparent flex items-center justify-center px-1 cursor-zoom-in"
                         data-theme-preserve="dark"
                         {...refThumbHandlers(r.url)}
                       >
                         <img src={r.url} className="h-full w-auto max-w-[172px] object-contain pointer-events-none" draggable={false} />
-                        <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-full bg-black/80 text-white text-[9px] font-black tracking-widest outline outline-[0.5px] outline-white/20 pointer-events-none">
+                        <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md bg-black/70 text-white text-[10px] font-medium pointer-events-none">
                           图{idx + 1}
                         </div>
                         <button
@@ -864,7 +812,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
                             const id = r.id;
                             setRefs((prev) => prev.filter((x) => x.id !== id));
                           }}
-                          className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/80 text-white flex items-center justify-center outline outline-[0.5px] outline-white/20"
+                          className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/70 text-white flex items-center justify-center"
                           title="移除图片"
                         >
                           <X className="w-3 h-3" />
@@ -882,7 +830,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
                               )
                             }
                             placeholder={`图${idx + 1} 名称`}
-                            className="w-full h-6 px-2 rounded-md bg-black/70 text-white text-[9px] font-semibold outline outline-[0.5px] outline-white/25 placeholder:text-white/60 focus:outline-none focus:ring-1 accent-focus-ring"
+                            className="w-full h-6 px-2 rounded-md bg-black/70 text-white text-[10px] font-medium placeholder:text-white/50 focus:outline-none focus:ring-1 accent-focus-ring"
                             title="给这张参考图命名（例如：小明）"
                           />
                         </div>
@@ -890,40 +838,38 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
                     ))}
                   </Reorder.Group>
                 ) : (
-                  <div className="h-20 flex flex-col items-center justify-center gap-1 text-on-surface/35 text-[10px] font-label uppercase tracking-[0.2em]">
-                    <span>拖放参考图至此处</span>
-                    <span className="text-[9px] normal-case tracking-normal text-on-surface/28">可命名、排序，映射到「图1 / 图2…」</span>
+                  <div className="h-14 flex items-center justify-center ai-editor-body text-center px-3 text-[13px]">
+                    拖放参考图至此处
                   </div>
                 )}
+                </div>
               </div>
 
-              <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="shrink-0 grid grid-cols-2 gap-2.5">
                 <button
                   onClick={runPromptPhase}
                   disabled={!canBuildPrompts}
                   className={cn(
-                    'w-full px-4 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-[0.18em] transition-all cursor-pointer flex items-center justify-center gap-2 outline outline-[0.5px] outline-outline-variant/50 shadow-[0_24px_48px_-32px_rgba(0,0,0,0.55)]',
+                    'w-full px-3 py-2.5 rounded-full text-[12px] font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5',
                     isRunning
                       ? phase === 'text'
-                        ? 'accent-focus-bg text-white accent-focus-glow opacity-95'
-                        : 'bg-surface-container-low text-slate-300 cursor-not-allowed'
+                        ? 'cover-hero-cta opacity-95'
+                        : 'ai-editor-btn-disabled'
                       : canBuildPrompts
-                        ? 'accent-focus-bg text-white hover:opacity-90 accent-focus-glow'
-                        : 'bg-surface-container-low text-slate-300 cursor-not-allowed',
+                        ? 'cover-hero-cta'
+                        : 'ai-editor-btn-disabled',
                   )}
                 >
-                  {isRunning && phase === 'text' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                  {isRunning && phase === 'text' ? '文本生成中...' : '生成提示词'}
+                  {isRunning && phase === 'text' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  {isRunning && phase === 'text' ? '生成中...' : '生成提示词'}
                 </button>
                 <button
                   type="button"
                   onClick={startNewBatch}
                   disabled={isRunning}
                   className={cn(
-                    'w-full px-4 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-[0.18em] transition-all cursor-pointer flex items-center justify-center gap-2 glass-panel ghost-border',
-                    isRunning
-                      ? 'bg-surface-container-low text-slate-400 cursor-not-allowed'
-                      : 'bg-surface-container-high text-slate-200 hover:text-primary hover:bg-white/5',
+                    'w-full px-3 py-2.5 rounded-full text-[12px] font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 ai-editor-btn-secondary',
+                    isRunning && 'opacity-50 cursor-not-allowed',
                   )}
                   title="清空当前编辑批次，开始新一批"
                 >
@@ -931,22 +877,22 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
                 </button>
               </div>
 
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="shrink-0 flex flex-col gap-2 sm:flex-row sm:items-center">
                 <button
                   onClick={runImagePhase}
                   disabled={!canGenerateImage}
                   className={cn(
-                    'w-full sm:flex-1 px-4 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-[0.18em] transition-all cursor-pointer flex items-center justify-center gap-2 outline outline-[0.5px] outline-outline-variant/50 shadow-[0_28px_56px_-32px_rgba(255,184,102,0.18)]',
+                    'w-full sm:flex-1 px-4 py-2.5 rounded-full text-[13px] font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5',
                     isRunning
                       ? phase === 'image'
-                        ? 'accent-focus-bg text-white accent-focus-glow opacity-95'
-                        : 'bg-surface-container-low text-slate-300 cursor-not-allowed'
+                        ? 'cover-hero-cta opacity-95'
+                        : 'ai-editor-btn-disabled'
                       : canGenerateImage
-                        ? 'accent-focus-bg text-white hover:opacity-90 accent-focus-glow'
-                        : 'bg-surface-container-low text-slate-300 cursor-not-allowed',
+                        ? 'cover-hero-cta'
+                        : 'ai-editor-btn-disabled',
                   )}
                 >
-                  {isRunning && phase === 'image' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Grid3X3 className="w-4 h-4" />}
+                  {isRunning && phase === 'image' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Grid3X3 className="w-3.5 h-3.5" />}
                   {isRunning && phase === 'image' ? '生图中...' : '生成 9 宫格'}
                 </button>
                 <select
@@ -954,27 +900,27 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
                   onChange={(e) => setImageModel(e.target.value as NineGridImageModel)}
                   disabled={isRunning}
                   className={cn(
-                    'ai-editor-select min-w-[14.5rem] text-white text-[10px] font-mono rounded-2xl px-3.5 py-3 focus:outline-none focus-visible:ring-2 accent-focus-ring cursor-pointer',
+                    'ai-editor-select min-w-[12rem] text-[13px] rounded-full px-4 py-2 focus:outline-none focus-visible:ring-2 accent-focus-ring cursor-pointer',
                     isRunning ? 'opacity-65 cursor-not-allowed' : '',
                   )}
                   title={imageModel === 'gpt-image-2' ? 'gpt-image-2 固定 size=3840x2160' : 'nano 模型走 IMAGE_GRID_* 配置'}
                 >
                   <option value="nano-banana-pro-4k">nano-banana-pro-4k（默认）</option>
-                  <option value="gpt-image-2">gpt-image-2（固定 3840x2160）</option>
+                  <option value="gpt-image-2">gpt-image-2（3840×2160）</option>
                 </select>
               </div>
 
-              <p className="mt-4 text-[10px] text-on-surface/38 leading-relaxed">
-                两步走：先「生成提示词」逐格打磨，再「生成 9 宫格」出主图；系统会尝试自动裁切并填入各格。
+              <p className="shrink-0 ai-editor-body text-[12px] line-clamp-2">
+                先生成提示词逐格打磨，再生成 9 宫格主图；系统会尝试自动裁切并填入各格。
               </p>
 
               {history.length > 0 && (
-                <div className="mt-5 rounded-[1.15rem] bg-surface-container-high/55 backdrop-blur-sm p-4 outline outline-[0.5px] outline-white/[0.08]">
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <div className="text-[9px] font-label tracking-[0.2em] uppercase text-secondary/85">历史批次</div>
-                    <div className="font-mono text-[9px] text-on-surface/35 tabular-nums">{history.length} 批</div>
+                <div className="ai-editor-history-section shrink-0 min-h-0 flex flex-col pt-3 mt-auto">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="cover-section-label mb-0">历史批次</div>
+                    <span className="ai-editor-stat text-[13px]">{history.length} 批</span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2.5 max-h-[260px] overflow-y-auto custom-scrollbar pr-1">
+                  <div className="ai-editor-timeline-rail ai-editor-timeline-rail--compact custom-scrollbar">
                     {history.map((h, i) => (
                       <motion.button
                         key={h.id}
@@ -983,29 +929,29 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.99 }}
                         transition={spring}
-                        className="relative rounded-xl overflow-hidden outline outline-[0.5px] outline-white/12 hover:outline-secondary/35 transition-shadow cursor-zoom-in shadow-[0_18px_36px_-24px_rgba(0,0,0,0.65)]"
+                        className="ai-editor-history-chip ai-editor-history-chip--compact cursor-zoom-in"
                         title="点击放大查看"
                       >
                         <img
                           src={h.gridUrl}
                           referrerPolicy="no-referrer"
-                          className="w-full aspect-video object-cover"
+                          className="w-full h-full object-cover"
                           onError={(e) => {
                             (e.currentTarget as HTMLImageElement).style.opacity = '0.08';
                           }}
                         />
-                        <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded-full bg-black/80 text-white text-[9px] font-black tracking-widest outline outline-[0.5px] outline-white/20">
-                          #{history.length - i}
-                        </div>
+                        <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded-md bg-black/70 text-white text-[10px] font-medium">
+                          {history.length - i}
+                        </span>
                       </motion.button>
                     ))}
                   </div>
                 </div>
               )}
             </div>
-          </motion.div>
+          </StudioConvergePiece>
         </div>
-      </motion.div>
+      </div>
 
       <ReferenceImageLightbox url={refThumbPreviewUrl} onClose={() => setRefThumbPreviewUrl(null)} zIndexClass="z-[98]" />
 
@@ -1016,6 +962,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
           animate={{ opacity: 1 }}
           transition={spring}
           className="fixed inset-0 z-[90]"
+          data-theme-preserve="dark"
         >
           <button
             type="button"
@@ -1028,7 +975,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
               <button
                 type="button"
                 onClick={() => setPreview(null)}
-                className="flex h-11 w-11 items-center justify-center rounded-full bg-surface-container-high/55 text-white/90 outline outline-[0.5px] outline-outline-variant/20 backdrop-blur-[30px] transition-colors hover:text-white cursor-pointer"
+                className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white/90 outline outline-[0.5px] outline-white/15 backdrop-blur-[30px] transition-colors hover:bg-white/16 hover:text-white cursor-pointer"
                 title="关闭 (Esc)"
                 aria-label="关闭"
               >
@@ -1058,7 +1005,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
                   <button
                     type="button"
                     onClick={() => downloadCropped(preview.idx)}
-                    className="absolute left-3 top-3 z-10 inline-flex items-center gap-2 rounded-full glass-panel ghost-border px-4 py-2.5 text-on-surface shadow-[0_24px_48px_-32px_rgba(0,0,0,0.85)] transition-colors cursor-pointer text-[10px] font-label font-bold uppercase tracking-widest hover:text-primary sm:left-4 sm:top-4"
+                    className="absolute left-3 top-3 z-10 inline-flex items-center gap-2 rounded-full bg-white/10 backdrop-blur-md px-4 py-2.5 text-white text-[13px] font-medium outline outline-[0.5px] outline-white/15 hover:bg-white/16 transition-colors cursor-pointer sm:left-4 sm:top-4"
                     title={`下载 图${preview.idx + 1}`}
                   >
                     <Download className="h-4 w-4" />
@@ -1066,7 +1013,7 @@ export const NineGridPage: React.FC<Props> = ({ onBack, onOpenStoryboard, onOpen
                   </button>
                 )}
               </motion.div>
-              <p className="pointer-events-none shrink-0 pt-2 text-center text-[10px] font-label tracking-[0.14em] text-white/40 uppercase">
+              <p className="pointer-events-none shrink-0 pt-2 text-center text-[12px] text-white/55">
                 滚轮缩放 · 中键拖拽 · 方向键切图 · 点空白或 ✕ 关闭
               </p>
             </div>

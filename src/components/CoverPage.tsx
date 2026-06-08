@@ -1,32 +1,36 @@
 import React from 'react';
-import { Navbar } from './Navbar';
 import { Hero } from './Hero';
-import { Features } from './Features';
+import { HomeTools } from './HomeTools';
 import { Footer } from './Footer';
 
 interface CoverPageProps {
   onStart: () => void;
   onOpenImageEditor: () => void;
   onOpenNineGrid: () => void;
+  onOpenDirectorWorkbench?: () => void;
+  onOpenInfiniteCanvas?: () => void;
 }
 
-export const CoverPage: React.FC<CoverPageProps> = ({ onStart, onOpenImageEditor, onOpenNineGrid }) => {
+export const CoverPage: React.FC<CoverPageProps> = ({
+  onStart,
+  onOpenImageEditor,
+  onOpenNineGrid,
+  onOpenDirectorWorkbench,
+  onOpenInfiniteCanvas,
+}) => {
   return (
-    <div className="min-h-screen bg-surface">
-      {/* data-ui-root：日间 slate/white 工具类映射；Hero 大图区单独保持白字，故放在外 */}
-      <div data-ui-root>
-        <Navbar onLaunchStudio={onStart} />
-      </div>
+    <div className="min-h-screen text-on-surface" data-ui-root data-cover-page>
       <main>
-        <Hero onStart={onStart} onOpenImageEditor={onOpenImageEditor} onOpenNineGrid={onOpenNineGrid} />
-        <div data-ui-root>
-          <Features />
-        </div>
+        <Hero onStart={onStart} />
+        <HomeTools
+          onStart={onStart}
+          onOpenImageEditor={onOpenImageEditor}
+          onOpenNineGrid={onOpenNineGrid}
+          onOpenDirectorWorkbench={onOpenDirectorWorkbench}
+          onOpenInfiniteCanvas={onOpenInfiniteCanvas}
+        />
       </main>
-      <div data-ui-root>
-        <Footer />
-      </div>
+      <Footer />
     </div>
   );
 };
-

@@ -70,7 +70,7 @@ export const StoryboardGridCard: React.FC<StoryboardGridCardProps> = ({ shot, on
       className="flex flex-col group"
     >
       <div
-        className="relative w-full aspect-video rounded-2xl overflow-hidden bg-[#0a0a0a] border border-white/5 group-hover:border-blue-500/50 transition-all duration-500 shadow-lg group-hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.5)] flex items-center justify-center cursor-pointer"
+        className="relative w-full aspect-video rounded-[1.15rem] overflow-hidden ai-editor-panel group-hover:outline-white/20 transition-all duration-500 flex items-center justify-center cursor-pointer outline outline-[0.5px] outline-white/10"
         onClick={onClick}
       >
         {shot.image_url ? (
@@ -83,7 +83,7 @@ export const StoryboardGridCard: React.FC<StoryboardGridCardProps> = ({ shot, on
             <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity duration-500" />
           </>
         ) : (
-          <div className="flex flex-col items-center justify-center text-slate-700 gap-3">
+          <div className="flex flex-col items-center justify-center text-[var(--cover-fg-warm-muted)] gap-3">
             <div className="w-12 h-12 rounded-full border-2 border-dashed border-slate-800 flex items-center justify-center">
               <ImageIcon className="w-6 h-6 opacity-40" />
             </div>
@@ -105,7 +105,7 @@ export const StoryboardGridCard: React.FC<StoryboardGridCardProps> = ({ shot, on
             {shot.image_url && (
               <button
                 onClick={handleDownload}
-                className="bg-black/60 backdrop-blur-xl text-slate-300 hover:text-primary p-1.5 rounded-lg border border-white/10 transition-all opacity-0 group-hover:opacity-100"
+                className="bg-black/60 backdrop-blur-xl text-[var(--cover-fg-warm)] hover:text-primary p-1.5 rounded-lg outline outline-[0.5px] outline-white/10 transition-all opacity-0 group-hover:opacity-100"
                 title="下载图片"
               >
                 <Download className="w-3.5 h-3.5" />
@@ -113,7 +113,7 @@ export const StoryboardGridCard: React.FC<StoryboardGridCardProps> = ({ shot, on
             )}
             <button 
               onClick={handleDelete}
-              className="bg-black/60 backdrop-blur-xl text-slate-400 hover:text-red-400 p-1.5 rounded-lg border border-white/10 transition-all opacity-0 group-hover:opacity-100"
+              className="bg-black/60 backdrop-blur-xl text-[var(--cover-fg-warm-muted)] hover:text-red-400 p-1.5 rounded-lg outline outline-[0.5px] outline-white/10 transition-all opacity-0 group-hover:opacity-100"
               title="删除此分镜"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -123,19 +123,19 @@ export const StoryboardGridCard: React.FC<StoryboardGridCardProps> = ({ shot, on
         
         {/* Bottom Info */}
         <div className="absolute bottom-4 left-4 right-4 opacity-0 group-hover:opacity-100 transition-all duration-500 translate-y-2 group-hover:translate-y-0">
-          <p className="text-[10px] text-slate-300 font-mono line-clamp-2 leading-relaxed italic">
+          <p className="text-[12px] text-white/88 font-medium line-clamp-2 leading-relaxed italic">
             "{shot.director_notes}"
           </p>
         </div>
       </div>
       
-      <div className="mt-5 px-2">
-        <div className="flex justify-end items-center mb-2.5">
-          <span className="text-slate-500 text-[9px] font-black px-2 py-1 rounded-lg bg-white/[0.03] border border-white/5 uppercase tracking-widest">
+      <div className="mt-4 px-1">
+        <div className="flex justify-end items-center mb-2">
+          <span className="ai-editor-stat text-[11px] px-2.5 py-1 rounded-full ai-editor-panel">
             {shotType}
           </span>
         </div>
-        <p className="text-slate-500 text-[11px] leading-relaxed line-clamp-2 mt-1.5 font-medium" title={shot.summary}>
+        <p className="ai-editor-body text-[13px] leading-relaxed line-clamp-2" title={shot.summary}>
           {shot.summary}
         </p>
       </div>

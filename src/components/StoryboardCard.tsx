@@ -373,23 +373,23 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
         transition={{ type: "spring", stiffness: 300, damping: 30 }}
       >
         <div className="flex gap-4 mb-3 items-end">
-          <span className="font-headline italic text-4xl tracking-[-0.02em] text-slate-700 group-hover:text-primary/30 transition-colors">
+          <span className="ai-editor-stat text-[2rem] sm:text-[2.25rem] tracking-[-0.03em] opacity-70 group-hover:opacity-90 transition-opacity">
             {shot.shot_number.toString().padStart(2, '0')}
           </span>
-          <div className="flex items-center gap-3 ml-2">
-            <span className="px-3 py-1 bg-surface-container-high rounded text-[9px] font-label tracking-[0.15em] text-slate-300 uppercase">
-              Shot A-{shot.shot_number}
+          <div className="flex items-center gap-2 ml-2 flex-wrap">
+            <span className="px-2.5 py-1 ai-editor-panel rounded-full text-[11px] font-medium text-[var(--cover-fg-warm)]">
+              镜头 {shot.shot_number}
             </span>
-            <span className="px-3 py-1 bg-surface-container-high rounded text-[9px] font-label tracking-[0.15em] text-slate-300 uppercase">
-              {shot.summary || 'Interior - The Lab'}
+            <span className="px-2.5 py-1 ai-editor-panel rounded-full text-[11px] font-medium text-[var(--cover-fg-warm-muted)] line-clamp-1 max-w-[12rem]">
+              {shot.summary || '场景描述'}
             </span>
           </div>
         </div>
 
-        <div className="grid grid-cols-12 gap-1 rounded-[1.25rem] overflow-hidden shadow-[0_45px_80px_-42px_rgba(0,0,0,0.58)] bg-surface-container-low p-1">
+        <div className="grid grid-cols-12 gap-1 rounded-[1.15rem] overflow-hidden ai-editor-panel p-1.5 outline outline-[0.5px] outline-white/10">
           {/* Frame Preview */}
           <div 
-            className="col-span-7 relative aspect-video bg-surface-container-highest group/preview overflow-hidden flex items-center justify-center rounded-[1rem]"
+            className="col-span-7 relative aspect-video bg-black/20 group/preview overflow-hidden flex items-center justify-center rounded-xl"
             onMouseEnter={() => setIsHoveringImage(true)}
             onMouseLeave={() => setIsHoveringImage(false)}
           >
@@ -402,9 +402,9 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                 className="w-full h-full object-cover opacity-90 group-hover/preview:scale-105 transition-transform duration-1000"
               />
             ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center text-slate-700 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-800/20 to-transparent">
-                <Camera className="w-16 h-16 mb-4 opacity-10" />
-                <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-slate-300">EDIT_RESULT_HERE</span>
+              <div className="w-full h-full flex flex-col items-center justify-center text-[var(--cover-fg-warm-muted)] bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white/5 to-transparent">
+                <Camera className="w-16 h-16 mb-4 opacity-20" />
+                <span className="text-[10px] font-medium tracking-[0.12em] uppercase text-[var(--cover-fg-warm-muted)]">等待编辑结果</span>
               </div>
             )
           ) : shot.image_url ? (
@@ -415,9 +415,9 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
               className="w-full h-full object-cover opacity-90 group-hover/preview:scale-105 transition-transform duration-1000"
             />
           ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center text-slate-700 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-800/20 to-transparent">
-              <Camera className="w-16 h-16 mb-4 opacity-10" />
-              <span className="text-[10px] font-bold tracking-[0.3em] uppercase text-slate-300">No Image Generated</span>
+            <div className="w-full h-full flex flex-col items-center justify-center text-[var(--cover-fg-warm-muted)] bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white/5 to-transparent">
+              <Camera className="w-16 h-16 mb-4 opacity-20" />
+              <span className="text-[10px] font-medium tracking-[0.12em] uppercase text-[var(--cover-fg-warm-muted)]">暂无图片</span>
             </div>
           )}
             
@@ -543,9 +543,9 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
           </div>
 
           {/* Sidebar Panel */}
-          <div className="col-span-5 flex flex-col gap-1 bg-surface-container-lowest rounded-[1rem] p-1">
+          <div className="col-span-5 flex flex-col gap-1 rounded-xl p-1 bg-black/10">
             {/* Header / Actions */}
-            <div className="p-4 flex justify-between items-center bg-surface-container-low rounded-[0.8rem]">
+            <div className="p-4 flex justify-between items-center ai-editor-panel rounded-lg">
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {

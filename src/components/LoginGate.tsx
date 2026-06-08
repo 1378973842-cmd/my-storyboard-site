@@ -1,32 +1,81 @@
-import React, { useLayoutEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { Lock, Loader2, ArrowRight } from 'lucide-react';
 import { cn } from '../lib/utils';
+import {
+  GATE_AUTH_REQUIRED_EVENT,
+  GATE_LS_KEY,
+  isStoredAuthorized,
+} from '../lib/gateAuth';
 
-/** 与后端 Cookie 门禁并行：本机 UI 放行标记（勿写入 main.tsx 的 LEGACY 清理列表） */
-export const GATE_LS_KEY = 'storyboard_gate_ok_v1';
-
-function isStoredAuthorized(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    const v = localStorage.getItem(GATE_LS_KEY);
-    return v === '1' || v === 'true';
-  } catch {
-    return false;
-  }
-}
+export { GATE_LS_KEY };
 
 /**
  * 专业门禁：琥珀 + 毛玻璃 + spring 动效；暗号由服务端 .env ACCESS_CODE 校验（默认 liu888）。
  */
 export function LoginGate({ children }: { children: React.ReactNode }) {
   const [authorized, setAuthorized] = useState(false);
+  /** 本会话曾通过暗号后保持 App 挂载，避免门禁弹层时卸载导致页面状态（如无限画布）丢失 */
+  const [sessionUnlocked, setSessionUnlocked] = useState(() => isStoredAuthorized());
+  const [checking, setChecking] = useState(true);
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useLayoutEffect(() => {
-    if (isStoredAuthorized()) setAuthorized(true);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/status', { credentials: 'same-origin' });
+        const data = (await res.json()) as { ok?: boolean };
+        if (cancelled) return;
+        if (data.ok) {
+          try {
+            localStorage.setItem(GATE_LS_KEY, '1');
+          } catch {
+            /* ignore */
+          }
+          setSessionUnlocked(true);
+          setAuthorized(true);
+        } else {
+          try {
+            localStorage.removeItem(GATE_LS_KEY);
+          } catch {
+            /* ignore */
+          }
+          setAuthorized(false);
+        }
+      } catch {
+        if (cancelled) return;
+        // 无法确认服务端 Cookie 时，不信任仅 localStorage 的放行（避免「能进站但不能生图」）
+        if (isStoredAuthorized()) {
+          try {
+            localStorage.removeItem(GATE_LS_KEY);
+          } catch {
+            /* ignore */
+          }
+        }
+        setAuthorized(false);
+      } finally {
+        if (!cancelled) setChecking(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onRequired = () => {
+      try {
+        localStorage.removeItem(GATE_LS_KEY);
+      } catch {
+        /* ignore */
+      }
+      setAuthorized(false);
+    };
+    window.addEventListener(GATE_AUTH_REQUIRED_EVENT, onRequired);
+    return () => window.removeEventListener(GATE_AUTH_REQUIRED_EVENT, onRequired);
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -58,6 +107,7 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
       } catch {
         /* 隐私模式：仅本会话放行 */
       }
+      setSessionUnlocked(true);
       setAuthorized(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : '校验失败');
@@ -66,11 +116,27 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
     }
   };
 
-  if (authorized) {
-    return <>{children}</>;
+  if (checking) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+        className="fixed inset-0 z-[2147483647] flex min-h-[100dvh] items-center justify-center bg-[#0e0e0e] text-sm text-[#e5e2e1]/80"
+        aria-busy="true"
+        aria-label="正在校验访问权限"
+      >
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+          className="h-9 w-9 rounded-full border-2 border-[#ffb866]/30 border-t-[#ffb866]"
+          aria-hidden
+        />
+      </motion.div>
+    );
   }
 
-  return (
+  const gateOverlay = !authorized ? (
     <div
       className="fixed inset-0 z-[2147483647] flex min-h-[100dvh] flex-col items-center justify-center bg-[#0e0e0e] px-6 py-12 text-[#e5e2e1]"
       data-login-gate
@@ -157,5 +223,16 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
         </form>
       </motion.div>
     </div>
+  ) : null;
+
+  if (!sessionUnlocked) {
+    return gateOverlay;
+  }
+
+  return (
+    <>
+      {children}
+      {gateOverlay}
+    </>
   );
 }

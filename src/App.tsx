@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import { useStore } from './store/useStore';
 import { 
@@ -26,26 +26,34 @@ import {
   Layout,
   CheckCircle2,
   Image as ImageIcon,
-  FileText,
-  Home
+  FileText
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { StyleBase, ReferenceImage } from './types';
 import { STYLES } from './constants';
 import { StoryboardCard } from './components/StoryboardCard';
 import { StoryboardGridCard } from './components/StoryboardGridCard';
-import { ThemeToggle } from './components/ThemeToggle';
 import { ProjectManager } from './components/ProjectManager';
 import { CoverPage } from './components/CoverPage';
+import { StudioTopNav } from './components/StudioTopNav';
 import { FrameDetail } from './components/FrameDetail';
 import { ImageEditorModal } from './components/ImageEditorModal';
 import { StandaloneImageEditorPage } from './components/StandaloneImageEditorPage';
 import { NineGridPage } from './components/NineGridPage';
+import { DirectorWorkbenchPage } from './pages/DirectorWorkbenchPage';
+import { InfiniteCanvasPage } from './pages/InfiniteCanvasPage';
 import { ZoomableLightboxImage } from './components/ZoomableLightboxImage';
 import { GlobalNoticeCenter } from './components/GlobalNoticeCenter';
 import { Folder, Save } from 'lucide-react';
 import { parseApiResponse } from './lib/http';
 import { SystemNotice } from './types';
+import { useShellNavigation } from './shell/ShellNavigation';
+import { useStudioCoverEnterKeys } from './shell/useStudioCoverEnterKeys';
+import { resolveStudioNavActive } from './shell/resolveStudioNavActive';
+import { StudioHeroShell } from './components/StudioHeroShell';
+import { StudioConvergePiece } from './components/motion/StudioConverge';
+import { CoverPageTransition } from './components/motion/CoverPageTransition';
+import { isInfiniteCanvasEditorOpen } from './lib/infiniteCanvas/canvasEngine.js';
 
 const ReferenceItem = ({ 
   asset, 
@@ -136,10 +144,10 @@ const ReferenceItem = ({
       )}
 
       <div className={cn(
-        "w-full rounded-xl overflow-hidden transition-all duration-200 bg-surface-container-low/70 flex flex-col outline outline-[0.5px] outline-outline-variant/20",
+        "w-full rounded-xl overflow-hidden transition-all duration-200 ai-editor-ref-tile flex flex-col",
         replaceTargetId === asset.id 
-          ? "ring-4 ring-blue-500/10 scale-[1.02] outline-blue-500/60" 
-          : "hover:outline-outline-variant/40",
+          ? "ring-2 ring-white/30 scale-[1.02]" 
+          : "hover:outline-white/16",
         draggedItemIndex === index ? "opacity-60 scale-90 shadow-xl" : "opacity-100 scale-100"
       )}>
         {/* Image Area */}
@@ -188,7 +196,7 @@ const ReferenceItem = ({
         </div>
 
         {/* Name Editor */}
-        <div className="h-8 bg-surface-container-high/55 backdrop-blur-sm px-1.5 border-t border-white/10">
+        <div className="h-8 bg-black/40 backdrop-blur-sm px-1.5">
           <input
             value={tempName}
             onChange={(e) => setTempName(e.target.value)}
@@ -204,7 +212,7 @@ const ReferenceItem = ({
               }
             }}
             placeholder={`图片${index + 1}`}
-            className="w-full h-full bg-transparent text-[10px] text-on-surface placeholder:text-on-surface/40 focus:outline-none text-center font-medium"
+            className="w-full h-full bg-transparent text-[11px] text-[var(--cover-fg-warm)] placeholder:text-[color-mix(in_srgb,var(--cover-fg-warm)_55%,transparent)] focus:outline-none text-center font-medium"
             onClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
           />
@@ -252,33 +260,52 @@ export default function App() {
   const openImageEditor = useStore((s) => s.openImageEditor);
   const updateGlobalSceneImage = useStore((s) => s.updateGlobalSceneImage);
 
+  const {
+    screen,
+    studioKeepAlive,
+    imageEditorKeepAlive,
+    nineGridKeepAlive,
+    directorWorkbenchKeepAlive,
+    infiniteCanvasKeepAlive,
+    openCover,
+    openStudio,
+    openImageEditor: openImageEditorScreen,
+    openNineGrid,
+    openDirectorWorkbench,
+    openInfiniteCanvas,
+  } = useShellNavigation();
+
+  const showCoverPage = screen === 'cover';
+  const showImageEditorPage = screen === 'image-editor';
+  const showNineGridPage = screen === 'nine-grid';
+  const showDirectorWorkbenchPage = screen === 'director';
+  const showInfiniteCanvasPage = screen === 'infinite-canvas';
+  const showMainStudio = screen === 'studio';
+
+  /** 回到首页时确保画布层不挡滚轮（z-index + body 标记） */
+  useEffect(() => {
+    if (showCoverPage) {
+      document.body.dataset.infiniteCanvasEditor = '0';
+    }
+  }, [showCoverPage]);
+
   const jumpByNotice = (notice: SystemNotice) => {
     const action = notice.action;
     if (!action) return;
     if (action.type === 'open-editor') {
-      setShowCoverPage(false);
-      setShowImageEditorPage(true);
-      setImageEditorKeepAlive(true);
-      setShowNineGridPage(false);
+      openImageEditorScreen();
       return;
     }
     if (action.type === 'open-nine-grid') {
-      setShowCoverPage(false);
-      setShowNineGridPage(true);
-      setNineGridKeepAlive(true);
-      setShowImageEditorPage(false);
+      openNineGrid();
       return;
     }
     if (action.type === 'open-shot') {
-      setShowCoverPage(false);
-      setShowImageEditorPage(false);
-      setShowNineGridPage(false);
+      openStudio();
       setSelectedShotNumber(action.shotNumber);
       return;
     }
-    setShowCoverPage(false);
-    setShowImageEditorPage(false);
-    setShowNineGridPage(false);
+    openStudio();
   };
 
   const [error, setError] = useState<string | null>(null);
@@ -298,15 +325,17 @@ export default function App() {
   const [sceneAspectRatio, setSceneAspectRatio] = useState('16:9');
   const [isScenePreviewOpen, setIsScenePreviewOpen] = useState(false);
   const [isSceneHistoryOpen, setIsSceneHistoryOpen] = useState(false);
-  const [showCoverPage, setShowCoverPage] = useState(true);
-  const [showImageEditorPage, setShowImageEditorPage] = useState(false);
-  const [showNineGridPage, setShowNineGridPage] = useState(false);
-  /** 一旦打开过即保持挂载，避免进主工作室/切回首页后卸载导致草稿丢失 */
-  const [imageEditorKeepAlive, setImageEditorKeepAlive] = useState(false);
-  const [nineGridKeepAlive, setNineGridKeepAlive] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [activeFilter, setActiveFilter] = useState<string>('All');
   const [showLibrary, setShowLibrary] = useState(false);
+  const studioTransitionKeys = useStudioCoverEnterKeys(screen);
+
+  const handleCanvasExitHome = () => {
+    if (isInfiniteCanvasEditorOpen() && !window.confirm('确定退出无限画布并返回网站首页？')) {
+      return;
+    }
+    openCover();
+  };
 
   const PRESET_IMAGES = [
     { id: 'p1', name: '赛博都市', url: 'https://images.unsplash.com/photo-1605810230434-7631ac76ec81?w=800&q=80', type: 'scene' as const },
@@ -601,78 +630,105 @@ export default function App() {
   return (
     <>
       <GlobalNoticeCenter onNoticeClick={jumpByNotice} />
+      <StudioTopNav
+        active={resolveStudioNavActive(screen)}
+        variant="overlay"
+        onHome={showInfiniteCanvasPage && !showCoverPage ? handleCanvasExitHome : undefined}
+      />
       {/* Keep editor mounted after first open (cover / main studio), so draft persists */}
       {(showImageEditorPage || imageEditorKeepAlive) && (
-        <div hidden={showCoverPage || !showImageEditorPage}>
-          <StandaloneImageEditorPage
-            onBack={() => {
-              setShowCoverPage(true);
-            }}
-            onOpenStoryboard={() => {
-              setShowCoverPage(false);
-              setShowImageEditorPage(false);
-              setShowNineGridPage(false);
-            }}
-            onOpenNineGrid={() => {
-              setShowCoverPage(false);
-              setShowNineGridPage(true);
-              setNineGridKeepAlive(true);
-              setShowImageEditorPage(false);
-            }}
-          />
-        </div>
+        <StudioHeroShell active={showImageEditorPage && !showCoverPage}>
+          <StandaloneImageEditorPage enterKey={studioTransitionKeys['image-editor']} />
+        </StudioHeroShell>
       )}
 
-      {/* Keep 9-grid mounted after first open (cover / main studio), so history & grids persist */}
+      {(showDirectorWorkbenchPage || directorWorkbenchKeepAlive) && (
+        <StudioHeroShell active={showDirectorWorkbenchPage && !showCoverPage}>
+          <DirectorWorkbenchPage enterKey={studioTransitionKeys.director} />
+        </StudioHeroShell>
+      )}
+
+      {(showInfiniteCanvasPage || (infiniteCanvasKeepAlive && !showCoverPage)) && (
+        <StudioHeroShell active={showInfiniteCanvasPage && !showCoverPage}>
+          <InfiniteCanvasPage
+            enterKey={studioTransitionKeys['infinite-canvas']}
+            shellActive={showInfiniteCanvasPage && !showCoverPage}
+            onBack={openCover}
+          />
+        </StudioHeroShell>
+      )}
+
       {(showNineGridPage || nineGridKeepAlive) && (
-        <div hidden={showCoverPage || !showNineGridPage}>
-          <NineGridPage
-            onBack={() => {
-              setShowCoverPage(true);
-            }}
-            onOpenStoryboard={() => {
-              setShowCoverPage(false);
-              setShowImageEditorPage(false);
-              setShowNineGridPage(false);
-            }}
-            onOpenImageEditor={() => {
-              setShowCoverPage(false);
-              setShowImageEditorPage(true);
-              setImageEditorKeepAlive(true);
-              setShowNineGridPage(false);
-            }}
-          />
-        </div>
+        <StudioHeroShell active={showNineGridPage && !showCoverPage}>
+          <NineGridPage enterKey={studioTransitionKeys['nine-grid']} />
+        </StudioHeroShell>
       )}
 
-      {showCoverPage ? (
-        <CoverPage
-          onStart={() => {
-            setShowCoverPage(false);
-            setShowImageEditorPage(false);
-            setShowNineGridPage(false);
-          }}
-          onOpenImageEditor={() => {
-            setShowCoverPage(false);
-            setShowImageEditorPage(true);
-            setImageEditorKeepAlive(true);
-            setShowNineGridPage(false);
-          }}
-          onOpenNineGrid={() => {
-            setShowCoverPage(false);
-            setShowNineGridPage(true);
-            setNineGridKeepAlive(true);
-            setShowImageEditorPage(false);
-          }}
-        />
-      ) : showImageEditorPage || showNineGridPage ? null : (
+      <CoverPageTransition
+        show={showCoverPage}
+        enterKey={studioTransitionKeys.cover}
+        onStart={openStudio}
+        onOpenImageEditor={openImageEditorScreen}
+        onOpenNineGrid={openNineGrid}
+        onOpenDirectorWorkbench={openDirectorWorkbench}
+        onOpenInfiniteCanvas={openInfiniteCanvas}
+      />
+
+      {(showMainStudio || studioKeepAlive) && (
+        <StudioHeroShell active={showMainStudio && !showCoverPage}>
         <div
-          className="flex h-screen bg-surface text-slate-100 font-sans overflow-hidden"
+          className="h-full min-h-0 overflow-hidden relative ai-editor-page storyboard-page studio-page-shell flex flex-col"
           data-ui-root
+          data-cover-page
+          data-studio-page
         >
+          <div className="studio-page-bg pointer-events-none fixed inset-0 z-0" aria-hidden />
+          <div className="studio-page-scrim pointer-events-none fixed inset-0 z-0" aria-hidden />
+          <div className="studio-page-glow pointer-events-none fixed inset-0 z-0 cover-ambient" aria-hidden />
+
+          <div className="studio-page-content ai-editor-layout relative z-10 flex flex-col flex-1 min-h-0 w-full mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 pb-4 md:pb-5">
+            <StudioConvergePiece origin="top" enterKey={studioTransitionKeys.studio} delay={0.03}>
+              <header className="shrink-0 mb-3 lg:mb-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+                <div>
+                  <h1 className="cover-tools-headline text-[1.75rem] sm:text-[2rem] lg:text-[2.15rem] tracking-[-0.035em] leading-[1.08]">
+                    分镜
+                  </h1>
+                  <p className="cover-tools-subhead mt-1 text-[14px] sm:text-[15px] leading-snug">
+                    剧本拆解、场景配置与镜头序列编排。
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={handleQuickSave}
+                    disabled={isSaving}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full ai-editor-btn-secondary text-[12px] font-medium transition-colors cursor-pointer disabled:opacity-50"
+                    title="快速保存"
+                  >
+                    {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                    保存
+                  </button>
+                  <button
+                    onClick={() => setIsProjectManagerOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full cover-hero-cta text-[12px] font-medium cursor-pointer"
+                    title="项目管理"
+                  >
+                    <Folder className="w-3.5 h-3.5" />
+                    项目
+                  </button>
+                </div>
+              </header>
+            </StudioConvergePiece>
+
+            <div className="ai-editor-workspace flex-1 min-h-0 flex gap-4 lg:gap-5 xl:gap-6 min-h-0">
           <ProjectManager isOpen={isProjectManagerOpen} onClose={() => setIsProjectManagerOpen(false)} />
           
           {/* Left Panel */}
+          <StudioConvergePiece
+            origin="left"
+            enterKey={studioTransitionKeys.studio}
+            delay={0.07}
+            className="shrink-0 min-h-0"
+          >
           <motion.aside 
             initial={false}
             animate={{ 
@@ -682,139 +738,84 @@ export default function App() {
               pointerEvents: isSidebarCollapsed ? 'none' : 'auto'
             }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="border-r border-white/5 flex flex-col bg-surface-container-lowest relative overflow-hidden"
+            className="ai-editor-sidebar storyboard-sidebar-shell relative overflow-hidden shrink-0"
           >
-            {/* Decorative Grid Background */}
-            <div className="absolute inset-0 pointer-events-none opacity-[0.03]" 
-                 style={{ backgroundImage: 'radial-gradient(#fff 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
-            
-            <div className="flex flex-col h-full min-w-[380px] relative z-10">
-              {/* Sidebar Header */}
-              <div className="p-6 border-b border-white/5 bg-white/[0.02]">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 bg-primary rounded-2xl flex items-center justify-center shadow-[0_0_30px_rgba(255,184,102,0.2)] group-hover:scale-105 transition-transform duration-500">
-                      <Film className="w-6 h-6 text-black" />
-                    </div>
-                    <div>
-                      <h1 className="text-xl font-black tracking-tighter uppercase leading-none text-white">Director.OS</h1>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-[8px] font-bold text-primary tracking-[0.3em] uppercase">System_v2.5.4</span>
-                        <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
-                      </div>
-                    </div>
+            <div className="ai-editor-panel ai-editor-sidebar-panel rounded-[1.15rem] h-full min-h-0 flex flex-col overflow-hidden min-w-[380px]">
+              <div className="shrink-0 p-4 md:p-5 outline outline-[0.5px] outline-white/[0.06]">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="cover-section-label mb-1">当前项目</div>
+                    <h2 className="text-[14px] font-medium truncate text-[var(--cover-fg-warm)]">{projectTitle}</h2>
                   </div>
-                  
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowCoverPage(true)}
-                      className="p-2 bg-white/5 outline outline-[0.5px] outline-outline-variant/20 rounded-xl text-slate-400 hover:text-primary hover:bg-white/[0.07] transition-all cursor-pointer"
-                      title="回到起始页"
-                    >
-                      <Home className="w-4 h-4" strokeWidth={1.75} />
-                    </button>
-                    <ThemeToggle />
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <button 
                       onClick={() => setIsSidebarCollapsed(true)}
-                      className="p-2 bg-white/5 border border-white/10 rounded-xl text-slate-400 hover:text-primary hover:border-primary/30 transition-all cursor-pointer"
+                      className="p-2 rounded-full ai-editor-btn-secondary transition-colors cursor-pointer"
                       title="收起侧边栏"
                     >
                       <ChevronLeft className="w-4 h-4" />
                     </button>
                     <button 
-                      onClick={handleQuickSave}
-                      disabled={isSaving}
-                      className="p-2 bg-white/5 border border-white/10 rounded-xl text-slate-400 hover:text-primary hover:border-primary/30 transition-all disabled:opacity-50 cursor-pointer"
-                      title="快速保存"
-                    >
-                      {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    </button>
-                    <button 
                       onClick={() => setIsProjectManagerOpen(true)}
-                      className="p-2 bg-white/5 border border-white/10 rounded-xl text-slate-400 hover:text-primary hover:border-primary/30 transition-all cursor-pointer"
-                      title="项目管理"
+                      className="p-2 rounded-full ai-editor-btn-secondary transition-colors cursor-pointer"
+                      title="编辑项目"
                     >
-                      <Folder className="w-4 h-4" />
+                      <Edit2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                </div>
-
-                <div className="p-4 bg-white/[0.03] border border-white/5 rounded-2xl flex items-center justify-between group hover:bg-white/[0.05] transition-colors">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                      <label className="text-[8px] font-black uppercase tracking-[0.2em] text-slate-500">Active_Project</label>
-                    </div>
-                    <h2 className="text-xs font-bold truncate text-slate-200 font-mono uppercase tracking-tight">{projectTitle}</h2>
-                  </div>
-                  <button 
-                    onClick={() => setIsProjectManagerOpen(true)}
-                    className="p-2 text-slate-500 hover:text-primary transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto p-4 md:p-5 pt-0 space-y-6 custom-scrollbar">
                 {/* Configuration Section */}
-                <section className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <div className="w-1 h-3 bg-primary rounded-full" />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Project_Configuration</span>
-                  </div>
+                <section className="space-y-3">
+                  <div className="cover-section-label">项目配置</div>
                   
-                  <div className="space-y-4 bg-white/[0.02] border border-white/5 rounded-2xl p-4">
+                  <div className="space-y-3 rounded-xl p-3 ai-editor-panel">
                     <div className="space-y-2">
-                      <label className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Visual_Style</label>
+                      <label className="cover-section-label mb-0 text-[12px]">视觉风格</label>
                       <div className="relative">
                         <select 
                           value={selectedStyle}
                           onChange={(e) => setStyle(e.target.value as any)}
-                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all appearance-none cursor-pointer hover:bg-white/10"
+                          className="w-full ai-editor-select rounded-xl px-4 py-2.5 text-[13px] font-medium focus:outline-none focus-visible:ring-2 accent-focus-ring appearance-none cursor-pointer"
                         >
-                          {STYLES.map(s => <option key={s} value={s} className="bg-surface">{s}</option>)}
+                          {STYLES.map(s => <option key={s} value={s}>{s}</option>)}
                         </select>
-                        <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                        <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 opacity-50 pointer-events-none" />
                       </div>
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-[9px] font-bold uppercase tracking-widest text-slate-600">Global_Context</label>
+                      <label className="cover-section-label mb-0 text-[12px]">全局语境</label>
                       <textarea 
                         value={context}
                         onChange={(e) => setContext(e.target.value)}
-                        placeholder="Define the world, time, and atmosphere..."
-                        className="w-full bg-white/5 border border-white/10 rounded-xl p-4 resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all text-xs leading-relaxed h-24 font-mono"
+                        placeholder="定义世界观、时间与氛围…"
+                        className="w-full ai-editor-input rounded-xl p-3 resize-none focus:outline-none focus-visible:ring-2 accent-focus-ring text-[13px] leading-relaxed h-24"
                       />
                     </div>
                   </div>
                 </section>
 
                 {/* Reference Assets Section */}
-                <section className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-1 h-3 bg-primary rounded-full" />
-                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Asset_Library</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <button 
-                        onClick={() => setShowLibrary(!showLibrary)}
-                        className={cn(
-                          "text-[9px] font-bold uppercase tracking-widest transition-colors flex items-center gap-1.5",
-                          showLibrary ? "text-primary" : "text-slate-500 hover:text-slate-300"
-                        )}
-                      >
-                        <ImageIcon className="w-3 h-3" />
-                        {showLibrary ? 'Hide_Library' : 'Open_Library'}
-                      </button>
-                    </div>
+                <section className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="cover-section-label mb-0">参考素材</div>
+                    <button 
+                      onClick={() => setShowLibrary(!showLibrary)}
+                      className={cn(
+                        "text-[12px] font-medium transition-colors flex items-center gap-1.5",
+                        showLibrary ? "text-[var(--cover-fg-warm)]" : "ai-editor-body hover:text-[var(--cover-fg-warm)]"
+                      )}
+                    >
+                      <ImageIcon className="w-3.5 h-3.5" />
+                      {showLibrary ? '收起库' : '素材库'}
+                    </button>
                   </div>
 
                   {showLibrary && (
-                    <div className="grid grid-cols-4 gap-2 p-3 bg-primary/5 border border-primary/20 rounded-2xl animate-in fade-in slide-in-from-top-2">
+                    <div className="grid grid-cols-4 gap-2 p-3 ai-editor-panel animate-in fade-in slide-in-from-top-2">
                       {PRESET_IMAGES.map(img => (
                         <button
                           key={img.id}
@@ -840,10 +841,10 @@ export default function App() {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between px-1">
                         <div className="flex items-center gap-2">
-                          <User className="w-3.5 h-3.5 text-primary" />
-                          <span className="text-[9px] font-bold uppercase tracking-widest text-slate-200">Characters</span>
+                          <User className="w-3.5 h-3.5 opacity-70" />
+                          <span className="cover-section-label mb-0 text-[12px]">角色</span>
                         </div>
-                        <span className="text-[8px] font-mono text-slate-400">{characterRefs.length}_ITEMS</span>
+                        <span className="ai-editor-stat text-[12px]">{characterRefs.length} 张</span>
                       </div>
 
                       <Reorder.Group 
@@ -855,8 +856,8 @@ export default function App() {
                           useStore.setState({ references: [...newOrder, ...otherRefs] });
                         }}
                         className={cn(
-                          "flex flex-row gap-3 p-3 bg-white/[0.03] border border-dashed rounded-2xl transition-all relative min-h-[128px] overflow-x-auto items-center custom-scrollbar",
-                          dragActiveType === 'character' ? "border-primary bg-primary/5" : "border-white/10"
+                          "flex flex-row gap-3 p-3 ai-editor-dropzone ai-editor-dropzone--compact transition-all relative min-h-[7.5rem] overflow-x-auto items-center custom-scrollbar",
+                          dragActiveType === 'character' && "outline-white/20"
                         )}
                         onDragEnter={(e: any) => handleDrag(e, 'character')}
                         onDragOver={(e: any) => handleDrag(e, 'character')}
@@ -884,10 +885,10 @@ export default function App() {
                         
                         <button 
                           onClick={() => triggerUpload('character')}
-                          className="shrink-0 w-24 h-24 flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/15 bg-white/[0.06] hover:bg-white/10 hover:border-primary/40 transition-all text-slate-300 hover:text-primary cursor-pointer"
+                          className="shrink-0 w-20 h-20 flex flex-col items-center justify-center gap-1 rounded-xl ai-editor-upload-tile cursor-pointer"
                         >
                           <Plus className="w-4 h-4" />
-                          <span className="text-[8px] font-black uppercase tracking-widest">Upload</span>
+                          <span className="text-[10px] font-medium">上传</span>
                         </button>
                       </Reorder.Group>
                     </div>
@@ -896,10 +897,10 @@ export default function App() {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between px-1">
                         <div className="flex items-center gap-2">
-                          <Map className="w-3.5 h-3.5 text-primary" />
-                          <span className="text-[9px] font-bold uppercase tracking-widest text-slate-200">Environments</span>
+                          <Map className="w-3.5 h-3.5 opacity-70" />
+                          <span className="cover-section-label mb-0 text-[12px]">场景</span>
                         </div>
-                        <span className="text-[8px] font-mono text-slate-400">{sceneRefs.length}_ITEMS</span>
+                        <span className="ai-editor-stat text-[12px]">{sceneRefs.length} 张</span>
                       </div>
 
                       <Reorder.Group 
@@ -911,8 +912,8 @@ export default function App() {
                           useStore.setState({ references: [...otherRefs, ...newOrder] });
                         }}
                         className={cn(
-                          "flex flex-row gap-3 p-3 bg-white/[0.03] border border-dashed rounded-2xl transition-all relative min-h-[128px] overflow-x-auto items-center custom-scrollbar",
-                          dragActiveType === 'scene' ? "border-primary bg-primary/5" : "border-white/10"
+                          "flex flex-row gap-3 p-3 ai-editor-dropzone ai-editor-dropzone--compact transition-all relative min-h-[7.5rem] overflow-x-auto items-center custom-scrollbar",
+                          dragActiveType === 'scene' && "outline-white/20"
                         )}
                         onDragEnter={(e: any) => handleDrag(e, 'scene')}
                         onDragOver={(e: any) => handleDrag(e, 'scene')}
@@ -940,10 +941,10 @@ export default function App() {
                         
                         <button 
                           onClick={() => triggerUpload('scene')}
-                          className="shrink-0 w-24 h-24 flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/15 bg-white/[0.06] hover:bg-white/10 hover:border-primary/40 transition-all text-slate-300 hover:text-primary cursor-pointer"
+                          className="shrink-0 w-20 h-20 flex flex-col items-center justify-center gap-1 rounded-xl ai-editor-upload-tile cursor-pointer"
                         >
                           <Plus className="w-4 h-4" />
-                          <span className="text-[8px] font-black uppercase tracking-widest">Upload</span>
+                          <span className="text-[10px] font-medium">上传</span>
                         </button>
                       </Reorder.Group>
                     </div>
@@ -952,49 +953,47 @@ export default function App() {
                 </section>
 
                 {/* Script Section */}
-                <section className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <div className="w-1 h-3 bg-primary rounded-full" />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Script_Editor</span>
-                  </div>
-                  <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4">
+                <section className="space-y-3">
+                  <div className="cover-section-label">剧本文本</div>
+                  <div className="rounded-xl p-3 ai-editor-panel">
                     <textarea 
                       value={script}
                       onChange={(e) => setScript(e.target.value)}
-                      placeholder="Enter your script outline here..."
-                      className="w-full bg-white/5 border border-white/10 rounded-xl p-4 resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all text-xs leading-relaxed h-48 font-mono"
+                      placeholder="在此粘贴剧本大纲或分场描述…"
+                      className="w-full ai-editor-input rounded-xl p-3 resize-none focus:outline-none focus-visible:ring-2 accent-focus-ring text-[13px] leading-relaxed h-44"
                     />
                   </div>
                 </section>
               </div>
 
               {/* Sidebar Footer Action */}
-              <div className="p-6 border-t border-white/5 bg-white/[0.02]">
+              <div className="shrink-0 p-4 md:p-5 pt-0">
                 <button 
                   onClick={handleGenerate}
                   disabled={isGeneratingScript || !script.trim()}
                   className={cn(
-                    "w-full py-4 rounded-2xl font-black uppercase tracking-[0.2em] text-xs flex items-center justify-center gap-3 transition-all shadow-2xl",
-                    isGeneratingScript 
-                      ? "bg-slate-800 text-slate-500 cursor-not-allowed" 
-                      : "bg-primary text-black hover:bg-amber-400 hover:shadow-[0_0_30px_rgba(255,184,102,0.4)] active:scale-[0.98] cursor-pointer"
+                    "w-full py-3 rounded-full text-[13px] font-medium flex items-center justify-center gap-2 transition-all cursor-pointer",
+                    isGeneratingScript || !script.trim()
+                      ? "ai-editor-btn-disabled"
+                      : "cover-hero-cta"
                   )}
                 >
                   {isGeneratingScript ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Processing...
+                      生成中…
                     </>
                   ) : (
                     <>
                       <Sparkles className="w-4 h-4" />
-                      Generate_Storyboard
+                      生成分镜
                     </>
                   )}
                 </button>
               </div>
             </div>
           </motion.aside>
+          </StudioConvergePiece>
 
     <AnimatePresence>
       {isSidebarCollapsed && (
@@ -1006,20 +1005,8 @@ export default function App() {
         >
           <motion.button
             type="button"
-            onClick={() => setShowCoverPage(true)}
-            className="w-10 h-10 rounded-full flex items-center justify-center bg-surface-container-high/55 backdrop-blur-md text-slate-400 hover:text-primary outline outline-[0.5px] outline-outline-variant/20 shadow-[0_24px_48px_-28px_rgba(0,0,0,0.45)] transition-colors cursor-pointer"
-            title="回到起始页"
-            whileHover={{ y: -2 }}
-            whileTap={{ scale: 0.94 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-          >
-            <Home className="w-4 h-4" strokeWidth={1.75} />
-          </motion.button>
-          <ThemeToggle />
-          <motion.button
-            type="button"
             onClick={() => setIsSidebarCollapsed(false)}
-            className="w-10 h-10 bg-primary rounded-full flex items-center justify-center text-black shadow-[0_0_24px_rgba(255,184,102,0.35)] hover:brightness-110 transition-all active:scale-95 cursor-pointer"
+            className="w-10 h-10 rounded-full cover-hero-cta flex items-center justify-center shadow-[0_0_24px_rgba(255,184,102,0.35)] hover:brightness-110 transition-all active:scale-95 cursor-pointer"
             title="展开侧边栏"
           >
             <ChevronRight className="w-6 h-6" />
@@ -1029,92 +1016,85 @@ export default function App() {
     </AnimatePresence>
 
     {/* Right Panel */}
-      <main className="flex-1 overflow-y-auto bg-surface-container-lowest relative custom-scrollbar">
+      <StudioConvergePiece
+        origin="right"
+        enterKey={studioTransitionKeys.studio}
+        delay={0.11}
+        className="flex-1 min-h-0 min-w-0"
+      >
+      <main className="storyboard-workspace-main h-full min-h-0 relative custom-scrollbar p-4 md:p-5 lg:p-6">
         {error && (
-          <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 bg-red-500/10 border border-red-500/20 px-4 py-2 rounded-full flex items-center gap-2 text-red-400 text-xs font-bold animate-in fade-in slide-in-from-top-4">
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl bg-red-500/15 outline outline-[0.5px] outline-red-400/25 text-red-200 text-[13px] flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
             <Info className="w-4 h-4" />
             {error}
           </div>
         )}
 
         {!data && !isGeneratingScript ? (
-          <div className="h-full flex flex-col items-center justify-center text-center p-12">
-            <div className="w-24 h-24 bg-slate-900 rounded-3xl flex items-center justify-center mb-6 border border-slate-800">
-              <Play className="w-10 h-10 text-slate-700" />
+          <div className="h-full flex flex-col items-center justify-center text-center px-6">
+            <div className="w-16 h-16 rounded-2xl ai-editor-panel flex items-center justify-center mb-5">
+              <Play className="w-7 h-7 opacity-60" />
             </div>
-            <h2 className="text-2xl font-semibold mb-2">准备好开始你的创作了吗？</h2>
-            <p className="text-slate-500 max-w-md">在左侧输入剧本大纲并选择画风，Seedance 将为你自动拆解分镜并生成视觉参考。</p>
+            <h2 className="cover-tools-subhead text-[17px] mb-2">准备好开始创作了吗？</h2>
+            <p className="ai-editor-body text-[14px] max-w-md">在左侧输入剧本并选择画风，系统将自动拆解分镜并生成视觉参考。</p>
           </div>
         ) : (
-          <div className="p-8 max-w-[1800px] mx-auto space-y-12 pb-24">
+          <div className="max-w-none mx-auto space-y-8 pb-8">
             {/* Key Scene Header - Technical Dashboard Style */}
             {data?.global_assets && (
-              <div className="bg-surface-container-low border border-white/5 rounded-2xl overflow-hidden shadow-2xl no-print">
-                <div className="flex items-center justify-between px-6 py-3 border-b border-white/5 bg-white/[0.02]">
-                  <div className="flex items-center gap-3">
-                    <div className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-[0_0_8px_rgba(255,184,102,0.5)]" />
-                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">System.Scene_Configuration</span>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Active_Scene</span>
-                      <select 
-                        value={selectedSceneIndex}
-                        onChange={(e) => setSelectedSceneIndex(Number(e.target.value))}
-                        className="bg-white/5 text-slate-300 text-[10px] font-mono rounded-md px-2 py-1 border border-white/10 focus:outline-none focus:border-primary/50 transition-colors cursor-pointer"
-                      >
-                        {data.global_assets.scenes.map((_, i) => (
-                          <option key={i} value={i} className="bg-surface">SCENE_{i + 1}</option>
-                        ))}
-                      </select>
-                    </div>
+              <div className="ai-editor-panel rounded-[1.15rem] overflow-hidden no-print">
+                <div className="flex items-center justify-between px-5 py-3 outline outline-[0.5px] outline-white/[0.06]">
+                  <div className="cover-section-label mb-0">场景配置</div>
+                  <div className="flex items-center gap-2">
+                    <span className="ai-editor-body text-[12px]">当前场景</span>
+                    <select 
+                      value={selectedSceneIndex}
+                      onChange={(e) => setSelectedSceneIndex(Number(e.target.value))}
+                      className="ai-editor-select rounded-full px-3 py-1.5 text-[12px] focus:outline-none focus-visible:ring-2 accent-focus-ring cursor-pointer"
+                    >
+                      {data.global_assets.scenes.map((_, i) => (
+                        <option key={i} value={i}>场景 {i + 1}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
                 
                 {data.global_assets.scenes[selectedSceneIndex] && (
-                  <div className="grid grid-cols-1 lg:grid-cols-[1fr_480px] divide-x divide-white/5">
-                    <div className="p-6 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-1 h-3 bg-primary rounded-full" />
-                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Scene_Description</span>
-                        </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-[1fr_480px]">
+                    <div className="p-5 space-y-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="cover-section-label mb-0">场景描述</div>
                         <button 
                           onClick={() => handleGenerateSceneDescription(selectedSceneIndex)}
                           disabled={isGeneratingDescription === selectedSceneIndex.toString()}
                           className={cn(
-                            "flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest transition-all",
-                            isGeneratingDescription === selectedSceneIndex.toString() 
-                              ? "text-primary animate-pulse" 
-                              : "text-slate-500 hover:text-primary"
+                            "flex items-center gap-1.5 text-[12px] font-medium transition-all ai-editor-body hover:text-[var(--cover-fg-warm)]",
+                            isGeneratingDescription === selectedSceneIndex.toString() && "opacity-80"
                           )}
                         >
-                          {isGeneratingDescription === selectedSceneIndex.toString() ? <Loader2 className="w-3 h-3 animate-spin" /> : <PenTool className="w-3 h-3" />}
-                          Rewrite_Prompt
+                          {isGeneratingDescription === selectedSceneIndex.toString() ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PenTool className="w-3.5 h-3.5" />}
+                          重写提示词
                         </button>
                       </div>
                       <textarea
                         value={data.global_assets.scenes[selectedSceneIndex].description}
                         onChange={(e) => handleUpdateSceneDescription(selectedSceneIndex, e.target.value)}
-                        className="w-full bg-white/[0.02] border border-white/5 rounded-xl p-4 text-xs text-slate-300 leading-relaxed min-h-[100px] focus:outline-none focus:border-primary/30 focus:bg-white/[0.04] transition-all font-mono"
-                        placeholder="Define the scene parameters..."
+                        className="w-full ai-editor-input rounded-xl p-3 text-[13px] leading-relaxed min-h-[100px] focus:outline-none focus-visible:ring-2 accent-focus-ring"
+                        placeholder="描述场景参数…"
                       />
                       
-                      <div className="flex items-center justify-between pt-4 border-t border-white/5">
-                        <div className="flex items-center gap-8">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between pt-3 outline outline-[0.5px] outline-white/[0.06] -mx-1 px-1">
+                        <div className="flex flex-wrap items-end gap-6">
                           <div className="space-y-2">
-                            <div className="flex items-center gap-1.5">
-                              <Maximize2 className="w-3 h-3 text-slate-600" />
-                              <span className="text-[8px] font-black uppercase tracking-widest text-slate-500">Resolution_Spec</span>
-                            </div>
-                            <div className="flex bg-white/[0.03] rounded-xl p-1 border border-white/5 shadow-inner">
+                            <span className="cover-section-label mb-0 text-[11px]">分辨率</span>
+                            <div className="flex rounded-full p-1 ai-editor-mode-switch">
                               {['1K', '2K', '4K'].map(size => (
                                 <button
                                   key={size}
                                   onClick={() => setSceneImageSize(size)}
                                   className={cn(
-                                    "px-4 py-1.5 text-[10px] font-mono font-bold rounded-lg transition-all",
-                                    sceneImageSize === size ? "bg-primary text-black shadow-[0_0_12px_rgba(255,184,102,0.4)]" : "text-slate-500 hover:text-slate-300"
+                                    "px-3 py-1.5 text-[12px] font-medium rounded-full transition-all cursor-pointer",
+                                    sceneImageSize === size ? "ai-editor-mode-btn--active" : "ai-editor-mode-btn"
                                   )}
                                 >
                                   {size}
@@ -1123,17 +1103,14 @@ export default function App() {
                             </div>
                           </div>
                           <div className="space-y-2">
-                            <div className="flex items-center gap-1.5">
-                              <Layout className="w-3 h-3 text-slate-600" />
-                              <span className="text-[8px] font-black uppercase tracking-widest text-slate-500">Aspect_Ratio</span>
-                            </div>
+                            <span className="cover-section-label mb-0 text-[11px]">画幅</span>
                             <select 
                               value={sceneAspectRatio}
                               onChange={(e) => setSceneAspectRatio(e.target.value)}
-                              className="bg-white/[0.03] text-slate-300 text-[10px] font-mono font-bold rounded-xl px-4 py-2.5 border border-white/5 focus:outline-none focus:border-primary/30 transition-all cursor-pointer hover:bg-white/10 appearance-none min-w-[100px]"
+                              className="ai-editor-select rounded-full px-4 py-2 text-[12px] focus:outline-none focus-visible:ring-2 accent-focus-ring cursor-pointer min-w-[100px]"
                             >
                               {['1:1', '16:9', '9:16', '4:3', '3:4'].map(ratio => (
-                                <option key={ratio} value={ratio} className="bg-surface">{ratio}</option>
+                                <option key={ratio} value={ratio}>{ratio}</option>
                               ))}
                             </select>
                           </div>
@@ -1143,20 +1120,19 @@ export default function App() {
                           onClick={() => handleGenerateGlobalAsset(data.global_assets.scenes[selectedSceneIndex].description, selectedSceneIndex)}
                           disabled={isGeneratingGlobalAsset === selectedSceneIndex.toString()}
                           className={cn(
-                            "group relative flex items-center gap-3 px-8 py-4 rounded-2xl font-black uppercase tracking-[0.2em] text-[12px] transition-all overflow-hidden",
+                            "inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-[13px] font-medium transition-all cursor-pointer shrink-0",
                             isGeneratingGlobalAsset === selectedSceneIndex.toString() 
-                              ? "bg-slate-800 text-primary" 
-                              : "bg-primary text-black hover:bg-amber-400 hover:shadow-[0_0_32px_rgba(255,184,102,0.4)] active:scale-95"
+                              ? "ai-editor-btn-disabled" 
+                              : "cover-hero-cta"
                           )}
                         >
-                          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:animate-[shimmer_2s_infinite]" />
                           {isGeneratingGlobalAsset === selectedSceneIndex.toString() ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                          GENERATE
+                          生成场景图
                         </button>
                       </div>
                     </div>
 
-                    <div className="relative aspect-video lg:aspect-auto bg-black/40 overflow-hidden group/sceneimg flex items-center justify-center">
+                    <div className="relative aspect-video lg:aspect-auto bg-black/30 overflow-hidden group/sceneimg flex items-center justify-center outline outline-[0.5px] outline-white/[0.06]">
                       {data.global_assets.scenes[selectedSceneIndex].image_url ? (
                         <>
                           <img 
@@ -1202,11 +1178,11 @@ export default function App() {
                           </div>
                         </>
                       ) : (
-                        <div className="flex flex-col items-center gap-4 text-slate-600">
-                          <div className="w-12 h-12 rounded-full border-2 border-dashed border-slate-800 flex items-center justify-center">
-                            <Map className="w-6 h-6" />
+                        <div className="flex flex-col items-center gap-3 ai-editor-body">
+                          <div className="w-12 h-12 rounded-full outline outline-[0.5px] outline-white/10 flex items-center justify-center">
+                            <Map className="w-6 h-6 opacity-60" />
                           </div>
-                          <span className="text-[10px] font-black uppercase tracking-widest">Environment_Pending</span>
+                          <span className="text-[12px]">等待生成场景图</span>
                         </div>
                       )}
 
@@ -1263,89 +1239,41 @@ export default function App() {
               </div>
             )}
 
-              {/* Storyboards Section Header - Editorial Style */}
-              <div className="flex flex-col gap-8">
-                <div className="flex items-center justify-between pb-8">
-                  <div className="flex items-center gap-8">
-                    <div className="space-y-1">
-                      <h3 className="text-4xl font-headline font-bold tracking-[-0.02em] text-on-surface">Storyboard List</h3>
-                      <div className="text-[10px] font-body font-semibold accent-focus uppercase tracking-[0.18em]">
-                        NEON_NOIR // SCENE_04 - THE_ALCHEMIST
-                      </div>
+              {/* Storyboards Section Header */}
+              <div className="flex flex-col gap-6">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between pb-2">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:gap-6">
+                    <div>
+                      <h3 className="cover-tools-headline text-[1.5rem] sm:text-[1.75rem] tracking-[-0.03em]">镜头序列</h3>
+                      <p className="cover-tools-subhead mt-1 text-[13px]">{projectTitle}</p>
                     </div>
 
-                    <div className="inline-flex items-center gap-1.5 rounded-full bg-surface-container-high/45 p-1.5 outline outline-[0.5px] outline-white/10">
-                      <button
-                        type="button"
-                        className="px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase segmented-active-bg segmented-active-text shadow-[0_10px_20px_-12px_rgba(0,0,0,0.45)] cursor-default"
-                      >
-                        Storyboard
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowCoverPage(false);
-                          setShowImageEditorPage(true);
-                          setImageEditorKeepAlive(true);
-                          setShowNineGridPage(false);
-                        }}
-                        className="px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase text-on-surface/70 hover:text-on-surface transition-colors cursor-pointer"
-                      >
-                        图片编辑
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowCoverPage(false);
-                          setShowNineGridPage(true);
-                          setNineGridKeepAlive(true);
-                          setShowImageEditorPage(false);
-                        }}
-                        className="px-3 py-1.5 rounded-full text-[9px] font-label tracking-[0.14em] uppercase text-on-surface/70 hover:text-on-surface transition-colors cursor-pointer"
-                      >
-                        九宫格
-                      </button>
-                    </div>
-
-                    <div className="flex items-center bg-surface-container-low rounded-full p-1">
+                    <div className="ai-editor-mode-switch">
                       {[
-                        { id: 'list', label: 'EDITOR_VIEW' },
-                        { id: 'grid', label: 'GRID_VIEW' }
+                        { id: 'list', label: '列表' },
+                        { id: 'grid', label: '网格' }
                       ].map((mode) => (
                         <button
                           key={mode.id}
                           onClick={() => setViewMode(mode.id as 'list' | 'grid')}
                           className={cn(
-                            "px-6 py-2 rounded-full text-[10px] font-body font-semibold uppercase tracking-[0.18em] transition-all cursor-pointer relative",
-                            viewMode === mode.id ? "accent-focus" : "text-slate-500 hover:text-slate-400"
+                            "relative px-4 py-2 rounded-full text-[12px] font-medium transition-all cursor-pointer",
+                            viewMode === mode.id ? "ai-editor-mode-btn--active" : "ai-editor-mode-btn"
                           )}
                         >
-                          {viewMode === mode.id && (
-                            <motion.div 
-                              layoutId="viewModeBg"
-                              className="absolute inset-0 bg-white/10 rounded-full" 
-                            />
-                          )}
-                          <span className="relative z-10">{mode.label}</span>
+                          {mode.label}
                         </button>
                       ))}
                     </div>
                   </div>
                   
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <button 
                       onClick={() => window.print()}
-                      className="group flex items-center gap-2 px-6 py-2.5 bg-surface-container-low hover:bg-white/10 rounded-full text-[10px] font-body font-semibold uppercase tracking-[0.18em] transition-all cursor-pointer accent-focus ghost-border"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full ai-editor-btn-secondary text-[12px] font-medium cursor-pointer"
                     >
-                      <FileText className="w-4 h-4" />
-                      EXPORT_PDF
-                    </button>
-                    
-                    <button 
-                      className="group flex items-center gap-2 px-6 py-2.5 accent-focus-bg hover:opacity-90 rounded-full text-[10px] font-body font-semibold uppercase tracking-[0.18em] transition-all cursor-pointer accent-focus-glow"
-                    >
-                      <Plus className="w-4 h-4" />
-                      NEW FRAME
+                      <FileText className="w-3.5 h-3.5" />
+                      导出 PDF
                     </button>
                   </div>
                 </div>
@@ -1374,7 +1302,7 @@ export default function App() {
                     />
                   ))}
                   {filteredStoryboards.length === 0 && (
-                    <div className="col-span-full py-12 text-center text-slate-500">
+                    <div className="col-span-full py-12 text-center ai-editor-body">
                       没有符合该分类的分镜
                     </div>
                   )}
@@ -1384,6 +1312,9 @@ export default function App() {
           </div>
         )}
       </main>
+      </StudioConvergePiece>
+            </div>
+          </div>
 
       {/* Image Preview Modal */}
       {previewImage && (
@@ -1397,7 +1328,7 @@ export default function App() {
           <div className="pointer-events-none absolute inset-0 flex justify-center p-3 sm:p-5">
             <button
               type="button"
-              className="pointer-events-auto absolute right-4 top-4 z-[120] flex h-11 w-11 items-center justify-center rounded-full bg-surface-container-high/55 text-white/90 outline outline-[0.5px] outline-outline-variant/20 backdrop-blur-[30px] shadow-[0_24px_48px_-28px_rgba(0,0,0,0.55)] transition-colors hover:text-white cursor-pointer sm:right-7 sm:top-7"
+              className="pointer-events-auto absolute right-4 top-4 z-[120] flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white/90 outline outline-[0.5px] outline-white/15 backdrop-blur-[30px] transition-colors hover:bg-white/16 hover:text-white cursor-pointer sm:right-7 sm:top-7"
               onClick={() => setPreviewImage(null)}
               title="关闭 (Esc)"
               aria-label="关闭"
@@ -1457,7 +1388,7 @@ export default function App() {
           <div className="pointer-events-none absolute inset-0 flex justify-center p-3 sm:p-5">
             <button
               type="button"
-              className="pointer-events-auto absolute right-4 top-4 z-[120] flex h-11 w-11 items-center justify-center rounded-full bg-surface-container-high/55 text-white/90 outline outline-[0.5px] outline-outline-variant/20 backdrop-blur-[30px] shadow-[0_24px_48px_-28px_rgba(0,0,0,0.55)] transition-colors hover:text-white cursor-pointer sm:right-7 sm:top-7"
+              className="pointer-events-auto absolute right-4 top-4 z-[120] flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white/90 outline outline-[0.5px] outline-white/15 backdrop-blur-[30px] transition-colors hover:bg-white/16 hover:text-white cursor-pointer sm:right-7 sm:top-7"
               onClick={() => setIsScenePreviewOpen(false)}
               title="关闭 (Esc)"
               aria-label="关闭"
@@ -1487,7 +1418,8 @@ export default function App() {
       <AnimatePresence>
         {selectedShotNumber && <FrameDetail />}
       </AnimatePresence>
-    </div>
+        </div>
+        </StudioHeroShell>
       )}
 
       <ImageEditorModal
@@ -1517,12 +1449,12 @@ export default function App() {
 
 function SkeletonCard() {
   return (
-    <div className="bg-slate-900/20 border border-slate-800/50 rounded-2xl overflow-hidden flex flex-col md:flex-row animate-pulse">
-      <div className="w-full md:w-[40%] aspect-video bg-slate-900" />
+    <div className="ai-editor-panel rounded-[1.15rem] overflow-hidden flex flex-col md:flex-row animate-pulse">
+      <div className="w-full md:w-[40%] aspect-video bg-black/20" />
       <div className="flex-1 p-6 space-y-4">
-        <div className="h-6 bg-slate-900 rounded w-3/4" />
-        <div className="h-12 bg-slate-900 rounded w-full" />
-        <div className="h-20 bg-slate-900 rounded w-full" />
+        <div className="h-6 rounded-lg bg-white/10 w-3/4" />
+        <div className="h-12 rounded-lg bg-white/10 w-full" />
+        <div className="h-20 rounded-lg bg-white/10 w-full" />
       </div>
     </div>
   );

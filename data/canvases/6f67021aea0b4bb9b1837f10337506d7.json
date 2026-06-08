@@ -1,0 +1,4134 @@
+{
+  "id": "6f67021aea0b4bb9b1837f10337506d7",
+  "title": "ai剧情",
+  "icon": "🧩",
+  "kind": "classic",
+  "created_at": 1780469074343,
+  "updated_at": 1780647795741,
+  "nodes": [
+    {
+      "id": "img_5370fe05a1e9d8_1780469080673",
+      "type": "image",
+      "x": 460.53840283507884,
+      "y": 256.8646963061583,
+      "url": "/uploads/canvas/canvas_08846c6bb8bb.png",
+      "name": "edit_result_1780467359019.png",
+      "mediaKind": "image"
+    },
+    {
+      "id": "gen_7dca88f5ea1c68_1780469087265",
+      "type": "generator",
+      "x": 939.1542406910277,
+      "y": 337.3692282954709,
+      "apiProvider": "runninghub",
+      "model": "gpt-image-2",
+      "ratio": "story",
+      "resolution": "1k",
+      "customRatio": "",
+      "customSize": "",
+      "customRatioWidth": "",
+      "customRatioHeight": "",
+      "customWidth": "",
+      "customHeight": "",
+      "inputs": [
+        "img_5370fe05a1e9d8_1780469080673",
+        "img_4350ff5f2b7cb8_1780469108978",
+        "prompt_135c796d19bfd_1780469233897"
+      ],
+      "count": 2,
+      "generatedOutputs": [
+        "/uploads/30c9788d-06ca-4899-8225-324106325bdb.png"
+      ],
+      "runStatus": "done",
+      "runError": "",
+      "quality": "medium"
+    },
+    {
+      "id": "img_4350ff5f2b7cb8_1780469108978",
+      "type": "image",
+      "x": 84.30102548543385,
+      "y": 588.4236382614802,
+      "url": "/uploads/canvas/canvas_c882bebb253d.png",
+      "name": "edit_result_1780470899858.png",
+      "mediaKind": "image"
+    },
+    {
+      "id": "out_7dbe7c355fa9c_1780469199610",
+      "type": "output",
+      "x": 1482.533068638172,
+      "y": 428.1924217482552,
+      "images": [
+        {
+          "url": "/uploads/c1cee040-4a61-4db3-bc1b-347a3ef2de77.png",
+          "viewed": true,
+          "runMs": 77833,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 906.2872373976616,
+              "y": 333.96919347201924,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2
+            },
+            "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、戴眼镜的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。背景有一张办公桌、电脑以及墙上挂着的一幅带有彩色柱状图的商业白板。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_015a377d0e23.png",
+                "name": "3.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/0911fe5a-f030-4d0c-88f8-43893569049f.png",
+          "viewed": true,
+          "runMs": 123088,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 906.2872373976616,
+              "y": 333.96919347201924,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2
+            },
+            "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、戴眼镜的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。背景有一张办公桌、电脑以及墙上挂着的一幅带有彩色柱状图的商业白板。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_015a377d0e23.png",
+                "name": "3.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/c8dfe048-ad11-4c55-8da9-14e017d9d759.png",
+          "viewed": false,
+          "runMs": 121342,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 906.2872373976616,
+              "y": 333.96919347201924,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/0911fe5a-f030-4d0c-88f8-43893569049f.png"
+              ]
+            },
+            "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。背景有一张办公桌、电脑以及墙上挂着的一幅带有彩色柱状图的商业白板。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_015a377d0e23.png",
+                "name": "3.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/0142812c-b450-43de-8edd-8ca0c03e1f44.png",
+          "viewed": true,
+          "runMs": 132198,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 906.2872373976616,
+              "y": 333.96919347201924,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/0911fe5a-f030-4d0c-88f8-43893569049f.png"
+              ]
+            },
+            "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。背景有一张办公桌、电脑以及墙上挂着的一幅带有彩色柱状图的商业白板。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_015a377d0e23.png",
+                "name": "3.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/b6896822-98a3-4272-b81a-561c307e8c49.png",
+          "viewed": true,
+          "runMs": 64988,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 906.2872373976616,
+              "y": 333.96919347201924,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/0142812c-b450-43de-8edd-8ca0c03e1f44.png"
+              ]
+            },
+            "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_015a377d0e23.png",
+                "name": "3.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/556d77d1-e5ec-4ba6-9392-5f9e474cbc1b.png",
+          "viewed": false,
+          "runMs": 89003,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 906.2872373976616,
+              "y": 333.96919347201924,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/0142812c-b450-43de-8edd-8ca0c03e1f44.png"
+              ]
+            },
+            "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_015a377d0e23.png",
+                "name": "3.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/d641be7a-6c52-437c-8b8a-64fefba6b250.png",
+          "viewed": true,
+          "runMs": 68788,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 906.2872373976616,
+              "y": 333.96919347201924,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/556d77d1-e5ec-4ba6-9392-5f9e474cbc1b.png"
+              ]
+            },
+            "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_015a377d0e23.png",
+                "name": "3.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/b4f0d0e1-bcec-4611-a293-a44192d6949e.png",
+          "viewed": false,
+          "runMs": 107453,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 906.2872373976616,
+              "y": 333.96919347201924,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/556d77d1-e5ec-4ba6-9392-5f9e474cbc1b.png"
+              ]
+            },
+            "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_015a377d0e23.png",
+                "name": "3.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/763eaf6d-9f89-4667-9274-eb3200f5d4c0.png",
+          "viewed": false,
+          "runMs": 70607,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 906.2872373976616,
+              "y": 333.96919347201924,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/b4f0d0e1-bcec-4611-a293-a44192d6949e.png"
+              ]
+            },
+            "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_015a377d0e23.png",
+                "name": "3.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/4fee5d5f-47b1-4a4c-85e3-2ffb480c44d6.png",
+          "viewed": false,
+          "runMs": 76060,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 906.2872373976616,
+              "y": 333.96919347201924,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/b4f0d0e1-bcec-4611-a293-a44192d6949e.png"
+              ]
+            },
+            "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_015a377d0e23.png",
+                "name": "3.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/3df20790-ce82-4060-8648-c49ba59462d8.png",
+          "viewed": false,
+          "runMs": 112197,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 939.1542406910277,
+              "y": 337.3692282954709,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/4fee5d5f-47b1-4a4c-85e3-2ffb480c44d6.png"
+              ]
+            },
+            "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_015a377d0e23.png",
+                "name": "3.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/2a5dbed7-0c4d-40f5-9e34-dcd967991f13.png",
+          "viewed": true,
+          "runMs": 171915,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 939.1542406910277,
+              "y": 337.3692282954709,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/4fee5d5f-47b1-4a4c-85e3-2ffb480c44d6.png"
+              ]
+            },
+            "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_015a377d0e23.png",
+                "name": "3.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/f784002e-3898-45cb-884b-2f460755ccb3.png",
+          "viewed": true,
+          "runMs": 65450,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 939.1542406910277,
+              "y": 337.3692282954709,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/2a5dbed7-0c4d-40f5-9e34-dcd967991f13.png"
+              ]
+            },
+            "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；带有夸张的戏剧冲突感",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_015a377d0e23.png",
+                "name": "3.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/384bed11-8f2d-4ab1-a095-959687643022.png",
+          "viewed": false,
+          "runMs": 72735,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 939.1542406910277,
+              "y": 337.3692282954709,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/2a5dbed7-0c4d-40f5-9e34-dcd967991f13.png"
+              ]
+            },
+            "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；带有夸张的戏剧冲突感",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_015a377d0e23.png",
+                "name": "3.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/e91ee2e2-d94a-4e48-9177-0806ef61b6e2.png",
+          "viewed": true,
+          "runMs": 97798,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 939.1542406910277,
+              "y": 337.3692282954709,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/384bed11-8f2d-4ab1-a095-959687643022.png"
+              ]
+            },
+            "prompt": "请确保图1右边两人的形象和图2的右边两人形象一致",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_08846c6bb8bb.png",
+                "name": "edit_result_1780467359019.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_c882bebb253d.png",
+                "name": "edit_result_1780470899858.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/30c9788d-06ca-4899-8225-324106325bdb.png",
+          "viewed": true,
+          "runMs": 108651,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_7dca88f5ea1c68_1780469087265",
+              "type": "generator",
+              "x": 939.1542406910277,
+              "y": 337.3692282954709,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/384bed11-8f2d-4ab1-a095-959687643022.png"
+              ]
+            },
+            "prompt": "请确保图1右边两人的形象和图2的右边两人形象一致",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_08846c6bb8bb.png",
+                "name": "edit_result_1780467359019.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_c882bebb253d.png",
+                "name": "edit_result_1780470899858.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        }
+      ],
+      "_pending": [],
+      "w": 847,
+      "h": 667,
+      "imageComparisons": {
+        "/uploads/c1cee040-4a61-4db3-bc1b-347a3ef2de77.png": {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        "/uploads/0911fe5a-f030-4d0c-88f8-43893569049f.png": {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        "/uploads/c8dfe048-ad11-4c55-8da9-14e017d9d759.png": {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        "/uploads/0142812c-b450-43de-8edd-8ca0c03e1f44.png": {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        "/uploads/b6896822-98a3-4272-b81a-561c307e8c49.png": {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        "/uploads/556d77d1-e5ec-4ba6-9392-5f9e474cbc1b.png": {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        "/uploads/d641be7a-6c52-437c-8b8a-64fefba6b250.png": {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        "/uploads/b4f0d0e1-bcec-4611-a293-a44192d6949e.png": {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        "/uploads/763eaf6d-9f89-4667-9274-eb3200f5d4c0.png": {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        "/uploads/4fee5d5f-47b1-4a4c-85e3-2ffb480c44d6.png": {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        "/uploads/3df20790-ce82-4060-8648-c49ba59462d8.png": {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        "/uploads/2a5dbed7-0c4d-40f5-9e34-dcd967991f13.png": {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        "/uploads/f784002e-3898-45cb-884b-2f460755ccb3.png": {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        "/uploads/384bed11-8f2d-4ab1-a095-959687643022.png": {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        "/uploads/e91ee2e2-d94a-4e48-9177-0806ef61b6e2.png": {
+          "url": "/uploads/canvas/canvas_08846c6bb8bb.png",
+          "name": "edit_result_1780467359019.png"
+        },
+        "/uploads/30c9788d-06ca-4899-8225-324106325bdb.png": {
+          "url": "/uploads/canvas/canvas_08846c6bb8bb.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      }
+    },
+    {
+      "id": "prompt_135c796d19bfd_1780469233897",
+      "type": "prompt",
+      "x": -248.50296535017935,
+      "y": 1032.3820120293587,
+      "text": "请确保图1右边两人的形象和图2的右边两人形象一致",
+      "w": 589,
+      "h": 530
+    },
+    {
+      "id": "img_2604b61589a8b_1780471488954",
+      "type": "image",
+      "x": 2576.6852322505088,
+      "y": 2282.388276550207,
+      "url": "/uploads/canvas/canvas_c9a8d4176bf8.png",
+      "name": "edit_result_1780476846674.png",
+      "mediaKind": "image"
+    },
+    {
+      "id": "gen_9498f7c5082ed8_1780471496321",
+      "type": "generator",
+      "x": 1083.9966388932291,
+      "y": 1400.2422035929908,
+      "apiProvider": "runninghub",
+      "model": "gpt-image-2",
+      "ratio": "story",
+      "resolution": "2k",
+      "customRatio": "",
+      "customSize": "",
+      "customRatioWidth": "",
+      "customRatioHeight": "",
+      "customWidth": "",
+      "customHeight": "",
+      "inputs": [
+        "img_2604b61589a8b_1780471488954",
+        "prompt_0df80ba80093b8_1780471544601"
+      ],
+      "count": 2,
+      "generatedOutputs": [
+        "/uploads/48a90eb1-41d6-4e21-a466-3960989fd085.png"
+      ],
+      "runStatus": "done",
+      "runError": "",
+      "quality": "medium"
+    },
+    {
+      "id": "out_1cc043e30a746_1780471507425",
+      "type": "output",
+      "x": 1843.6523122616697,
+      "y": 1625.3494564333769,
+      "images": [
+        {
+          "url": "/uploads/634b8c11-cc6a-451d-a889-227959050fd1.jpg",
+          "viewed": false,
+          "runMs": 124883,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "nano-banana-pro",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2
+            },
+            "prompt": "请把图1的人物换成图2黑色西装男的形象",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_8f88ac3ae220.png",
+                "name": "image_1780471525491.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_9bb796485026.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/8ae17709-6eea-41e9-9cee-ec05b2da6de5.jpg",
+          "viewed": false,
+          "runMs": 253303,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "nano-banana-pro",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2
+            },
+            "prompt": "请把图1的人物换成图2黑色西装男的形象",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_8f88ac3ae220.png",
+                "name": "image_1780471525491.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_9bb796485026.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/ecb5b8b3-c0bc-4458-b558-8e558e44b58c.jpg",
+          "viewed": true,
+          "runMs": 191832,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "nano-banana-pro",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/8ae17709-6eea-41e9-9cee-ec05b2da6de5.jpg"
+              ]
+            },
+            "prompt": "请把图1（姿势和神态不变）的人物换成图2黑色西装男的形象，",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_8f88ac3ae220.png",
+                "name": "image_1780471525491.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_9bb796485026.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/4de07b46-4187-4d2f-8b4d-6794d93fd9fa.jpg",
+          "viewed": false,
+          "runMs": 200896,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "nano-banana-pro",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/8ae17709-6eea-41e9-9cee-ec05b2da6de5.jpg"
+              ]
+            },
+            "prompt": "请把图1（姿势和神态不变）的人物换成图2黑色西装男的形象，",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_8f88ac3ae220.png",
+                "name": "image_1780471525491.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_9bb796485026.png",
+                "name": "edit_result_1780467359019.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/9552cf4a-7426-476f-b4ac-22313d42676a.png",
+          "viewed": true,
+          "runMs": 65164,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/4de07b46-4187-4d2f-8b4d-6794d93fd9fa.jpg"
+              ]
+            },
+            "prompt": "3D风格化卡通动画，休闲游戏原画风格。一个身穿黑色商务西装男子（图1）的背影作为近景前景，占据画面左侧。他正迈步走向前方矗立着的一台巨型、极尽奢华的金色神牛主题老虎机。焦点在【背景】 老虎机上。整个赌场大厅背景金碧辉煌，充满了赛博魔幻的财富氛围，高反光的大理石地面清晰倒映着璀璨的光影。低机位跟随时轴视角，充满解压感和期待感的玩法触发场景",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+                "name": "2.jpg"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/077aa8cb-11ce-43d5-93b9-465005fc8d9f.png",
+          "viewed": false,
+          "runMs": 68802,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/4de07b46-4187-4d2f-8b4d-6794d93fd9fa.jpg"
+              ]
+            },
+            "prompt": "3D风格化卡通动画，休闲游戏原画风格。一个身穿黑色商务西装男子（图1）的背影作为近景前景，占据画面左侧。他正迈步走向前方矗立着的一台巨型、极尽奢华的金色神牛主题老虎机。焦点在【背景】 老虎机上。整个赌场大厅背景金碧辉煌，充满了赛博魔幻的财富氛围，高反光的大理石地面清晰倒映着璀璨的光影。低机位跟随时轴视角，充满解压感和期待感的玩法触发场景",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+                "name": "2.jpg"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/16eb9eac-6c66-4b45-8f6b-e40ec6534f9a.png",
+          "viewed": false,
+          "runMs": 68802,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/077aa8cb-11ce-43d5-93b9-465005fc8d9f.png"
+              ]
+            },
+            "prompt": "3D风格化卡通动画，休闲游戏原画风格。一个身穿黑色商务西装男子（图1）的背影作为近景前景，占据画面左侧。他正迈步走向前方矗立着的一台巨型、极尽奢华的金色神牛主题老虎机。焦点在【背景】 老虎机上。整个赌场大厅背景金碧辉煌，充满了赛博魔幻的财富氛围，低机位跟随时轴视角，充满解压感和期待感的玩法触发场景",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+                "name": "2.jpg"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/fc0b5b5d-e130-4525-b74b-ae53f2fd7413.png",
+          "viewed": false,
+          "runMs": 70639,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/077aa8cb-11ce-43d5-93b9-465005fc8d9f.png"
+              ]
+            },
+            "prompt": "3D风格化卡通动画，休闲游戏原画风格。一个身穿黑色商务西装男子（图1）的背影作为近景前景，占据画面左侧。他正迈步走向前方矗立着的一台巨型、极尽奢华的金色神牛主题老虎机。焦点在【背景】 老虎机上。整个赌场大厅背景金碧辉煌，充满了赛博魔幻的财富氛围，低机位跟随时轴视角，充满解压感和期待感的玩法触发场景",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+                "name": "2.jpg"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/486de0ab-1c49-4d1b-942f-7587d91098e7.png",
+          "viewed": true,
+          "runMs": 1433013,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/fc0b5b5d-e130-4525-b74b-ae53f2fd7413.png"
+              ]
+            },
+            "prompt": "3D风格化卡通动画，休闲游戏原画风格。一个身穿黑色商务西装男子（图1）的背影作为近景前景，占据画面左侧。他正迈步走向前方矗立着的一台巨型、极尽奢华的金色神牛主题老虎机（图2）。焦点在【背景】 老虎机上。整个赌场大厅背景金碧辉煌，充满了财富氛围，低机位跟随时轴视角，充满解压感和期待感的玩法触发场景。",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+                "name": "2.jpg"
+              },
+              {
+                "url": "/uploads/canvas/canvas_4fde6b7da6ce.png",
+                "name": "edit_result_1780395453787.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/1e4119ac-b0c7-4b05-ad26-27deccc2fc4f.png",
+          "viewed": true,
+          "runMs": 1458377,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/fc0b5b5d-e130-4525-b74b-ae53f2fd7413.png"
+              ]
+            },
+            "prompt": "3D风格化卡通动画，休闲游戏原画风格。一个身穿黑色商务西装男子（图1）的背影作为近景前景，占据画面左侧。他正迈步走向前方矗立着的一台巨型、极尽奢华的金色神牛主题老虎机（图2）。焦点在【背景】 老虎机上。整个赌场大厅背景金碧辉煌，充满了财富氛围，低机位跟随时轴视角，充满解压感和期待感的玩法触发场景。",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+                "name": "2.jpg"
+              },
+              {
+                "url": "/uploads/canvas/canvas_4fde6b7da6ce.png",
+                "name": "edit_result_1780395453787.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/3555cc10-b3db-4f5e-a4c8-929bda32e6a4.png",
+          "viewed": true,
+          "runMs": 142899,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/1e4119ac-b0c7-4b05-ad26-27deccc2fc4f.png"
+              ]
+            },
+            "prompt": "老虎机旁边的两头金牛不要挡住画面，然后屏幕改成纯绿色绿幕（方便我后期抠图）",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_d9c298c03bab.png",
+                "name": "canvas-output-1780475241138.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/095bc480-6ad4-4edd-a069-71a9a2766780.png",
+          "viewed": true,
+          "runMs": 180913,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/1e4119ac-b0c7-4b05-ad26-27deccc2fc4f.png"
+              ]
+            },
+            "prompt": "老虎机旁边的两头金牛不要挡住画面，然后屏幕改成纯绿色绿幕（方便我后期抠图）",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_d9c298c03bab.png",
+                "name": "canvas-output-1780475241138.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/19fbaa8f-d987-4dcd-ae61-2bbb3a05ed5a.png",
+          "viewed": false,
+          "runMs": 85166,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/095bc480-6ad4-4edd-a069-71a9a2766780.png"
+              ]
+            },
+            "prompt": "老虎机旁边的两头金牛移除，在老虎机顶上加一个神牛的形象。然后屏幕改成纯绿色绿幕（方便我后期抠图）",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_d9c298c03bab.png",
+                "name": "canvas-output-1780475241138.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/48af34ca-47bb-43d7-b407-82b96ed5a5bb.png",
+          "viewed": false,
+          "runMs": 188248,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/095bc480-6ad4-4edd-a069-71a9a2766780.png"
+              ]
+            },
+            "prompt": "老虎机旁边的两头金牛移除，在老虎机顶上加一个神牛的形象。然后屏幕改成纯绿色绿幕（方便我后期抠图）",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_d9c298c03bab.png",
+                "name": "canvas-output-1780475241138.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/9f9c6ef7-7350-4c05-a2ce-3bb65d775ae5.png",
+          "viewed": true,
+          "runMs": 110467,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "2k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/48af34ca-47bb-43d7-b407-82b96ed5a5bb.png"
+              ]
+            },
+            "prompt": "金色老虎机整体的正面视角（正视图）",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_c9a8d4176bf8.png",
+                "name": "edit_result_1780476846674.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/48a90eb1-41d6-4e21-a466-3960989fd085.png",
+          "viewed": false,
+          "runMs": 110505,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_9498f7c5082ed8_1780471496321",
+              "type": "generator",
+              "x": 1083.9966388932291,
+              "y": 1400.2422035929908,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "2k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/48af34ca-47bb-43d7-b407-82b96ed5a5bb.png"
+              ]
+            },
+            "prompt": "金色老虎机整体的正面视角（正视图）",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_c9a8d4176bf8.png",
+                "name": "edit_result_1780476846674.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        }
+      ],
+      "_pending": [],
+      "imageComparisons": {
+        "/uploads/634b8c11-cc6a-451d-a889-227959050fd1.jpg": {
+          "url": "/uploads/canvas/canvas_8f88ac3ae220.png",
+          "name": "image_1780471525491.png"
+        },
+        "/uploads/8ae17709-6eea-41e9-9cee-ec05b2da6de5.jpg": {
+          "url": "/uploads/canvas/canvas_8f88ac3ae220.png",
+          "name": "image_1780471525491.png"
+        },
+        "/uploads/ecb5b8b3-c0bc-4458-b558-8e558e44b58c.jpg": {
+          "url": "/uploads/canvas/canvas_8f88ac3ae220.png",
+          "name": "image_1780471525491.png"
+        },
+        "/uploads/4de07b46-4187-4d2f-8b4d-6794d93fd9fa.jpg": {
+          "url": "/uploads/canvas/canvas_8f88ac3ae220.png",
+          "name": "image_1780471525491.png"
+        },
+        "/uploads/9552cf4a-7426-476f-b4ac-22313d42676a.png": {
+          "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+          "name": "2.jpg"
+        },
+        "/uploads/077aa8cb-11ce-43d5-93b9-465005fc8d9f.png": {
+          "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+          "name": "2.jpg"
+        },
+        "/uploads/16eb9eac-6c66-4b45-8f6b-e40ec6534f9a.png": {
+          "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+          "name": "2.jpg"
+        },
+        "/uploads/fc0b5b5d-e130-4525-b74b-ae53f2fd7413.png": {
+          "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+          "name": "2.jpg"
+        },
+        "/uploads/486de0ab-1c49-4d1b-942f-7587d91098e7.png": {
+          "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+          "name": "2.jpg"
+        },
+        "/uploads/1e4119ac-b0c7-4b05-ad26-27deccc2fc4f.png": {
+          "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+          "name": "2.jpg"
+        },
+        "/uploads/3555cc10-b3db-4f5e-a4c8-929bda32e6a4.png": {
+          "url": "/uploads/canvas/canvas_d9c298c03bab.png",
+          "name": "canvas-output-1780475241138.png"
+        },
+        "/uploads/095bc480-6ad4-4edd-a069-71a9a2766780.png": {
+          "url": "/uploads/canvas/canvas_d9c298c03bab.png",
+          "name": "canvas-output-1780475241138.png"
+        },
+        "/uploads/19fbaa8f-d987-4dcd-ae61-2bbb3a05ed5a.png": {
+          "url": "/uploads/canvas/canvas_d9c298c03bab.png",
+          "name": "canvas-output-1780475241138.png"
+        },
+        "/uploads/48af34ca-47bb-43d7-b407-82b96ed5a5bb.png": {
+          "url": "/uploads/canvas/canvas_d9c298c03bab.png",
+          "name": "canvas-output-1780475241138.png"
+        },
+        "/uploads/9f9c6ef7-7350-4c05-a2ce-3bb65d775ae5.png": {
+          "url": "/uploads/canvas/canvas_c9a8d4176bf8.png",
+          "name": "edit_result_1780476846674.png"
+        },
+        "/uploads/48a90eb1-41d6-4e21-a466-3960989fd085.png": {
+          "url": "/uploads/canvas/canvas_c9a8d4176bf8.png",
+          "name": "edit_result_1780476846674.png"
+        }
+      },
+      "w": 674,
+      "h": 968
+    },
+    {
+      "id": "prompt_0df80ba80093b8_1780471544601",
+      "type": "prompt",
+      "x": 371.9816214788159,
+      "y": 1848.4827066281823,
+      "text": "金色老虎机整体的正面视角（正视图）",
+      "w": 619,
+      "h": 306
+    },
+    {
+      "id": "out_c6bfb33481b118_1780490480838",
+      "type": "output",
+      "x": -1352.3377624346494,
+      "y": 1857.5167996698547,
+      "images": [
+        {
+          "url": "/uploads/8438e003-d045-434b-a56b-e8dabd265d17.png",
+          "viewed": true,
+          "runMs": 221099,
+          "run": {
+            "nodeType": "replicaAgent",
+            "node": {
+              "id": "agent_a088040231805_1780492822830",
+              "type": "replicaAgent",
+              "x": -380.1912325147739,
+              "y": 2394.241549364838,
+              "w": 331,
+              "h": 704,
+              "style_prompt": "",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "roles": {
+                "img_6a9882be8aaec8_1780493239556": "character",
+                "loop_97f0025042e0d8_1780491474614:image:3:/uploads/canvas/canvas_521ce9ff0c19.jpg": "background"
+              },
+              "generatedOutputs": [],
+              "_cascadeFailed": false,
+              "_cascadeIdx": "1/1 · 3/3"
+            },
+            "prompt": "复刻 Agent 双阶段生图",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_5ab37658f286.jpg",
+                "name": "canvas_5ab37658f286.jpg"
+              },
+              {
+                "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+                "name": "edit_result_1780494628820.png"
+              }
+            ],
+            "request": {
+              "replica_task_id": "replica_d31d6b5308d24892a55226b09e4ac3c2",
+              "reverse_prompt": "3D animated film style, medium shot, low angle, [Subject] kneeling on the snow-covered ground outside, hands clasped together in a shivering prayer, closed eyes with a sad and cold expression, a wicker basket on the ground nearby, falling snow drifting around, a warm-lit cozy window in the background creating a strong contrast between cold blue exterior and warm golden interior light, cinematic lighting, shallow depth of field, emotional atmosphere",
+              "washed_image_url": "/uploads/04037c95-231f-4124-8d6d-13e7eddad0c4.png"
+            }
+          }
+        },
+        {
+          "url": "/uploads/567c85af-7d96-4175-b614-fdf9363f5907.png",
+          "viewed": true,
+          "runMs": 237147,
+          "run": {
+            "nodeType": "replicaAgent",
+            "node": {
+              "id": "agent_a088040231805_1780492822830",
+              "type": "replicaAgent",
+              "x": -380.1912325147739,
+              "y": 2394.241549364838,
+              "w": 331,
+              "h": 704,
+              "style_prompt": "",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "roles": {
+                "img_6a9882be8aaec8_1780493239556": "character",
+                "loop_97f0025042e0d8_1780491474614:image:3:/uploads/canvas/canvas_521ce9ff0c19.jpg": "background"
+              },
+              "generatedOutputs": [],
+              "_cascadeFailed": false,
+              "_cascadeIdx": "1/1 · 3/3"
+            },
+            "prompt": "复刻 Agent 双阶段生图",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_a2b83175801e.jpg",
+                "name": "canvas_a2b83175801e.jpg"
+              },
+              {
+                "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+                "name": "edit_result_1780494628820.png"
+              }
+            ],
+            "request": {
+              "replica_task_id": "replica_d74f03864bd242afbdd446f80375f90c",
+              "reverse_prompt": "medium close-up, slightly high-angle, [Subject] sitting in the cold snow, shivering with arms wrapped around chest, looking extremely sad and freezing, tearful eyes looking towards the camera, rosy cheeks from the cold, winter outdoor setting with soft-focus background, gentle falling snow, warm light hitting from top-right casting soft shadows, emotional and dramatic atmosphere, cinematic 3D style",
+              "washed_image_url": "/uploads/3dabe7bd-f9ec-473c-bc4a-ff7ade7a5b27.png"
+            }
+          }
+        },
+        {
+          "url": "/uploads/395ec1e1-f987-4f69-a5e1-4e021cd57e0a.png",
+          "viewed": false,
+          "runMs": 249265,
+          "run": {
+            "nodeType": "replicaAgent",
+            "node": {
+              "id": "agent_a088040231805_1780492822830",
+              "type": "replicaAgent",
+              "x": -380.1912325147739,
+              "y": 2394.241549364838,
+              "w": 331,
+              "h": 704,
+              "style_prompt": "",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "roles": {
+                "img_6a9882be8aaec8_1780493239556": "character",
+                "loop_97f0025042e0d8_1780491474614:image:3:/uploads/canvas/canvas_521ce9ff0c19.jpg": "background"
+              },
+              "generatedOutputs": [],
+              "_cascadeFailed": false,
+              "_cascadeIdx": "1/1 · 3/3"
+            },
+            "prompt": "复刻 Agent 双阶段生图",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_521ce9ff0c19.jpg",
+                "name": "canvas_521ce9ff0c19.jpg"
+              },
+              {
+                "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+                "name": "edit_result_1780494628820.png"
+              }
+            ],
+            "request": {
+              "replica_task_id": "replica_2a28576b8c4046049df4fdc105d7219c",
+              "reverse_prompt": "stylized 3D animation style, medium shot, eye-level camera angle, [Subject] kneeling on snowy ground, holding a single lit match with glowing fire, looking down at the warm flame with a hopeful and gentle expression, strong warm under-lighting illuminating the face, contrasting with cool dark blue winter night background, soft falling snow, cinematic lighting, shallow depth of field, cozy and emotional atmosphere",
+              "washed_image_url": "/uploads/55075609-9abe-48b2-9d98-7862072a386b.png"
+            }
+          }
+        },
+        {
+          "url": "/uploads/4b89f9aa-5e79-40a9-b8dc-ee8262b3c91a.png",
+          "viewed": true,
+          "runMs": 160892,
+          "run": {
+            "nodeType": "replicaAgent",
+            "node": {
+              "id": "agent_a088040231805_1780492822830",
+              "type": "replicaAgent",
+              "x": -380.1912325147739,
+              "y": 2394.241549364838,
+              "w": 331,
+              "h": 704,
+              "style_prompt": "",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "roles": {
+                "img_6a9882be8aaec8_1780493239556": "character",
+                "loop_97f0025042e0d8_1780491474614:image:5:/uploads/canvas/canvas_e489655474dd.jpg": "background"
+              },
+              "generatedOutputs": [],
+              "_cascadeFailed": false,
+              "_cascadeIdx": "1/1 · 5/5"
+            },
+            "prompt": "复刻 Agent 双阶段生图",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_a2b83175801e.jpg",
+                "name": "canvas_a2b83175801e.jpg"
+              },
+              {
+                "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+                "name": "edit_result_1780494628820.png"
+              }
+            ],
+            "request": {
+              "replica_task_id": "replica_f256ffee586546769b741e373fbb9562",
+              "reverse_prompt": "Medium close-up shot, eye-level angle, [Subject] is huddled and shivering in the snow, centered composition, outdoor winter night setting with gentle snow falling, [Subject] has a sad and tearful expression looking towards the viewer, arms crossed for warmth, soft warm rim lighting on the head and shoulders, cold blue ambient light, emotional and dramatic atmosphere",
+              "washed_image_url": "/uploads/c544f0d0-37f7-44eb-8077-1c9df82cfdaa.png"
+            }
+          }
+        },
+        {
+          "url": "/uploads/33d472fa-248d-4bb5-b5f4-262f3cd3ded3.png",
+          "viewed": true,
+          "runMs": 164949,
+          "run": {
+            "nodeType": "replicaAgent",
+            "node": {
+              "id": "agent_a088040231805_1780492822830",
+              "type": "replicaAgent",
+              "x": -380.1912325147739,
+              "y": 2394.241549364838,
+              "w": 331,
+              "h": 704,
+              "style_prompt": "",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "roles": {
+                "img_6a9882be8aaec8_1780493239556": "character",
+                "loop_97f0025042e0d8_1780491474614:image:5:/uploads/canvas/canvas_e489655474dd.jpg": "background"
+              },
+              "generatedOutputs": [],
+              "_cascadeFailed": false,
+              "_cascadeIdx": "1/1 · 5/5"
+            },
+            "prompt": "复刻 Agent 双阶段生图",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_006da9ae7dd1.jpg",
+                "name": "canvas_006da9ae7dd1.jpg"
+              },
+              {
+                "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+                "name": "edit_result_1780494628820.png"
+              }
+            ],
+            "request": {
+              "replica_task_id": "replica_ac2fc3ea723b4948b7c6f5660bc32ef9",
+              "reverse_prompt": "cinematic medium shot, slightly high angle, [Subject] kneeling in the cold snow, sad and shivering expression, rosy cheeks, holding a matchbox and a match, looking down with melancholic eyes, outdoor snowy street at night, soft falling snowflakes, warm cozy light illuminating [Subject]'s face from above, cold blue ambient lighting, shallow depth of field, soft focus background, stylized 3D animation style, claymation texture, emotional atmosphere",
+              "washed_image_url": "/uploads/f8f872ee-5cca-4dbb-9dd3-fc80a17602bc.png"
+            }
+          }
+        },
+        {
+          "url": "/uploads/1c7bfc41-070b-4487-8d12-97845d5e6ac7.png",
+          "viewed": true,
+          "runMs": 167058,
+          "run": {
+            "nodeType": "replicaAgent",
+            "node": {
+              "id": "agent_a088040231805_1780492822830",
+              "type": "replicaAgent",
+              "x": -380.1912325147739,
+              "y": 2394.241549364838,
+              "w": 331,
+              "h": 704,
+              "style_prompt": "",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "roles": {
+                "img_6a9882be8aaec8_1780493239556": "character",
+                "loop_97f0025042e0d8_1780491474614:image:5:/uploads/canvas/canvas_e489655474dd.jpg": "background"
+              },
+              "generatedOutputs": [],
+              "_cascadeFailed": false,
+              "_cascadeIdx": "1/1 · 5/5"
+            },
+            "prompt": "复刻 Agent 双阶段生图",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_5ab37658f286.jpg",
+                "name": "canvas_5ab37658f286.jpg"
+              },
+              {
+                "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+                "name": "edit_result_1780494628820.png"
+              }
+            ],
+            "request": {
+              "replica_task_id": "replica_ca4c57811af8440c8a54d66d64c8e76d",
+              "reverse_prompt": "ground-level medium shot of [Subject] kneeling in the cold snow outdoors, hands clasped together in prayer, eyes closed with a shivering and sad expression, a small woven basket on the ground next to [Subject], a house window in the background with warm golden light glowing from the cozy interior, falling snowflakes in the air, cinematic lighting, cold blue tones contrasted with warm golden glow, shallow depth of field, blurred background, stylized 3D animated render, emotional and atmospheric scene",
+              "washed_image_url": "/uploads/a8f6d66b-d786-454e-83b5-d2552464d6f2.png"
+            }
+          }
+        },
+        {
+          "url": "/uploads/fb0af3ec-fa24-4b0b-9eb1-b5334982edf4.png",
+          "viewed": true,
+          "runMs": 172958,
+          "run": {
+            "nodeType": "replicaAgent",
+            "node": {
+              "id": "agent_a088040231805_1780492822830",
+              "type": "replicaAgent",
+              "x": -380.1912325147739,
+              "y": 2394.241549364838,
+              "w": 331,
+              "h": 704,
+              "style_prompt": "",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "roles": {
+                "img_6a9882be8aaec8_1780493239556": "character",
+                "loop_97f0025042e0d8_1780491474614:image:5:/uploads/canvas/canvas_e489655474dd.jpg": "background"
+              },
+              "generatedOutputs": [],
+              "_cascadeFailed": false,
+              "_cascadeIdx": "1/1 · 5/5"
+            },
+            "prompt": "复刻 Agent 双阶段生图",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_e489655474dd.jpg",
+                "name": "canvas_e489655474dd.jpg"
+              },
+              {
+                "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+                "name": "edit_result_1780494628820.png"
+              }
+            ],
+            "request": {
+              "replica_task_id": "replica_7b9497dd1f9047e7a0b7a8a0d0fab90b",
+              "reverse_prompt": "3D animated style, medium shot, high-angle camera, a shivering [Subject] kneeling on the cold snow, clutching hands to chest with a sorrowful expression, a small basket on the snowy ground beside them, soft falling snowflakes with bokeh effect, warm golden light spilling from a house window in the background, contrasting with the cool blue tones of the snowy winter night, shallow depth of field, cinematic lighting, emotional and melancholy atmosphere",
+              "washed_image_url": "/uploads/4d87a03e-58f0-4b5d-9ec5-1b503ca8b6a0.png"
+            }
+          }
+        },
+        {
+          "url": "/uploads/1192b18e-dbe4-4a76-8a54-b98a20cc4330.png",
+          "viewed": false,
+          "runMs": 187049,
+          "run": {
+            "nodeType": "replicaAgent",
+            "node": {
+              "id": "agent_a088040231805_1780492822830",
+              "type": "replicaAgent",
+              "x": -380.1912325147739,
+              "y": 2394.241549364838,
+              "w": 331,
+              "h": 704,
+              "style_prompt": "",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "roles": {
+                "img_6a9882be8aaec8_1780493239556": "character",
+                "loop_97f0025042e0d8_1780491474614:image:5:/uploads/canvas/canvas_e489655474dd.jpg": "background"
+              },
+              "generatedOutputs": [],
+              "_cascadeFailed": false,
+              "_cascadeIdx": "1/1 · 5/5"
+            },
+            "prompt": "复刻 Agent 双阶段生图",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_521ce9ff0c19.jpg",
+                "name": "canvas_521ce9ff0c19.jpg"
+              },
+              {
+                "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+                "name": "edit_result_1780494628820.png"
+              }
+            ],
+            "request": {
+              "replica_task_id": "replica_36260038df8642a6aac4aa309f11bcc5",
+              "reverse_prompt": "3D animated style, medium shot, eye-level angle, [Subject] kneeling on the snow, holding a single lit match close to face, glowing match flame casting a warm golden light on [Subject]'s face, looking at the light with hopeful expression, cold snowy winter night, soft falling snow, out-of-focus background with a wall and a basket, dramatic contrast between warm under-light and cool blue ambient shadows, cinematic depth of field, magical and emotional atmosphere",
+              "washed_image_url": "/uploads/3ecf06dc-e6b2-45b9-bc92-dc4a9b689aa5.png"
+            }
+          }
+        }
+      ],
+      "_pending": [],
+      "imageComparisons": {
+        "/uploads/8438e003-d045-434b-a56b-e8dabd265d17.png": {
+          "url": "/uploads/canvas/canvas_5ab37658f286.jpg",
+          "name": "canvas_5ab37658f286.jpg"
+        },
+        "/uploads/567c85af-7d96-4175-b614-fdf9363f5907.png": {
+          "url": "/uploads/canvas/canvas_a2b83175801e.jpg",
+          "name": "canvas_a2b83175801e.jpg"
+        },
+        "/uploads/395ec1e1-f987-4f69-a5e1-4e021cd57e0a.png": {
+          "url": "/uploads/canvas/canvas_521ce9ff0c19.jpg",
+          "name": "canvas_521ce9ff0c19.jpg"
+        },
+        "/uploads/4b89f9aa-5e79-40a9-b8dc-ee8262b3c91a.png": {
+          "url": "/uploads/canvas/canvas_a2b83175801e.jpg",
+          "name": "canvas_a2b83175801e.jpg"
+        },
+        "/uploads/33d472fa-248d-4bb5-b5f4-262f3cd3ded3.png": {
+          "url": "/uploads/canvas/canvas_006da9ae7dd1.jpg",
+          "name": "canvas_006da9ae7dd1.jpg"
+        },
+        "/uploads/1c7bfc41-070b-4487-8d12-97845d5e6ac7.png": {
+          "url": "/uploads/canvas/canvas_5ab37658f286.jpg",
+          "name": "canvas_5ab37658f286.jpg"
+        },
+        "/uploads/fb0af3ec-fa24-4b0b-9eb1-b5334982edf4.png": {
+          "url": "/uploads/canvas/canvas_e489655474dd.jpg",
+          "name": "canvas_e489655474dd.jpg"
+        },
+        "/uploads/1192b18e-dbe4-4a76-8a54-b98a20cc4330.png": {
+          "url": "/uploads/canvas/canvas_521ce9ff0c19.jpg",
+          "name": "canvas_521ce9ff0c19.jpg"
+        }
+      }
+    },
+    {
+      "id": "loop_97f0025042e0d8_1780491474614",
+      "type": "loop",
+      "x": -2163.3377624346494,
+      "y": 1857.5167996698547,
+      "count": 5,
+      "mode": "parallel",
+      "showPrompt": false,
+      "variablePrompt": "",
+      "fixedPrompt": "",
+      "loopStart": 1,
+      "imageBatchSize": 1,
+      "imageInput": true,
+      "w": 336,
+      "h": 320
+    },
+    {
+      "id": "img_282bb11d35d4e_1780491489582",
+      "type": "image",
+      "x": -3027.3377624346494,
+      "y": 1857.5167996698547,
+      "url": "/uploads/canvas/canvas_27dd26181c98.mp4",
+      "name": "Gossip HarborÂ®_ Merge & Story-720 X 1280-2026-05-21-f3cb30e7e00ef9848b2a9c16688d530e.mp4",
+      "mediaKind": "video",
+      "frameOutputId": "fstack_e62e2c93eae44_1780491556589"
+    },
+    {
+      "id": "fstack_e62e2c93eae44_1780491556589",
+      "type": "frameStack",
+      "x": -2695.3377624346494,
+      "y": 1857.5167996698547,
+      "images": [
+        {
+          "url": "/uploads/canvas/canvas_5ab37658f286.jpg",
+          "viewed": false,
+          "runMs": 0,
+          "run": null,
+          "kind": "image"
+        },
+        {
+          "url": "/uploads/canvas/canvas_a2b83175801e.jpg",
+          "viewed": false,
+          "runMs": 0,
+          "run": null,
+          "kind": "image"
+        },
+        {
+          "url": "/uploads/canvas/canvas_521ce9ff0c19.jpg",
+          "viewed": true,
+          "runMs": 0,
+          "run": null,
+          "kind": "image"
+        },
+        {
+          "url": "/uploads/canvas/canvas_006da9ae7dd1.jpg",
+          "viewed": false,
+          "runMs": 0,
+          "run": null,
+          "kind": "image"
+        },
+        {
+          "url": "/uploads/canvas/canvas_e489655474dd.jpg",
+          "viewed": false,
+          "runMs": 0,
+          "run": null,
+          "kind": "image"
+        }
+      ],
+      "sourceVideoId": "img_282bb11d35d4e_1780491489582"
+    },
+    {
+      "id": "agent_a088040231805_1780492822830",
+      "type": "replicaAgent",
+      "x": -1755.3377624346494,
+      "y": 1857.5167996698547,
+      "w": 331,
+      "h": 704,
+      "style_prompt": "",
+      "ratio": "story",
+      "resolution": "1k",
+      "customRatio": "",
+      "customRatioWidth": "",
+      "customRatioHeight": "",
+      "roles": {
+        "img_6a9882be8aaec8_1780493239556": "character",
+        "loop_97f0025042e0d8_1780491474614:image:1:/uploads/canvas/canvas_5ab37658f286.jpg": "background"
+      },
+      "inputs": [
+        "img_6a9882be8aaec8_1780493239556",
+        "loop_97f0025042e0d8_1780491474614:image:1:/uploads/canvas/canvas_5ab37658f286.jpg"
+      ],
+      "runStatus": "",
+      "generatedOutputs": [
+        "/uploads/4b89f9aa-5e79-40a9-b8dc-ee8262b3c91a.png",
+        "/uploads/33d472fa-248d-4bb5-b5f4-262f3cd3ded3.png",
+        "/uploads/1c7bfc41-070b-4487-8d12-97845d5e6ac7.png",
+        "/uploads/fb0af3ec-fa24-4b0b-9eb1-b5334982edf4.png",
+        "/uploads/1192b18e-dbe4-4a76-8a54-b98a20cc4330.png"
+      ],
+      "runError": "",
+      "_cascadeFailed": false,
+      "_cascadeIdx": ""
+    },
+    {
+      "id": "img_6a9882be8aaec8_1780493239556",
+      "type": "image",
+      "x": -3027.3377624346494,
+      "y": 2233.5167996698547,
+      "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+      "name": "edit_result_1780494628820.png",
+      "mediaKind": "image"
+    },
+    {
+      "id": "loop_9454bc0acea678_1780540288330",
+      "type": "loop",
+      "x": -346.1217377866227,
+      "y": 3988.496096811242,
+      "count": 5,
+      "mode": "parallel",
+      "showPrompt": false,
+      "imageInput": true,
+      "imageBatchSize": 1,
+      "loopStart": 1,
+      "variablePrompt": "",
+      "fixedPrompt": ""
+    },
+    {
+      "id": "imag_5d904c46fe8038_1780540288330",
+      "type": "image",
+      "x": -622.2211287782936,
+      "y": 3081.515486815367,
+      "url": "",
+      "name": "角色参考图"
+    },
+    {
+      "id": "repl_2ebf1d2af65e5_1780540288330",
+      "type": "replicaAgent",
+      "x": 467.94439030413423,
+      "y": 3605.539423164674,
+      "w": 320,
+      "h": 480,
+      "style_prompt": "",
+      "ratio": "story",
+      "resolution": "2k",
+      "customRatio": "",
+      "customRatioWidth": "",
+      "customRatioHeight": "",
+      "roles": {},
+      "inputs": [
+        "loop_9454bc0acea678_1780540288330"
+      ]
+    },
+    {
+      "id": "outp_95d443a8b323b_1780540288330",
+      "type": "output",
+      "x": 859.9443903041342,
+      "y": 3605.539423164674,
+      "images": []
+    },
+    {
+      "id": "img_2f87cd2fd1d1f_1780640738897",
+      "type": "image",
+      "x": -2926.2892621530036,
+      "y": 2998.0582447715833,
+      "url": "",
+      "name": "空白图片"
+    },
+    {
+      "id": "img_30f2355d67f658_1780641024279",
+      "type": "image",
+      "x": -2621.71359398974,
+      "y": 3006.7808858280737,
+      "url": "",
+      "name": "空白图片"
+    },
+    {
+      "id": "grp_dc1027a07713a_1780641031384",
+      "type": "group",
+      "x": -2963.035790334473,
+      "y": 2910.901086085046,
+      "w": 994,
+      "h": 690,
+      "items": [
+        "img_2f87cd2fd1d1f_1780640738897",
+        "img_30f2355d67f658_1780641024279"
+      ]
+    },
+    {
+      "id": "gen_248f4b12554ba_1780646247041",
+      "type": "generator",
+      "x": -1608.8189482861962,
+      "y": 3015.533441449414,
+      "apiProvider": "runninghub",
+      "model": "midjourneyV8.1",
+      "ratio": "square",
+      "resolution": "1k",
+      "customRatio": "",
+      "customSize": "",
+      "customRatioWidth": "",
+      "customRatioHeight": "",
+      "customWidth": "",
+      "customHeight": "",
+      "inputs": [],
+      "quality": "auto",
+      "mjQuality": "1",
+      "mjChaos": 0,
+      "mjStylize": 0,
+      "mjIw": 1,
+      "mjSw": 100,
+      "mjSv": 6,
+      "mjRaw": false,
+      "mjHd": false
+    }
+  ],
+  "connections": [
+    {
+      "id": "c_852f153aa2a9f8_1780469091857",
+      "from": "img_5370fe05a1e9d8_1780469080673",
+      "to": "gen_7dca88f5ea1c68_1780469087265"
+    },
+    {
+      "id": "c_15411f9c02fb38_1780469196994",
+      "from": "img_4350ff5f2b7cb8_1780469108978",
+      "to": "gen_7dca88f5ea1c68_1780469087265"
+    },
+    {
+      "id": "c_c2aa7334a2bc6_1780469202457",
+      "from": "gen_7dca88f5ea1c68_1780469087265",
+      "to": "out_7dbe7c355fa9c_1780469199610"
+    },
+    {
+      "id": "c_76225dbae0fdd8_1780469236905",
+      "from": "prompt_135c796d19bfd_1780469233897",
+      "to": "gen_7dca88f5ea1c68_1780469087265"
+    },
+    {
+      "id": "c_6d71cc01bc61a8_1780471498322",
+      "from": "img_2604b61589a8b_1780471488954",
+      "to": "gen_9498f7c5082ed8_1780471496321"
+    },
+    {
+      "id": "c_1410f3630b0958_1780471510074",
+      "from": "gen_9498f7c5082ed8_1780471496321",
+      "to": "out_1cc043e30a746_1780471507425"
+    },
+    {
+      "id": "c_2c73e768cc6018_1780471548034",
+      "from": "prompt_0df80ba80093b8_1780471544601",
+      "to": "gen_9498f7c5082ed8_1780471496321"
+    },
+    {
+      "id": "c_d147bd4a7b3228_1780491556589",
+      "from": "img_282bb11d35d4e_1780491489582",
+      "to": "fstack_e62e2c93eae44_1780491556589"
+    },
+    {
+      "id": "c_a8628a8a8dd8e8_1780491787062",
+      "from": "fstack_e62e2c93eae44_1780491556589",
+      "to": "loop_97f0025042e0d8_1780491474614"
+    },
+    {
+      "id": "c_4a8140b38a0fe_1780492825678",
+      "from": "loop_97f0025042e0d8_1780491474614",
+      "to": "agent_a088040231805_1780492822830"
+    },
+    {
+      "id": "c_2979e702fa04d_1780492827190",
+      "from": "agent_a088040231805_1780492822830",
+      "to": "out_c6bfb33481b118_1780490480838"
+    },
+    {
+      "id": "c_f2d1162431aa5_1780493245792",
+      "from": "img_6a9882be8aaec8_1780493239556",
+      "to": "agent_a088040231805_1780492822830"
+    },
+    {
+      "id": "c_018b7ed8ebb548_1780540288330",
+      "from": "loop_9454bc0acea678_1780540288330",
+      "to": "repl_2ebf1d2af65e5_1780540288330"
+    },
+    {
+      "id": "c_5985ff5848ecd8_1780540288330",
+      "from": "imag_5d904c46fe8038_1780540288330",
+      "to": "repl_2ebf1d2af65e5_1780540288330"
+    },
+    {
+      "id": "c_ed66577d17fdc8_1780540288330",
+      "from": "repl_2ebf1d2af65e5_1780540288330",
+      "to": "outp_95d443a8b323b_1780540288330"
+    }
+  ],
+  "viewport": {
+    "x": 1291.446039308815,
+    "y": -1386.7566031261174,
+    "scale": 0.5321676761742663
+  },
+  "logs": [
+    {
+      "id": "log_54c406c47f9f18_1780495379007",
+      "createdAt": 1780495379007,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_36260038df8642a6aac4aa309f11bcc5",
+        "reverse_prompt": "3D animated style, medium shot, eye-level angle, [Subject] kneeling on the snow, holding a single lit match close to face, glowing match flame casting a warm golden light on [Subject]'s face, looking at the light with hopeful expression, cold snowy winter night, soft falling snow, out-of-focus background with a wall and a basket, dramatic contrast between warm under-light and cool blue ambient shadows, cinematic depth of field, magical and emotional atmosphere",
+        "washed_image_url": "/uploads/3ecf06dc-e6b2-45b9-bc92-dc4a9b689aa5.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/1192b18e-dbe4-4a76-8a54-b98a20cc4330.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_521ce9ff0c19.jpg",
+          "name": "canvas_521ce9ff0c19.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 187049,
+      "error": ""
+    },
+    {
+      "id": "log_a2005152b1a1d8_1780495364943",
+      "createdAt": 1780495364943,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_7b9497dd1f9047e7a0b7a8a0d0fab90b",
+        "reverse_prompt": "3D animated style, medium shot, high-angle camera, a shivering [Subject] kneeling on the cold snow, clutching hands to chest with a sorrowful expression, a small basket on the snowy ground beside them, soft falling snowflakes with bokeh effect, warm golden light spilling from a house window in the background, contrasting with the cool blue tones of the snowy winter night, shallow depth of field, cinematic lighting, emotional and melancholy atmosphere",
+        "washed_image_url": "/uploads/4d87a03e-58f0-4b5d-9ec5-1b503ca8b6a0.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/fb0af3ec-fa24-4b0b-9eb1-b5334982edf4.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_e489655474dd.jpg",
+          "name": "canvas_e489655474dd.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 172958,
+      "error": ""
+    },
+    {
+      "id": "log_defcbcb32c098_1780495358985",
+      "createdAt": 1780495358985,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_ca4c57811af8440c8a54d66d64c8e76d",
+        "reverse_prompt": "ground-level medium shot of [Subject] kneeling in the cold snow outdoors, hands clasped together in prayer, eyes closed with a shivering and sad expression, a small woven basket on the ground next to [Subject], a house window in the background with warm golden light glowing from the cozy interior, falling snowflakes in the air, cinematic lighting, cold blue tones contrasted with warm golden glow, shallow depth of field, blurred background, stylized 3D animated render, emotional and atmospheric scene",
+        "washed_image_url": "/uploads/a8f6d66b-d786-454e-83b5-d2552464d6f2.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/1c7bfc41-070b-4487-8d12-97845d5e6ac7.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_5ab37658f286.jpg",
+          "name": "canvas_5ab37658f286.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 167058,
+      "error": ""
+    },
+    {
+      "id": "log_0d53441dfe3c7_1780495356920",
+      "createdAt": 1780495356920,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_ac2fc3ea723b4948b7c6f5660bc32ef9",
+        "reverse_prompt": "cinematic medium shot, slightly high angle, [Subject] kneeling in the cold snow, sad and shivering expression, rosy cheeks, holding a matchbox and a match, looking down with melancholic eyes, outdoor snowy street at night, soft falling snowflakes, warm cozy light illuminating [Subject]'s face from above, cold blue ambient lighting, shallow depth of field, soft focus background, stylized 3D animation style, claymation texture, emotional atmosphere",
+        "washed_image_url": "/uploads/f8f872ee-5cca-4dbb-9dd3-fc80a17602bc.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/33d472fa-248d-4bb5-b5f4-262f3cd3ded3.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_006da9ae7dd1.jpg",
+          "name": "canvas_006da9ae7dd1.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 164949,
+      "error": ""
+    },
+    {
+      "id": "log_d040641aa0c23_1780495352838",
+      "createdAt": 1780495352838,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_f256ffee586546769b741e373fbb9562",
+        "reverse_prompt": "Medium close-up shot, eye-level angle, [Subject] is huddled and shivering in the snow, centered composition, outdoor winter night setting with gentle snow falling, [Subject] has a sad and tearful expression looking towards the viewer, arms crossed for warmth, soft warm rim lighting on the head and shoulders, cold blue ambient light, emotional and dramatic atmosphere",
+        "washed_image_url": "/uploads/c544f0d0-37f7-44eb-8077-1c9df82cfdaa.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/4b89f9aa-5e79-40a9-b8dc-ee8262b3c91a.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a2b83175801e.jpg",
+          "name": "canvas_a2b83175801e.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 160892,
+      "error": ""
+    },
+    {
+      "id": "log_94307aa33d15e8_1780494916592",
+      "createdAt": 1780494916592,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_2a28576b8c4046049df4fdc105d7219c",
+        "reverse_prompt": "stylized 3D animation style, medium shot, eye-level camera angle, [Subject] kneeling on snowy ground, holding a single lit match with glowing fire, looking down at the warm flame with a hopeful and gentle expression, strong warm under-lighting illuminating the face, contrasting with cool dark blue winter night background, soft falling snow, cinematic lighting, shallow depth of field, cozy and emotional atmosphere",
+        "washed_image_url": "/uploads/55075609-9abe-48b2-9d98-7862072a386b.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/395ec1e1-f987-4f69-a5e1-4e021cd57e0a.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_521ce9ff0c19.jpg",
+          "name": "canvas_521ce9ff0c19.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 249265,
+      "error": ""
+    },
+    {
+      "id": "log_9d6dc0cb51d4f_1780494904464",
+      "createdAt": 1780494904464,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_d74f03864bd242afbdd446f80375f90c",
+        "reverse_prompt": "medium close-up, slightly high-angle, [Subject] sitting in the cold snow, shivering with arms wrapped around chest, looking extremely sad and freezing, tearful eyes looking towards the camera, rosy cheeks from the cold, winter outdoor setting with soft-focus background, gentle falling snow, warm light hitting from top-right casting soft shadows, emotional and dramatic atmosphere, cinematic 3D style",
+        "washed_image_url": "/uploads/3dabe7bd-f9ec-473c-bc4a-ff7ade7a5b27.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/567c85af-7d96-4175-b614-fdf9363f5907.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a2b83175801e.jpg",
+          "name": "canvas_a2b83175801e.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 237147,
+      "error": ""
+    },
+    {
+      "id": "log_7bdba25159c6f_1780494888403",
+      "createdAt": 1780494888403,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_d31d6b5308d24892a55226b09e4ac3c2",
+        "reverse_prompt": "3D animated film style, medium shot, low angle, [Subject] kneeling on the snow-covered ground outside, hands clasped together in a shivering prayer, closed eyes with a sad and cold expression, a wicker basket on the ground nearby, falling snow drifting around, a warm-lit cozy window in the background creating a strong contrast between cold blue exterior and warm golden interior light, cinematic lighting, shallow depth of field, emotional atmosphere",
+        "washed_image_url": "/uploads/04037c95-231f-4124-8d6d-13e7eddad0c4.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/8438e003-d045-434b-a56b-e8dabd265d17.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_5ab37658f286.jpg",
+          "name": "canvas_5ab37658f286.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_8315d2f1158c.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 221099,
+      "error": ""
+    },
+    {
+      "id": "log_b8e0daccc53158_1780494196801",
+      "createdAt": 1780494196801,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_8613f1e97437434bbeaa05afa0cf27c6",
+        "reverse_prompt": "3D animated film style, medium shot, centered composition, [Subject] kneeling on snow-covered ground, holding a single lit match close to their face, looking at the small glowing flame with wide-eyed wonder and hope, warm golden light from the flame illuminating [Subject]'s face, dramatic under-lighting, cool blue night atmosphere, gentle snowflakes falling, soft focus background, cinematic lighting, shallow depth of field",
+        "washed_image_url": "/uploads/5f736247-ae18-4290-b4f9-61715de1301e.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/f2621487-f5ab-4fab-b77d-839e9a98557c.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_521ce9ff0c19.jpg",
+          "name": "canvas_521ce9ff0c19.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_21d432267b85.png",
+          "name": "edit_result_1780493235475.png"
+        }
+      ],
+      "runMs": 255406,
+      "error": ""
+    },
+    {
+      "id": "log_6c381bd949b4f_1780494168672",
+      "createdAt": 1780494168672,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_e0385bedf9a946dab93a830708e04a29",
+        "reverse_prompt": "medium full shot, low angle, cinematic 3D animation style, [Subject] kneeling on snow-covered ground, shivering with hands clasped in front, sad and cold expression with closed eyes, a simple woven basket on the ground nearby, falling snow, background with a warm glowing window of a house, sharp contrast of cold blue ambient light and warm orange interior glow, soft rim light, melancholic and emotional atmosphere, shallow depth of field",
+        "washed_image_url": "/uploads/e50a29dd-8946-4f58-8119-7b6eadfb4618.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/1b6958ad-b860-4e2d-b8e7-5cb73f9f5b89.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_5ab37658f286.jpg",
+          "name": "canvas_5ab37658f286.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_21d432267b85.png",
+          "name": "edit_result_1780493235475.png"
+        }
+      ],
+      "runMs": 227304,
+      "error": ""
+    },
+    {
+      "id": "log_1c7601664262b_1780494164610",
+      "createdAt": 1780494164610,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_8c8fa1f626b54b5faa72ff8b57ad61c0",
+        "reverse_prompt": "Medium close-up shot, front view, slightly high-angle perspective, centered composition, [Subject] huddled on the snowy ground, shivering in the freezing cold with arms crossed tightly, sad and miserable expression, looking forward with big teary eyes and flushed cheeks, short hair with snowflakes on it, outdoor winter night background, soft falling snow, dramatic cinematic 3D animation style, cold blue ambient shadows, warm golden rim lighting on the hair, melancholic and emotional atmosphere",
+        "washed_image_url": "/uploads/b284207c-d76c-43c1-a0fd-9f87937cd649.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/3f65887c-929e-40f0-abf3-4950ae531e67.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a2b83175801e.jpg",
+          "name": "canvas_a2b83175801e.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_21d432267b85.png",
+          "name": "edit_result_1780493235475.png"
+        }
+      ],
+      "runMs": 223223,
+      "error": ""
+    },
+    {
+      "id": "log_85415a1d8a31b_1780493730447",
+      "createdAt": 1780493730447,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_53e0b27771dc4724bb3f49a64228bc62",
+        "reverse_prompt": "medium shot, [Subject] kneeling on snow-covered ground in winter, hands clasped in prayer, eyes closed with a sad and shivering expression, a small woven basket beside [Subject], gentle falling snow, warm golden light spilling from a house window in the background, contrasting cold blue ambient light, cinematic lighting, dramatic backlight, soft bokeh, emotional atmosphere, 3D render style",
+        "washed_image_url": "/uploads/65cc95c6-feff-47de-b693-dce57c77cdd9.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/65cc95c6-feff-47de-b693-dce57c77cdd9.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_5ab37658f286.jpg",
+          "name": "canvas_5ab37658f286.jpg"
+        }
+      ],
+      "runMs": 166879,
+      "error": ""
+    },
+    {
+      "id": "log_ff7452eed31f78_1780493674114",
+      "createdAt": 1780493674114,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_826cc62b2f724a078606b4b470fabf21",
+        "reverse_prompt": "Medium close-up, high angle view, [Subject] huddled on the snowy ground, shivering with arms crossed tightly, sad and pitiful facial expression, looking up at the camera pleadingly, soft snow falling, dark wintry background with blurred wooden structures, warm golden light highlighting [Subject] from above, contrasting with cool blue ambient night light, cinematic lighting, shallow depth of field, 3D stylized animation aesthetic",
+        "washed_image_url": "/uploads/fbb2b05c-c79d-482c-93cb-fd766b10f93b.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/fbb2b05c-c79d-482c-93cb-fd766b10f93b.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a2b83175801e.jpg",
+          "name": "canvas_a2b83175801e.jpg"
+        }
+      ],
+      "runMs": 110530,
+      "error": ""
+    },
+    {
+      "id": "log_6b061db5fb7528_1780493666085",
+      "createdAt": 1780493666085,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_e46d3bb1e9594e86b38f1ca77e4859df",
+        "reverse_prompt": "medium shot of [Subject] kneeling on snowy ground, holding a single lit matchstick in hands, warm golden glow from the flame illuminating [Subject]'s face and chest, wide-eyed hopeful expression, cold winter night atmosphere, falling snow with soft bokeh, dark rustic background in shallow depth of field, high contrast of warm key light and cool blue ambient shadows, cinematic 3D animation style, cozy and melancholic mood",
+        "washed_image_url": "/uploads/570e8a44-777f-4fe8-8fb1-6f09475371d4.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/570e8a44-777f-4fe8-8fb1-6f09475371d4.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_521ce9ff0c19.jpg",
+          "name": "canvas_521ce9ff0c19.jpg"
+        }
+      ],
+      "runMs": 102489,
+      "error": ""
+    },
+    {
+      "id": "log_813bdf319c8558_1780493498260",
+      "createdAt": 1780493498260,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_088dbe1063a74e98b4f127499747e0b4",
+        "reverse_prompt": "medium full shot, low angle, vertical composition, 3D animated film style, [Subject] kneeling on snow-covered ground in the center, hands clasped together in prayer, eyes closed with a sad and shivering expression, a small wooden basket next to [Subject], background shows a warm glowing house window at night, soft blurry lights inside, falling snowflakes in the air, dramatic rim lighting from the warm window, cool blue ambient lighting on the snow, high-contrast warm and cool color palette, cinematic atmosphere, shallow depth of field, soft focus",
+        "washed_image_url": "/uploads/3b8f4d9a-8fb8-41e4-baff-c06bb0a918c8.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/3b8f4d9a-8fb8-41e4-baff-c06bb0a918c8.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_5ab37658f286.jpg",
+          "name": "canvas_5ab37658f286.jpg"
+        }
+      ],
+      "runMs": 116738,
+      "error": ""
+    },
+    {
+      "id": "log_2ea1ee97c4189_1780493494194",
+      "createdAt": 1780493494194,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_3f64a12c62b041eebee9bedabdf18349",
+        "reverse_prompt": "medium shot, front view, [Subject] kneeling on snowy ground, holding a single glowing match in both hands, warm golden under-lighting illuminating [Subject]'s face and chest, wide eyes filled with hope and wonder looking down at the flame, cold winter night environment, soft falling snow, sharp contrast between warm orange firelight and cool blue ambient shadows, cinematic 3D CGI animation style, shallow depth of field, blurred cozy background with soft bokeh",
+        "washed_image_url": "/uploads/fb2cc96e-8b1a-42cf-8f07-e348b0ef90d8.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/fb2cc96e-8b1a-42cf-8f07-e348b0ef90d8.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_521ce9ff0c19.jpg",
+          "name": "canvas_521ce9ff0c19.jpg"
+        }
+      ],
+      "runMs": 112645,
+      "error": ""
+    },
+    {
+      "id": "log_95975a57ca6e88_1780493464017",
+      "createdAt": 1780493464017,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_075cf3c2f07f44d38c87dbcf91db0a60",
+        "reverse_prompt": "medium close-up, front view, [Subject] shivering and huddling in the cold, sad expression with wide teary eyes and flushed cheeks, snow dust on hair, sitting on snowy ground, outdoor winter night setting, soft warm rim lighting highlighting the hair and shoulders, cool blue shadows, falling snowflakes, cinematic 3D animation style, shallow depth of field, emotional and dramatic atmosphere",
+        "washed_image_url": "/uploads/bd1680dd-e928-4829-9bfa-47899e1f6288.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/bd1680dd-e928-4829-9bfa-47899e1f6288.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a2b83175801e.jpg",
+          "name": "canvas_a2b83175801e.jpg"
+        }
+      ],
+      "runMs": 82478,
+      "error": ""
+    },
+    {
+      "id": "log_91bbaa59412ff8_1780493080434",
+      "createdAt": 1780493080434,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_e012ce94ea4e490f8455cdb8b72cb4a6",
+        "reverse_prompt": "Full-body back view of two [Subject]s walking hand-in-hand, one taller [Subject] and one shorter [Subject] walking away from the camera, along a snowy stone path, heading towards a cozy wooden cabin on a hill in the background, snow-covered pine trees, gently falling snowflakes with depth of field blur, winter wonderland atmosphere, bright daylight with soft shadows, cool blue and white tones, stylized 3D animation style, cinematic composition",
+        "washed_image_url": "/uploads/c579b0a0-4664-4671-bce0-e073b6fe1997.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/c579b0a0-4664-4671-bce0-e073b6fe1997.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_610d989a2041.jpg",
+          "name": "canvas_610d989a2041.jpg"
+        }
+      ],
+      "runMs": 207150,
+      "error": ""
+    },
+    {
+      "id": "log_c65deb69cabbd8_1780492996065",
+      "createdAt": 1780492996065,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_0a1c740f51364a32933068a4a51e8116",
+        "reverse_prompt": "medium shot, eye-level angle, 3D animated style, [Subject] standing outdoors in winter, shivering with arms crossed, surprised expression looking away, soft falling snowflakes, next to a brick building wall, warm golden light contrasting with cool ambient blue shadows, cinematic rim lighting, cozy yet cold atmosphere, shallow depth of field",
+        "washed_image_url": "/uploads/142e348f-59d1-4269-907f-904dc629ce5b.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/142e348f-59d1-4269-907f-904dc629ce5b.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a169b8dc7130.jpg",
+          "name": "canvas_a169b8dc7130.jpg"
+        }
+      ],
+      "runMs": 122791,
+      "error": ""
+    },
+    {
+      "id": "log_7c41c809514f9_1780492993999",
+      "createdAt": 1780492993999,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_8854dfc6aeb5438ab0b3b95b18bc5444",
+        "reverse_prompt": "medium close-up, high-angle shot, 3D stylized animation, [Subject] crouching on the snowy ground, shivering in the cold with arms crossed, sad and miserable expression, rosy cheeks, tearful eyes looking downcast, gentle snowfall, cold winter night outdoor setting, warm golden rim lighting contrasting with cool ambient tones, shallow depth of field, cinematic emotional storytelling atmosphere",
+        "washed_image_url": "/uploads/e5b3a446-3294-4d5f-9ed2-29510cd9b5fe.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/e5b3a446-3294-4d5f-9ed2-29510cd9b5fe.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a2b83175801e.jpg",
+          "name": "canvas_a2b83175801e.jpg"
+        }
+      ],
+      "runMs": 120737,
+      "error": ""
+    },
+    {
+      "id": "log_08fe882a4647c_1780492987970",
+      "createdAt": 1780492987970,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_1c59aeb5143c436480cf67b1421bc67f",
+        "reverse_prompt": "medium shot, low-angle perspective, [Subject] kneeling on a snow-covered pavement, hands clasped together in prayer, shivering with a cold and sad facial expression, closed eyes, a small woven basket on the ground beside them, background features a blurred window with warm golden light glowing from inside, falling snow particles drifting across the scene, strong lighting contrast with cold blue ambient tones in the foreground and warm golden backlight from the window, cinematic 3D animation style, dramatic emotional atmosphere, shallow depth of field",
+        "washed_image_url": "/uploads/04fb3325-6d2f-4e12-88e1-a8fa8f7f6d80.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/04fb3325-6d2f-4e12-88e1-a8fa8f7f6d80.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_5ab37658f286.jpg",
+          "name": "canvas_5ab37658f286.jpg"
+        }
+      ],
+      "runMs": 114729,
+      "error": ""
+    },
+    {
+      "id": "log_861526550db138_1780492969801",
+      "createdAt": 1780492969801,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_95f33c92af9e404697efc3b50528b988",
+        "reverse_prompt": "medium shot of [Subject] kneeling on the snowy ground, holding a tiny lit match, warm golden under-lighting casting a soft glow on [Subject]'s face, looking down at the flame with an expression of hope and wonder, magical winter night atmosphere, soft snow falling, cool blue and dark ambient shadows in the background, cinematic 3D animation style, cozy yet cold color palette, shallow depth of field",
+        "washed_image_url": "/uploads/e8310f47-e106-4920-aad1-b3b6e94d9f13.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/e8310f47-e106-4920-aad1-b3b6e94d9f13.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_03aab0d07fc3.jpg",
+          "name": "canvas_03aab0d07fc3.jpg"
+        }
+      ],
+      "runMs": 96547,
+      "error": ""
+    },
+    {
+      "id": "log_c233a3bb90a278_1780492206412",
+      "createdAt": 1780492206412,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_02ccdaabb50d4d47b9a35a965386d46b",
+        "reverse_prompt": "medium shot, eye-level angle, 3D animated style, [Subject] kneeling on snowy ground, hands clasped together in front of chest, shivering with a sorrowful expression, eyes closed, a small basket on the snow next to [Subject], falling snowflakes, outdoor winter night setting, a large window behind [Subject] with warm golden light glowing from inside, stark contrast between cold blue foreground and warm golden background, soft depth of field, dramatic cinematic lighting, emotional and melancholic atmosphere",
+        "washed_image_url": "/uploads/9049ceeb-f9af-432c-b9c6-7e75bc1881f8.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/9049ceeb-f9af-432c-b9c6-7e75bc1881f8.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_5ab37658f286.jpg",
+          "name": "canvas_5ab37658f286.jpg"
+        }
+      ],
+      "runMs": 180926,
+      "error": ""
+    },
+    {
+      "id": "log_d30dc0a9e1d8f_1780491072628",
+      "createdAt": 1780491072628,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_8bca9a01f4334223b69771182b0880af",
+        "reverse_prompt": "3D animated style, medium shot, low angle, [Subject] kneeling on the cold snowy ground, shivering with a sad and teary expression, hands clasped close to the chest, a small wicker basket on the snow beside [Subject], falling snow illuminated by light, background features a warmly lit window with soft-focus figures inside, contrast of cold blue winter night shadows and warm golden light from the window, cinematic rim lighting on [Subject], melancholic and emotional atmosphere, shallow depth of field",
+        "washed_image_url": "/uploads/9702f6be-fc59-404d-89da-8ef1fb8bd9b9.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/9702f6be-fc59-404d-89da-8ef1fb8bd9b9.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_f521051550ef.jpg",
+          "name": "canvas_f521051550ef.jpg"
+        }
+      ],
+      "runMs": 205227,
+      "error": ""
+    },
+    {
+      "id": "log_35b571dde53d98_1780490693983",
+      "createdAt": 1780490693983,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_7381d45705fe447abdebbe77d4ff7197",
+        "reverse_prompt": "Medium shot, looking through a snowy window pane from the outside, framing within a frame, three [Subject]s sitting around a festive dinner table, a male [Subject] on the left in side profile, a female [Subject] on the right in side profile, a young child [Subject] in the center wearing a winter hat, cozy Christmas-themed interior background, decorated mini Christmas trees, warm golden overhead lighting, soft glowing atmosphere, contrast of cool winter blue outside and warm amber tones inside, gentle falling snow in the foreground, 3D animated film style, cinematic lighting, heartfelt festive mood",
+        "washed_image_url": "/uploads/9fe875c7-5833-41e7-b839-c1d6606d0d09.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/9fe875c7-5833-41e7-b839-c1d6606d0d09.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_5e9a592f7dfa.jpg",
+          "name": "canvas_5e9a592f7dfa.jpg"
+        }
+      ],
+      "runMs": 153078,
+      "error": ""
+    },
+    {
+      "id": "log_a4869701c6cf48_1780482166655",
+      "createdAt": 1780482166655,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "金色老虎机整体的正面视角（正视图）",
+      "outputs": [
+        "/uploads/48a90eb1-41d6-4e21-a466-3960989fd085.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_c9a8d4176bf8.png",
+          "name": "edit_result_1780476846674.png"
+        }
+      ],
+      "runMs": 110505,
+      "error": ""
+    },
+    {
+      "id": "log_df7e98116af48_1780482166617",
+      "createdAt": 1780482166617,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "金色老虎机整体的正面视角（正视图）",
+      "outputs": [
+        "/uploads/9f9c6ef7-7350-4c05-a2ce-3bb65d775ae5.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_c9a8d4176bf8.png",
+          "name": "edit_result_1780476846674.png"
+        }
+      ],
+      "runMs": 110467,
+      "error": ""
+    },
+    {
+      "id": "log_c2a1259c86a0f_1780476256750",
+      "createdAt": 1780476256750,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "老虎机旁边的两头金牛移除，在老虎机顶上加一个神牛的形象。然后屏幕改成纯绿色绿幕（方便我后期抠图）",
+      "outputs": [
+        "/uploads/48af34ca-47bb-43d7-b407-82b96ed5a5bb.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_d9c298c03bab.png",
+          "name": "canvas-output-1780475241138.png"
+        }
+      ],
+      "runMs": 188248,
+      "error": ""
+    },
+    {
+      "id": "log_08b02ba18fc008_1780476153668",
+      "createdAt": 1780476153668,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "老虎机旁边的两头金牛移除，在老虎机顶上加一个神牛的形象。然后屏幕改成纯绿色绿幕（方便我后期抠图）",
+      "outputs": [
+        "/uploads/19fbaa8f-d987-4dcd-ae61-2bbb3a05ed5a.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_d9c298c03bab.png",
+          "name": "canvas-output-1780475241138.png"
+        }
+      ],
+      "runMs": 85166,
+      "error": ""
+    },
+    {
+      "id": "log_85df04c6d2d47_1780475544740",
+      "createdAt": 1780475544740,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "老虎机旁边的两头金牛不要挡住画面，然后屏幕改成纯绿色绿幕（方便我后期抠图）",
+      "outputs": [
+        "/uploads/095bc480-6ad4-4edd-a069-71a9a2766780.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_d9c298c03bab.png",
+          "name": "canvas-output-1780475241138.png"
+        }
+      ],
+      "runMs": 180913,
+      "error": ""
+    },
+    {
+      "id": "log_010eba042ef5c_1780475506726",
+      "createdAt": 1780475506726,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "老虎机旁边的两头金牛不要挡住画面，然后屏幕改成纯绿色绿幕（方便我后期抠图）",
+      "outputs": [
+        "/uploads/3555cc10-b3db-4f5e-a4c8-929bda32e6a4.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_d9c298c03bab.png",
+          "name": "canvas-output-1780475241138.png"
+        }
+      ],
+      "runMs": 142899,
+      "error": ""
+    },
+    {
+      "id": "log_4f50c7678f2078_1780475105513",
+      "createdAt": 1780475105513,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "3D风格化卡通动画，休闲游戏原画风格。一个身穿黑色商务西装男子（图1）的背影作为近景前景，占据画面左侧。他正迈步走向前方矗立着的一台巨型、极尽奢华的金色神牛主题老虎机（图2）。焦点在【背景】 老虎机上。整个赌场大厅背景金碧辉煌，充满了财富氛围，低机位跟随时轴视角，充满解压感和期待感的玩法触发场景。",
+      "outputs": [
+        "/uploads/1e4119ac-b0c7-4b05-ad26-27deccc2fc4f.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+          "name": "2.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_4fde6b7da6ce.png",
+          "name": "edit_result_1780395453787.png"
+        }
+      ],
+      "runMs": 1458377,
+      "error": ""
+    },
+    {
+      "id": "log_1a1dcd4c862248_1780475080149",
+      "createdAt": 1780475080149,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "3D风格化卡通动画，休闲游戏原画风格。一个身穿黑色商务西装男子（图1）的背影作为近景前景，占据画面左侧。他正迈步走向前方矗立着的一台巨型、极尽奢华的金色神牛主题老虎机（图2）。焦点在【背景】 老虎机上。整个赌场大厅背景金碧辉煌，充满了财富氛围，低机位跟随时轴视角，充满解压感和期待感的玩法触发场景。",
+      "outputs": [
+        "/uploads/486de0ab-1c49-4d1b-942f-7587d91098e7.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+          "name": "2.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_4fde6b7da6ce.png",
+          "name": "edit_result_1780395453787.png"
+        }
+      ],
+      "runMs": 1433013,
+      "error": ""
+    },
+    {
+      "id": "log_053de16a2ed6f_1780473459225",
+      "createdAt": 1780473459225,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "3D风格化卡通动画，休闲游戏原画风格。一个身穿黑色商务西装男子（图1）的背影作为近景前景，占据画面左侧。他正迈步走向前方矗立着的一台巨型、极尽奢华的金色神牛主题老虎机。焦点在【背景】 老虎机上。整个赌场大厅背景金碧辉煌，充满了赛博魔幻的财富氛围，低机位跟随时轴视角，充满解压感和期待感的玩法触发场景",
+      "outputs": [
+        "/uploads/fc0b5b5d-e130-4525-b74b-ae53f2fd7413.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+          "name": "2.jpg"
+        }
+      ],
+      "runMs": 70639,
+      "error": ""
+    },
+    {
+      "id": "log_acf6acc218057_1780473457388",
+      "createdAt": 1780473457388,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "3D风格化卡通动画，休闲游戏原画风格。一个身穿黑色商务西装男子（图1）的背影作为近景前景，占据画面左侧。他正迈步走向前方矗立着的一台巨型、极尽奢华的金色神牛主题老虎机。焦点在【背景】 老虎机上。整个赌场大厅背景金碧辉煌，充满了赛博魔幻的财富氛围，低机位跟随时轴视角，充满解压感和期待感的玩法触发场景",
+      "outputs": [
+        "/uploads/16eb9eac-6c66-4b45-8f6b-e40ec6534f9a.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+          "name": "2.jpg"
+        }
+      ],
+      "runMs": 68802,
+      "error": ""
+    },
+    {
+      "id": "log_e237b9995302b_1780473317645",
+      "createdAt": 1780473317645,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "3D风格化卡通动画，休闲游戏原画风格。一个身穿黑色商务西装男子（图1）的背影作为近景前景，占据画面左侧。他正迈步走向前方矗立着的一台巨型、极尽奢华的金色神牛主题老虎机。焦点在【背景】 老虎机上。整个赌场大厅背景金碧辉煌，充满了赛博魔幻的财富氛围，高反光的大理石地面清晰倒映着璀璨的光影。低机位跟随时轴视角，充满解压感和期待感的玩法触发场景",
+      "outputs": [
+        "/uploads/077aa8cb-11ce-43d5-93b9-465005fc8d9f.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+          "name": "2.jpg"
+        }
+      ],
+      "runMs": 68802,
+      "error": ""
+    },
+    {
+      "id": "log_de44a5d3d52148_1780473314007",
+      "createdAt": 1780473314007,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "3D风格化卡通动画，休闲游戏原画风格。一个身穿黑色商务西装男子（图1）的背影作为近景前景，占据画面左侧。他正迈步走向前方矗立着的一台巨型、极尽奢华的金色神牛主题老虎机。焦点在【背景】 老虎机上。整个赌场大厅背景金碧辉煌，充满了赛博魔幻的财富氛围，高反光的大理石地面清晰倒映着璀璨的光影。低机位跟随时轴视角，充满解压感和期待感的玩法触发场景",
+      "outputs": [
+        "/uploads/9552cf4a-7426-476f-b4ac-22313d42676a.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_c9df9b074780.jpg",
+          "name": "2.jpg"
+        }
+      ],
+      "runMs": 65164,
+      "error": ""
+    },
+    {
+      "id": "log_d04d3ff6b65d98_1780472165352",
+      "createdAt": 1780472165352,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "nano-banana-pro",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "请把图1（姿势和神态不变）的人物换成图2黑色西装男的形象，",
+      "outputs": [
+        "/uploads/4de07b46-4187-4d2f-8b4d-6794d93fd9fa.jpg"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_8f88ac3ae220.png",
+          "name": "image_1780471525491.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_9bb796485026.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 200896,
+      "error": ""
+    },
+    {
+      "id": "log_361165d11b286_1780472156289",
+      "createdAt": 1780472156289,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "nano-banana-pro",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "请把图1（姿势和神态不变）的人物换成图2黑色西装男的形象，",
+      "outputs": [
+        "/uploads/ecb5b8b3-c0bc-4458-b558-8e558e44b58c.jpg"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_8f88ac3ae220.png",
+          "name": "image_1780471525491.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_9bb796485026.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 191832,
+      "error": ""
+    },
+    {
+      "id": "log_f10b8f026546d8_1780471836065",
+      "createdAt": 1780471836065,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "nano-banana-pro",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "请把图1的人物换成图2黑色西装男的形象",
+      "outputs": [
+        "/uploads/8ae17709-6eea-41e9-9cee-ec05b2da6de5.jpg"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_8f88ac3ae220.png",
+          "name": "image_1780471525491.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_9bb796485026.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 253303,
+      "error": ""
+    },
+    {
+      "id": "log_6851f296771f08_1780471707644",
+      "createdAt": 1780471707644,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "nano-banana-pro",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "请把图1的人物换成图2黑色西装男的形象",
+      "outputs": [
+        "/uploads/634b8c11-cc6a-451d-a889-227959050fd1.jpg"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_8f88ac3ae220.png",
+          "name": "image_1780471525491.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_9bb796485026.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 124883,
+      "error": ""
+    },
+    {
+      "id": "log_4506278daf1488_1780471546967",
+      "createdAt": 1780471546967,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "请确保图1右边两人的形象和图2的右边两人形象一致",
+      "outputs": [
+        "/uploads/30c9788d-06ca-4899-8225-324106325bdb.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_08846c6bb8bb.png",
+          "name": "edit_result_1780467359019.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_c882bebb253d.png",
+          "name": "edit_result_1780470899858.png"
+        }
+      ],
+      "runMs": 108651,
+      "error": ""
+    },
+    {
+      "id": "log_fe0a620290d218_1780471536114",
+      "createdAt": 1780471536114,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "请确保图1右边两人的形象和图2的右边两人形象一致",
+      "outputs": [
+        "/uploads/e91ee2e2-d94a-4e48-9177-0806ef61b6e2.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_08846c6bb8bb.png",
+          "name": "edit_result_1780467359019.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_c882bebb253d.png",
+          "name": "edit_result_1780470899858.png"
+        }
+      ],
+      "runMs": 97798,
+      "error": ""
+    },
+    {
+      "id": "log_063b737160ae58_1780471153802",
+      "createdAt": 1780471153802,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；带有夸张的戏剧冲突感",
+      "outputs": [
+        "/uploads/384bed11-8f2d-4ab1-a095-959687643022.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 72735,
+      "error": ""
+    },
+    {
+      "id": "log_d77f965893c698_1780471146517",
+      "createdAt": 1780471146517,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；带有夸张的戏剧冲突感",
+      "outputs": [
+        "/uploads/f784002e-3898-45cb-884b-2f460755ccb3.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 65450,
+      "error": ""
+    },
+    {
+      "id": "log_ff3810d9d76318_1780470665591",
+      "createdAt": 1780470665591,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+      "outputs": [
+        "/uploads/2a5dbed7-0c4d-40f5-9e34-dcd967991f13.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 171915,
+      "error": ""
+    },
+    {
+      "id": "log_2544dfaab9b428_1780470605874",
+      "createdAt": 1780470605874,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+      "outputs": [
+        "/uploads/3df20790-ce82-4060-8648-c49ba59462d8.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 112197,
+      "error": ""
+    },
+    {
+      "id": "log_4e6f511a7de318_1780470333939",
+      "createdAt": 1780470333939,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+      "outputs": [
+        "/uploads/4fee5d5f-47b1-4a4c-85e3-2ffb480c44d6.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 76060,
+      "error": ""
+    },
+    {
+      "id": "log_0a39e055fcf3d8_1780470328487",
+      "createdAt": 1780470328487,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+      "outputs": [
+        "/uploads/763eaf6d-9f89-4667-9274-eb3200f5d4c0.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 70607,
+      "error": ""
+    },
+    {
+      "id": "log_1c2de5b28ed1b8_1780470144118",
+      "createdAt": 1780470144118,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+      "outputs": [
+        "/uploads/b4f0d0e1-bcec-4611-a293-a44192d6949e.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 107453,
+      "error": ""
+    },
+    {
+      "id": "log_2b49fa7d706bb8_1780470105453",
+      "createdAt": 1780470105453,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+      "outputs": [
+        "/uploads/d641be7a-6c52-437c-8b8a-64fefba6b250.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 68788,
+      "error": ""
+    },
+    {
+      "id": "log_a70a1bbf288a4_1780469944471",
+      "createdAt": 1780469944471,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+      "outputs": [
+        "/uploads/556d77d1-e5ec-4ba6-9392-5f9e474cbc1b.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 89003,
+      "error": ""
+    },
+    {
+      "id": "log_ed00396f047168_1780469920456",
+      "createdAt": 1780469920456,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+      "outputs": [
+        "/uploads/b6896822-98a3-4272-b81a-561c307e8c49.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 64988,
+      "error": ""
+    },
+    {
+      "id": "log_bdb0c71dc1f27_1780469732407",
+      "createdAt": 1780469732407,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。背景有一张办公桌、电脑以及墙上挂着的一幅带有彩色柱状图的商业白板。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+      "outputs": [
+        "/uploads/0142812c-b450-43de-8edd-8ca0c03e1f44.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 132198,
+      "error": ""
+    },
+    {
+      "id": "log_653544787fe0c8_1780469721551",
+      "createdAt": 1780469721551,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。背景有一张办公桌、电脑以及墙上挂着的一幅带有彩色柱状图的商业白板。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+      "outputs": [
+        "/uploads/c8dfe048-ad11-4c55-8da9-14e017d9d759.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 121342,
+      "error": ""
+    },
+    {
+      "id": "log_bc34165fe308c8_1780469518884",
+      "createdAt": 1780469518884,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、戴眼镜的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。背景有一张办公桌、电脑以及墙上挂着的一幅带有彩色柱状图的商业白板。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+      "outputs": [
+        "/uploads/0911fe5a-f030-4d0c-88f8-43893569049f.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 123088,
+      "error": ""
+    },
+    {
+      "id": "log_84ce1f3ef90cd8_1780469473628",
+      "createdAt": 1780469473628,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "参考图1的构图和姿势表情和眼神朝向，调整图2的画面，3D卡通休闲游戏原画风格，流畅的次世代角色渲染。在一个粉色墙面的现代经理办公室内，左侧是一个身穿黑色西装的男子愤怒对质的背影；中间是一个身材极其肥胖、穿着白衬衫、蓝裤子、戴眼镜的秃顶老板，神情极度恐慌；右侧是一位身材夸张、穿着紧身红色低胸连衣短裙和红色高跟鞋的红发秘书，表情慌张。背景有一张办公桌、电脑以及墙上挂着的一幅带有彩色柱状图的商业白板。均匀柔和的室内打光，高饱和度色彩，带有夸张的戏剧冲突感",
+      "outputs": [
+        "/uploads/c1cee040-4a61-4db3-bc1b-347a3ef2de77.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_015a377d0e23.png",
+          "name": "3.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_6a29fd088b28.png",
+          "name": "edit_result_1780467359019.png"
+        }
+      ],
+      "runMs": 77833,
+      "error": ""
+    }
+  ],
+  "settings": {}
+}

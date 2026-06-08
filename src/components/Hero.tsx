@@ -1,147 +1,140 @@
-import React from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { useStore } from '../store/useStore';
+import React, { useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
+import { cn } from '../lib/utils';
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
-interface HeroProps {
-  onStart?: () => void;
-  onOpenImageEditor?: () => void;
-  onOpenNineGrid?: () => void;
+/** 将视频放到 public/ 下，留空字符串则仅使用图片 */
+export const COVER_HERO_VIDEO = '';
+/** 可选 WebM，体积通常更小 */
+export const COVER_HERO_VIDEO_WEBM = '';
+/** 视频加载前的封面帧；也可作为 prefers-reduced-motion 时的静态背景 */
+export const COVER_HERO_POSTER = '/cover-hero.jpg';
+/** 视频不可用时的静态图回退 */
+export const COVER_HERO_BG = '/cover-hero.jpg';
+
+function usePrefersReducedMotion() {
+  const [reduced, setReduced] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setReduced(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+
+  return reduced;
 }
 
-export const Hero: React.FC<HeroProps> = ({ onStart, onOpenImageEditor, onOpenNineGrid }) => {
-  const uiTheme = useStore((s) => s.uiTheme);
-  const isDark = uiTheme === 'dark';
+function HeroBackground() {
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const [videoFailed, setVideoFailed] = useState(false);
+  const [imageFailed, setImageFailed] = useState(false);
 
-  const bgSrc = isDark
-    ? 'https://lh3.googleusercontent.com/aida-public/AB6AXuAUFk-K9rgy9CePzk0ifBf30XluZCV_8r-GPFkUSfIBYwBY_MFXC91T9zZ6XshM9UAazNCMMhy-2r29za_4JfxDYN3HmvPBL34VgBFMSFZrA61xbdmDABszWvQuBZdJzP_nq2gf__jmk4UPyMKn9uSrnPnxFZiRlFLzdZpoL-f9_Ez3MX7LEC4lJyb3qX9655x1Qw-K_gg35O8oEHxMUtRl6q6pzMD_RNqD9bst4uyn3O0kL69FnxlBgBuMoh9ULck3EIitO1MJGVtk'
-    : 'https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=2400&auto=format&fit=crop&q=80';
+  const useVideo = Boolean(COVER_HERO_VIDEO) && !prefersReducedMotion && !videoFailed;
+  const poster = COVER_HERO_POSTER || COVER_HERO_BG;
+  const showImage = !useVideo && !imageFailed && Boolean(COVER_HERO_BG);
 
   return (
-    <section className="relative min-h-screen w-full flex items-center justify-center overflow-hidden pt-24 pb-16 md:pt-28 md:pb-20">
-      <div className="absolute inset-0 z-0">
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.img
-            key={uiTheme}
-            src={bgSrc}
-            alt={isDark ? 'Night studio scene' : 'Daylight studio scene'}
-            className="w-full h-full object-cover scale-105"
-            referrerPolicy="no-referrer"
-            initial={{
-              opacity: 0,
-              filter: isDark ? 'brightness(0.9) saturate(1.05)' : 'brightness(1.06) saturate(1.03)',
-            }}
-            animate={{
-              opacity: 0.88,
-              filter: isDark ? 'brightness(0.9) saturate(1.05)' : 'brightness(1.06) saturate(1.03)',
-            }}
-            exit={{
-              opacity: 0,
-              filter: isDark ? 'brightness(0.9) saturate(1.05)' : 'brightness(1.06) saturate(1.03)',
-            }}
-            transition={{ type: 'spring', stiffness: 220, damping: 34 }}
-          />
-        </AnimatePresence>
+    <>
+      <div className="cover-hero-bg absolute inset-0 z-0" aria-hidden />
 
-        <div
-          className={
-            isDark
-              ? 'absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-[#131313]'
-              : 'absolute inset-0 bg-gradient-to-b from-black/15 via-transparent to-[#fffdf9]'
-          }
+      {useVideo && (
+        <video
+          className="cover-hero-media absolute inset-0 z-[1] h-full w-full object-cover object-[42%_38%]"
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="metadata"
+          poster={poster || undefined}
+          aria-hidden
+          onError={() => setVideoFailed(true)}
+        >
+          {COVER_HERO_VIDEO_WEBM ? (
+            <source src={COVER_HERO_VIDEO_WEBM} type="video/webm" />
+          ) : null}
+          <source src={COVER_HERO_VIDEO} type="video/mp4" />
+        </video>
+      )}
+
+      {showImage && (
+        <img
+          src={prefersReducedMotion && poster ? poster : COVER_HERO_BG}
+          alt=""
+          className="cover-hero-media absolute inset-0 z-[1] h-full w-full object-cover object-[42%_38%]"
+          onError={() => setImageFailed(true)}
         />
-        <div
-          className={
-            isDark
-              ? 'absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,#131313_100%)] opacity-80'
-              : 'absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(255,253,249,0.92)_100%)] opacity-70'
-          }
-        />
-      </div>
+      )}
 
-      {/* 精简起始页装饰性角标，避免与内容争夺注意力 */}
+      <div className="cover-hero-overlay absolute inset-0 z-[2] pointer-events-none" aria-hidden />
+      <div className="cover-hero-vignette absolute inset-0 z-[2] pointer-events-none" aria-hidden />
+    </>
+  );
+}
 
-      <div className="relative z-10 w-full max-w-[1400px] px-6 md:px-12 grid grid-cols-12 gap-8 md:gap-10">
-        <div className="col-span-12 md:col-span-10 lg:col-span-7">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ ...spring, delay: 0.05 }}
-            className="inline-flex items-center gap-3 mb-6 md:mb-8 px-4 py-2 rounded-full bg-black/35 backdrop-blur-md"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-            <span className="font-label text-[9px] md:text-[10px] uppercase tracking-[0.3em] text-white/90">
-              The Future of Animation Orchestration
-            </span>
-          </motion.div>
+interface HeroProps {
+  onStart?: () => void;
+}
 
+export const Hero: React.FC<HeroProps> = ({ onStart }) => {
+  return (
+    <section className="cover-hero relative h-[100dvh] min-h-[640px] w-full flex items-center overflow-hidden">
+      <HeroBackground />
+
+      <div className="relative z-10 w-full max-w-[1280px] mx-auto px-6 md:px-10 lg:px-14 pt-24 md:pt-28">
+        <div className="max-w-[640px] space-y-6 md:space-y-8">
           <motion.h1
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ ...spring, delay: 0.12 }}
-            className="font-headline text-5xl sm:text-6xl md:text-7xl lg:text-[7.5rem] leading-[1.05] md:leading-[0.95] tracking-[-0.02em] text-white mb-8 md:mb-12"
+            transition={{ ...spring, delay: 0.06 }}
+            className="cover-hero-title text-[2.75rem] sm:text-[3.25rem] md:text-[3.75rem] lg:text-[4.25rem] tracking-[-0.03em] leading-[1.02]"
           >
-            Transform <br />
-            <span className="italic font-light text-white/85">Imagination</span> <br />
-            <span className="ml-0 md:ml-16 lg:ml-24">
-              into{' '}
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-amber-200 glow-text">
-                Cinematic Magic
-              </span>
-            </span>
+            LHZ&apos;s Studio
           </motion.h1>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
+          <motion.p
+            initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ ...spring, delay: 0.22 }}
-            className="flex flex-col sm:flex-row items-start sm:items-center gap-8 md:gap-12 mt-8 md:mt-12"
+            transition={{ ...spring, delay: 0.12 }}
+            className="cover-hero-tagline text-xl md:text-2xl font-medium tracking-[-0.02em]"
+          >
+            为分镜叙事而生。
+          </motion.p>
+
+          <motion.p
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ ...spring, delay: 0.18 }}
+            className="cover-hero-body text-[15px] md:text-[17px] leading-[1.7] max-w-[520px]"
+          >
+            从剧本拆解到批量生图，从九宫格预览到节点画布编排——在同一间 Studio 里，把故事变成画面。
+          </motion.p>
+
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ ...spring, delay: 0.24 }}
+            className="flex flex-wrap items-center gap-5 md:gap-8 pt-2"
           >
             <button
               type="button"
               onClick={onStart}
-              className="group relative px-8 md:px-12 py-4 md:py-5 rounded-full overflow-hidden cursor-pointer shrink-0
-                bg-gradient-to-br from-primary to-[#b77100] text-black shadow-[0_0_32px_rgba(255,184,102,0.28)]
-                hover:shadow-[0_0_48px_rgba(255,184,102,0.4)] transition-shadow duration-500"
+              disabled={!onStart}
+              className={cn(
+                'cover-hero-cta rounded-full px-8 md:px-10 py-3.5 md:py-4',
+                'text-[15px] font-semibold tracking-[-0.01em]',
+                'cursor-pointer disabled:opacity-50 disabled:pointer-events-none',
+              )}
             >
-              <span className="relative z-10 font-label text-[10px] md:text-xs tracking-[0.2em] uppercase font-semibold group-hover:opacity-90 transition-opacity">
-                Launch Studio
-              </span>
+              进入分镜工作台
             </button>
-            <button
-              type="button"
-              onClick={onOpenImageEditor}
-              disabled={!onOpenImageEditor}
-              className="group relative px-8 md:px-12 py-4 md:py-5 rounded-full overflow-hidden cursor-pointer shrink-0
-                bg-white/5 text-on-surface hover:bg-white/10 transition-colors duration-300
-                outline outline-[0.5px] outline-outline-variant/20 disabled:opacity-50 disabled:pointer-events-none"
-            >
-              <span className="relative z-10 font-label text-[10px] md:text-xs tracking-[0.2em] uppercase font-semibold group-hover:opacity-90 transition-opacity">
-                IMAGE_EDITOR
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={onOpenNineGrid}
-              disabled={!onOpenNineGrid}
-              className="group relative px-8 md:px-12 py-4 md:py-5 rounded-full overflow-hidden cursor-pointer shrink-0
-                bg-white/5 text-on-surface hover:bg-white/10 transition-colors duration-300
-                outline outline-[0.5px] outline-outline-variant/20 disabled:opacity-50 disabled:pointer-events-none"
-            >
-              <span className="relative z-10 font-label text-[10px] md:text-xs tracking-[0.2em] uppercase font-semibold group-hover:opacity-90 transition-opacity">
-                9_GRID
-              </span>
-            </button>
-            <div className="max-w-sm flex gap-5 pl-0 sm:pl-2">
-              <div className="w-1 shrink-0 rounded-full bg-white/35 min-h-[3rem]" aria-hidden />
-              <p className="font-body text-[9px] leading-relaxed tracking-[0.12em] text-white/50 uppercase py-1">
-                Engine leverages neural lighting paths to render compositions in real-time. No pre-rendering required.
-              </p>
-            </div>
+            <a href="#tools" className="cover-hero-link text-[15px] font-medium tracking-[-0.01em]">
+              浏览全部工具
+            </a>
           </motion.div>
         </div>
-        <div className="hidden lg:block lg:col-span-5" aria-hidden />
       </div>
     </section>
   );

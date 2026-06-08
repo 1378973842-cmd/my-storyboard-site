@@ -1,0 +1,5748 @@
+{
+  "id": "5b718411e8734f17adfd41822d2c4dbb",
+  "title": "雪地母女",
+  "icon": "🧩",
+  "kind": "classic",
+  "created_at": 1780551060752,
+  "updated_at": 1780568976375,
+  "nodes": [
+    {
+      "id": "imag_87af33bdb7b348_1780551069855",
+      "type": "image",
+      "x": -277.93704282074464,
+      "y": 217.7368291279691,
+      "url": "/uploads/canvas/canvas_df3fc006f0bd.mp4",
+      "name": "Gossip HarborÂ®_ Merge & Story-720 X 1280-2026-05-21-f3cb30e7e00ef9848b2a9c16688d530e.mp4",
+      "frameOutputId": "fram_6d257ba73b2f9_1780551069855",
+      "mediaKind": "video"
+    },
+    {
+      "id": "fram_6d257ba73b2f9_1780551069855",
+      "type": "frameStack",
+      "x": 189.35682708643935,
+      "y": -187.65394191029395,
+      "images": [
+        {
+          "url": "/uploads/canvas/canvas_1610a6906d28.jpg",
+          "viewed": false,
+          "runMs": 0,
+          "run": null,
+          "kind": "image"
+        },
+        {
+          "url": "/uploads/canvas/canvas_f37192394757.jpg",
+          "viewed": false,
+          "runMs": 0,
+          "run": null,
+          "kind": "image"
+        }
+      ],
+      "sourceVideoId": "imag_87af33bdb7b348_1780551069855"
+    },
+    {
+      "id": "loop_ca78abb9fd1158_1780551069855",
+      "type": "loop",
+      "x": 727.7170697017561,
+      "y": 244.55920082775168,
+      "count": 2,
+      "mode": "parallel",
+      "showPrompt": false,
+      "imageInput": true,
+      "imageBatchSize": 1,
+      "loopStart": 1,
+      "variablePrompt": "",
+      "fixedPrompt": ""
+    },
+    {
+      "id": "repl_d752bc139fad3_1780551069855",
+      "type": "replicaAgent",
+      "x": 1124.2105695734363,
+      "y": 262.68422782937455,
+      "w": 350,
+      "h": 695,
+      "style_prompt": "",
+      "ratio": "story",
+      "resolution": "1k",
+      "customRatio": "",
+      "customRatioWidth": "",
+      "customRatioHeight": "",
+      "roles": {
+        "img_01da2da2114098_1780562356515": "character",
+        "loop_ca78abb9fd1158_1780551069855:image:1:/uploads/canvas/canvas_1610a6906d28.jpg": "background"
+      },
+      "inputs": [
+        "img_01da2da2114098_1780562356515",
+        "loop_ca78abb9fd1158_1780551069855:image:1:/uploads/canvas/canvas_1610a6906d28.jpg"
+      ],
+      "generatedOutputs": [
+        "/uploads/132cdaf5-f6df-428f-824a-cc6487e329c0.png",
+        "/uploads/c3509411-6cf9-40c4-8d6e-793f5379ff4a.png"
+      ],
+      "runStatus": "",
+      "runError": "",
+      "_cascadeFailed": false,
+      "_cascadeIdx": ""
+    },
+    {
+      "id": "gen_8acaf42af26d_1780551685154",
+      "type": "generator",
+      "x": -65.71001836887021,
+      "y": 1127.931469972351,
+      "apiProvider": "runninghub",
+      "model": "gpt-image-2",
+      "ratio": "story",
+      "resolution": "1k",
+      "customRatio": "",
+      "customSize": "",
+      "customRatioWidth": "",
+      "customRatioHeight": "",
+      "customWidth": "",
+      "customHeight": "",
+      "inputs": [
+        "prompt_fbdff8eb0514b8_1780551715194",
+        "img_95473f6670bf98_1780559625430"
+      ],
+      "count": 4,
+      "generatedOutputs": [
+        "/uploads/41b3d902-1090-4a6d-9878-f2e503526e58.png"
+      ],
+      "runStatus": "done",
+      "runError": ""
+    },
+    {
+      "id": "out_4f907fbe972c_1780551691498",
+      "type": "output",
+      "x": 547.9943241488397,
+      "y": 1296.2574587525637,
+      "images": [
+        {
+          "url": "/uploads/a1bc7838-23e6-4353-a045-6e2da57bcd0c.png",
+          "viewed": false,
+          "runMs": 92316,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2
+            },
+            "prompt": "图中的小女孩换个样子，换个发型，换个衣服",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_0d0035c3dd57.png",
+                "name": "canvas-output-1780551667042.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/511a5736-dba8-4828-a787-8c247be9f2a1.png",
+          "viewed": false,
+          "runMs": 123076,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2
+            },
+            "prompt": "图中的小女孩换个样子，换个发型，换个衣服",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_0d0035c3dd57.png",
+                "name": "canvas-output-1780551667042.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/aba3444c-b063-45d6-87b0-7f287d264b8b.png",
+          "viewed": false,
+          "runMs": 57996,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/511a5736-dba8-4828-a787-8c247be9f2a1.png"
+              ]
+            },
+            "prompt": "图中的小女孩换个脸，换个发型，换个衣服",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_0d0035c3dd57.png",
+                "name": "canvas-output-1780551667042.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/71ef667b-1148-4ec8-aa98-266b3ee65187.png",
+          "viewed": true,
+          "runMs": 68864,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/511a5736-dba8-4828-a787-8c247be9f2a1.png"
+              ]
+            },
+            "prompt": "图中的小女孩换个脸，换个发型，换个衣服",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_0d0035c3dd57.png",
+                "name": "canvas-output-1780551667042.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/d2ae6f44-9e33-45f3-a638-7712ad2d729e.png",
+          "viewed": false,
+          "runMs": 60085,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/71ef667b-1148-4ec8-aa98-266b3ee65187.png"
+              ]
+            },
+            "prompt": "图1窗户内的场景参考图2，保持透视和位置正确",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_f41c04167530.png",
+                "name": "canvas-output-1780558244011.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_212f16c8d489.png",
+                "name": "1.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/5efbbb6c-4929-4ed4-b3b2-21eea3f494ba.png",
+          "viewed": false,
+          "runMs": 85437,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/71ef667b-1148-4ec8-aa98-266b3ee65187.png"
+              ]
+            },
+            "prompt": "图1窗户内的场景参考图2，保持透视和位置正确",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_f41c04167530.png",
+                "name": "canvas-output-1780558244011.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_212f16c8d489.png",
+                "name": "1.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/2125ee2c-9dd6-44e2-8321-2bfaffdf7443.png",
+          "viewed": false,
+          "runMs": 63341,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/5efbbb6c-4929-4ed4-b3b2-21eea3f494ba.png"
+              ]
+            },
+            "prompt": "图1窗户高一点，窗户里的人不要露出来",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_f41c04167530.png",
+                "name": "canvas-output-1780558244011.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/e4ad623f-a330-4a72-bb7f-07a70ab2677c.png",
+          "viewed": false,
+          "runMs": 97723,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/5efbbb6c-4929-4ed4-b3b2-21eea3f494ba.png"
+              ]
+            },
+            "prompt": "图1窗户高一点，窗户里的人不要露出来",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_f41c04167530.png",
+                "name": "canvas-output-1780558244011.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/303ea26f-1bc4-443c-a82a-cc870c48fb77.png",
+          "viewed": false,
+          "runMs": 59791,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/e4ad623f-a330-4a72-bb7f-07a70ab2677c.png"
+              ]
+            },
+            "prompt": "图1窗户围墙高一点，窗户里的人不要露出来",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_f41c04167530.png",
+                "name": "canvas-output-1780558244011.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/62e7f9d0-e4ca-429f-aeed-3100ac5a1c03.png",
+          "viewed": false,
+          "runMs": 70658,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/e4ad623f-a330-4a72-bb7f-07a70ab2677c.png"
+              ]
+            },
+            "prompt": "图1窗户围墙高一点，窗户里的人不要露出来",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_f41c04167530.png",
+                "name": "canvas-output-1780558244011.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/2bb4e17d-b7c6-44d2-abb8-388965fc12f9.png",
+          "viewed": false,
+          "runMs": 72459,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/62e7f9d0-e4ca-429f-aeed-3100ac5a1c03.png"
+              ]
+            },
+            "prompt": "修改图2：参考图1的动作，其他不变。",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_f41c04167530.png",
+                "name": "canvas-output-1780558244011.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_b8713ea9eb58.png",
+                "name": "3.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/6c676573-7d68-48f4-aed8-497468df994e.png",
+          "viewed": true,
+          "runMs": 92372,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/62e7f9d0-e4ca-429f-aeed-3100ac5a1c03.png"
+              ]
+            },
+            "prompt": "修改图2：参考图1的动作，其他不变。",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_f41c04167530.png",
+                "name": "canvas-output-1780558244011.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_b8713ea9eb58.png",
+                "name": "3.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/dbec8563-e372-4081-915a-3b7554d58562.png",
+          "viewed": false,
+          "runMs": 70933,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/6c676573-7d68-48f4-aed8-497468df994e.png"
+              ]
+            },
+            "prompt": "修改图3的构图：结合图1的构图和图2的窗户场景（窗户里的小女孩删掉）",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_2bfba8d2c0c2.png",
+                "name": "1.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_203cdb2445c5.png",
+                "name": "image.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_1b38c5fea89a.png",
+                "name": "2.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/d7381cf5-3b77-4e2c-8565-2784c2acace1.png",
+          "viewed": false,
+          "runMs": 79983,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/6c676573-7d68-48f4-aed8-497468df994e.png"
+              ]
+            },
+            "prompt": "修改图3的构图：结合图1的构图和图2的窗户场景（窗户里的小女孩删掉）",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_2bfba8d2c0c2.png",
+                "name": "1.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_203cdb2445c5.png",
+                "name": "image.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_1b38c5fea89a.png",
+                "name": "2.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/f6e0e1ca-0f0a-4f6a-b4b8-f929b8c419b9.png",
+          "viewed": true,
+          "runMs": 65151,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "wide",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/d7381cf5-3b77-4e2c-8565-2784c2acace1.png"
+              ]
+            },
+            "prompt": "把图2的小女孩换成图1的小女孩",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_67f2348321b8.png",
+                "name": "edit_result_1780494628820.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_856950a2d713.png",
+                "name": "edit_result_1779961851102.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/72be391a-ca81-4c47-ad6a-888b892b4f0c.png",
+          "viewed": false,
+          "runMs": 65165,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": 155.62709416513286,
+              "y": 1124.4181824718112,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "wide",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/d7381cf5-3b77-4e2c-8565-2784c2acace1.png"
+              ]
+            },
+            "prompt": "把图2的小女孩换成图1的小女孩",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_67f2348321b8.png",
+                "name": "edit_result_1780494628820.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_856950a2d713.png",
+                "name": "edit_result_1779961851102.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/cf8a4864-366a-41b1-b8b2-ff514a47f3a0.png",
+          "viewed": false,
+          "runMs": 96117,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "wide",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/72be391a-ca81-4c47-ad6a-888b892b4f0c.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/1cd33f76-8a6a-4fdb-8301-6f7c8394b481.png",
+          "viewed": false,
+          "runMs": 125100,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "wide",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/72be391a-ca81-4c47-ad6a-888b892b4f0c.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/1d47aea9-d176-48cc-8eb7-52e33eca5eb3.png",
+          "viewed": true,
+          "runMs": 74548,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/1cd33f76-8a6a-4fdb-8301-6f7c8394b481.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/c71403fb-475b-44a1-93f6-4e787099618f.png",
+          "viewed": false,
+          "runMs": 76354,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/1cd33f76-8a6a-4fdb-8301-6f7c8394b481.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/0af1003d-c112-4aa3-8299-5cd7d11f70f3.png",
+          "viewed": false,
+          "runMs": 70781,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/c71403fb-475b-44a1-93f6-4e787099618f.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子。图中的人物是躺在紫色的床上的",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/d33a5f13-99cb-4854-8e60-0894cf0d4cb9.png",
+          "viewed": false,
+          "runMs": 97912,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/c71403fb-475b-44a1-93f6-4e787099618f.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子。图中的人物是躺在紫色的床上的",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/92f37193-9413-4102-9d87-f3c44d1c0901.png",
+          "viewed": false,
+          "runMs": 63352,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/d33a5f13-99cb-4854-8e60-0894cf0d4cb9.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子。图2中的2个角色是躺在紫色的床上的",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/47ac5509-824c-43ac-b7f2-f278997578e5.png",
+          "viewed": true,
+          "runMs": 90236,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/d33a5f13-99cb-4854-8e60-0894cf0d4cb9.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子。图2中的2个角色是躺在紫色的床上的",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/65da7176-5684-443e-9747-0df6a48377ed.png",
+          "viewed": false,
+          "runMs": 86899,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/47ac5509-824c-43ac-b7f2-f278997578e5.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子。图3中的2个角色是躺在紫色的床上的",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_e53096e46588.png",
+                "name": "canvas-output-1780559887836.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/29a3dff4-f76f-49f5-b94d-f1eb189e92ff.png",
+          "viewed": true,
+          "runMs": 108639,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/47ac5509-824c-43ac-b7f2-f278997578e5.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子。图3中的2个角色是躺在紫色的床上的",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_e53096e46588.png",
+                "name": "canvas-output-1780559887836.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/0a11e8de-d129-4a45-b6f6-1e4a9b03d9fa.png",
+          "viewed": false,
+          "runMs": 115838,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/29a3dff4-f76f-49f5-b94d-f1eb189e92ff.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_e53096e46588.png",
+                "name": "canvas-output-1780559887836.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/60fef5da-5188-4517-8b12-2701e38c8b20.png",
+          "viewed": true,
+          "runMs": 124886,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/29a3dff4-f76f-49f5-b94d-f1eb189e92ff.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_e53096e46588.png",
+                "name": "canvas-output-1780559887836.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/bd3edb89-476a-4757-9568-2e90112390c0.png",
+          "viewed": false,
+          "runMs": 70662,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/60fef5da-5188-4517-8b12-2701e38c8b20.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_e53096e46588.png",
+                "name": "canvas-output-1780559887836.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/57065bf3-a746-4b9a-bc01-b41f66aa5b5e.png",
+          "viewed": false,
+          "runMs": 72496,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/60fef5da-5188-4517-8b12-2701e38c8b20.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_e53096e46588.png",
+                "name": "canvas-output-1780559887836.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/c1cf0af3-beb4-4118-be67-ba4f7f5e916c.png",
+          "viewed": false,
+          "runMs": 81581,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/60fef5da-5188-4517-8b12-2701e38c8b20.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_e53096e46588.png",
+                "name": "canvas-output-1780559887836.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/2e2dcaf0-7672-403b-bc47-a6a441c01f4f.png",
+          "viewed": false,
+          "runMs": 110566,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/60fef5da-5188-4517-8b12-2701e38c8b20.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_e53096e46588.png",
+                "name": "canvas-output-1780559887836.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/8e3a5e82-af85-4ba6-9516-94edb65641b3.png",
+          "viewed": false,
+          "runMs": 74192,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/2e2dcaf0-7672-403b-bc47-a6a441c01f4f.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。没有灯光",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_e53096e46588.png",
+                "name": "canvas-output-1780559887836.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/28a858ae-0319-4ded-ae2b-2400725e0355.png",
+          "viewed": false,
+          "runMs": 88691,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/2e2dcaf0-7672-403b-bc47-a6a441c01f4f.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。没有灯光",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_e53096e46588.png",
+                "name": "canvas-output-1780559887836.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/6be8aea7-79df-4b05-84cd-a939472132d8.png",
+          "viewed": false,
+          "runMs": 117646,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/2e2dcaf0-7672-403b-bc47-a6a441c01f4f.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。没有灯光",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_e53096e46588.png",
+                "name": "canvas-output-1780559887836.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/e097ffbb-ecca-4052-a505-0f26abfdae50.png",
+          "viewed": true,
+          "runMs": 124889,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/2e2dcaf0-7672-403b-bc47-a6a441c01f4f.png"
+              ]
+            },
+            "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。没有灯光",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+                "name": "canvas-output-1780560806268.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_e53096e46588.png",
+                "name": "canvas-output-1780559887836.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/5d1e1b99-3c99-4d2e-a145-faaaa599ba84.png",
+          "viewed": false,
+          "runMs": 68849,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/e097ffbb-ecca-4052-a505-0f26abfdae50.png"
+              ]
+            },
+            "prompt": "除去人物旁边的白色毛发",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/bb28258b-93a0-482e-9869-1c51efdbdaeb.png",
+          "viewed": true,
+          "runMs": 92338,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/e097ffbb-ecca-4052-a505-0f26abfdae50.png"
+              ]
+            },
+            "prompt": "除去人物旁边的白色毛发",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/3cc15dde-63da-438b-93ea-e9b186d74796.png",
+          "viewed": false,
+          "runMs": 101363,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/e097ffbb-ecca-4052-a505-0f26abfdae50.png"
+              ]
+            },
+            "prompt": "除去人物旁边的白色毛发",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/f8588462-12d0-499c-a2f4-cc39857ce9e0.png",
+          "viewed": false,
+          "runMs": 106796,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/e097ffbb-ecca-4052-a505-0f26abfdae50.png"
+              ]
+            },
+            "prompt": "除去人物旁边的白色毛发",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+                "name": "canvas-output-1780560623267.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/4f44de2a-1911-4073-a43b-d91a9f97899b.png",
+          "viewed": true,
+          "runMs": 49087,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "wide",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/f8588462-12d0-499c-a2f4-cc39857ce9e0.png"
+              ]
+            },
+            "prompt": "图中左边的ui的文字改成“lgnore her”，右边的ui的文字改成“Save her”",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_3bc0a1f21270.png",
+                "name": "edit_result_1780479969165.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/30d358da-5ef3-49a4-a63f-0f38842c6696.png",
+          "viewed": false,
+          "runMs": 68971,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "wide",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/f8588462-12d0-499c-a2f4-cc39857ce9e0.png"
+              ]
+            },
+            "prompt": "图中左边的ui的文字改成“lgnore her”，右边的ui的文字改成“Save her”",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_3bc0a1f21270.png",
+                "name": "edit_result_1780479969165.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/8781ac09-cea2-4311-a895-38b9a4ea59a3.png",
+          "viewed": false,
+          "runMs": 50686,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/30d358da-5ef3-49a4-a63f-0f38842c6696.png"
+              ]
+            },
+            "prompt": "广角镜头，整个房子都要在画面内",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+                "name": "canvas-output-1780562542045.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/20178543-b0ea-4e39-ad7b-1c8ffbcdce0e.png",
+          "viewed": false,
+          "runMs": 70577,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/8781ac09-cea2-4311-a895-38b9a4ea59a3.png"
+              ]
+            },
+            "prompt": "广角镜头，整个房子都要在画面内并且处于画面上方。没有灯",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+                "name": "canvas-output-1780562542045.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/38cc128e-f1e1-4643-a03b-f3d0a54d0d7f.png",
+          "viewed": false,
+          "runMs": 79654,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/8781ac09-cea2-4311-a895-38b9a4ea59a3.png"
+              ]
+            },
+            "prompt": "广角镜头，整个房子都要在画面内并且处于画面上方。没有灯",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+                "name": "canvas-output-1780562542045.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/e7aa8187-a753-462b-ac0f-3058679c1bdf.png",
+          "viewed": false,
+          "runMs": 110457,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/8781ac09-cea2-4311-a895-38b9a4ea59a3.png"
+              ]
+            },
+            "prompt": "广角镜头，整个房子都要在画面内并且处于画面上方。没有灯",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+                "name": "canvas-output-1780562542045.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/3d2a2932-20f8-4c95-8898-1303207b7064.png",
+          "viewed": true,
+          "runMs": 119424,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/8781ac09-cea2-4311-a895-38b9a4ea59a3.png"
+              ]
+            },
+            "prompt": "广角镜头，整个房子都要在画面内并且处于画面上方。没有灯",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+                "name": "canvas-output-1780562542045.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/faeb67d8-86ad-44c2-8308-06906e9f2dd7.png",
+          "viewed": false,
+          "runMs": 562662,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 2,
+              "generatedOutputs": [
+                "/uploads/30d358da-5ef3-49a4-a63f-0f38842c6696.png"
+              ]
+            },
+            "prompt": "广角镜头，整个房子都要在画面内",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+                "name": "canvas-output-1780562542045.png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/a2ebfa24-7ecb-4f09-a8e1-7ff061af154b.png",
+          "viewed": false,
+          "runMs": 85423,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/faeb67d8-86ad-44c2-8308-06906e9f2dd7.png"
+              ]
+            },
+            "prompt": "房子顶部上有一块一块的布遮挡住",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_5c1fac5403ba.png",
+                "name": "è¿è·ç¦».png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/ddbee207-ec43-4b3e-bef0-871a8551b09a.png",
+          "viewed": false,
+          "runMs": 87270,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/faeb67d8-86ad-44c2-8308-06906e9f2dd7.png"
+              ]
+            },
+            "prompt": "房子顶部上有一块一块的布遮挡住",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_5c1fac5403ba.png",
+                "name": "è¿è·ç¦».png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/33b6e4d9-f800-46c6-86a0-43ccb1974c67.png",
+          "viewed": true,
+          "runMs": 107136,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/faeb67d8-86ad-44c2-8308-06906e9f2dd7.png"
+              ]
+            },
+            "prompt": "房子顶部上有一块一块的布遮挡住",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_5c1fac5403ba.png",
+                "name": "è¿è·ç¦».png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        },
+        {
+          "url": "/uploads/41b3d902-1090-4a6d-9878-f2e503526e58.png",
+          "viewed": false,
+          "runMs": 678601,
+          "run": {
+            "nodeType": "generator",
+            "node": {
+              "id": "gen_8acaf42af26d_1780551685154",
+              "type": "generator",
+              "x": -65.71001836887021,
+              "y": 1127.931469972351,
+              "apiProvider": "runninghub",
+              "model": "gpt-image-2",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customSize": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "customWidth": "",
+              "customHeight": "",
+              "count": 4,
+              "generatedOutputs": [
+                "/uploads/faeb67d8-86ad-44c2-8308-06906e9f2dd7.png"
+              ]
+            },
+            "prompt": "房子顶部上有一块一块的布遮挡住",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_5c1fac5403ba.png",
+                "name": "è¿è·ç¦».png"
+              }
+            ],
+            "request": {
+              "task_id": "",
+              "request_id": "",
+              "provider_id": "",
+              "backend": "",
+              "prompt_id": "",
+              "workflow_json": "",
+              "seed": ""
+            }
+          }
+        }
+      ],
+      "_pending": [],
+      "imageComparisons": {
+        "/uploads/a1bc7838-23e6-4353-a045-6e2da57bcd0c.png": {
+          "url": "/uploads/canvas/canvas_0d0035c3dd57.png",
+          "name": "canvas-output-1780551667042.png"
+        },
+        "/uploads/511a5736-dba8-4828-a787-8c247be9f2a1.png": {
+          "url": "/uploads/canvas/canvas_0d0035c3dd57.png",
+          "name": "canvas-output-1780551667042.png"
+        },
+        "/uploads/aba3444c-b063-45d6-87b0-7f287d264b8b.png": {
+          "url": "/uploads/canvas/canvas_0d0035c3dd57.png",
+          "name": "canvas-output-1780551667042.png"
+        },
+        "/uploads/71ef667b-1148-4ec8-aa98-266b3ee65187.png": {
+          "url": "/uploads/canvas/canvas_0d0035c3dd57.png",
+          "name": "canvas-output-1780551667042.png"
+        },
+        "/uploads/d2ae6f44-9e33-45f3-a638-7712ad2d729e.png": {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        },
+        "/uploads/5efbbb6c-4929-4ed4-b3b2-21eea3f494ba.png": {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        },
+        "/uploads/2125ee2c-9dd6-44e2-8321-2bfaffdf7443.png": {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        },
+        "/uploads/e4ad623f-a330-4a72-bb7f-07a70ab2677c.png": {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        },
+        "/uploads/303ea26f-1bc4-443c-a82a-cc870c48fb77.png": {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        },
+        "/uploads/62e7f9d0-e4ca-429f-aeed-3100ac5a1c03.png": {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        },
+        "/uploads/2bb4e17d-b7c6-44d2-abb8-388965fc12f9.png": {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        },
+        "/uploads/6c676573-7d68-48f4-aed8-497468df994e.png": {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        },
+        "/uploads/dbec8563-e372-4081-915a-3b7554d58562.png": {
+          "url": "/uploads/canvas/canvas_2bfba8d2c0c2.png",
+          "name": "1.png"
+        },
+        "/uploads/d7381cf5-3b77-4e2c-8565-2784c2acace1.png": {
+          "url": "/uploads/canvas/canvas_2bfba8d2c0c2.png",
+          "name": "1.png"
+        },
+        "/uploads/f6e0e1ca-0f0a-4f6a-b4b8-f929b8c419b9.png": {
+          "url": "/uploads/canvas/canvas_67f2348321b8.png",
+          "name": "edit_result_1780494628820.png"
+        },
+        "/uploads/72be391a-ca81-4c47-ad6a-888b892b4f0c.png": {
+          "url": "/uploads/canvas/canvas_67f2348321b8.png",
+          "name": "edit_result_1780494628820.png"
+        },
+        "/uploads/cf8a4864-366a-41b1-b8b2-ff514a47f3a0.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/1cd33f76-8a6a-4fdb-8301-6f7c8394b481.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/1d47aea9-d176-48cc-8eb7-52e33eca5eb3.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/c71403fb-475b-44a1-93f6-4e787099618f.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/0af1003d-c112-4aa3-8299-5cd7d11f70f3.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/d33a5f13-99cb-4854-8e60-0894cf0d4cb9.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/92f37193-9413-4102-9d87-f3c44d1c0901.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/47ac5509-824c-43ac-b7f2-f278997578e5.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/65da7176-5684-443e-9747-0df6a48377ed.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/29a3dff4-f76f-49f5-b94d-f1eb189e92ff.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/0a11e8de-d129-4a45-b6f6-1e4a9b03d9fa.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/60fef5da-5188-4517-8b12-2701e38c8b20.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/bd3edb89-476a-4757-9568-2e90112390c0.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/57065bf3-a746-4b9a-bc01-b41f66aa5b5e.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/c1cf0af3-beb4-4118-be67-ba4f7f5e916c.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/2e2dcaf0-7672-403b-bc47-a6a441c01f4f.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/8e3a5e82-af85-4ba6-9516-94edb65641b3.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/28a858ae-0319-4ded-ae2b-2400725e0355.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/6be8aea7-79df-4b05-84cd-a939472132d8.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/e097ffbb-ecca-4052-a505-0f26abfdae50.png": {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        "/uploads/5d1e1b99-3c99-4d2e-a145-faaaa599ba84.png": {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        "/uploads/bb28258b-93a0-482e-9869-1c51efdbdaeb.png": {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        "/uploads/3cc15dde-63da-438b-93ea-e9b186d74796.png": {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        "/uploads/f8588462-12d0-499c-a2f4-cc39857ce9e0.png": {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        "/uploads/4f44de2a-1911-4073-a43b-d91a9f97899b.png": {
+          "url": "/uploads/canvas/canvas_3bc0a1f21270.png",
+          "name": "edit_result_1780479969165.png"
+        },
+        "/uploads/30d358da-5ef3-49a4-a63f-0f38842c6696.png": {
+          "url": "/uploads/canvas/canvas_3bc0a1f21270.png",
+          "name": "edit_result_1780479969165.png"
+        },
+        "/uploads/8781ac09-cea2-4311-a895-38b9a4ea59a3.png": {
+          "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+          "name": "canvas-output-1780562542045.png"
+        },
+        "/uploads/20178543-b0ea-4e39-ad7b-1c8ffbcdce0e.png": {
+          "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+          "name": "canvas-output-1780562542045.png"
+        },
+        "/uploads/38cc128e-f1e1-4643-a03b-f3d0a54d0d7f.png": {
+          "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+          "name": "canvas-output-1780562542045.png"
+        },
+        "/uploads/e7aa8187-a753-462b-ac0f-3058679c1bdf.png": {
+          "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+          "name": "canvas-output-1780562542045.png"
+        },
+        "/uploads/3d2a2932-20f8-4c95-8898-1303207b7064.png": {
+          "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+          "name": "canvas-output-1780562542045.png"
+        },
+        "/uploads/faeb67d8-86ad-44c2-8308-06906e9f2dd7.png": {
+          "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+          "name": "canvas-output-1780562542045.png"
+        },
+        "/uploads/a2ebfa24-7ecb-4f09-a8e1-7ff061af154b.png": {
+          "url": "/uploads/canvas/canvas_5c1fac5403ba.png",
+          "name": "è¿è·ç¦».png"
+        },
+        "/uploads/ddbee207-ec43-4b3e-bef0-871a8551b09a.png": {
+          "url": "/uploads/canvas/canvas_5c1fac5403ba.png",
+          "name": "è¿è·ç¦».png"
+        },
+        "/uploads/33b6e4d9-f800-46c6-86a0-43ccb1974c67.png": {
+          "url": "/uploads/canvas/canvas_5c1fac5403ba.png",
+          "name": "è¿è·ç¦».png"
+        },
+        "/uploads/41b3d902-1090-4a6d-9878-f2e503526e58.png": {
+          "url": "/uploads/canvas/canvas_5c1fac5403ba.png",
+          "name": "è¿è·ç¦».png"
+        }
+      },
+      "w": 914,
+      "h": 721
+    },
+    {
+      "id": "prompt_fbdff8eb0514b8_1780551715194",
+      "type": "prompt",
+      "x": -827.5500603698835,
+      "y": 1798.0412775237073,
+      "text": "房子顶部上有一块一块的布遮挡住"
+    },
+    {
+      "id": "img_95473f6670bf98_1780559625430",
+      "type": "image",
+      "x": -358.9341214630939,
+      "y": 1757.1887859087299,
+      "url": "/uploads/canvas/canvas_5c1fac5403ba.png",
+      "name": "è¿è·ç¦».png",
+      "mediaKind": "image"
+    },
+    {
+      "id": "img_01da2da2114098_1780562356515",
+      "type": "image",
+      "x": 182.08198174438277,
+      "y": 234.558463490796,
+      "url": "/uploads/canvas/canvas_4115c8353dcd.png",
+      "name": "edit_result_1780494628820.png",
+      "mediaKind": "image"
+    },
+    {
+      "id": "out_e56ed92d3056c_1780562447678",
+      "type": "output",
+      "x": 1641.4816773320242,
+      "y": 511.68902053237764,
+      "images": [
+        {
+          "url": "/uploads/c3bf1793-55c0-4ab4-8c7f-25493adb403e.png",
+          "viewed": false,
+          "runMs": 164747,
+          "run": {
+            "nodeType": "replicaAgent",
+            "node": {
+              "id": "repl_d752bc139fad3_1780551069855",
+              "type": "replicaAgent",
+              "x": 1124.2105695734363,
+              "y": 262.68422782937455,
+              "w": 350,
+              "h": 695,
+              "style_prompt": "",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "roles": {
+                "img_01da2da2114098_1780562356515": "character"
+              },
+              "generatedOutputs": [],
+              "_cascadeFailed": false,
+              "_cascadeIdx": "1/1 · 2/2"
+            },
+            "prompt": "复刻 Agent 双阶段生图",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_4115c8353dcd.png",
+                "name": "edit_result_1780494628820.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_4115c8353dcd.png",
+                "name": "edit_result_1780494628820.png"
+              }
+            ],
+            "request": {
+              "replica_task_id": "replica_e55ca437d0e54a3cb6047571295a56fe",
+              "reverse_prompt": "Full body shot of [Subject], standing in the center of the frame, front view, eye-level camera angle, neutral solid grey studio background, minimalist setting, soft studio lighting, gentle diffused shadows, [Subject] has a sad and worried expression, big expressive eyes looking directly at the camera, 3D animated character style, cinematic rendering, warm and soft color palette, clean composition",
+              "washed_image_url": "/uploads/4b8583c0-fd22-43e5-9057-7bbb5f93902e.png"
+            }
+          }
+        },
+        {
+          "url": "/uploads/3d87a284-10f5-4ba1-bd2a-2b9165ae5753.png",
+          "viewed": false,
+          "runMs": 164808,
+          "run": {
+            "nodeType": "replicaAgent",
+            "node": {
+              "id": "repl_d752bc139fad3_1780551069855",
+              "type": "replicaAgent",
+              "x": 1124.2105695734363,
+              "y": 262.68422782937455,
+              "w": 350,
+              "h": 695,
+              "style_prompt": "",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "roles": {
+                "img_01da2da2114098_1780562356515": "character"
+              },
+              "generatedOutputs": [],
+              "_cascadeFailed": false,
+              "_cascadeIdx": "1/1 · 2/2"
+            },
+            "prompt": "复刻 Agent 双阶段生图",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_1610a6906d28.jpg",
+                "name": "canvas_1610a6906d28.jpg"
+              },
+              {
+                "url": "/uploads/canvas/canvas_4115c8353dcd.png",
+                "name": "edit_result_1780494628820.png"
+              }
+            ],
+            "request": {
+              "replica_task_id": "replica_0357ba1904e6486880a354b7e890cd81",
+              "reverse_prompt": "close-up shot, slightly high-angle view, [Subject] shivering on the snowy ground, arms crossed hugging themselves, sad and cold expression, rosy cheeks, stylized 3D animation style, snowy outdoor winter night, soft falling snow, warm golden rim light on hair, cool ambient blue and purple shadows, emotional and melancholic atmosphere, soft-focus background, depth of field, cinematic lighting",
+              "washed_image_url": "/uploads/8733fb0d-3a1e-48bd-9b9b-5bbefd7e49f7.png"
+            }
+          }
+        },
+        {
+          "url": "/uploads/132cdaf5-f6df-428f-824a-cc6487e329c0.png",
+          "viewed": false,
+          "runMs": 144690,
+          "run": {
+            "nodeType": "replicaAgent",
+            "node": {
+              "id": "repl_d752bc139fad3_1780551069855",
+              "type": "replicaAgent",
+              "x": 1124.2105695734363,
+              "y": 262.68422782937455,
+              "w": 350,
+              "h": 695,
+              "style_prompt": "",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "roles": {
+                "img_01da2da2114098_1780562356515": "character"
+              },
+              "generatedOutputs": [],
+              "_cascadeFailed": false,
+              "_cascadeIdx": "1/1 · 2/2"
+            },
+            "prompt": "复刻 Agent 双阶段生图",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_4115c8353dcd.png",
+                "name": "edit_result_1780494628820.png"
+              },
+              {
+                "url": "/uploads/canvas/canvas_4115c8353dcd.png",
+                "name": "edit_result_1780494628820.png"
+              }
+            ],
+            "request": {
+              "replica_task_id": "replica_ae93e85e0ce640a799fbca335f8e1bd3",
+              "reverse_prompt": "full-body shot, eye-level angle, [Subject] standing in the center of the frame, 3D animated character design style, sad and vulnerable expression, looking directly forward, barefoot standing pose, neutral solid gray studio background, soft diffused studio lighting, gentle ambient shadows, warm and melancholic cinematic atmosphere",
+              "washed_image_url": "/uploads/e916d9a3-91a2-49e9-9d4c-5271bfcb0706.png"
+            }
+          }
+        },
+        {
+          "url": "/uploads/c3509411-6cf9-40c4-8d6e-793f5379ff4a.png",
+          "viewed": false,
+          "runMs": 162832,
+          "run": {
+            "nodeType": "replicaAgent",
+            "node": {
+              "id": "repl_d752bc139fad3_1780551069855",
+              "type": "replicaAgent",
+              "x": 1124.2105695734363,
+              "y": 262.68422782937455,
+              "w": 350,
+              "h": 695,
+              "style_prompt": "",
+              "ratio": "story",
+              "resolution": "1k",
+              "customRatio": "",
+              "customRatioWidth": "",
+              "customRatioHeight": "",
+              "roles": {
+                "img_01da2da2114098_1780562356515": "character"
+              },
+              "generatedOutputs": [],
+              "_cascadeFailed": false,
+              "_cascadeIdx": "1/1 · 2/2"
+            },
+            "prompt": "复刻 Agent 双阶段生图",
+            "refs": [
+              {
+                "url": "/uploads/canvas/canvas_1610a6906d28.jpg",
+                "name": "canvas_1610a6906d28.jpg"
+              },
+              {
+                "url": "/uploads/canvas/canvas_4115c8353dcd.png",
+                "name": "edit_result_1780494628820.png"
+              }
+            ],
+            "request": {
+              "replica_task_id": "replica_bc102b8f450a4f5fbf482e251ae483bb",
+              "reverse_prompt": "cinematic 3D animation style, medium close-up shot, slightly high-angle view, [Subject] kneeling in the cold snow, shivering with arms wrapped around body, looking sad and vulnerable, red cheeks from freezing temperature, snowflakes gently falling, warm light glow from a nearby window contrasting with deep blue winter night, emotional and melancholic atmosphere, soft bokeh background",
+              "washed_image_url": "/uploads/453d0e04-d9fc-41aa-8d99-a124dd780795.png"
+            }
+          }
+        }
+      ],
+      "_pending": [],
+      "w": 473,
+      "h": 458,
+      "imageComparisons": {
+        "/uploads/c3bf1793-55c0-4ab4-8c7f-25493adb403e.png": {
+          "url": "/uploads/canvas/canvas_4115c8353dcd.png",
+          "name": "edit_result_1780494628820.png"
+        },
+        "/uploads/3d87a284-10f5-4ba1-bd2a-2b9165ae5753.png": {
+          "url": "/uploads/canvas/canvas_1610a6906d28.jpg",
+          "name": "canvas_1610a6906d28.jpg"
+        },
+        "/uploads/132cdaf5-f6df-428f-824a-cc6487e329c0.png": {
+          "url": "/uploads/canvas/canvas_4115c8353dcd.png",
+          "name": "edit_result_1780494628820.png"
+        },
+        "/uploads/c3509411-6cf9-40c4-8d6e-793f5379ff4a.png": {
+          "url": "/uploads/canvas/canvas_1610a6906d28.jpg",
+          "name": "canvas_1610a6906d28.jpg"
+        }
+      }
+    }
+  ],
+  "connections": [
+    {
+      "id": "c_f70217a7e2ea4_1780551069855",
+      "from": "imag_87af33bdb7b348_1780551069855",
+      "to": "fram_6d257ba73b2f9_1780551069855"
+    },
+    {
+      "id": "c_e72adda323383_1780551069855",
+      "from": "fram_6d257ba73b2f9_1780551069855",
+      "to": "loop_ca78abb9fd1158_1780551069855"
+    },
+    {
+      "id": "c_47c2facfcb96e_1780551069855",
+      "from": "loop_ca78abb9fd1158_1780551069855",
+      "to": "repl_d752bc139fad3_1780551069855"
+    },
+    {
+      "id": "c_beecc96e1751a8_1780551695290",
+      "from": "gen_8acaf42af26d_1780551685154",
+      "to": "out_4f907fbe972c_1780551691498"
+    },
+    {
+      "id": "c_e56138aea45928_1780551719978",
+      "from": "prompt_fbdff8eb0514b8_1780551715194",
+      "to": "gen_8acaf42af26d_1780551685154"
+    },
+    {
+      "id": "c_2503565a2445_1780559665510",
+      "from": "img_95473f6670bf98_1780559625430",
+      "to": "gen_8acaf42af26d_1780551685154"
+    },
+    {
+      "id": "c_029b7d94be4a8_1780562450173",
+      "from": "repl_d752bc139fad3_1780551069855",
+      "to": "out_e56ed92d3056c_1780562447678"
+    },
+    {
+      "id": "c_30913b24f6f1c8_1780562465556",
+      "from": "img_01da2da2114098_1780562356515",
+      "to": "repl_d752bc139fad3_1780551069855"
+    }
+  ],
+  "viewport": {
+    "x": 776.3435808135305,
+    "y": 299.71473146623066,
+    "scale": 0.2935042105454459
+  },
+  "logs": [
+    {
+      "id": "log_7459c67e602f78_1780568975381",
+      "createdAt": 1780568975381,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "房子顶部上有一块一块的布遮挡住",
+      "outputs": [
+        "/uploads/41b3d902-1090-4a6d-9878-f2e503526e58.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_5c1fac5403ba.png",
+          "name": "è¿è·ç¦».png"
+        }
+      ],
+      "runMs": 678601,
+      "error": ""
+    },
+    {
+      "id": "log_72964c08a8122_1780568403917",
+      "createdAt": 1780568403917,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "房子顶部上有一块一块的布遮挡住",
+      "outputs": [
+        "/uploads/33b6e4d9-f800-46c6-86a0-43ccb1974c67.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_5c1fac5403ba.png",
+          "name": "è¿è·ç¦».png"
+        }
+      ],
+      "runMs": 107136,
+      "error": ""
+    },
+    {
+      "id": "log_bdecc6febb9598_1780568384050",
+      "createdAt": 1780568384050,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "房子顶部上有一块一块的布遮挡住",
+      "outputs": [
+        "/uploads/ddbee207-ec43-4b3e-bef0-871a8551b09a.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_5c1fac5403ba.png",
+          "name": "è¿è·ç¦».png"
+        }
+      ],
+      "runMs": 87270,
+      "error": ""
+    },
+    {
+      "id": "log_530225a5c3496_1780568382203",
+      "createdAt": 1780568382203,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "房子顶部上有一块一块的布遮挡住",
+      "outputs": [
+        "/uploads/a2ebfa24-7ecb-4f09-a8e1-7ff061af154b.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_5c1fac5403ba.png",
+          "name": "è¿è·ç¦».png"
+        }
+      ],
+      "runMs": 85423,
+      "error": ""
+    },
+    {
+      "id": "log_ae389cad9c31b_1780568195036",
+      "createdAt": 1780568195036,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "广角镜头，整个房子都要在画面内",
+      "outputs": [
+        "/uploads/faeb67d8-86ad-44c2-8308-06906e9f2dd7.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+          "name": "canvas-output-1780562542045.png"
+        }
+      ],
+      "runMs": 562662,
+      "error": ""
+    },
+    {
+      "id": "log_c329528bec2b6_1780567866055",
+      "createdAt": 1780567866055,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "广角镜头，整个房子都要在画面内并且处于画面上方。没有灯",
+      "outputs": [
+        "/uploads/3d2a2932-20f8-4c95-8898-1303207b7064.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+          "name": "canvas-output-1780562542045.png"
+        }
+      ],
+      "runMs": 119424,
+      "error": ""
+    },
+    {
+      "id": "log_3c5ef2cab46158_1780567857088",
+      "createdAt": 1780567857088,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "广角镜头，整个房子都要在画面内并且处于画面上方。没有灯",
+      "outputs": [
+        "/uploads/e7aa8187-a753-462b-ac0f-3058679c1bdf.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+          "name": "canvas-output-1780562542045.png"
+        }
+      ],
+      "runMs": 110457,
+      "error": ""
+    },
+    {
+      "id": "log_bb3f5b859d9dc_1780567826285",
+      "createdAt": 1780567826285,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "广角镜头，整个房子都要在画面内并且处于画面上方。没有灯",
+      "outputs": [
+        "/uploads/38cc128e-f1e1-4643-a03b-f3d0a54d0d7f.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+          "name": "canvas-output-1780562542045.png"
+        }
+      ],
+      "runMs": 79654,
+      "error": ""
+    },
+    {
+      "id": "log_24862475202fc8_1780567817209",
+      "createdAt": 1780567817209,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "广角镜头，整个房子都要在画面内并且处于画面上方。没有灯",
+      "outputs": [
+        "/uploads/20178543-b0ea-4e39-ad7b-1c8ffbcdce0e.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+          "name": "canvas-output-1780562542045.png"
+        }
+      ],
+      "runMs": 70577,
+      "error": ""
+    },
+    {
+      "id": "log_b6026c1f578878_1780567683060",
+      "createdAt": 1780567683060,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "广角镜头，整个房子都要在画面内",
+      "outputs": [
+        "/uploads/8781ac09-cea2-4311-a895-38b9a4ea59a3.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a84a2ff7bc04.png",
+          "name": "canvas-output-1780562542045.png"
+        }
+      ],
+      "runMs": 50686,
+      "error": ""
+    },
+    {
+      "id": "log_4acdfd200bf08_1780565714422",
+      "createdAt": 1780565714422,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "图中左边的ui的文字改成“lgnore her”，右边的ui的文字改成“Save her”",
+      "outputs": [
+        "/uploads/30d358da-5ef3-49a4-a63f-0f38842c6696.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_3bc0a1f21270.png",
+          "name": "edit_result_1780479969165.png"
+        }
+      ],
+      "runMs": 68971,
+      "error": ""
+    },
+    {
+      "id": "log_d82f3c684b6348_1780565694538",
+      "createdAt": 1780565694538,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "图中左边的ui的文字改成“lgnore her”，右边的ui的文字改成“Save her”",
+      "outputs": [
+        "/uploads/4f44de2a-1911-4073-a43b-d91a9f97899b.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_3bc0a1f21270.png",
+          "name": "edit_result_1780479969165.png"
+        }
+      ],
+      "runMs": 49087,
+      "error": ""
+    },
+    {
+      "id": "log_95ef68ca41929_1780565273593",
+      "createdAt": 1780565273593,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "除去人物旁边的白色毛发",
+      "outputs": [
+        "/uploads/f8588462-12d0-499c-a2f4-cc39857ce9e0.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        }
+      ],
+      "runMs": 106796,
+      "error": ""
+    },
+    {
+      "id": "log_f4d5c44d01697_1780565268160",
+      "createdAt": 1780565268160,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "除去人物旁边的白色毛发",
+      "outputs": [
+        "/uploads/3cc15dde-63da-438b-93ea-e9b186d74796.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        }
+      ],
+      "runMs": 101363,
+      "error": ""
+    },
+    {
+      "id": "log_e811ae0b46efe_1780565259135",
+      "createdAt": 1780565259135,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "除去人物旁边的白色毛发",
+      "outputs": [
+        "/uploads/bb28258b-93a0-482e-9869-1c51efdbdaeb.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        }
+      ],
+      "runMs": 92338,
+      "error": ""
+    },
+    {
+      "id": "log_1caf4007bb9a28_1780565235646",
+      "createdAt": 1780565235646,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "除去人物旁边的白色毛发",
+      "outputs": [
+        "/uploads/5d1e1b99-3c99-4d2e-a145-faaaa599ba84.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        }
+      ],
+      "runMs": 68849,
+      "error": ""
+    },
+    {
+      "id": "log_62cca001e4d4b8_1780562963942",
+      "createdAt": 1780562963942,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_bc102b8f450a4f5fbf482e251ae483bb",
+        "reverse_prompt": "cinematic 3D animation style, medium close-up shot, slightly high-angle view, [Subject] kneeling in the cold snow, shivering with arms wrapped around body, looking sad and vulnerable, red cheeks from freezing temperature, snowflakes gently falling, warm light glow from a nearby window contrasting with deep blue winter night, emotional and melancholic atmosphere, soft bokeh background",
+        "washed_image_url": "/uploads/453d0e04-d9fc-41aa-8d99-a124dd780795.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/c3509411-6cf9-40c4-8d6e-793f5379ff4a.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_1610a6906d28.jpg",
+          "name": "canvas_1610a6906d28.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_4115c8353dcd.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 162832,
+      "error": ""
+    },
+    {
+      "id": "log_d384d74d0c6aa_1780562945812",
+      "createdAt": 1780562945812,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_ae93e85e0ce640a799fbca335f8e1bd3",
+        "reverse_prompt": "full-body shot, eye-level angle, [Subject] standing in the center of the frame, 3D animated character design style, sad and vulnerable expression, looking directly forward, barefoot standing pose, neutral solid gray studio background, soft diffused studio lighting, gentle ambient shadows, warm and melancholic cinematic atmosphere",
+        "washed_image_url": "/uploads/e916d9a3-91a2-49e9-9d4c-5271bfcb0706.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/132cdaf5-f6df-428f-824a-cc6487e329c0.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_4115c8353dcd.png",
+          "name": "edit_result_1780494628820.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_4115c8353dcd.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 144690,
+      "error": ""
+    },
+    {
+      "id": "log_ee2bda70c89068_1780562635660",
+      "createdAt": 1780562635660,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_0357ba1904e6486880a354b7e890cd81",
+        "reverse_prompt": "close-up shot, slightly high-angle view, [Subject] shivering on the snowy ground, arms crossed hugging themselves, sad and cold expression, rosy cheeks, stylized 3D animation style, snowy outdoor winter night, soft falling snow, warm golden rim light on hair, cool ambient blue and purple shadows, emotional and melancholic atmosphere, soft-focus background, depth of field, cinematic lighting",
+        "washed_image_url": "/uploads/8733fb0d-3a1e-48bd-9b9b-5bbefd7e49f7.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/3d87a284-10f5-4ba1-bd2a-2b9165ae5753.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_1610a6906d28.jpg",
+          "name": "canvas_1610a6906d28.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_4115c8353dcd.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 164808,
+      "error": ""
+    },
+    {
+      "id": "log_f174997eb79ed8_1780562635612",
+      "createdAt": 1780562635612,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_e55ca437d0e54a3cb6047571295a56fe",
+        "reverse_prompt": "Full body shot of [Subject], standing in the center of the frame, front view, eye-level camera angle, neutral solid grey studio background, minimalist setting, soft studio lighting, gentle diffused shadows, [Subject] has a sad and worried expression, big expressive eyes looking directly at the camera, 3D animated character style, cinematic rendering, warm and soft color palette, clean composition",
+        "washed_image_url": "/uploads/4b8583c0-fd22-43e5-9057-7bbb5f93902e.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/c3bf1793-55c0-4ab4-8c7f-25493adb403e.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_4115c8353dcd.png",
+          "name": "edit_result_1780494628820.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_4115c8353dcd.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 164747,
+      "error": ""
+    },
+    {
+      "id": "log_add3a6eb6fd9c8_1780562325948",
+      "createdAt": 1780562325948,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。没有灯光",
+      "outputs": [
+        "/uploads/e097ffbb-ecca-4052-a505-0f26abfdae50.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_e53096e46588.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 124889,
+      "error": ""
+    },
+    {
+      "id": "log_7701b59c56118_1780562318705",
+      "createdAt": 1780562318705,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。没有灯光",
+      "outputs": [
+        "/uploads/6be8aea7-79df-4b05-84cd-a939472132d8.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_e53096e46588.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 117646,
+      "error": ""
+    },
+    {
+      "id": "log_5f76efe2c023c_1780562289750",
+      "createdAt": 1780562289750,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。没有灯光",
+      "outputs": [
+        "/uploads/28a858ae-0319-4ded-ae2b-2400725e0355.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_e53096e46588.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 88691,
+      "error": ""
+    },
+    {
+      "id": "log_16a06635e7218_1780562275251",
+      "createdAt": 1780562275251,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。没有灯光",
+      "outputs": [
+        "/uploads/8e3a5e82-af85-4ba6-9516-94edb65641b3.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_e53096e46588.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 74192,
+      "error": ""
+    },
+    {
+      "id": "log_e7244f5ebc848_1780562136055",
+      "createdAt": 1780562136055,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。",
+      "outputs": [
+        "/uploads/2e2dcaf0-7672-403b-bc47-a6a441c01f4f.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_e53096e46588.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 110566,
+      "error": ""
+    },
+    {
+      "id": "log_9241a395820118_1780562107070",
+      "createdAt": 1780562107070,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。",
+      "outputs": [
+        "/uploads/c1cf0af3-beb4-4118-be67-ba4f7f5e916c.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_e53096e46588.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 81581,
+      "error": ""
+    },
+    {
+      "id": "log_e2fb66bef4c7_1780562097985",
+      "createdAt": 1780562097985,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。",
+      "outputs": [
+        "/uploads/57065bf3-a746-4b9a-bc01-b41f66aa5b5e.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_e53096e46588.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 72496,
+      "error": ""
+    },
+    {
+      "id": "log_cbf6efd4c199b8_1780562096151",
+      "createdAt": 1780562096151,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的。",
+      "outputs": [
+        "/uploads/bd3edb89-476a-4757-9568-2e90112390c0.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_e53096e46588.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 70662,
+      "error": ""
+    },
+    {
+      "id": "log_89ab3410f13498_1780561978379",
+      "createdAt": 1780561978379,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的",
+      "outputs": [
+        "/uploads/60fef5da-5188-4517-8b12-2701e38c8b20.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_e53096e46588.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 124886,
+      "error": ""
+    },
+    {
+      "id": "log_f5e56e5b20508_1780561969331",
+      "createdAt": 1780561969331,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1的木梁架子。图3中的2个角色是躺在紫色的床上的",
+      "outputs": [
+        "/uploads/0a11e8de-d129-4a45-b6f6-1e4a9b03d9fa.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_e53096e46588.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 115838,
+      "error": ""
+    },
+    {
+      "id": "log_2df7df45c282a8_1780561824057",
+      "createdAt": 1780561824057,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_0964a38858224a178101a53af572fd21",
+        "reverse_prompt": "cinematic 3D animation style, rear view, full shot, a taller [Subject] and a smaller [Subject] holding hands, walking away from the camera along a snowy path, heading towards a cozy wooden cabin in the background, rustic wooden fence on the side, snow-covered pine trees, gentle falling snow, soft diffused winter daylight, cool blue and white tones, heartwarming atmosphere",
+        "washed_image_url": "/uploads/c7fccf00-6657-4e51-8abb-8874a1b04c2e.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/609c6813-3c46-4920-bf28-537cacec6916.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_ad2a7a038499.jpg",
+          "name": "canvas_ad2a7a038499.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_83384ec1c041.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 199353,
+      "error": ""
+    },
+    {
+      "id": "log_989070f62836a_1780561821197",
+      "createdAt": 1780561821197,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子。图3中的2个角色是躺在紫色的床上的",
+      "outputs": [
+        "/uploads/29a3dff4-f76f-49f5-b94d-f1eb189e92ff.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_e53096e46588.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 108639,
+      "error": ""
+    },
+    {
+      "id": "log_d6b9f7b96c2cd_1780561799457",
+      "createdAt": 1780561799457,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子。图3中的2个角色是躺在紫色的床上的",
+      "outputs": [
+        "/uploads/65da7176-5684-443e-9747-0df6a48377ed.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_e53096e46588.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 86899,
+      "error": ""
+    },
+    {
+      "id": "log_45c80ea833b0f8_1780561621496",
+      "createdAt": 1780561621496,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子。图2中的2个角色是躺在紫色的床上的",
+      "outputs": [
+        "/uploads/47ac5509-824c-43ac-b7f2-f278997578e5.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        }
+      ],
+      "runMs": 90236,
+      "error": ""
+    },
+    {
+      "id": "log_a6cfc37f155fa8_1780561594612",
+      "createdAt": 1780561594612,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子。图2中的2个角色是躺在紫色的床上的",
+      "outputs": [
+        "/uploads/92f37193-9413-4102-9d87-f3c44d1c0901.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        }
+      ],
+      "runMs": 63352,
+      "error": ""
+    },
+    {
+      "id": "log_2025fdd56fc9b8_1780561550621",
+      "createdAt": 1780561550621,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_d791ce1eade648d085c73bda09e4b459",
+        "reverse_prompt": "full shot, low-angle back view, taller [Subject] and smaller [Subject] holding hands, walking along a snow-covered path, walking away from the camera, cozy rustic wooden cabin in the distance, snow-covered roof, evergreen trees, gentle falling snowflakes in the air, soft daylight, cold blue and white color grading, cinematic composition, heartwarming yet cold winter atmosphere, depth of field",
+        "washed_image_url": "/uploads/f6c77020-a1ce-4cc3-988e-d7fb6aa3c93c.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/7481b0ea-9eb8-4f4b-92ec-eb2ed04eb595.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_ad2a7a038499.jpg",
+          "name": "canvas_ad2a7a038499.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_83384ec1c041.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 172854,
+      "error": ""
+    },
+    {
+      "id": "log_c224992ff7dd1_1780561416123",
+      "createdAt": 1780561416123,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子。图中的人物是躺在紫色的床上的",
+      "outputs": [
+        "/uploads/d33a5f13-99cb-4854-8e60-0894cf0d4cb9.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        }
+      ],
+      "runMs": 97912,
+      "error": ""
+    },
+    {
+      "id": "log_82ebfbd430d188_1780561388992",
+      "createdAt": 1780561388992,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子。图中的人物是躺在紫色的床上的",
+      "outputs": [
+        "/uploads/0af1003d-c112-4aa3-8299-5cd7d11f70f3.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        }
+      ],
+      "runMs": 70781,
+      "error": ""
+    },
+    {
+      "id": "log_531a68bbdfcd68_1780561226282",
+      "createdAt": 1780561226282,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_0512217113ea49119233bffcdf82ad23",
+        "reverse_prompt": "rear view of [Subject] holding hands with a smaller [Subject] while walking away from the camera, strolling along a snow-covered pathway towards a cozy wooden cabin in the background, beautiful winter landscape, heavy falling snow, pine trees covered in thick snow, low-angle tracking shot, serene and cozy atmosphere, soft diffused daylight, bright winter color palette, stylized 3D animation style",
+        "washed_image_url": "/uploads/ebfd0111-5012-45bd-8e66-49d60a599086.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/3945d4f6-70f5-4fae-bbdc-8af6cc5889c3.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_ad2a7a038499.jpg",
+          "name": "canvas_ad2a7a038499.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_83384ec1c041.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 574874,
+      "error": ""
+    },
+    {
+      "id": "log_f16667041e1d78_1780561163577",
+      "createdAt": 1780561163577,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子",
+      "outputs": [
+        "/uploads/c71403fb-475b-44a1-93f6-4e787099618f.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        }
+      ],
+      "runMs": 76354,
+      "error": ""
+    },
+    {
+      "id": "log_007bec295eeb5_1780561161771",
+      "createdAt": 1780561161771,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角，并且顶部也有图1类似的木梁架子",
+      "outputs": [
+        "/uploads/1d47aea9-d176-48cc-8eb7-52e33eca5eb3.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        }
+      ],
+      "runMs": 74548,
+      "error": ""
+    },
+    {
+      "id": "log_035018fe9209b8_1780561032751",
+      "createdAt": 1780561032751,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角",
+      "outputs": [
+        "/uploads/1cd33f76-8a6a-4fdb-8301-6f7c8394b481.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        }
+      ],
+      "runMs": 125100,
+      "error": ""
+    },
+    {
+      "id": "log_c2813ac2a05d18_1780561003769",
+      "createdAt": 1780561003769,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "以图2为内部参考图，推测扩大成图1的视角",
+      "outputs": [
+        "/uploads/cf8a4864-366a-41b1-b8b2-ff514a47f3a0.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_6bd4a0dbf20e.png",
+          "name": "canvas-output-1780560806268.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_0c8346c12e3c.png",
+          "name": "canvas-output-1780560623267.png"
+        }
+      ],
+      "runMs": 96117,
+      "error": ""
+    },
+    {
+      "id": "log_0063e8737f67a8_1780560840487",
+      "createdAt": 1780560840487,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_bf4f5ebfb96646ae9e07de5b8d8b0603",
+        "reverse_prompt": "isometric high-angle view, 3D stylized digital art, a dilapidated cold bedroom in winter, two [Subject]s lying in a wooden bed shivering under a thick purple blanket, freezing and sad expressions, snow drifting indoors from a broken window with torn green curtains, wooden floor, chilly blue and pale purple color palette, dim cold ambient light, desolate and freezing atmosphere",
+        "washed_image_url": "/uploads/056c8d83-aa87-46ef-8cd0-a805a8c4bd35.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/5ae0391e-c3e5-4c4a-baf6-02576533db84.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_d588e3e4e9f9.jpg",
+          "name": "canvas_d588e3e4e9f9.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_83384ec1c041.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 189070,
+      "error": ""
+    },
+    {
+      "id": "log_c81b60360addf_1780560832574",
+      "createdAt": 1780560832574,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_0bf847911df74d96b6aa0ac802e31312",
+        "reverse_prompt": "medium shot, waist-up view, 3D stylized animation style, [Subject] shivering and hugging themselves tightly, looking cold and anxious, eyes directed downwards, standing outdoors in a snowy winter environment, falling snowflakes, positioned next to a rustic wooden window pane, warm golden light glowing from inside the building, contrast of cold blue winter atmosphere and warm indoor lighting, soft rim light highlighting the subject, cinematic composition, shallow depth of field, cozy and chilly mood",
+        "washed_image_url": "/uploads/4551aa6e-5b66-4285-a220-5a63b3ec6f40.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/6ec26f83-3329-49b1-ac33-d21e862d97b8.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a5c85e338ed6.jpg",
+          "name": "canvas_a5c85e338ed6.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_83384ec1c041.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 181179,
+      "error": ""
+    },
+    {
+      "id": "log_fdf60ddcba5eb_1780560832515",
+      "createdAt": 1780560832515,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_090511cbb8ca46c2aab990adf7c86c90",
+        "reverse_prompt": "isometric 2.5D cutaway view of a dilapidated bedroom, high-angle perspective, stylized 3D mobile game art style, two [Subject] characters standing in the center warming their hands, a glowing fireplace on the left casting a warm orange light, worn wooden floors, peeling walls, a bed in the room, a window with torn green curtains, snowy winter forest visible outside in a cold blue haze, strong contrast of warm golden firelight and cool ambient winter shadows, cozy yet chilly atmosphere",
+        "washed_image_url": "/uploads/3011618a-4228-465c-af9f-70a5ea0219da.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/5847f6a7-51eb-416c-a6b7-2251b8247311.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_64509b14769d.jpg",
+          "name": "canvas_64509b14769d.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_83384ec1c041.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 181062,
+      "error": ""
+    },
+    {
+      "id": "log_1ac1f100352f88_1780560812369",
+      "createdAt": 1780560812369,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_c49e075f1f3d49e9b8bbf5d741ee87e5",
+        "reverse_prompt": "high-angle isometric view, stylized 3D game art, interior of a dilapidated freezing room with a cold fireplace and broken window, two [Subject]s standing together shivering from the cold, arms crossed, distressed expressions, snowy winter storm visible outside, cold blue and muted grey color palette, dramatic cool-toned lighting, sad and chilly atmosphere",
+        "washed_image_url": "/uploads/f136fac8-b29b-4190-8b89-4108480c34c5.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/fa1266ad-6ef4-4568-b080-89908c317382.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_8f469e22f840.jpg",
+          "name": "canvas_8f469e22f840.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_83384ec1c041.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 160929,
+      "error": ""
+    },
+    {
+      "id": "log_2d6b0c75b989f8_1780560748004",
+      "createdAt": 1780560748004,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_e0eacdeb279748219a0b120e5583e758",
+        "reverse_prompt": "isometric high-angle view, cozy wooden cabin with an exposed wooden rafter roof, under renovation, snowy winter forest background, snow-covered pine trees, falling snow particles, soft overcast daylight, detailed cabin interior visible from above, rustic fireplace, cartoon game art style, warm wooden textures, cool blue and white winter color palette, atmospheric depth",
+        "washed_image_url": "/uploads/5ef576a4-fc44-4d20-96fe-291e0ab78399.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/5ef576a4-fc44-4d20-96fe-291e0ab78399.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_3bb1b0bf9f67.jpg",
+          "name": "canvas_3bb1b0bf9f67.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_83384ec1c041.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 96574,
+      "error": ""
+    },
+    {
+      "id": "log_dba759792a91d_1780560573535",
+      "createdAt": 1780560573535,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_f9b75a4a67b34715b000c4b4f7c486a7",
+        "reverse_prompt": "isometric high-angle view, game art style, 3D stylized illustration, cutaway room interior, [Subject] standing shivering and hugging themselves in distress, cold and freezing atmosphere, an empty fireplace with snow, broken window, snowy winter storm outside, snow on the wooden floor, gloomy desaturated blue and purple color palette, soft ambient lighting, winter survival theme",
+        "washed_image_url": "/uploads/164a65db-7136-42db-913a-3b6da0a12cc5.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/76c1b6d2-4ff8-42cc-9281-2d22caa2a76e.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_8f469e22f840.jpg",
+          "name": "canvas_8f469e22f840.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_83384ec1c041.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 321648,
+      "error": ""
+    },
+    {
+      "id": "log_b7550de96be6e8_1780560477063",
+      "createdAt": 1780560477063,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_8a6f816699ba45b48f2eb9b9f863f761",
+        "reverse_prompt": "Isometric high-angle view, cold dilapidated cabin bedroom, [Subject] shivering in bed under a blanket, broken window with torn curtains, snow on wooden floor, dim cold ambient light, blue and purple tones, 3D stylized game art style",
+        "washed_image_url": "/uploads/a96ef87c-93a4-4117-ac78-0a4ae76633d2.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/34f606d7-cc28-439a-bf77-4ef38d839e96.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_d588e3e4e9f9.jpg",
+          "name": "canvas_d588e3e4e9f9.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_83384ec1c041.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 225195,
+      "error": ""
+    },
+    {
+      "id": "log_af16d11ef33778_1780560446891",
+      "createdAt": 1780560446891,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_7ffb700369f440459a4fdfd11f84e70f",
+        "reverse_prompt": "cinematic medium full shot, rear view, back shot, low angle, two [Subject] holding hands, walking along a winding snowy path, leading towards a cozy rustic cabin in the background, snow-covered roof, winter landscape, falling snowflakes, snow-laden pine trees, wooden fence, soft daylight, warm and cozy yet chilly winter atmosphere, 3D animated cinematic style, soft volumetric light, cold color palette with soft contrast",
+        "washed_image_url": "/uploads/21f02f22-2b68-4fb0-8b05-374adb9386c7.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/9399242a-072e-422a-a26b-cadc8481fcb7.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_ad2a7a038499.jpg",
+          "name": "canvas_ad2a7a038499.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_83384ec1c041.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 195041,
+      "error": ""
+    },
+    {
+      "id": "log_e1079b9a5a7538_1780560426811",
+      "createdAt": 1780560426811,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_75d4afb8ad2545528dd32b8d5bbaddb6",
+        "reverse_prompt": "stylized 3D animation style, medium shot of [Subject], shivering with arms crossed, looking cold and anxious, three-quarter profile, gaze directed downwards, outdoor winter setting, soft falling snowflakes, background of a rustic wooden cabin window with warm light glowing from within, cinematic soft lighting, contrast of warm indoor glow and cool winter atmosphere, shallow depth of field, expressive emotional atmosphere",
+        "washed_image_url": "/uploads/f6f4b362-96d2-4f86-a52e-c49a68be291f.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/f757785d-2b32-49be-9ed7-b835890225f9.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a5c85e338ed6.jpg",
+          "name": "canvas_a5c85e338ed6.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_83384ec1c041.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 174973,
+      "error": ""
+    },
+    {
+      "id": "log_6277065553662_1780560346426",
+      "createdAt": 1780560346426,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_40df07d2aa6b482abb8d37c6672d02e7",
+        "reverse_prompt": "isometric view, stylized 3D game art, wooden cabin with a broken roof structure, exposed wooden rafters with patches of snow, cozy interior bedroom visible from a high angle, cold winter forest background with snowy pine trees, soft snowfall, warm ambient light glowing from inside, whimsical and cute cartoon style, clean rendering",
+        "washed_image_url": "/uploads/4c80e49c-bfa7-4438-af82-95fd8587b9c6.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/4c80e49c-bfa7-4438-af82-95fd8587b9c6.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_3bb1b0bf9f67.jpg",
+          "name": "canvas_3bb1b0bf9f67.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_83384ec1c041.png",
+          "name": "canvas-output-1780559887836.png"
+        }
+      ],
+      "runMs": 94548,
+      "error": ""
+    },
+    {
+      "id": "log_cb9a1bd5f2c7c8_1780560223748",
+      "createdAt": 1780560223748,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_2ecaa58875dc41e2a522fdfc4f51caca",
+        "reverse_prompt": "isometric high-angle view, rustic wooden cabin in a winter landscape, partially destroyed roof with exposed wooden rafters covered in snow, revealing a cozy cabin interior, surrounded by snow-covered pine trees under a soft purple sky, gentle falling snow, soft diffuse cold lighting, stylized 3D game art, clean and cozy aesthetic",
+        "washed_image_url": "/uploads/6c48d22e-73ed-45b1-ae63-b29255f96dc5.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/6c48d22e-73ed-45b1-ae63-b29255f96dc5.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_3bb1b0bf9f67.jpg",
+          "name": "canvas_3bb1b0bf9f67.jpg"
+        }
+      ],
+      "runMs": 118701,
+      "error": ""
+    },
+    {
+      "id": "log_b2a9f3d2e86288_1780560217718",
+      "createdAt": 1780560217718,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_235bcfc8eae24a3983e674e34322fce5",
+        "reverse_prompt": "isometric view, 3D stylized game art style, high-angle perspective, a dilapidated and freezing room, broken window with snow drifts, an empty fireplace with clutter on top, wooden floor, chilly atmosphere, cool blue and grey tones, [Subject] standing in the room shivering intensely, hugging themselves from the cold, worried and distressed facial expression, soft ambient light, clean 3D rendering",
+        "washed_image_url": "/uploads/0a1892b6-1a3f-4036-aaee-b3994f380c2e.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/0a1892b6-1a3f-4036-aaee-b3994f380c2e.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_8f469e22f840.jpg",
+          "name": "canvas_8f469e22f840.jpg"
+        }
+      ],
+      "runMs": 112658,
+      "error": ""
+    },
+    {
+      "id": "log_f6265a4a912cf_1780560195579",
+      "createdAt": 1780560195579,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_3603732cf97f4a619c4ec03e13f98e51",
+        "reverse_prompt": "high-angle isometric view, medium shot of [Subject] shivering in a wooden bed under a heavy blanket, dilapidated bedroom interior, a broken glass window with tattered curtains, snowflakes falling inside the room, snow piles on the wooden floor, freezing and desperate atmosphere, dim cold lighting, soft winter light, muted blue and purple color palette, stylized 3D game art style",
+        "washed_image_url": "/uploads/50504243-faae-4c41-9459-02f57975f2d4.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/50504243-faae-4c41-9459-02f57975f2d4.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_d588e3e4e9f9.jpg",
+          "name": "canvas_d588e3e4e9f9.jpg"
+        }
+      ],
+      "runMs": 90543,
+      "error": ""
+    },
+    {
+      "id": "log_4a18431de54f78_1780560189484",
+      "createdAt": 1780560189484,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_9e433d57dc4c428993b74685f2aca77f",
+        "reverse_prompt": "medium full shot, back view, low angle tracking perspective, two [Subject]s holding hands and walking away along a snowy path, a taller [Subject] and a smaller [Subject] walking toward a cozy wooden cabin in the background, thick snow-covered roof, rustic wooden fence, snow-covered pine trees, gentle falling snow, soft focus foreground snowflakes, diffuse winter daylight, cool blue and white color palette, cinematic 3D animated film style, whimsical and cozy atmosphere",
+        "washed_image_url": "/uploads/3e59c398-fba2-4a20-86b0-18c524766281.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/3e59c398-fba2-4a20-86b0-18c524766281.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_ad2a7a038499.jpg",
+          "name": "canvas_ad2a7a038499.jpg"
+        }
+      ],
+      "runMs": 84463,
+      "error": ""
+    },
+    {
+      "id": "log_84e7e36c131188_1780560058726",
+      "createdAt": 1780560058726,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_99848eaeb65c498d9f66eb11919ca01e",
+        "reverse_prompt": "high-angle isometric perspective, two [Subject]s huddling in a wooden bed under a purple blanket, shivering with cold, sad and distressed expressions, a freezing and dilapidated bedroom, broken window letting in blowing snow, frost on the walls and floor, cold color palette, dominant blue and purple tones, soft chilly diffused lighting, 3D stylized animation style, winter survival atmosphere",
+        "washed_image_url": "/uploads/c757249f-f678-4cc9-9b5e-68612c062889.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/c757249f-f678-4cc9-9b5e-68612c062889.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_d588e3e4e9f9.jpg",
+          "name": "canvas_d588e3e4e9f9.jpg"
+        }
+      ],
+      "runMs": 112650,
+      "error": ""
+    },
+    {
+      "id": "log_52ddf1c45b39e_1780560048764",
+      "createdAt": 1780560048764,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_0a666c441ec24648b297bb7e962a2102",
+        "reverse_prompt": "isometric high-angle view, 3D stylized cartoon art style, a freezing and dilapidated indoor room, [Subjects] standing in the center and shivering from the cold, broken window letting in winter snow, unlit fireplace, cold and messy environment, cool blue and gray color palette, soft ambient winter light",
+        "washed_image_url": "/uploads/a45f94b4-751e-4048-b535-1175ea8dcbf3.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/a45f94b4-751e-4048-b535-1175ea8dcbf3.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_8f469e22f840.jpg",
+          "name": "canvas_8f469e22f840.jpg"
+        }
+      ],
+      "runMs": 102669,
+      "error": ""
+    },
+    {
+      "id": "log_1ff084f9dd7c48_1780560026632",
+      "createdAt": 1780560026632,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_6e41a93535c740bfb6153b0b5132af32",
+        "reverse_prompt": "3D stylized animation, cinematic CGI style, medium shot, three-quarters view, [Subject] standing outdoors in the snow, arms crossed, hugging themselves to stay warm, shivering, worried and anxious expression, looking downwards, standing next to a large glass window with warm light shining from inside, falling snowflakes, contrast of warm golden interior glow and cool blue-gray winter light, soft atmospheric lighting, shallow depth of field",
+        "washed_image_url": "/uploads/fa85ecf1-b7f8-43fc-80a7-a334a6597f0e.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/fa85ecf1-b7f8-43fc-80a7-a334a6597f0e.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a5c85e338ed6.jpg",
+          "name": "canvas_a5c85e338ed6.jpg"
+        }
+      ],
+      "runMs": 80578,
+      "error": ""
+    },
+    {
+      "id": "log_ab04b8a7f707b8_1780560024582",
+      "createdAt": 1780560024582,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_84f602fa73734643ac8ecf02b6e8392a",
+        "reverse_prompt": "isometric view of a cozy wooden cabin, partially broken wooden roof with exposed rafters, snow-covered log walls, rustic cottage architecture, nestled in a snowy pine forest, winter landscape, soft snowfall, warm fireplace visible inside, high-angle perspective, game art style, soft diffuse winter light, blue and brown color palette, cozy yet cold atmosphere",
+        "washed_image_url": "/uploads/8f148951-ba6a-4e0a-b34f-8aed6277715a.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/8f148951-ba6a-4e0a-b34f-8aed6277715a.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_3bb1b0bf9f67.jpg",
+          "name": "canvas_3bb1b0bf9f67.jpg"
+        }
+      ],
+      "runMs": 78497,
+      "error": ""
+    },
+    {
+      "id": "log_081f08fa5747e8_1780560014468",
+      "createdAt": 1780560014468,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_8d3e134c0999453f870b06b79be341b8",
+        "reverse_prompt": "rear view shot, a tall [Subject] and a short [Subject] holding hands, walking along a snowy path towards a wooden cabin, cozy winter cottage in the background, serene snowy landscape, soft falling snow particles, pine trees covered in snow, cinematic composition, depth of field, soft diffused daylight, cool blue and white tones",
+        "washed_image_url": "/uploads/5ea18b8a-c31b-4c8d-98af-bd0bac3da2d2.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/5ea18b8a-c31b-4c8d-98af-bd0bac3da2d2.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_ad2a7a038499.jpg",
+          "name": "canvas_ad2a7a038499.jpg"
+        }
+      ],
+      "runMs": 68403,
+      "error": ""
+    },
+    {
+      "id": "log_0ffee4812aeb8_1780559756217",
+      "createdAt": 1780559756217,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "把图2的小女孩换成图1的小女孩",
+      "outputs": [
+        "/uploads/72be391a-ca81-4c47-ad6a-888b892b4f0c.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_67f2348321b8.png",
+          "name": "edit_result_1780494628820.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_856950a2d713.png",
+          "name": "edit_result_1779961851102.png"
+        }
+      ],
+      "runMs": 65165,
+      "error": ""
+    },
+    {
+      "id": "log_6b7c88b92980f_1780559756203",
+      "createdAt": 1780559756203,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "把图2的小女孩换成图1的小女孩",
+      "outputs": [
+        "/uploads/f6e0e1ca-0f0a-4f6a-b4b8-f929b8c419b9.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_67f2348321b8.png",
+          "name": "edit_result_1780494628820.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_856950a2d713.png",
+          "name": "edit_result_1779961851102.png"
+        }
+      ],
+      "runMs": 65151,
+      "error": ""
+    },
+    {
+      "id": "log_0433ad48b0b688_1780559417541",
+      "createdAt": 1780559417541,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "修改图3的构图：结合图1的构图和图2的窗户场景（窗户里的小女孩删掉）",
+      "outputs": [
+        "/uploads/d7381cf5-3b77-4e2c-8565-2784c2acace1.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_2bfba8d2c0c2.png",
+          "name": "1.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_203cdb2445c5.png",
+          "name": "image.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_1b38c5fea89a.png",
+          "name": "2.png"
+        }
+      ],
+      "runMs": 79983,
+      "error": ""
+    },
+    {
+      "id": "log_c42aeca2df76f_1780559408491",
+      "createdAt": 1780559408491,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "修改图3的构图：结合图1的构图和图2的窗户场景（窗户里的小女孩删掉）",
+      "outputs": [
+        "/uploads/dbec8563-e372-4081-915a-3b7554d58562.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_2bfba8d2c0c2.png",
+          "name": "1.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_203cdb2445c5.png",
+          "name": "image.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_1b38c5fea89a.png",
+          "name": "2.png"
+        }
+      ],
+      "runMs": 70933,
+      "error": ""
+    },
+    {
+      "id": "log_b1afed268b67e_1780559048937",
+      "createdAt": 1780559048937,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "修改图2：参考图1的动作，其他不变。",
+      "outputs": [
+        "/uploads/6c676573-7d68-48f4-aed8-497468df994e.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_b8713ea9eb58.png",
+          "name": "3.png"
+        }
+      ],
+      "runMs": 92372,
+      "error": ""
+    },
+    {
+      "id": "log_76724c452762a_1780559029024",
+      "createdAt": 1780559029024,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "修改图2：参考图1的动作，其他不变。",
+      "outputs": [
+        "/uploads/2bb4e17d-b7c6-44d2-abb8-388965fc12f9.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_b8713ea9eb58.png",
+          "name": "3.png"
+        }
+      ],
+      "runMs": 72459,
+      "error": ""
+    },
+    {
+      "id": "log_9507f88c378588_1780558698484",
+      "createdAt": 1780558698484,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "图1窗户围墙高一点，窗户里的人不要露出来",
+      "outputs": [
+        "/uploads/62e7f9d0-e4ca-429f-aeed-3100ac5a1c03.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        }
+      ],
+      "runMs": 70658,
+      "error": ""
+    },
+    {
+      "id": "log_61455db4fc858_1780558687617",
+      "createdAt": 1780558687617,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "图1窗户围墙高一点，窗户里的人不要露出来",
+      "outputs": [
+        "/uploads/303ea26f-1bc4-443c-a82a-cc870c48fb77.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        }
+      ],
+      "runMs": 59791,
+      "error": ""
+    },
+    {
+      "id": "log_b3cf4a690df4_1780558614084",
+      "createdAt": 1780558614084,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "图1窗户高一点，窗户里的人不要露出来",
+      "outputs": [
+        "/uploads/e4ad623f-a330-4a72-bb7f-07a70ab2677c.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        }
+      ],
+      "runMs": 97723,
+      "error": ""
+    },
+    {
+      "id": "log_a40f474968fdc8_1780558579702",
+      "createdAt": 1780558579702,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "图1窗户高一点，窗户里的人不要露出来",
+      "outputs": [
+        "/uploads/2125ee2c-9dd6-44e2-8321-2bfaffdf7443.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        }
+      ],
+      "runMs": 63341,
+      "error": ""
+    },
+    {
+      "id": "log_55740c03602d68_1780558421773",
+      "createdAt": 1780558421773,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "图1窗户内的场景参考图2，保持透视和位置正确",
+      "outputs": [
+        "/uploads/5efbbb6c-4929-4ed4-b3b2-21eea3f494ba.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_212f16c8d489.png",
+          "name": "1.png"
+        }
+      ],
+      "runMs": 85437,
+      "error": ""
+    },
+    {
+      "id": "log_1c789b6920a598_1780558396421",
+      "createdAt": 1780558396421,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "图1窗户内的场景参考图2，保持透视和位置正确",
+      "outputs": [
+        "/uploads/d2ae6f44-9e33-45f3-a638-7712ad2d729e.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_f41c04167530.png",
+          "name": "canvas-output-1780558244011.png"
+        },
+        {
+          "url": "/uploads/canvas/canvas_212f16c8d489.png",
+          "name": "1.png"
+        }
+      ],
+      "runMs": 60085,
+      "error": ""
+    },
+    {
+      "id": "log_1d6310b50e1938_1780558180725",
+      "createdAt": 1780558180725,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_5576650fc9c14a37aa0f577adfdcd9de",
+        "reverse_prompt": "medium-full shot, slightly high-angle perspective, [Subject] kneeling in the snow on a cold street, [Subject] shivering with closed eyes and hands clutched near the chest, expressing coldness and vulnerability, a small wooden basket rests on the snow beside [Subject], gentle snowflakes falling through the air, background features a warm golden-lit window displaying a cozy out-of-focus interior scene, stark contrast between the cold blue-toned outdoor environment and the warm golden indoor glow, cinematic lighting with a soft rim light highlighting [Subject], 3D stylized animation style, claymation aesthetic, emotional and melancholic atmosphere, shallow depth of field",
+        "washed_image_url": "/uploads/b85218b6-2d80-417c-8cde-5ef7e5d41fa4.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/ff5b3b26-ff2d-4448-8c6e-dff02b809f10.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_638be73ef3c8.jpg",
+          "name": "canvas_638be73ef3c8.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_67f2348321b8.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 243399,
+      "error": ""
+    },
+    {
+      "id": "log_97e0a5da942bf8_1780558168590",
+      "createdAt": 1780558168590,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_bb8587d100c54b20a045f2a4929a35d4",
+        "reverse_prompt": "medium shot, looking through a snowy window from the outside, falling snow in the foreground, three [Subject]s as a family gathered for a festive dinner inside, cozy decorated dining room, one [Subject] on the left in profile holding a glass, one [Subject] on the right in profile smiling, a small [Subject] in the center wearing a winter hat and looking towards the viewer, warm golden indoor illumination, soft glowing overhead lamp, Christmas themed background with small pine trees and bunting flags, heartwarming and magical holiday atmosphere, stylized 3D animation render, cinematic lighting",
+        "washed_image_url": "/uploads/8f97cd3a-cbdd-4f15-a728-04b67ff4c205.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/bbd1dc29-a693-46a9-9dbc-9d922ca7dfb3.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_430448248582.jpg",
+          "name": "canvas_430448248582.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_67f2348321b8.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 231323,
+      "error": ""
+    },
+    {
+      "id": "log_e104cbe8f09cf_1780558150445",
+      "createdAt": 1780558150445,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_ec4122ebdf7741959de6347956918ac9",
+        "reverse_prompt": "medium shot, eye-level perspective, 3D animated cinematic style, [Subject] kneeling on snow-covered ground with a sad and cold expression, holding a tiny matchbox, falling snowflakes all around, soft warm light illuminating [Subject], cool blue ambient shadows in the background, a blurry warm-lit window and dark wall behind, shallow depth of field, emotionally evocative winter atmosphere, high-end render quality, warm and cold color contrast",
+        "washed_image_url": "/uploads/ebdb1b2b-4b95-484b-9d5d-eb77a6cbfc2c.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/9ec4b114-b9a6-4bb9-a1f6-a9be4a0c750e.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_0bdc2a24b48c.jpg",
+          "name": "canvas_0bdc2a24b48c.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_67f2348321b8.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 213149,
+      "error": ""
+    },
+    {
+      "id": "log_1de5e1aacdb28_1780558108242",
+      "createdAt": 1780558108242,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_4c74b449eee64f9a922923050269e32a",
+        "reverse_prompt": "medium close-up shot, cinematic 3D animation style, [Subject] shivering and crouching in the snow, looking cold and deeply sad, flushed red cheeks, tearful eyes, cold winter night environment, falling snowflakes, soft warm golden light glowing from a building in the background, cool blue tones contrasting with warm highlights, shallow depth of field, emotional and atmospheric composition",
+        "washed_image_url": "/uploads/45d7c279-73e4-4ffa-bcef-1db0309b4405.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/127790a1-34b5-4c95-8505-a98955152726.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a224bc94ed61.jpg",
+          "name": "canvas_a224bc94ed61.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_67f2348321b8.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 170935,
+      "error": ""
+    },
+    {
+      "id": "log_1058f7b66dbd8_1780558106181",
+      "createdAt": 1780558106181,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_d72a175b4bc34bd2bdd61d92598decab",
+        "reverse_prompt": "Cinematic 3D animation style, medium shot, low angle, [Subject] kneeling in the cold snow outdoors, hands clasped in prayer, sad and tearful expression with rosy cheeks looking downwards, snowflakes falling on head, a small basket nearby, background of a warm glowing house window with blurred silhouettes inside, strong contrast of warm interior golden light and cold winter blue exterior light, emotional storytelling, cinematic lighting, soft focus background",
+        "washed_image_url": "/uploads/17173ca9-67a4-422f-940b-80f5f576342a.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/edf9651b-7661-47b5-b8f8-7a325c1a0ba7.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_9c62d8c68022.jpg",
+          "name": "canvas_9c62d8c68022.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_67f2348321b8.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 168895,
+      "error": ""
+    },
+    {
+      "id": "log_4154985f675ed_1780552606803",
+      "createdAt": 1780552606803,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "图中的小女孩换个脸，换个发型，换个衣服",
+      "outputs": [
+        "/uploads/71ef667b-1148-4ec8-aa98-266b3ee65187.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_0d0035c3dd57.png",
+          "name": "canvas-output-1780551667042.png"
+        }
+      ],
+      "runMs": 68864,
+      "error": ""
+    },
+    {
+      "id": "log_8efd8344718f18_1780552595935",
+      "createdAt": 1780552595935,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "图中的小女孩换个脸，换个发型，换个衣服",
+      "outputs": [
+        "/uploads/aba3444c-b063-45d6-87b0-7f287d264b8b.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_0d0035c3dd57.png",
+          "name": "canvas-output-1780551667042.png"
+        }
+      ],
+      "runMs": 57996,
+      "error": ""
+    },
+    {
+      "id": "log_48a4633cde6518_1780551889144",
+      "createdAt": 1780551889144,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "图中的小女孩换个样子，换个发型，换个衣服",
+      "outputs": [
+        "/uploads/511a5736-dba8-4828-a787-8c247be9f2a1.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_0d0035c3dd57.png",
+          "name": "canvas-output-1780551667042.png"
+        }
+      ],
+      "runMs": 123076,
+      "error": ""
+    },
+    {
+      "id": "log_b101b506041808_1780551858385",
+      "createdAt": 1780551858385,
+      "status": "success",
+      "platform": "RunningHub",
+      "nodeType": "generator",
+      "model": "gpt-image-2",
+      "request": {
+        "task_id": "",
+        "request_id": "",
+        "provider_id": "",
+        "backend": "",
+        "prompt_id": "",
+        "workflow_json": "",
+        "seed": ""
+      },
+      "prompt": "图中的小女孩换个样子，换个发型，换个衣服",
+      "outputs": [
+        "/uploads/a1bc7838-23e6-4353-a045-6e2da57bcd0c.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_0d0035c3dd57.png",
+          "name": "canvas-output-1780551667042.png"
+        }
+      ],
+      "runMs": 92316,
+      "error": ""
+    },
+    {
+      "id": "log_ba5441fbd3a8f8_1780551427944",
+      "createdAt": 1780551427944,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_e3242666704e4f1c921dbfb557861f55",
+        "reverse_prompt": "Medium shot, low-angle, 3D animated film style, [Subject] kneeling on a snowy pavement outdoors, looking sad and cold, hands clasped together in a pleading gesture, looking downcast, a small woven basket next to [Subject], falling snowflakes, cozy house window in the background with warm golden light glowing from inside, stark contrast of cold blue night shadows and warm orange light, cinematic rim lighting, soft focus, emotional atmosphere",
+        "washed_image_url": "/uploads/3fe0daeb-151f-41bc-b6f6-fb0adb88476b.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/a5498db3-685d-43a5-87bf-dc45996b311c.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_9c62d8c68022.jpg",
+          "name": "canvas_9c62d8c68022.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_67f2348321b8.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 205573,
+      "error": ""
+    },
+    {
+      "id": "log_caaab100d96d78_1780551375667",
+      "createdAt": 1780551375667,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_a93d9396ba4344038feb82ec88117c71",
+        "reverse_prompt": "medium close-up shot, centered composition, slightly high-angle, [Subject] kneeling in the snow with a pitiful and sad expression, shivering with arms crossed, teary eyes looking towards the camera, snow dust on hair, outdoor snowy environment at night, soft falling snowflakes, blurred background with warm and cool bokeh, cinematic atmospheric lighting, warm key light on the face, cool blue ambient shadows, 3D stylized animation style",
+        "washed_image_url": "/uploads/72b6802f-8cfc-4972-9e2a-985ee9709484.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/45d6655b-e953-4155-aba0-b384f5ab5f4e.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_a224bc94ed61.jpg",
+          "name": "canvas_a224bc94ed61.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_67f2348321b8.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 153287,
+      "error": ""
+    },
+    {
+      "id": "log_0e482ecacb1ba_1780551367636",
+      "createdAt": 1780551367636,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_b318ab873a914d6887e3e0472c336911",
+        "reverse_prompt": "medium shot, 3D animated film style, [Subject] kneeling in the cold snow on a winter night, clutching hands tightly to chest, shivering with a sorrowful and freezing expression, eyes closed, a small woven basket on the ground next to [Subject], soft falling snowflakes, warm light glowing from a window in the background contrasting with the cold blue ambient light of the snowy street, shallow depth of field, cinematic bokeh, emotional and melancholic atmosphere",
+        "washed_image_url": "/uploads/f27b7845-e574-4b41-a91d-3ad9cb0189ae.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/1ab45ebc-e9d2-4cdd-a4ae-b19b0ad550a4.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_638be73ef3c8.jpg",
+          "name": "canvas_638be73ef3c8.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_67f2348321b8.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 145243,
+      "error": ""
+    },
+    {
+      "id": "log_c3d06216ac0a18_1780551365568",
+      "createdAt": 1780551365568,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_3ec4646a1e924edaa11dce5a25e081bc",
+        "reverse_prompt": "medium shot, 3D animated style, [Subject] kneeling in the snow, centered composition, sad and melancholic expression, looking down, holding a small box near the face, gentle falling snowflakes, blurred winter street background with soft warm window light, cool blue ambient lighting, golden rim light on [Subject]'s hair, cinematic depth of field, emotional and atmospheric render",
+        "washed_image_url": "/uploads/536801d5-1883-4b5c-b588-0ac88ade7081.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/77a11e62-5a6a-4333-bcf1-5813cad1aa3c.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_0bdc2a24b48c.jpg",
+          "name": "canvas_0bdc2a24b48c.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_67f2348321b8.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 143209,
+      "error": ""
+    },
+    {
+      "id": "log_5a9df1a915c658_1780551359536",
+      "createdAt": 1780551359536,
+      "status": "success",
+      "platform": "replicaAgent",
+      "nodeType": "replicaAgent",
+      "model": "复刻 Agent",
+      "request": {
+        "replica_task_id": "replica_687aed0d01ec435c9e873eab001b2df5",
+        "reverse_prompt": "3D animated style, medium shot, looking through a snow-dusted window from the outside, warm cozy dining room interior, three [Subject] family members sitting around a table, a man on the left raising a glass, a woman on the right looking towards him, a young child wearing a festive winter hat in the center foreground, soft expressions of happiness, warm golden ambient lighting inside, glowing hanging lamp, festive Christmas trees and decorations in the background, soft falling snow in the foreground, strong contrast between warm interior and cool exterior, cinematic depth of field, heartwarming holiday atmosphere",
+        "washed_image_url": "/uploads/1bc292db-2960-4049-a80c-07baec7d2ac0.png"
+      },
+      "prompt": "复刻 Agent 双阶段生图",
+      "outputs": [
+        "/uploads/ba754d11-2e2a-4da1-bdf4-8b08dacf6247.png"
+      ],
+      "refs": [
+        {
+          "url": "/uploads/canvas/canvas_430448248582.jpg",
+          "name": "canvas_430448248582.jpg"
+        },
+        {
+          "url": "/uploads/canvas/canvas_67f2348321b8.png",
+          "name": "edit_result_1780494628820.png"
+        }
+      ],
+      "runMs": 137235,
+      "error": ""
+    }
+  ],
+  "settings": {}
+}
