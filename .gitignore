@@ -12,3 +12,10 @@ coverage/
 !.env.example
 public/uploads/*
 !public/uploads/.gitkeep
+
+# 运行时数据：勿提交（线上/本地各自积累）
+projects.db
+data/canvases/*
+!data/canvases/.gitkeep
+data/canvas-workflow-templates/*
+!data/canvas-workflow-templates/.gitkeep
