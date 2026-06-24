@@ -1,5 +1,6 @@
-import type { Express, Request, Response } from "express";
+import type { Express, Request, Response, RequestHandler } from "express";
 import { v4 as uuidv4 } from "uuid";
+import { augmentImagePromptWithReferenceCostumeLock } from "../lib/nineGrid/nineGridCore.js";
 import {
   getStoryboardImageEnv,
   isMidjourneyV81Model,
@@ -151,11 +152,20 @@ export function mapCanvasToEditorRequest(
   req: Request,
   payload: CanvasOnlineImagePayload
 ): { path: "/api/edit-image"; body: Record<string, unknown> } {
-  const prompt = String(payload.prompt || "").trim() || "Edit the reference images.";
+  const refItems = (payload.reference_images || [])
+    .map((r) => ({
+      url: String(r?.url || "").trim(),
+      name: String(r?.name || "").trim(),
+    }))
+    .filter((r) => r.url);
+  const prompt = refItems.length
+    ? augmentImagePromptWithReferenceCostumeLock(
+        String(payload.prompt || "").trim() || "Edit the reference images.",
+        refItems
+      )
+    : String(payload.prompt || "").trim() || "Edit the reference images.";
   const model = String(payload.model || "").trim();
-  const images = (payload.reference_images || [])
-    .map((r) => absoluteUrl(req, String(r?.url || "").trim()))
-    .filter(Boolean);
+  const images = refItems.map((r) => absoluteUrl(req, r.url)).filter(Boolean);
   const image_size = canvasResolutionToImageSize(payload.canvas_resolution);
   const aspect_ratio = canvasRatioToAspectRatio(payload);
 
@@ -186,6 +196,7 @@ export function mapCanvasToEditorRequest(
 export type CanvasImageBridgeDeps = {
   projectRoot: string;
   persistImage: (url: string) => Promise<string>;
+  requireGate?: RequestHandler;
 };
 
 async function callSiteEditImage(
@@ -222,9 +233,16 @@ async function executeCanvasGeneration(
 ): Promise<{ images: string[]; url: string }> {
   const prompt = String(payload.prompt || "").trim() || "Edit the reference images.";
   const model = String(payload.model || "").trim();
-  const imageUrls = (payload.reference_images || [])
-    .map((r) => absoluteUrl(req, String(r?.url || "").trim()))
-    .filter(Boolean);
+  const refItems = (payload.reference_images || [])
+    .map((r) => ({
+      url: String(r?.url || "").trim(),
+      name: String(r?.name || "").trim(),
+    }))
+    .filter((r) => r.url);
+  const imageUrls = refItems.map((r) => absoluteUrl(req, r.url)).filter(Boolean);
+  const enrichedPrompt = refItems.length
+    ? augmentImagePromptWithReferenceCostumeLock(prompt, refItems)
+    : prompt;
   const image_size = canvasResolutionToImageSize(payload.canvas_resolution);
   const aspect_ratio = canvasRatioToAspectRatio(payload);
   const rhEnv = getStoryboardImageEnv();
@@ -290,7 +308,7 @@ async function executeCanvasGeneration(
       if (isGptImage2(model)) {
         console.log("[canvas-image/runninghub-g2]", { resolution: image_size, aspect_ratio: nearestG2AspectRatio(aspect_ratio), quality: payload.quality, images: imageUrls.length });
         upstreamUrl = await runStoryboardRunningHubG2Job({
-          prompt,
+          prompt: enrichedPrompt,
           images: imageUrls,
           image_size,
           aspect_ratio: nearestG2AspectRatio(aspect_ratio),
@@ -300,7 +318,7 @@ async function executeCanvasGeneration(
       } else {
         console.log("[canvas-image/runninghub]", { resolution: image_size, aspect_ratio, images: imageUrls.length });
         upstreamUrl = await runStoryboardRunningHubJob({
-          prompt,
+          prompt: enrichedPrompt,
           images: imageUrls,
           image_size,
           aspect_ratio,
@@ -385,7 +403,8 @@ async function runCanvasImageTask(
 }
 
 export function registerCanvasSiteImageRoutes(app: Express, deps: CanvasImageBridgeDeps) {
-  app.post("/api/canvas-image-tasks", (req, res) => {
+  const gate = deps.requireGate;
+  app.post("/api/canvas-image-tasks", ...(gate ? [gate] : []), (req, res) => {
     const payload = (req.body || {}) as CanvasOnlineImagePayload;
     const taskId = `canvas_img_${uuidv4().replace(/-/g, "")}`;
     const now = Date.now();
@@ -401,7 +420,7 @@ export function registerCanvasSiteImageRoutes(app: Express, deps: CanvasImageBri
     res.json({ task_id: taskId, status: "queued" });
   });
 
-  app.get("/api/canvas-image-tasks/:taskId", (req, res) => {
+  app.get("/api/canvas-image-tasks/:taskId", ...(gate ? [gate] : []), (req, res) => {
     const task = tasks.get(req.params.taskId);
     if (!task) {
       return res.status(404).json({
@@ -418,7 +437,7 @@ export function registerCanvasSiteImageRoutes(app: Express, deps: CanvasImageBri
     });
   });
 
-  app.post("/api/online-image", async (req, res) => {
+  app.post("/api/online-image", ...(gate ? [gate] : []), async (req, res) => {
     try {
       const payload = (req.body || {}) as CanvasOnlineImagePayload;
       const result = await executeCanvasGeneration(req, payload, deps);

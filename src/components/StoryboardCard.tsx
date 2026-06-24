@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import { Storyboard, ImageSize, AspectRatio } from '../types';
-import { SIZES, RATIOS } from '../constants';
+import { SIZES, RATIOS, STORYBOARD_TEXT_MODEL } from '../constants';
 import { cn, uniqueRefItemId } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { ConfirmationModal } from './ConfirmationModal';
@@ -133,7 +133,8 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
             type: r.type
           })),
           shot_summary: shot.summary,
-          shot_number: shot.shot_number
+          shot_number: shot.shot_number,
+          textModel: STORYBOARD_TEXT_MODEL,
         })
       });
       

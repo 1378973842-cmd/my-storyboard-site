@@ -21,7 +21,7 @@ export const CoverPage: React.FC<CoverPageProps> = ({
   return (
     <div className="min-h-screen text-on-surface" data-ui-root data-cover-page>
       <main>
-        <Hero onStart={onStart} />
+        <Hero />
         <HomeTools
           onStart={onStart}
           onOpenImageEditor={onOpenImageEditor}

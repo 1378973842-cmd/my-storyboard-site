@@ -780,8 +780,9 @@ export const StandaloneImageEditorPage: React.FC<Props> = ({ enterKey = 0 }) => 
                         type="button"
                         draggable
                         onDragStart={(e) => {
-                          e.dataTransfer.setData('text/plain', url);
-                          e.dataTransfer.effectAllowed = 'copy';
+                          const de = e as unknown as React.DragEvent;
+                          de.dataTransfer.setData('text/plain', url);
+                          de.dataTransfer.effectAllowed = 'copy';
                         }}
                         onClick={() => {
                           if (runMode === 'generate') setEditResultImageGenerate(url);

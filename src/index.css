@@ -1544,23 +1544,38 @@ html[data-theme="dark"] [data-cover-page][data-studio-page].studio-page-shell {
   color: var(--cover-fg-warm);
 }
 
+.studio-shell-canvas[data-shell-active='1'] {
+  opacity: 1 !important;
+  transform: none !important;
+  background-color: transparent;
+}
+
 /* 画布根节点勿用不透明底，否则会挡住 studio-page-bg */
 [data-cover-page].canvas-page .infinite-canvas-root {
   background: transparent !important;
   color: var(--cover-fg-warm);
 }
 
+/* 进入画布编辑器：隐藏封面背景，改用纯黑底 */
+[data-cover-page].canvas-page:has(.infinite-canvas-root[data-canvas-open='1']) {
+  background-color: #0e0e0e;
+}
+
+.studio-shell-canvas:has(.infinite-canvas-root[data-canvas-open='1']) {
+  background-color: #0e0e0e !important;
+}
+
+[data-cover-page].canvas-page:has(.infinite-canvas-root[data-canvas-open='1']) .studio-page-bg,
+[data-cover-page].canvas-page:has(.infinite-canvas-root[data-canvas-open='1']) .studio-page-scrim,
+[data-cover-page].canvas-page:has(.infinite-canvas-root[data-canvas-open='1']) .studio-page-glow {
+  display: none;
+}
+
 [data-cover-page].canvas-page .infinite-canvas-root .canvas-gate {
   background: transparent !important;
 }
 
-/* 画布页：顶栏 overlay 下偏移内嵌工具条；Gate 留出导航空间 */
-[data-cover-page].canvas-page .infinite-canvas-root .topbar {
-  top: 5rem;
-  left: 1rem;
-  right: 1rem;
-}
-
+/* 画布页：返回条已挂到顶栏品牌右侧；Gate 留出导航空间 */
 [data-cover-page].canvas-page .infinite-canvas-root .canvas-gate {
   padding: 5rem 1.5rem 2.5rem;
   align-items: center;
@@ -1569,11 +1584,8 @@ html[data-theme="dark"] [data-cover-page][data-studio-page].studio-page-shell {
 
 [data-cover-page].canvas-page .infinite-canvas-root .gate-panel {
   margin-top: 0;
+  contain: layout style paint;
   transform: translateY(clamp(1rem, 4vh, 2.75rem));
-}
-
-[data-cover-page].canvas-page .infinite-canvas-root .gate-panel-ambient {
-  transform: translate(-50%, calc(-50% + clamp(0.75rem, 3vh, 2rem)));
 }
 
 /* 站点日间 + 画布暗色引擎：避免 textarea 深色字配深色底导致「有字看不见」 */
@@ -1581,19 +1593,23 @@ html[data-theme="light"] [data-cover-page].canvas-page .infinite-canvas-root.the
 html[data-theme="light"] [data-cover-page].canvas-page .infinite-canvas-root.theme-dark .loop-field textarea,
 html[data-theme="light"] [data-cover-page].canvas-page .infinite-canvas-root.theme-dark .llm-system,
 html[data-theme="light"] [data-cover-page].canvas-page .infinite-canvas-root.theme-dark .llm-chat-input,
-html[data-theme="light"] [data-cover-page].canvas-page .infinite-canvas-root.theme-dark .llm-input-area {
+html[data-theme="light"] [data-cover-page].canvas-page .infinite-canvas-root.theme-dark .llm-input-area,
+html[data-theme="light"] [data-cover-page].canvas-page .infinite-canvas-root.theme-dark .nine-grid-agent-node .nine-grid-shot-prompt,
+html[data-theme="light"] [data-cover-page].canvas-page .infinite-canvas-root.theme-dark .nine-grid-agent-node .nine-grid-story-input,
+html[data-theme="light"] [data-cover-page].canvas-page .infinite-canvas-root.theme-dark .prompt-group-prefix {
   color: var(--text, #e5e2e1) !important;
   caret-color: var(--text, #e5e2e1);
+  -webkit-text-fill-color: var(--text, #e5e2e1);
+}
+
+[data-cover-page].canvas-page .infinite-canvas-root .gate-panel {
+  background: rgba(19, 19, 19, 0.84) !important;
+  backdrop-filter: blur(20px) saturate(1.06);
+  -webkit-backdrop-filter: blur(20px) saturate(1.06);
 }
 
 @media (min-width: 768px) {
   .canvas-page-intro {
-    top: 5.75rem;
-    left: 1.5rem;
-    right: 1.5rem;
-  }
-
-  [data-cover-page].canvas-page .infinite-canvas-root .topbar {
     top: 5.75rem;
     left: 1.5rem;
     right: 1.5rem;

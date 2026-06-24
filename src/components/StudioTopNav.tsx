@@ -9,7 +9,6 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useShellNavigation } from '../shell/ShellNavigation';
-import { ThemeToggle } from './ThemeToggle';
 import { StudioBackgroundRevealControl } from './StudioBackgroundRevealControl';
 import { cn } from '../lib/utils';
 
@@ -29,14 +28,29 @@ type StudioTopNavProps = {
   variant?: 'overlay' | 'embedded';
   className?: string;
   onHome?: () => void;
+  /** 功能页隐藏分镜/画布/九宫格等栏目，仅保留品牌返回 */
+  hideFeatureNav?: boolean;
+  /** 画布编辑页：在品牌右侧挂载返回/标题条 */
+  showCanvasTopbarSlot?: boolean;
 };
 
-function NavBrand({ onHome, heroTone }: { onHome: () => void; heroTone?: boolean }) {
+/** 画布引擎 topbar 挂载点（与 InfiniteCanvas 内 portal 对应） */
+export const CANVAS_TOPBAR_SLOT_ID = 'canvas-topbar-slot';
+
+function NavBrand({
+  onHome,
+  heroTone,
+  className,
+}: {
+  onHome: () => void;
+  heroTone?: boolean;
+  className?: string;
+}) {
   return (
     <button
       type="button"
       onClick={onHome}
-      className="group flex items-center shrink-0 min-w-0 cursor-pointer"
+      className={cn('group flex items-center shrink-0 min-w-0 cursor-pointer', className)}
       aria-label="LHZ's Studio — 返回首页"
     >
       <span
@@ -137,6 +151,8 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
   variant = 'embedded',
   className,
   onHome,
+  hideFeatureNav = false,
+  showCanvasTopbarSlot = false,
 }) => {
   const {
     openCover,
@@ -176,25 +192,51 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
       className={cn(
         'cover-hero-nav-bar',
         isOverlayNav &&
-          'fixed inset-x-0 top-0 z-[70] px-6 pt-5 md:px-10 md:pt-7 lg:px-14 pointer-events-none',
+          'fixed inset-x-0 top-0 z-[70] pointer-events-none',
         variant === 'embedded' &&
-          'shrink-0 z-50 px-4 py-3 md:px-6 md:py-4 bg-surface-container-lowest/55 backdrop-blur-[24px]',
+          'flex items-center shrink-0 z-50 px-4 py-3 md:px-6 md:py-4 bg-surface-container-lowest/55 backdrop-blur-[24px]',
         className,
       )}
     >
+      {showCanvasTopbarSlot ? (
+        <div
+          className={cn(
+            'pointer-events-auto z-[2] flex min-w-0 items-center gap-3',
+            isOverlayNav
+              ? 'absolute left-6 top-5 md:left-10 md:top-7 lg:left-14 max-w-[min(560px,calc(100vw-2rem))]'
+              : 'shrink-0',
+          )}
+        >
+          <NavBrand onHome={handleHome} heroTone={isOverlayNav} />
+          <div id={CANVAS_TOPBAR_SLOT_ID} className="min-w-0 flex-1" />
+        </div>
+      ) : (
+        <NavBrand
+          onHome={handleHome}
+          heroTone={isOverlayNav}
+          className={cn(
+            'pointer-events-auto z-[2]',
+            isOverlayNav
+              ? 'absolute left-6 top-5 md:left-10 md:top-7 lg:left-14'
+              : 'shrink-0',
+          )}
+        />
+      )}
+
+      {!hideFeatureNav ? (
       <nav
         className={cn(
-          'pointer-events-auto mx-auto flex w-full max-w-[1400px] items-center',
-          !isCoverHomeNav && 'gap-3 md:gap-4',
+          'pointer-events-auto flex w-full items-center',
+          isOverlayNav
+            ? 'justify-end gap-2 px-6 pt-5 md:gap-3 md:px-10 md:pt-7 lg:px-14'
+            : 'justify-end gap-2 md:gap-3 flex-1 min-w-0',
         )}
         aria-label="LHZ's Studio navigation"
       >
-        <NavBrand onHome={handleHome} heroTone={isOverlayNav} />
-
         <div
           className={cn(
-            'ml-auto flex min-w-0 items-center',
-            isCoverHomeNav ? 'gap-8 md:gap-10 lg:gap-12' : 'gap-2 md:gap-3 flex-1 justify-end',
+            'flex min-w-0 items-center',
+            isCoverHomeNav ? 'gap-8 md:gap-10 lg:gap-12' : 'gap-2 md:gap-3',
           )}
         >
           <div
@@ -242,11 +284,10 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
             {!isCoverHomeNav && isOverlayNav ? (
               <StudioBackgroundRevealControl heroTone />
             ) : null}
-
-            <ThemeToggle heroTone={isOverlayNav} />
           </div>
         </div>
       </nav>
+      ) : null}
     </header>
   );
 };

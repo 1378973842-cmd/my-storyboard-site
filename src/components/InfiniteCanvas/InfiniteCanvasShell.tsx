@@ -1,5 +1,19 @@
 /** Auto-generated from canvas.html — re-run scripts/html-to-jsx-shell.mjs */
-import { memo, useCallback, type Ref } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type Ref } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  applyImageEdit,
+  clearEditDrawing,
+  closeImageEditor,
+  redoEditDrawing,
+  resetCropBox,
+  resetImageEditZoom,
+  restoreAnnotationBase,
+  setBrushTool,
+  setCropAspectLock,
+  setImageEditMode,
+  undoEditDrawing,
+} from '../../lib/infiniteCanvas/canvasEngine.js';
 
 const canvasWin = window as unknown as Record<string, (...args: unknown[]) => void>;
 
@@ -8,13 +22,140 @@ function assignRootRef(rootRef: Ref<HTMLDivElement>, node: HTMLDivElement | null
   else if (rootRef && 'current' in rootRef) rootRef.current = node;
 }
 
-/** 首帧保持 gate 可见；勿用 lastCanvasId 预设 canvasOpen（会触发 gate 隐藏→再显示闪动） */
+/** 首帧保持 gate 可见；shell 默认 no-canvas，避免编辑器顶栏在引擎就绪前闪现 */
 function seedCanvasRootMarkers(node: HTMLDivElement) {
   if (node.dataset.editorSession == null) node.dataset.editorSession = '0';
   if (node.dataset.canvasOpen == null) node.dataset.canvasOpen = '0';
+  const shell = node.querySelector('#shell');
+  if (shell && !shell.classList.contains('no-canvas')) {
+    shell.classList.add('no-canvas');
+  }
 }
 
 type Props = { rootRef: Ref<HTMLDivElement> };
+
+function ToolbarAgentFlyout() {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState({ left: 0, bottom: 0 });
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const root = document.querySelector('.infinite-canvas-root');
+    setPortalRoot(root instanceof HTMLElement ? root : null);
+  }, []);
+
+  const syncMenuPos = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setMenuPos({
+      left: rect.left + rect.width / 2,
+      bottom: window.innerHeight - rect.top + 8,
+    });
+  }, []);
+
+  const refreshFlyoutIcons = useCallback(() => {
+    const lucide = (window as unknown as { lucide?: { createIcons?: () => void } }).lucide;
+    lucide?.createIcons?.();
+  }, []);
+
+  const openMenu = useCallback(() => {
+    if (closeTimerRef.current != null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    syncMenuPos();
+    setOpen(true);
+    queueMicrotask(refreshFlyoutIcons);
+  }, [refreshFlyoutIcons, syncMenuPos]);
+
+  const scheduleClose = useCallback(() => {
+    closeTimerRef.current = window.setTimeout(() => setOpen(false), 140);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onLayout = () => syncMenuPos();
+    window.addEventListener('resize', onLayout);
+    window.addEventListener('scroll', onLayout, true);
+    return () => {
+      window.removeEventListener('resize', onLayout);
+      window.removeEventListener('scroll', onLayout, true);
+    };
+  }, [open, syncMenuPos]);
+
+  useEffect(() => () => {
+    if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
+  }, []);
+
+  const menu = open && portalRoot ? createPortal(
+    <div
+      className="toolbar-flyout-menu toolbar-flyout-menu-portal is-open"
+      role="menu"
+      aria-label="Agent nodes"
+      style={{ left: `${menuPos.left}px`, bottom: `${menuPos.bottom}px` }}
+      onMouseEnter={openMenu}
+      onMouseLeave={scheduleClose}
+    >
+      <button
+        type="button"
+        className="toolbar-flyout-item"
+        role="menuitem"
+        onClick={() => {
+          setOpen(false);
+          canvasWin['addReplicaAgentNode']?.();
+        }}
+      >
+        <i data-lucide="bot" className="w-4 h-4"></i>
+        <span>复刻 Agent</span>
+      </button>
+      <button
+        type="button"
+        className="toolbar-flyout-item"
+        role="menuitem"
+        onClick={() => {
+          setOpen(false);
+          canvasWin['addBatchPosterAgentNode']?.();
+        }}
+      >
+        <i data-lucide="layout-grid" className="w-4 h-4"></i>
+        <span>Batch Poster Agent</span>
+      </button>
+    </div>,
+    portalRoot,
+  ) : null;
+
+  return (
+    <>
+      <div
+        className={`toolbar-flyout${open ? ' is-open' : ''}`}
+        onMouseEnter={openMenu}
+        onMouseLeave={scheduleClose}
+      >
+        <button
+          ref={triggerRef}
+          type="button"
+          className="tool-btn tool-btn-ghost tool-btn-icon-only toolbar-flyout-trigger"
+          title="Agent"
+          aria-label="Agent"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => {
+            syncMenuPos();
+            setOpen((value) => !value);
+            queueMicrotask(refreshFlyoutIcons);
+          }}
+        >
+          <i data-lucide="bot" className="w-4 h-4"></i>
+          <span>Agent</span>
+        </button>
+      </div>
+      {menu}
+    </>
+  );
+}
 
 export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({ rootRef }: Props) {
   const mergedRef = useCallback(
@@ -30,7 +171,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({ rootRef }
       {/* #shell 禁止写 className，由 canvasEngine 独占 no-canvas / theme-dark */}
       <div id="shell">
               <div className="topbar editor-only">
-                  <div id="quickToolbar" className="panel canvas-topbar toolbar">
+                  <div className="panel canvas-topbar-compact">
                       <div className="canvas-topbar-nav">
                           <button id="backToManagerBtn" className="tool-btn tool-btn-back" type="button" title="返回画布管理" aria-label="返回画布管理" data-i18n-title="canvas.backToManager"><i data-lucide="arrow-left" className="w-4 h-4"></i></button>
                           <div className="canvas-nav-meta">
@@ -39,7 +180,12 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({ rootRef }
                           </div>
                           <p id="saveState" style={{ display: "none" }} data-i18n="canvas.chooseFirst">请选择或新建画布</p>
                       </div>
-                      <div className="canvas-topbar-body">
+                  </div>
+              </div>
+
+              <div className="bottombar editor-only">
+                  <div id="quickToolbar" className="panel canvas-bottombar toolbar">
+                      <div className="canvas-bottombar-body">
                           <div className="toolbar-dock">
                               <div className="toolbar-group">
                                   <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["addImageNode"]?.()} title="图片" aria-label="图片"><i data-lucide="image-plus" className="w-4 h-4"></i><span data-i18n="canvas.image">图片</span></button>
@@ -49,23 +195,18 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({ rootRef }
                               <span className="toolbar-dock-sep" aria-hidden="true" />
                               <div className="toolbar-group">
                                   <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["addLLMNode"]?.()} title="LLM" aria-label="LLM"><i data-lucide="message-square-text" className="w-4 h-4"></i><span>LLM</span></button>
-                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["addGeneratorNode"]?.()} title="API生成" aria-label="API生成"><i data-lucide="wand-sparkles" className="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">API生成</span></button>
-                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["addReplicaAgentNode"]?.()} title="复刻 Agent" aria-label="复刻 Agent"><i data-lucide="bot" className="w-4 h-4"></i><span>复刻</span></button>
+                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["addGeneratorNode"]?.()} title="图片生成" aria-label="图片生成"><i data-lucide="wand-sparkles" className="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
+                                  <ToolbarAgentFlyout />
                                   <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["addVideoReverseNode"]?.()} title="视频反推" aria-label="视频反推"><i data-lucide="scan-search" className="w-4 h-4"></i><span>反推</span></button>
                               </div>
                               <span className="toolbar-dock-sep" aria-hidden="true" />
                               <div className="toolbar-group">
                                   <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["addOutputNode"]?.()} title="Output" aria-label="Output"><i data-lucide="circle-dot" className="w-4 h-4"></i><span>Output</span></button>
-                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["groupSelectedImages"]?.()} title="分组" aria-label="分组"><i data-lucide="group" className="w-4 h-4"></i><span data-i18n="canvas.group">分组</span></button>
-                              </div>
-                              <span className="toolbar-dock-sep" aria-hidden="true" />
-                              <div className="toolbar-utilities">
-                                  <button id="workflowTemplateBtn" className="tool-btn tool-btn-ghost tool-btn-icon-only" type="button" title="工作流模板" aria-label="工作流模板"><i data-lucide="layout-template" className="w-4 h-4"></i><span data-i18n="canvas.workflowTemplates">工作流</span></button>
-                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["openCanvasLog"]?.()} title="日志" aria-label="日志" data-i18n-title="canvas.logs"><i data-lucide="list-todo" className="w-4 h-4"></i><span data-i18n="canvas.logs">日志</span></button>
+                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["createImageBatchFromSelection"]?.()} title="图片组" aria-label="图片组" data-i18n-title="canvas.imageBatchNode"><i data-lucide="images" className="w-4 h-4"></i><span data-i18n="canvas.imageBatchNode">图片组</span></button>
+                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["createPromptGroupFromSelection"]?.()} title="提示词组" aria-label="提示词组" data-i18n-title="canvas.promptGroupNode"><i data-lucide="layers" className="w-4 h-4"></i><span data-i18n="canvas.promptGroupNode">提示词组</span></button>
                               </div>
                           </div>
                       </div>
-                      <button className="tool-btn tool-btn-toggle toolbar-toggle" type="button" onClick={() => canvasWin["toggleQuickToolbar"]?.()} title="折叠工具栏" aria-label="折叠工具栏"><i data-lucide="chevrons-up" className="w-4 h-4 toolbar-toggle-icon"></i></button>
                   </div>
               </div>
       
@@ -114,15 +255,23 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({ rootRef }
       
               <div id="board" className="board editor-only">
                   <div id="dropOverlay" className="drop-overlay" data-i18n="canvas.dropImage">拖放图片到画布</div>
+                  <div className="output-drag-hint editor-only" aria-live="polite">
+                      <span data-i18n="canvas.outputDragHint">拖离节点后再松手，即可复制到画布</span>
+                  </div>
                   <div id="selectionBox" className="selection-box"></div>
                   <div id="selectionHub" className="selection-hub"></div>
                   <div id="createMenu" className="create-menu">
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('image')}><i data-lucide="image-plus" className="w-4 h-4"></i><span data-i18n="canvas.imageCard">图片卡片</span></button>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('imageBatch')}><i data-lucide="images" className="w-4 h-4"></i><span data-i18n="canvas.imageBatchNode">图片组</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('prompt')}><i data-lucide="text-cursor-input" className="w-4 h-4"></i><span data-i18n="canvas.prompt">提示词</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('loop')}><i data-lucide="repeat-2" className="w-4 h-4"></i><span data-i18n="canvas.loopNode">循环节点</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('llm')}><i data-lucide="message-square-text" className="w-4 h-4"></i><span data-i18n="canvas.llmNode">LLM 节点</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('generator')}><i data-lucide="wand-sparkles" className="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">API生成</span></button>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('generator')}><i data-lucide="wand-sparkles" className="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('nineGridAgent')}><i data-lucide="grid-3x3" className="w-4 h-4"></i><span>九宫格 Agent</span></button>
+                      <div className="menu-section-title">Agent</div>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('replicaAgent')}><i data-lucide="bot" className="w-4 h-4"></i><span>复刻 Agent</span></button>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('imageRepairAgent')}><i data-lucide="wand-sparkles" className="w-4 h-4"></i><span>修图 Agent</span></button>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('batchPosterAgent')}><i data-lucide="layout-grid" className="w-4 h-4"></i><span>Batch Poster Agent</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('videoReverse')}><i data-lucide="scan-search" className="w-4 h-4"></i><span>视频反推</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('video')}><i data-lucide="clapperboard" className="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('rh')}><i data-lucide="workflow" className="w-4 h-4"></i><span data-i18n="canvas.rhGenerate">RH生成</span></button>
@@ -200,63 +349,42 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({ rootRef }
                       <div id="logList" className="log-list"></div>
                   </div>
               </div>
-              <div id="imageEditModal" className="image-edit-modal" onClick={() => canvasWin["closeImageEditor"]?.()}>
+              <div id="imageEditModal" className="image-edit-modal" onClick={() => closeImageEditor()}>
                   <div className="image-edit-panel" onClick={(e) => e.stopPropagation()}>
                       <div className="image-edit-head">
                           <div>
                               <div id="imageEditTitle" className="image-edit-title" data-i18n="canvas.editImage">编辑图片</div>
-                              <div id="imageEditSub" className="image-edit-sub" data-i18n="canvas.editImageSub">选择裁剪、遮罩或画笔模式</div>
+                              <div id="imageEditSub" className="image-edit-sub" data-i18n="canvas.editImageSub">选择裁剪或画笔模式</div>
                           </div>
                           <div className="image-edit-mode">
-                              <button type="button" data-image-edit-mode="crop" className="active"><i data-lucide="crop" className="w-3.5 h-3.5"></i><span data-i18n="canvas.modeCrop">裁剪</span></button>
-                              <button type="button" data-image-edit-mode="outpaint"><i data-lucide="expand" className="w-3.5 h-3.5"></i><span data-i18n="canvas.modeOutpaint">扩展</span></button>
-                              <button type="button" data-image-edit-mode="mask"><i data-lucide="brush" className="w-3.5 h-3.5"></i><span data-i18n="canvas.modeMask">遮罩</span></button>
-                              <button type="button" data-image-edit-mode="brush"><i data-lucide="paintbrush" className="w-3.5 h-3.5"></i><span data-i18n="canvas.modeBrush">画笔</span></button>
-                              <button type="button" data-image-edit-mode="grid"><i data-lucide="grid-3x3" className="w-3.5 h-3.5"></i><span data-i18n="canvas.modeGrid">宫格切分</span></button>
+                              <button type="button" data-image-edit-mode="crop" className="active" onClick={(e) => { e.stopPropagation(); setImageEditMode('crop', true); }}><i data-lucide="crop" className="w-3.5 h-3.5"></i><span data-i18n="canvas.modeCrop">裁剪</span></button>
+                              <button type="button" data-image-edit-mode="brush" onClick={(e) => { e.stopPropagation(); setImageEditMode('brush', true); }}><i data-lucide="paintbrush" className="w-3.5 h-3.5"></i><span data-i18n="canvas.modeBrush">画笔</span></button>
                           </div>
-                          <button className="preview-icon-btn" type="button" onClick={() => canvasWin["closeImageEditor"]?.()} title="关闭" data-i18n-title="common.close"><i data-lucide="x" className="w-4 h-4"></i></button>
+                          <button className="preview-icon-btn" type="button" onClick={() => closeImageEditor()} title="关闭" data-i18n-title="common.close"><i data-lucide="x" className="w-4 h-4"></i></button>
                       </div>
-                      <div id="imageMaskTools" className="image-edit-tools">
-                          <label><span data-i18n="canvas.brushSize">笔刷</span> <input id="maskBrushSize" type="range" min={4} max={160} value={42} /></label>
-                          <button id="maskUndoBtn" className="image-edit-btn secondary" type="button" onClick={() => canvasWin["undoEditDrawing"]?.()} title="撤销"><i data-lucide="undo-2" className="w-4 h-4"></i></button>
-                          <button id="maskRedoBtn" className="image-edit-btn secondary" type="button" onClick={() => canvasWin["redoEditDrawing"]?.()} title="恢复"><i data-lucide="redo-2" className="w-4 h-4"></i></button>
-                          <button className="image-edit-btn secondary" type="button" onClick={() => canvasWin["clearEditDrawing"]?.()}><i data-lucide="eraser" className="w-4 h-4"></i><span data-i18n="canvas.clear">清空</span></button>
-                          <span className="image-edit-sub" data-i18n="canvas.maskHint">白色区域为要编辑的遮罩</span>
+                      <div id="imageCropTools" className="image-edit-tools active">
+                          <span className="image-edit-sub" data-i18n="canvas.cropAspect">裁剪比例</span>
+                          <button type="button" className="crop-aspect-btn active" data-crop-aspect="original" data-i18n="canvas.cropAspectOriginal" onClick={(e) => { e.stopPropagation(); setCropAspectLock('original'); }}>原图比例</button>
+                          <button type="button" className="crop-aspect-btn" data-crop-aspect="free" data-i18n="canvas.cropAspectFree" onClick={(e) => { e.stopPropagation(); setCropAspectLock('free'); }}>自由</button>
+                          <button type="button" className="crop-aspect-btn" data-crop-aspect="1:1" onClick={(e) => { e.stopPropagation(); setCropAspectLock('1:1'); }}>1:1</button>
+                          <button type="button" className="crop-aspect-btn" data-crop-aspect="9:16" onClick={(e) => { e.stopPropagation(); setCropAspectLock('9:16'); }}>9:16</button>
+                          <button type="button" className="crop-aspect-btn" data-crop-aspect="16:9" onClick={(e) => { e.stopPropagation(); setCropAspectLock('16:9'); }}>16:9</button>
+                          <button type="button" className="crop-aspect-btn" data-crop-aspect="4:3" onClick={(e) => { e.stopPropagation(); setCropAspectLock('4:3'); }}>4:3</button>
+                          <button type="button" className="crop-aspect-btn" data-crop-aspect="3:4" onClick={(e) => { e.stopPropagation(); setCropAspectLock('3:4'); }}>3:4</button>
+                          <span id="cropAspectHint" className="image-edit-sub"></span>
                       </div>
                       <div id="imageBrushTools" className="image-edit-tools">
-                          <button className="image-edit-btn primary" type="button" data-brush-tool="free" onClick={() => canvasWin["setBrushTool"]?.('free')} title="自由画笔"><i data-lucide="paintbrush" className="w-4 h-4"></i></button>
-                          <button className="image-edit-btn secondary" type="button" data-brush-tool="rect" onClick={() => canvasWin["setBrushTool"]?.('rect')} title="矩形"><i data-lucide="square" className="w-4 h-4"></i></button>
-                          <button className="image-edit-btn secondary" type="button" data-brush-tool="ellipse" onClick={() => canvasWin["setBrushTool"]?.('ellipse')} title="椭圆"><i data-lucide="circle" className="w-4 h-4"></i></button>
-                          <button className="image-edit-btn secondary" type="button" data-brush-tool="label" onClick={() => canvasWin["setBrushTool"]?.('label')} title="数字标签"><i data-lucide="list-ordered" className="w-4 h-4"></i></button>
+                          <button className="image-edit-btn primary" type="button" data-brush-tool="free" onClick={(e) => { e.stopPropagation(); setBrushTool('free'); }} title="自由画笔"><i data-lucide="paintbrush" className="w-4 h-4"></i></button>
+                          <button className="image-edit-btn secondary" type="button" data-brush-tool="rect" onClick={(e) => { e.stopPropagation(); setBrushTool('rect'); }} title="矩形"><i data-lucide="square" className="w-4 h-4"></i></button>
+                          <button className="image-edit-btn secondary" type="button" data-brush-tool="ellipse" onClick={(e) => { e.stopPropagation(); setBrushTool('ellipse'); }} title="椭圆"><i data-lucide="circle" className="w-4 h-4"></i></button>
+                          <button className="image-edit-btn secondary" type="button" data-brush-tool="label" onClick={(e) => { e.stopPropagation(); setBrushTool('label'); }} title="角色编号标注"><i data-lucide="list-ordered" className="w-4 h-4"></i></button>
                           <label><span data-i18n="canvas.color">颜色</span> <input id="paintBrushColor" type="color" value="#ff2d55" /></label>
                           <label><span data-i18n="canvas.brushSize">笔刷</span> <input id="paintBrushSize" type="range" min={2} max={80} value={14} /></label>
-                          <button id="brushUndoBtn" className="image-edit-btn secondary" type="button" onClick={() => canvasWin["undoEditDrawing"]?.()} title="撤销"><i data-lucide="undo-2" className="w-4 h-4"></i></button>
-                          <button id="brushRedoBtn" className="image-edit-btn secondary" type="button" onClick={() => canvasWin["redoEditDrawing"]?.()} title="恢复"><i data-lucide="redo-2" className="w-4 h-4"></i></button>
-                          <button className="image-edit-btn secondary" type="button" onClick={() => canvasWin["clearEditDrawing"]?.()}><i data-lucide="eraser" className="w-4 h-4"></i><span data-i18n="canvas.clear">清空</span></button>
-                      </div>
-                      <div id="imageGridTools" className="image-edit-tools">
-                          <button id="gridCustomToggle" className="image-edit-btn secondary" type="button" onClick={() => canvasWin["toggleGridCustomMode"]?.()} data-i18n="canvas.gridCustom" data-i18n-title="canvas.gridCustomTitle" title="自由放置切割线">自定义</button>
-                          <div className="grid-preset-row">
-                              <span className="image-edit-sub" data-i18n="canvas.gridPresets">预设</span>
-                              <button className="grid-preset-btn" type="button" onClick={() => canvasWin["applyGridPreset"]?.(1, 2)}>1×2</button>
-                              <button className="grid-preset-btn" type="button" onClick={() => canvasWin["applyGridPreset"]?.(2, 1)}>2×1</button>
-                              <button className="grid-preset-btn" type="button" onClick={() => canvasWin["applyGridPreset"]?.(2, 2)}>2×2</button>
-                              <button className="grid-preset-btn" type="button" onClick={() => canvasWin["applyGridPreset"]?.(2, 3)}>2×3</button>
-                              <button className="grid-preset-btn" type="button" onClick={() => canvasWin["applyGridPreset"]?.(3, 2)}>3×2</button>
-                              <button className="grid-preset-btn" type="button" onClick={() => canvasWin["applyGridPreset"]?.(3, 3)}>3×3</button>
-                          </div>
-                          <span id="gridRegularControls" style={{ display: "contents" }}>
-                              <label><span data-i18n="canvas.gridHLines">横向线</span> <input id="gridHorizontalLines" type="number" min={0} max={20} value={2} /></label>
-                              <label><span data-i18n="canvas.gridVLines">竖向线</span> <input id="gridVerticalLines" type="number" min={0} max={20} value={2} /></label>
-                          </span>
-                          <div id="gridCustomControls" style={{ display: "none", alignItems: "center", gap: 6 }}>
-                              <button id="gridOrientH" className="image-edit-btn primary" type="button" onClick={() => canvasWin["setGridCustomOrientation"]?.('h')} data-i18n="canvas.gridOrientH" data-i18n-title="canvas.gridOrientHTitle" title="点击图片放置水平线">水平</button>
-                              <button id="gridOrientV" className="image-edit-btn secondary" type="button" onClick={() => canvasWin["setGridCustomOrientation"]?.('v')} data-i18n="canvas.gridOrientV" data-i18n-title="canvas.gridOrientVTitle" title="点击图片放置竖直线">垂直</button>
-                              <button id="gridUndoBtn" className="image-edit-btn secondary" type="button" onClick={() => canvasWin["undoGridCustomLine"]?.()} data-i18n-title="canvas.gridUndo" title="撤销上一条线" disabled style={{ opacity: 0.4 }}><i data-lucide="undo-2" className="w-3.5 h-3.5"></i></button>
-                              <button className="image-edit-btn secondary" type="button" onClick={() => canvasWin["clearGridCustomLines"]?.()} data-i18n-title="canvas.gridClearLines" title="清除所有自定义线"><i data-lucide="eraser" className="w-3.5 h-3.5"></i></button>
-                          </div>
-                          <label className="grid-gap-control"><span data-i18n="canvas.gridGap">间隔(px)</span> <input id="gridGapSize" type="range" min={0} max={240} step={1} value={0} /><span id="gridGapValue" className="grid-gap-value">0</span></label>
-                          <span id="gridSplitCount" className="image-edit-sub"></span>
+                          <button id="brushUndoBtn" className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); undoEditDrawing(); }} title="撤销"><i data-lucide="undo-2" className="w-4 h-4"></i></button>
+                          <button id="brushRedoBtn" className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); redoEditDrawing(); }} title="恢复"><i data-lucide="redo-2" className="w-4 h-4"></i></button>
+                          <button className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); clearEditDrawing(); }}><i data-lucide="eraser" className="w-4 h-4"></i><span data-i18n="canvas.clear">清空</span></button>
+                          <div id="annotationLabelPick" className="annotation-label-pick" style={{ display: "none" }} />
+                          <button id="annotationRestoreBtn" className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); restoreAnnotationBase(); }} title="恢复标注前的原图"><i data-lucide="rotate-ccw" className="w-4 h-4"></i><span>恢复原图</span></button>
                       </div>
                       <div id="imageEditStage" className="image-edit-stage">
                           <div className="image-edit-stage-inner">
@@ -266,22 +394,14 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({ rootRef }
                                   <div id="cropBox" className="crop-box">
                                       <div id="cropHandle" className="crop-handle"></div>
                                   </div>
-                                  <div id="outpaintFrame" className="outpaint-frame">
-                                      <div className="outpaint-handle" data-outpaint-handle="top"></div>
-                                      <div className="outpaint-handle" data-outpaint-handle="right"></div>
-                                      <div className="outpaint-handle" data-outpaint-handle="bottom"></div>
-                                      <div className="outpaint-handle" data-outpaint-handle="left"></div>
-                                      <div className="outpaint-handle" data-outpaint-handle="corner"></div>
-                                  </div>
-                                  <div id="outpaintResolution" className="outpaint-resolution"></div>
                               </div>
                           </div>
                       </div>
                       <div className="image-edit-actions">
-                          <span id="imageEditZoomLabel" style={{ color: "#94a3b8", fontSize: 11, fontWeight: 800, padding: "0 4px", marginRight: "auto", cursor: "pointer", userSelect: "none" }} title="双击重置缩放" onDoubleClick={() => canvasWin["resetImageEditZoom"]?.()}>100%</span>
-                          <button className="image-edit-btn secondary" type="button" onClick={() => canvasWin["resetCropBox"]?.()}><i data-lucide="rotate-ccw" className="w-4 h-4"></i><span data-i18n="canvas.reset">重置</span></button>
-                          <button className="image-edit-btn secondary" type="button" onClick={() => canvasWin["closeImageEditor"]?.()} data-i18n="common.cancel">取消</button>
-                          <button id="imageEditApplyBtn" className="image-edit-btn primary" type="button" onClick={() => canvasWin["applyImageEdit"]?.()}><i data-lucide="crop" className="w-4 h-4"></i><span data-i18n="canvas.applyCrop">应用裁剪</span></button>
+                          <span id="imageEditZoomLabel" style={{ color: "#94a3b8", fontSize: 11, fontWeight: 800, padding: "0 4px", marginRight: "auto", cursor: "pointer", userSelect: "none" }} title="双击重置缩放" onDoubleClick={() => resetImageEditZoom()}>100%</span>
+                          <button className="image-edit-btn secondary" type="button" onClick={() => resetCropBox()}><i data-lucide="rotate-ccw" className="w-4 h-4"></i><span data-i18n="canvas.reset">重置</span></button>
+                          <button className="image-edit-btn secondary" type="button" onClick={() => closeImageEditor()} data-i18n="common.cancel">取消</button>
+                          <button id="imageEditApplyBtn" className="image-edit-btn primary" type="button" onClick={() => applyImageEdit()}><i data-lucide="crop" className="w-4 h-4"></i><span data-i18n="canvas.applyCrop">应用裁剪</span></button>
                       </div>
                   </div>
               </div>

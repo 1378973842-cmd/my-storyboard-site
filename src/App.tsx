@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import { StyleBase, ReferenceImage } from './types';
-import { STYLES } from './constants';
+import { STYLES, STORYBOARD_TEXT_MODEL } from './constants';
 import { StoryboardCard } from './components/StoryboardCard';
 import { StoryboardGridCard } from './components/StoryboardGridCard';
 import { ProjectManager } from './components/ProjectManager';
@@ -397,7 +397,8 @@ export default function App() {
           script,
           context,
           style: selectedStyle,
-          index
+          index,
+          textModel: STORYBOARD_TEXT_MODEL,
         })
       });
       const result = await parseApiResponse(res);
@@ -541,7 +542,8 @@ export default function App() {
             index: index + 1,
             name: r.name,
             type: r.type
-          }))
+          })),
+          textModel: STORYBOARD_TEXT_MODEL,
         }),
       });
       
@@ -633,6 +635,8 @@ export default function App() {
       <StudioTopNav
         active={resolveStudioNavActive(screen)}
         variant="overlay"
+        hideFeatureNav={!showCoverPage}
+        showCanvasTopbarSlot={showInfiniteCanvasPage && !showCoverPage}
         onHome={showInfiniteCanvasPage && !showCoverPage ? handleCanvasExitHome : undefined}
       />
       {/* Keep editor mounted after first open (cover / main studio), so draft persists */}
@@ -648,8 +652,11 @@ export default function App() {
         </StudioHeroShell>
       )}
 
-      {(showInfiniteCanvasPage || (infiniteCanvasKeepAlive && !showCoverPage)) && (
-        <StudioHeroShell active={showInfiniteCanvasPage && !showCoverPage}>
+      {(infiniteCanvasKeepAlive || showInfiniteCanvasPage) && (
+        <StudioHeroShell
+          active={showInfiniteCanvasPage && !showCoverPage}
+          className="studio-shell-canvas"
+        >
           <InfiniteCanvasPage
             enterKey={studioTransitionKeys['infinite-canvas']}
             shellActive={showInfiniteCanvasPage && !showCoverPage}
@@ -666,6 +673,7 @@ export default function App() {
 
       <CoverPageTransition
         show={showCoverPage}
+        instantExit={showInfiniteCanvasPage && !showCoverPage}
         enterKey={studioTransitionKeys.cover}
         onStart={openStudio}
         onOpenImageEditor={openImageEditorScreen}

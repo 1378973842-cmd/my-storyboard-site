@@ -1,4 +1,4 @@
-import type { Express, Request, Response } from "express";
+import type { Express, Request, Response, RequestHandler } from "express";
 import multer from "multer";
 import path from "path";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
@@ -17,7 +17,9 @@ import {
 } from "./infiniteCanvasStore.js";
 import { registerCanvasSiteImageRoutes } from "./canvasSiteImageBridge.js";
 import { registerCanvasLlmRoutes } from "./canvasLlmBridge.js";
+import { registerCanvasBatchPosterRoutes } from "./canvasBatchPosterBridge.js";
 import { registerCanvasReplicaAgentRoutes } from "./canvasReplicaAgentBridge.js";
+import { registerCanvasImageRepairAgentRoutes } from "./canvasImageRepairAgentBridge.js";
 import {
   deleteUserWorkflowTemplate,
   getWorkflowTemplate,
@@ -25,6 +27,7 @@ import {
   listWorkflowTemplates,
   saveUserWorkflowTemplate,
 } from "./canvasWorkflowTemplates.js";
+import { requireSiteGate } from "./siteAccessGate.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 80 * 1024 * 1024 } });
 
@@ -46,6 +49,8 @@ function canvasError(res: Response, err: unknown, fallback = "操作失败") {
 
 export type InfiniteCanvasRouteDeps = {
   persistImage: (url: string) => Promise<string>;
+  /** 与生图/LLM 共用的暗号 Cookie 校验；缺省 requireSiteGate */
+  requireGate?: RequestHandler;
 };
 
 export function registerInfiniteCanvasRoutes(
@@ -55,8 +60,9 @@ export function registerInfiniteCanvasRoutes(
 ) {
   initInfiniteCanvasStore(projectRoot);
   initCanvasWorkflowTemplatesStore(projectRoot);
+  const gate = deps?.requireGate ?? requireSiteGate;
   console.log(
-    "[infinite-canvas] routes ready: /api/canvases, /api/canvas-workflow-templates, /api/canvas-image-tasks, /api/canvas-llm, /api/canvas/replica-agent-run, /api/config"
+    "[infinite-canvas] routes ready: /api/canvases, /api/canvas-workflow-templates, /api/canvas-image-tasks, /api/canvas-llm, /api/canvas/batch-poster-brainstorm, /api/canvas/replica-agent-run, /api/canvas/image-repair-agent-run, /api/config (P0 gated)"
   );
   const uploadsDir = path.join(projectRoot, "public", "uploads", "canvas");
   mkdirSync(uploadsDir, { recursive: true });
@@ -173,22 +179,31 @@ export function registerInfiniteCanvasRoutes(
 
   /** 画布 API 生成：与主页图片编辑（编辑模式 / GPT 编辑）同一套 /api/edit-image + RunningHub */
   if (deps?.persistImage) {
-    registerCanvasSiteImageRoutes(app, { projectRoot, persistImage: deps.persistImage });
+    registerCanvasSiteImageRoutes(app, { projectRoot, persistImage: deps.persistImage, requireGate: gate });
   } else {
     registerCanvasSiteImageRoutes(app, {
       projectRoot,
       persistImage: async (url) => url,
+      requireGate: gate,
     });
   }
 
-  registerCanvasLlmRoutes(app, projectRoot);
+  registerCanvasLlmRoutes(app, projectRoot, gate);
+  registerCanvasBatchPosterRoutes(app, projectRoot, gate);
 
   if (deps?.persistImage) {
-    registerCanvasReplicaAgentRoutes(app, { projectRoot, persistImage: deps.persistImage });
+    registerCanvasReplicaAgentRoutes(app, { projectRoot, persistImage: deps.persistImage, requireGate: gate });
+    registerCanvasImageRepairAgentRoutes(app, { projectRoot, persistImage: deps.persistImage, requireGate: gate });
   } else {
     registerCanvasReplicaAgentRoutes(app, {
       projectRoot,
       persistImage: async (url) => url,
+      requireGate: gate,
+    });
+    registerCanvasImageRepairAgentRoutes(app, {
+      projectRoot,
+      persistImage: async (url) => url,
+      requireGate: gate,
     });
   }
 
@@ -204,6 +219,7 @@ export function registerInfiniteCanvasRoutes(
         [
           (process.env.TEXT_MODEL || "").trim(),
           "gemini-3.5-flash",
+          "glm-5.1",
           "gemini-3.1-pro-preview",
           "gemini-1.5-pro-preview-05-08",
           "gpt-4o-mini",
@@ -238,7 +254,7 @@ export function registerInfiniteCanvasRoutes(
     res.json({ workflows: [] });
   });
 
-  app.post("/api/canvas-assets/check", (req, res) => {
+  app.post("/api/canvas-assets/check", gate, (req, res) => {
     const urls: string[] = Array.isArray(req.body?.urls) ? req.body.urls : [];
     const exists: Record<string, boolean> = {};
     for (const url of urls.slice(0, 3000)) {
@@ -254,7 +270,7 @@ export function registerInfiniteCanvasRoutes(
     res.json({ exists });
   });
 
-  app.post("/api/ai/upload", upload.array("files"), (req, res) => {
+  app.post("/api/ai/upload", gate, upload.array("files"), (req, res) => {
     const files = (req.files as Express.Multer.File[]) || [];
     const uploaded: { url: string; name: string; kind: string }[] = [];
     for (const file of files) {
@@ -289,7 +305,7 @@ export function registerInfiniteCanvasRoutes(
       error: "该节点 API 尚未接入本站后端，可在 .env 配置 CANVAS_API_ORIGIN 转发到原 Python 服务。",
     });
   };
-  app.post("/api/canvas-video", aiStub);
-  app.post("/api/generate", aiStub);
-  app.post("/api/upload", aiStub);
+  app.post("/api/canvas-video", gate, aiStub);
+  app.post("/api/generate", gate, aiStub);
+  app.post("/api/upload", gate, aiStub);
 }

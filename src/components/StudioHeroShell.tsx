@@ -13,12 +13,13 @@ type StudioHeroShellProps = {
 
 /**
  * 功能页壳层：进入时立即就位；回封面时淡出+轻缩放。
- * 不用 filter——会破坏子树 backdrop-filter（选择画布毛玻璃会突然糊一下）。
+ * 画布壳层进入时 opacity 必须瞬时满不透明，否则会透出 body 浅色底（闪白）。
  */
 export function StudioHeroShell({ active, children, className }: StudioHeroShellProps) {
   const reduceMotion =
     typeof window !== 'undefined' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const isCanvasShell = Boolean(className?.includes('studio-shell-canvas'));
 
   if (reduceMotion) {
     if (!active) return null;
@@ -26,6 +27,7 @@ export function StudioHeroShell({ active, children, className }: StudioHeroShell
       <div
         className={cn(
           'fixed inset-0 z-[65] flex flex-col min-h-0 min-w-0 pointer-events-auto',
+          isCanvasShell && 'bg-transparent',
           className,
         )}
       >
@@ -34,18 +36,32 @@ export function StudioHeroShell({ active, children, className }: StudioHeroShell
     );
   }
 
+  const canvasEnter = isCanvasShell && active;
+
   return (
     <motion.div
-      className={cn('fixed inset-0 flex flex-col min-h-0 min-w-0', className)}
+      className={cn(
+        'fixed inset-0 flex flex-col min-h-0 min-w-0 overflow-hidden',
+        isCanvasShell && 'bg-transparent',
+        className,
+      )}
+      data-shell-active={active ? '1' : '0'}
       initial={false}
       animate={
         active
           ? { opacity: 1, scale: 1 }
-          : { opacity: 0, scale: 0.986 }
+          : { opacity: 0, scale: isCanvasShell ? 1 : 0.986 }
       }
       transition={{
-        opacity: { duration: active ? 0.01 : 0.42, ease: SHELL_EASE },
-        scale: { duration: active ? 0.01 : 0.42, ease: SHELL_EASE },
+        opacity: {
+          duration: canvasEnter ? 0 : active ? 0.01 : 0.42,
+          ease: SHELL_EASE,
+        },
+        scale: {
+          /* 画布页禁止 scale：缩小 fixed 全屏层会在四边露出 body 浅色底（边缘闪白） */
+          duration: isCanvasShell ? 0 : active ? 0.01 : 0.42,
+          ease: SHELL_EASE,
+        },
       }}
       style={{
         zIndex: active ? 65 : 55,

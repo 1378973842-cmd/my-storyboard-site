@@ -11,7 +11,7 @@ import {
 export { GATE_LS_KEY };
 
 /**
- * 专业门禁：琥珀 + 毛玻璃 + spring 动效；暗号由服务端 .env ACCESS_CODE 校验（默认 liu888）。
+ * 专业门禁：琥珀 + 毛玻璃 + spring 动效；暗号由服务端 .env ACCESS_CODE 校验（开发缺省 liu888，生产须设强暗号）。
  */
 export function LoginGate({ children }: { children: React.ReactNode }) {
   const [authorized, setAuthorized] = useState(false);

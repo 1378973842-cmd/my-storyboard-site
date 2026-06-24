@@ -8,6 +8,13 @@ import { useRefThumbPreview } from '../hooks/useRefThumbPreview';
 import { ReferenceImageLightbox } from './ReferenceImageLightbox';
 import { ZoomableLightboxImage } from './ZoomableLightboxImage';
 import { StudioConvergePiece } from './motion/StudioConverge';
+import {
+  buildNineGridImagePrompt,
+  estimateNineGridGap,
+  NINE_GRID_SHOT_PROMPT_MIN_CHARS,
+  nineGridFallbackSlicePosition,
+  splitNineGridToNine,
+} from '../lib/nineGrid/nineGridCore';
 
 type RefItem = { id: string; url: string; name?: string };
 type GridHistoryItem = {
@@ -33,16 +40,6 @@ type Props = {
   enterKey?: number;
 };
 
-const GRID_PREFIX =
-  `在3X3网格中生成9个连贯分镜，固定版式为“从左到右、从上到下 1-9 顺序”。` +
-  `每个格子严格为16:9横屏，整体大图严格为16:9。` +
-  `九格必须无任何分隔线、无边框、无留白、无黑边、无白边、无拼接缝；` +
-  `九格彼此紧贴，像一张完整画布被分为九个镜头。` +
-  `以参考图为主体，保持环境空间布局一致、人物与物品相对位置合理，并通过不同角度推进剧情连贯发展。` +
-  `全图要求高分辨率、超高清细节、电影级质感、风格高度一致。` +
-  `负向约束：禁止任何文字元素、禁止字幕、禁止对白台词字卡、禁止标题字、禁止 logo、禁止水印、禁止网格线、禁止边框、禁止任何装饰性分割元素。` +
-  `如果模型倾向添加文字，必须改为纯画面表达，画面中不得出现可读字符。`;
-
 type NineGridImageModel = 'nano-banana-pro-4k' | 'gpt-image-2';
 
 export const NineGridPage: React.FC<Props> = ({ enterKey = 0 }) => {
@@ -56,6 +53,7 @@ export const NineGridPage: React.FC<Props> = ({ enterKey = 0 }) => {
   const [error, setError] = useState<string | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [shotsPreview, setShotsPreview] = useState<Array<{ n: number; prompt: string }>>([]);
+  const [refLooks, setRefLooks] = useState<Array<Record<string, unknown>>>([]);
   const [cropPadding, setCropPadding] = useState(0);
   const [cropGap, setCropGap] = useState(0);
   const [isCropping, setIsCropping] = useState(false);
@@ -96,14 +94,10 @@ export const NineGridPage: React.FC<Props> = ({ enterKey = 0 }) => {
   const canGenerateImage =
     refs.length >= 1 &&
     shotsPreview.length === 9 &&
-    shotsPreview.every((s) => s.prompt.trim().length >= 12) &&
+    shotsPreview.every((s) => s.prompt.trim().length >= NINE_GRID_SHOT_PROMPT_MIN_CHARS) &&
     !isRunning;
 
-  const getFallbackSlicePosition = (idx: number) => {
-    const row = Math.floor(idx / 3);
-    const col = idx % 3;
-    return { row, col };
-  };
+  const getFallbackSlicePosition = nineGridFallbackSlicePosition;
 
   const hint = useMemo(() => {
     if (refs.length === 0) return '上传参考图并命名（按顺序：图1/图2/...）。';
@@ -158,6 +152,7 @@ export const NineGridPage: React.FC<Props> = ({ enterKey = 0 }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mode: 'prompts_only',
+          textModel: 'gemini-3.5-flash',
           story,
           references: refs.map((r, idx) => ({
             url: r.url,
@@ -177,6 +172,7 @@ export const NineGridPage: React.FC<Props> = ({ enterKey = 0 }) => {
           prompt: String(s?.prompt || '').trim(),
         })).sort((a: { n: number }, b: { n: number }) => a.n - b.n),
       );
+      setRefLooks(Array.isArray(textData.refLooks) ? textData.refLooks : []);
       setProgress(100);
     } catch (e) {
       setError(e instanceof Error ? e.message : '九宫格生成失败');
@@ -201,15 +197,17 @@ export const NineGridPage: React.FC<Props> = ({ enterKey = 0 }) => {
         setProgress((p) => (p >= 94 ? p : p + Math.random() * 5));
       }, 450);
 
-      const refMap = refs
-        .map((r, idx) => `图${idx + 1}（${(r.name || '').trim() || `角色${String(idx + 1).padStart(2, '0')}`}）`)
-        .join('、');
-      const shotLines = shotsPreview
-        .slice()
-        .sort((a, b) => a.n - b.n)
-        .map((s) => `格子${s.n}：${s.prompt.trim()}`)
-        .join('\n');
-      const mergedPrompt = `${GRID_PREFIX}\n参考图命名映射：${refMap || '无'}\n九宫格内容要求（从左到右、从上到下对应1-9）：\n${shotLines}`;
+      const mergedPrompt = buildNineGridImagePrompt(
+        shotsPreview,
+        refs.map((r, idx) => ({
+          url: r.url,
+          name: (r.name || '').trim() || `角色${String(idx + 1).padStart(2, '0')}`,
+        })),
+        {
+          refLooks,
+          imageModel,
+        },
+      );
 
       const imageRes = await fetch('/api/generate-9grid', {
         method: 'POST',
@@ -231,7 +229,7 @@ export const NineGridPage: React.FC<Props> = ({ enterKey = 0 }) => {
       setResultUrl(imageData.url);
       addNotice('九宫格：主图生成成功（点击前往）', 'success', { type: 'open-nine-grid' });
       try {
-        const autoCropped = await splitToNine(imageData.url, 0, 0);
+        const autoCropped = await splitNineGridToNine(imageData.url, 0, 0);
         setCroppedUrls(autoCropped);
         setHistory((prev) => [
           {
@@ -283,149 +281,14 @@ export const NineGridPage: React.FC<Props> = ({ enterKey = 0 }) => {
     window.URL.revokeObjectURL(blobUrl);
   };
 
-  const loadImage = (src: string) =>
-    new Promise<HTMLImageElement>((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error('图片加载失败（可能跨域或链接已失效）'));
-      img.src = src;
-    });
-
-  const splitToNine = async (src: string, pad: number, gap: number): Promise<string[]> => {
-    const img = await loadImage(src);
-    const w = img.naturalWidth || img.width;
-    const h = img.naturalHeight || img.height;
-    const safePad = Math.max(0, Math.min(Math.floor(Math.min(w, h) / 10), Math.round(pad)));
-    const safeGap = Math.max(0, Math.min(200, Math.round(gap)));
-    const innerW = w - safePad * 2 - safeGap * 2;
-    const innerH = h - safePad * 2 - safeGap * 2;
-    if (innerW <= 0 || innerH <= 0) throw new Error('裁切参数过大：内框尺寸为负');
-
-    const cellW = Math.floor(innerW / 3);
-    const cellH = Math.floor(innerH / 3);
-    if (cellW <= 10 || cellH <= 10) throw new Error('裁切参数过大：单格过小');
-
-    const out: string[] = [];
-    for (let row = 0; row < 3; row++) {
-      for (let col = 0; col < 3; col++) {
-        const sx = safePad + col * (cellW + safeGap);
-        const sy = safePad + row * (cellH + safeGap);
-        const c = document.createElement('canvas');
-        c.width = cellW;
-        c.height = cellH;
-        const ctx = c.getContext('2d');
-        if (!ctx) throw new Error('Canvas 初始化失败');
-        ctx.drawImage(img, sx, sy, cellW, cellH, 0, 0, cellW, cellH);
-        out.push(c.toDataURL('image/png'));
-      }
-    }
-    return out;
-  };
+  const splitToNine = splitNineGridToNine;
 
   const estimateGapAndPadding = async () => {
     if (!resultUrl) return;
     setCropError(null);
     try {
-      const img = await loadImage(resultUrl);
-      const w = img.naturalWidth || img.width;
-      const h = img.naturalHeight || img.height;
-      const c = document.createElement('canvas');
-      c.width = w;
-      c.height = h;
-      const ctx = c.getContext('2d');
-      if (!ctx) throw new Error('Canvas 初始化失败');
-      ctx.drawImage(img, 0, 0);
-
-      const data = ctx.getImageData(0, 0, w, h).data;
-      const sampleColumnScore = (x: number) => {
-        let sum = 0;
-        let sum2 = 0;
-        let n = 0;
-        for (let y = 0; y < h; y += Math.max(1, Math.floor(h / 220))) {
-          const i = (y * w + x) * 4;
-          const v = (data[i] + data[i + 1] + data[i + 2]) / 3;
-          sum += v;
-          sum2 += v * v;
-          n++;
-        }
-        const mean = sum / Math.max(1, n);
-        const variance = sum2 / Math.max(1, n) - mean * mean;
-        return { mean, variance };
-      };
-
-      const findGapNear = (center: number, axis: 'x' | 'y') => {
-        const radius = Math.max(8, Math.floor((axis === 'x' ? w : h) * 0.02));
-        const start = Math.max(1, Math.floor(center - radius));
-        const end = Math.min((axis === 'x' ? w : h) - 2, Math.floor(center + radius));
-
-        let best = { pos: start, variance: Number.POSITIVE_INFINITY, mean: 0 };
-        for (let p = start; p <= end; p++) {
-          const s =
-            axis === 'x'
-              ? sampleColumnScore(p)
-              : (() => {
-                  let sum = 0;
-                  let sum2 = 0;
-                  let n = 0;
-                  for (let x = 0; x < w; x += Math.max(1, Math.floor(w / 220))) {
-                    const i = (p * w + x) * 4;
-                    const v = (data[i] + data[i + 1] + data[i + 2]) / 3;
-                    sum += v;
-                    sum2 += v * v;
-                    n++;
-                  }
-                  const mean = sum / Math.max(1, n);
-                  const variance = sum2 / Math.max(1, n) - mean * mean;
-                  return { mean, variance };
-                })();
-          if (s.variance < best.variance) best = { pos: p, variance: s.variance, mean: s.mean };
-        }
-
-        // expand around best.pos for contiguous low-variance + similar-mean region
-        const thresholdVar = best.variance + 8;
-        const thresholdMean = 14;
-        let left = best.pos;
-        let right = best.pos;
-        const scoreAt = (p: number) =>
-          axis === 'x' ? sampleColumnScore(p) : (() => {
-            let sum = 0;
-            let sum2 = 0;
-            let n = 0;
-            for (let x = 0; x < w; x += Math.max(1, Math.floor(w / 220))) {
-              const i = (p * w + x) * 4;
-              const v = (data[i] + data[i + 1] + data[i + 2]) / 3;
-              sum += v;
-              sum2 += v * v;
-              n++;
-            }
-            const mean = sum / Math.max(1, n);
-            const variance = sum2 / Math.max(1, n) - mean * mean;
-            return { mean, variance };
-          })();
-
-        for (let p = best.pos - 1; p >= start; p--) {
-          const s = scoreAt(p);
-          if (s.variance <= thresholdVar && Math.abs(s.mean - best.mean) <= thresholdMean) left = p;
-          else break;
-        }
-        for (let p = best.pos + 1; p <= end; p++) {
-          const s = scoreAt(p);
-          if (s.variance <= thresholdVar && Math.abs(s.mean - best.mean) <= thresholdMean) right = p;
-          else break;
-        }
-        return { gap: Math.max(0, right - left + 1) };
-      };
-
-      const g1 = findGapNear(w / 3, 'x');
-      const g2 = findGapNear((2 * w) / 3, 'x');
-      const gapX = Math.max(g1.gap, g2.gap);
-      const r1 = findGapNear(h / 3, 'y');
-      const r2 = findGapNear((2 * h) / 3, 'y');
-      const gapY = Math.max(r1.gap, r2.gap);
-      const gap = Math.max(gapX, gapY);
-
-      setCropGap(Math.min(160, Math.max(0, Math.round(gap))));
+      const gap = await estimateNineGridGap(resultUrl);
+      setCropGap(gap);
       setCropPadding(0);
     } catch (e) {
       setCropError(e instanceof Error ? e.message : '自动估算失败');

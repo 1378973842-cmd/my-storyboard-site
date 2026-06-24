@@ -1,6 +1,13 @@
-import type { Express, Request } from "express";
+import type { Express, Request, RequestHandler } from "express";
 import { existsSync, readFileSync } from "fs";
 import path from "path";
+import {
+  augmentChatCompletionsBody,
+  extractTextLlmMessageContent,
+  postTextLlm,
+  resolveTextLlmEnv,
+  textLlmConfigError,
+} from "./canvasTextLlmBridge.js";
 
 export type CanvasLLMRequestBody = {
   message?: string;
@@ -9,6 +16,7 @@ export type CanvasLLMRequestBody = {
   messages?: Array<{ role?: string; content?: string }>;
   images?: string[];
   videos?: string[];
+  temperature?: number;
 };
 
 const MAX_LOCAL_VIDEO_BYTES = Number(process.env.CANVAS_LLM_MAX_VIDEO_BYTES || 20 * 1024 * 1024);
@@ -67,38 +75,8 @@ function resolveMediaUrlForUpstream(req: Request, projectRoot: string, rawUrl: s
   return absoluteUrl(req, url);
 }
 
-function textFromChatResponse(raw: Record<string, unknown>): string {
-  const choices = raw.choices;
-  if (!Array.isArray(choices) || !choices.length) return "";
-  const first = choices[0] as { message?: { content?: unknown } };
-  const content = first?.message?.content;
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === "string") return part;
-        if (part && typeof part === "object" && "text" in part) {
-          return String((part as { text?: unknown }).text || "");
-        }
-        return "";
-      })
-      .filter(Boolean)
-      .join("\n");
-  }
-  return "";
-}
-
-export function registerCanvasLlmRoutes(app: Express, projectRoot: string) {
-  app.post("/api/canvas-llm", async (req, res) => {
-    const apiBase = (process.env.THIRD_PARTY_API_BASE || "").trim().replace(/\/$/, "");
-    const apiKey = (process.env.THIRD_PARTY_API_KEY || "").trim();
-    if (!apiBase || !apiKey) {
-      return res.status(503).json({
-        error:
-          "缺少 LLM API 配置。请在 .env 中设置 THIRD_PARTY_API_BASE 与 THIRD_PARTY_API_KEY，保存后重启服务。",
-      });
-    }
-
+export function registerCanvasLlmRoutes(app: Express, projectRoot: string, gate?: RequestHandler) {
+  app.post("/api/canvas-llm", ...(gate ? [gate] : []), async (req, res) => {
     const payload = (req.body || {}) as CanvasLLMRequestBody;
     const message = String(payload.message || "").trim();
     if (!message) {
@@ -109,6 +87,13 @@ export function registerCanvasLlmRoutes(app: Express, projectRoot: string) {
       String(payload.model || "").trim() ||
       (process.env.TEXT_MODEL || "").trim() ||
       "gemini-3.1-pro-preview";
+
+    const { apiBase, apiKey } = resolveTextLlmEnv(model);
+    if (!apiBase || !apiKey) {
+      return res.status(503).json({
+        error: textLlmConfigError(model),
+      });
+    }
 
     const imageUrls = (Array.isArray(payload.images) ? payload.images : [])
       .map((u) => String(u || "").trim())
@@ -148,6 +133,8 @@ export function registerCanvasLlmRoutes(app: Express, projectRoot: string) {
     });
 
     const timeoutMs = Number(process.env.TEXT_API_TIMEOUT_MS || 300000);
+    const temperatureRaw = Number(payload.temperature);
+    const temperature = Number.isFinite(temperatureRaw) ? Math.max(0, Math.min(2, temperatureRaw)) : undefined;
 
     try {
       console.log("[canvas-llm]", {
@@ -155,25 +142,19 @@ export function registerCanvasLlmRoutes(app: Express, projectRoot: string) {
         messageLen: message.length,
         videos: videoUrls.length,
         images: imageUrls.length,
+        temperature,
       });
 
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-      const response = await fetch(`${apiBase}/v1/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: upstreamMessages,
-          max_tokens: Number(process.env.CANVAS_LLM_MAX_TOKENS || 4096),
-          stream: false,
-        }),
-        signal: ctrl.signal,
+      const upstreamBody = augmentChatCompletionsBody(model, {
+        model,
+        messages: upstreamMessages,
+        max_tokens: Number(process.env.CANVAS_LLM_MAX_TOKENS || 4096),
+        stream: false,
+        ...(temperature !== undefined ? { temperature } : {}),
       });
+      const response = await postTextLlm(model, apiBase, apiKey, upstreamBody, { signal: ctrl.signal });
       clearTimeout(timer);
 
       const rawText = await response.text();
@@ -193,7 +174,7 @@ export function registerCanvasLlmRoutes(app: Express, projectRoot: string) {
         return res.status(response.status >= 400 ? response.status : 502).json({ error: errMsg });
       }
 
-      const text = textFromChatResponse(data).trim() || "接口返回了空回复。";
+      const text = extractTextLlmMessageContent(model, data).trim() || "接口返回了空回复。";
       return res.json({
         text,
         model,

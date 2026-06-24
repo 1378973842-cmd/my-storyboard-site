@@ -8,6 +8,8 @@ const COVER_EASE = [0.22, 1, 0.36, 1] as const;
 
 type CoverPageTransitionProps = {
   show: boolean;
+  /** 进入画布等功能页时封面瞬时收起，避免与画布层交叉淡出露出 body 浅色底 */
+  instantExit?: boolean;
   enterKey: number;
   onStart: () => void;
   onOpenImageEditor: () => void;
@@ -16,9 +18,10 @@ type CoverPageTransitionProps = {
   onOpenInfiniteCanvas?: () => void;
 };
 
-/** 封面层：不透明底 + 淡入，避免透视到底层画布；内容轻抬进场 */
+/** 封面层：不透明底 + 淡入，避免透视到底层画布；勿用 filter（会破坏子树 backdrop-filter） */
 export function CoverPageTransition({
   show,
+  instantExit = false,
   enterKey,
   onStart,
   onOpenImageEditor,
@@ -67,10 +70,12 @@ export function CoverPageTransition({
       initial={false}
       animate={{
         opacity: show ? 1 : 0,
-        scale: show ? 1 : 0.96,
-        filter: show ? 'blur(0px)' : 'blur(10px)',
+        scale: show ? 1 : instantExit ? 1 : 0.985,
       }}
-      transition={{ duration: 0.44, ease: COVER_EASE }}
+      transition={{
+        duration: show ? 0.36 : instantExit ? 0 : 0.34,
+        ease: COVER_EASE,
+      }}
       style={{
         zIndex: show ? 60 : 50,
         pointerEvents: show ? 'auto' : 'none',

@@ -1,5 +1,4 @@
 import { config as loadDotenv } from "dotenv";
-import { createHmac, timingSafeEqual } from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { writeFile } from "fs/promises";
@@ -9,50 +8,32 @@ import { Agent, setGlobalDispatcher, FormData } from "undici";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import { registerInfiniteCanvasRoutes } from "./src/services/infiniteCanvasRoutes.js";
+import {
+  registerInfiniteCanvasRoutes,
+} from "./src/services/infiniteCanvasRoutes.js";
+import {
+  analyzeNineGridReferenceLooks,
+  formatNineGridRefLooksForPhaseA,
+} from "./src/services/canvasNineGridBridge.js";
+import {
+  augmentChatCompletionsBody,
+  extractTextLlmMessageContent,
+  postTextLlm,
+  resolveTextLlmEnv,
+  textLlmConfigError,
+} from "./src/services/canvasTextLlmBridge.js";
+import { buildNineGridImagePrompt, buildNineGridShotExpandRetryMessage, mapNineGridShotsFromLlm, NINE_GRID_JSON_OUTPUT_CONSTRAINT, NINE_GRID_SHOT_PROMPT_MIN_CHARS, nineGridShotsBelowMinChars } from "./src/lib/nineGrid/nineGridCore.js";
 import {
   getStoryboardImageEnv,
   runStoryboardRunningHubGenerateJob,
   runStoryboardRunningHubG2Job,
   runStoryboardRunningHubJob,
 } from "./src/services/runningHubStoryboardImage.js";
-
-/** HttpOnly Cookie，与生图接口门禁共用（校验暗号成功后下发） */
-const GATE_COOKIE_NAME = "sb_gate_v1";
-
-function parseCookieHeader(header: string | undefined): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (!header) return out;
-  for (const part of header.split(";")) {
-    const idx = part.indexOf("=");
-    if (idx === -1) continue;
-    const k = part.slice(0, idx).trim();
-    const v = part.slice(idx + 1).trim();
-    out[k] = decodeURIComponent(v);
-  }
-  return out;
-}
-
-/** 请求时读取 ACCESS_CODE（需在 loadDotenv 之后调用） */
-function resolvedAccessCode(): string {
-  const v = (process.env.ACCESS_CODE ?? "").trim();
-  return v.length > 0 ? v : "liu888";
-}
-
-function signedGateToken(): string {
-  return createHmac("sha256", `gate|${resolvedAccessCode()}`).update("granted").digest("hex");
-}
-
-function verifyGateCookie(token: string | undefined): boolean {
-  if (!token) return false;
-  const expected = signedGateToken();
-  if (token.length !== expected.length) return false;
-  try {
-    return timingSafeEqual(Buffer.from(token, "utf8"), Buffer.from(expected, "utf8"));
-  } catch {
-    return false;
-  }
-}
+import {
+  registerSiteAccessRoutes,
+  requireSiteGate,
+  validateAccessCodeForDeploy,
+} from "./src/services/siteAccessGate.js";
 
 /** 从当前脚本所在目录向上查找 .env（不依赖 process.cwd，避免从别的目录启动时读不到配置） */
 function loadEnvFromProject(): void {
@@ -72,6 +53,7 @@ function loadEnvFromProject(): void {
 }
 
 loadEnvFromProject();
+validateAccessCodeForDeploy();
 
 function getThirdPartyEnv(): { apiBase: string; apiKey: string } {
   let apiKey = (process.env.THIRD_PARTY_API_KEY ?? "").trim();
@@ -113,17 +95,26 @@ function getGridEnv(): { apiBase: string; apiKey: string } {
 }
 
 /** 九宫格 Phase A（剧本→9 条 prompt）：可与主页 THIRD_PARTY 使用不同令牌 */
-function getNineGridTextEnv(): { apiBase: string; apiKey: string } {
-  const base =
-    (process.env.NINE_GRID_TEXT_API_BASE ?? "").trim() ||
-    (process.env.THIRD_PARTY_API_BASE ?? "").trim();
-  let key = (process.env.NINE_GRID_TEXT_API_KEY ?? "").trim();
-  if (/^bearer\s+/i.test(key)) key = key.replace(/^bearer\s+/i, "").trim();
-  if (!key) {
-    key = (process.env.THIRD_PARTY_API_KEY ?? "").trim();
-    if (/^bearer\s+/i.test(key)) key = key.replace(/^bearer\s+/i, "").trim();
-  }
-  return { apiBase: base, apiKey: key };
+function getNineGridTextEnv(model?: string): { apiBase: string; apiKey: string } {
+  return resolveTextLlmEnv(model);
+}
+
+/** 分镜页 / 九宫格 Phase A 文本：共用 NINE_GRID_TEXT_*，缺省回退 THIRD_PARTY_* */
+function getStoryboardTextEnv(model?: string): { apiBase: string; apiKey: string } {
+  return getNineGridTextEnv(model);
+}
+
+function resolveStoryboardTextModel(requested?: string): string {
+  return resolveNineGridTextModel(requested);
+}
+
+/** 与画布 Batch Poster Agent 一致：优先 gemini-3.5-flash，避开无渠道的 gemini-3.1-pro-preview */
+function resolveNineGridTextModel(requested?: string): string {
+  const explicit = String(requested || process.env.NINE_GRID_TEXT_MODEL || "").trim();
+  if (explicit) return explicit;
+  const textModel = String(process.env.TEXT_MODEL || "").trim();
+  if (textModel && !/^gemini-3\.1-pro-preview$/i.test(textModel)) return textModel;
+  return "gemini-3.5-flash";
 }
 
 /**
@@ -458,6 +449,9 @@ function resolveGptImage2Size(imageSize: unknown, aspectRatio: unknown): GptImag
 
 async function startServer() {
   const app = express();
+  if (process.env.TRUST_PROXY === "1" || process.env.NODE_ENV === "production") {
+    app.set("trust proxy", 1);
+  }
   const PORT = Number(process.env.PORT) || 3000;
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
   /**
@@ -524,41 +518,11 @@ async function startServer() {
   /** 无限画布：内置存储（data/canvases），无需单独启动 canvas_source Python */
   registerInfiniteCanvasRoutes(app, projectRoot, {
     persistImage: (url) => persistAiImageToLocalStorage(url, projectRoot, db),
+    requireGate: requireSiteGate,
   });
   mkdirSync(path.join(projectRoot, "data", "canvases"), { recursive: true });
 
-  app.get("/api/auth/status", (req, res) => {
-    const cookies = parseCookieHeader(req.headers.cookie);
-    res.json({ ok: verifyGateCookie(cookies[GATE_COOKIE_NAME]) });
-  });
-
-  app.post("/api/auth", (req, res) => {
-    const raw = typeof req.body?.code === "string" ? req.body.code.trim() : "";
-    const expected = resolvedAccessCode();
-    if (!expected) {
-      return res.status(503).json({ error: "服务器未配置 ACCESS_CODE" });
-    }
-    if (raw.length !== expected.length || raw !== expected) {
-      return res.status(401).json({ error: "暗号错误" });
-    }
-    const token = signedGateToken();
-    // 会话 Cookie：关闭浏览器后失效；每次新开站点需重新输入暗号
-    res.setHeader("Set-Cookie", `${GATE_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax`);
-    res.json({ ok: true });
-  });
-
-  function requireImageGate(req: express.Request, res: express.Response, next: express.NextFunction) {
-    // 九宫格「仅生成提示词」不走生图，允许未登录（仍消耗文本 API，可按需改为全程门禁）
-    if (req.method === "POST" && req.originalUrl.split("?")[0] === "/api/generate-9grid") {
-      const mode = (req.body as { mode?: string })?.mode;
-      if (mode === "prompts_only") return next();
-    }
-    const cookies = parseCookieHeader(req.headers.cookie);
-    if (!verifyGateCookie(cookies[GATE_COOKIE_NAME])) {
-      return res.status(401).json({ error: "请先通过暗号校验后再使用生图功能" });
-    }
-    next();
-  }
+  registerSiteAccessRoutes(app);
 
   // Project Management Routes
   app.get("/api/projects", (req, res) => {
@@ -632,27 +596,20 @@ async function startServer() {
     }
   });
 
-  // Step 1: Generate Script JSON (Gemini 3.0 Pro via OpenAI Format)
-  app.post("/api/generate-script", async (req, res) => {
-    const { script, context, style, references } = req.body;
+  // Step 1: Generate Script JSON (storyboard LLM — same channel as nine-grid Phase A)
+  app.post("/api/generate-script", requireSiteGate, async (req, res) => {
+    const { script, context, style, references, textModel } = req.body;
 
-    const { apiBase, apiKey } = getThirdPartyEnv();
+    const resolvedTextModel = resolveStoryboardTextModel(textModel);
+    const { apiBase, apiKey } = getStoryboardTextEnv(resolvedTextModel);
 
     if (!apiBase || !apiKey) {
       return res.status(400).json({ 
-        error: "缺少 API 配置。请在项目根目录的 .env 中设置 THIRD_PARTY_API_BASE 和 THIRD_PARTY_API_KEY，保存后重启 npm run dev。" 
+        error: textLlmConfigError(resolvedTextModel)
       });
     }
 
-    // 智能处理 Base URL
-    let cleanBase = apiBase.replace(/\/+$/, "");
-    if (!cleanBase.startsWith("http://") && !cleanBase.startsWith("https://")) {
-      cleanBase = `https://${cleanBase}`;
-    }
-    // 如果用户没填 /v1，且不是以 v1 结尾的，自动补全（针对 OpenAI 兼容供应商的常见习惯）
-    if (!cleanBase.endsWith("/v1") && !cleanBase.includes("/v1/")) {
-      cleanBase = `${cleanBase}/v1`;
-    }
+    const cleanBase = apiBase;
 
     const pixarInstruction = style === 'Pixar' 
       ? "\n\n## 🎨 画风特定约束\n由于当前画风是 Pixar，你必须在每个 `image_prompt` 以及 `global_assets.scenes` 的 `description` 最开头严格包含以下文字：'迪士尼皮克斯 3D 风格，8k 分辨率，极致细节，电影感照明，虚幻引擎 5 渲染质感，电影级调色。'" 
@@ -721,24 +678,24 @@ ${pixarInstruction}
       const baseDelayMs = Number(process.env.TEXT_API_RETRY_BASE_DELAY_MS || 1200);
       const textTimeoutMs = Number(process.env.TEXT_API_TIMEOUT_MS || 120000);
 
-      const chatBody = JSON.stringify({
-        model: process.env.TEXT_MODEL || "gemini-3.1-pro-preview",
-        messages: [
-          { role: "system", content: systemInstruction },
-          {
-            role: "user",
-            content: `前情提要（全局设定）：${context || "无"}\n\n剧本大纲：${script}\n\n参考资产列表：\n${
-              references && references.length > 0
-                ? references
-                    .map((r: any) => `- 图${r.index} (${r.name}): ${r.type === "character" ? "角色" : "场景"}`)
-                    .join("\n")
-                : "无"
-            }`,
-          },
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.7,
-      });
+      const chatRequestBody = augmentChatCompletionsBody(resolvedTextModel, {
+          model: resolvedTextModel,
+          messages: [
+            { role: "system", content: systemInstruction },
+            {
+              role: "user",
+              content: `前情提要（全局设定）：${context || "无"}\n\n剧本大纲：${script}\n\n参考资产列表：\n${
+                references && references.length > 0
+                  ? references
+                      .map((r: any) => `- 图${r.index} (${r.name}): ${r.type === "character" ? "角色" : "场景"}`)
+                      .join("\n")
+                  : "无"
+              }`,
+            },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.7,
+        });
 
       let data: any = null;
 
@@ -749,13 +706,7 @@ ${pixarInstruction}
             () => ctrl.abort(new Error(`TEXT_API_TIMEOUT_${textTimeoutMs}ms`)),
             textTimeoutMs
           );
-          const response = await fetch(`${cleanBase}/chat/completions`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: chatBody,
+          const response = await postTextLlm(resolvedTextModel, cleanBase, apiKey, chatRequestBody, {
             signal: ctrl.signal,
           });
           clearTimeout(timer);
@@ -823,8 +774,8 @@ ${pixarInstruction}
         });
       }
 
-      const content = data.choices?.[0]?.message?.content;
-      if (typeof content !== "string" || !content.trim()) {
+      const content = extractTextLlmMessageContent(resolvedTextModel, data);
+      if (!content) {
         return res.status(500).json({ error: "文本模型未返回有效内容（choices[0].message.content 为空）" });
       }
 
@@ -857,22 +808,17 @@ ${pixarInstruction}
   });
 
   // Step 1.2: Generate Scene Description
-  app.post("/api/generate-scene-description", async (req, res) => {
-    const { script, context, style, index } = req.body;
+  app.post("/api/generate-scene-description", requireSiteGate, async (req, res) => {
+    const { script, context, style, index, textModel } = req.body;
 
-    const { apiBase, apiKey } = getThirdPartyEnv();
+    const resolvedTextModel = resolveStoryboardTextModel(textModel);
+    const { apiBase, apiKey } = getStoryboardTextEnv(resolvedTextModel);
 
     if (!apiBase || !apiKey) {
-      return res.status(400).json({ error: "缺少 API 配置。" });
+      return res.status(400).json({ error: textLlmConfigError(resolvedTextModel) });
     }
 
-    let cleanBase = apiBase.replace(/\/+$/, "");
-    if (!cleanBase.startsWith("http://") && !cleanBase.startsWith("https://")) {
-      cleanBase = `https://${cleanBase}`;
-    }
-    if (!cleanBase.endsWith("/v1") && !cleanBase.includes("/v1/")) {
-      cleanBase = `${cleanBase}/v1`;
-    }
+    const cleanBase = apiBase;
 
     const pixarInstruction = style === 'Pixar'
       ? "\n\n## 🎨 画风特定约束\n由于当前画风是 Pixar，你必须在 `description` 的最开头严格包含以下文字：'迪士尼皮克斯 3D 风格，8k 分辨率，极致细节，电影感照明，虚幻引擎 5 渲染质感，电影级调色。'"
@@ -893,32 +839,30 @@ ${pixarInstruction}
 当前画风基调设定：${style}`;
 
     try {
-      const response = await fetch(`${cleanBase}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: process.env.TEXT_MODEL || "gemini-3.1-pro-preview",
+      const response = await postTextLlm(
+        resolvedTextModel,
+        cleanBase,
+        apiKey,
+        augmentChatCompletionsBody(resolvedTextModel, {
+          model: resolvedTextModel,
           messages: [
             { role: "system", content: systemInstruction },
-            { 
-              role: "user", 
-              content: `前情提要（全局设定）：${context || '无'}\n\n剧本大纲：${script}\n\n请重新生成场景 ${index + 1} 的描述。` 
-            }
+            {
+              role: "user",
+              content: `前情提要（全局设定）：${context || '无'}\n\n剧本大纲：${script}\n\n请重新生成场景 ${index + 1} 的描述。`,
+            },
           ],
           response_format: { type: "json_object" },
-          temperature: 0.8
+          temperature: 0.8,
         })
-      });
+      );
 
       if (!response.ok) {
         throw new Error(`API 错误: ${response.status}`);
       }
 
       const data = await response.json();
-      const content = data.choices[0].message.content;
+      const content = extractTextLlmMessageContent(resolvedTextModel, data);
       res.json(extractJSON(content));
     } catch (error) {
       console.error("Generate scene description error:", error);
@@ -927,22 +871,17 @@ ${pixarInstruction}
   });
 
   // Step 1.5: Regenerate a single shot
-  app.post("/api/regenerate-shot", async (req, res) => {
-    const { script, context, style, references, shot_summary, shot_number } = req.body;
+  app.post("/api/regenerate-shot", requireSiteGate, async (req, res) => {
+    const { script, context, style, references, shot_summary, shot_number, textModel } = req.body;
 
-    const { apiBase, apiKey } = getThirdPartyEnv();
+    const resolvedTextModel = resolveStoryboardTextModel(textModel);
+    const { apiBase, apiKey } = getStoryboardTextEnv(resolvedTextModel);
 
     if (!apiBase || !apiKey) {
-      return res.status(400).json({ error: "缺少 API 配置。" });
+      return res.status(400).json({ error: textLlmConfigError(resolvedTextModel) });
     }
 
-    let cleanBase = apiBase.replace(/\/+$/, "");
-    if (!cleanBase.startsWith("http://") && !cleanBase.startsWith("https://")) {
-      cleanBase = `https://${cleanBase}`;
-    }
-    if (!cleanBase.endsWith("/v1") && !cleanBase.includes("/v1/")) {
-      cleanBase = `${cleanBase}/v1`;
-    }
+    const cleanBase = apiBase;
 
     const pixarInstruction = style === 'Pixar'
       ? "\n\n## 🎨 画风特定约束\n由于当前画风是 Pixar，你必须在 `image_prompt` 的最开头严格包含以下文字：'迪士尼皮克斯 3D 风格，8k 分辨率，极致细节，电影感照明，虚幻引擎 5 渲染质感，电影级调色。'"
@@ -972,34 +911,32 @@ ${pixarInstruction}
 参考资产引用规范：仅使用 "图[编号]" 格式。`;
 
     try {
-      const response = await fetch(`${cleanBase}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: process.env.TEXT_MODEL || "gemini-3.1-pro-preview",
+      const response = await postTextLlm(
+        resolvedTextModel,
+        cleanBase,
+        apiKey,
+        augmentChatCompletionsBody(resolvedTextModel, {
+          model: resolvedTextModel,
           messages: [
             { role: "system", content: systemInstruction },
-            { 
-              role: "user", 
-              content: `前情提要（全局设定）：${context || '无'}\n\n剧本背景：${script}\n需要重新生成的镜头描述：${shot_summary}\n\n参考资产列表：\n${references && references.length > 0 
-                ? references.map((r: any) => `- 图${r.index} (${r.name}): ${r.type === 'character' ? '角色' : '场景'}`).join('\n') 
-                : '无'}` 
-            }
+            {
+              role: "user",
+              content: `前情提要（全局设定）：${context || '无'}\n\n剧本背景：${script}\n需要重新生成的镜头描述：${shot_summary}\n\n参考资产列表：\n${references && references.length > 0
+                ? references.map((r: any) => `- 图${r.index} (${r.name}): ${r.type === 'character' ? '角色' : '场景'}`).join('\n')
+                : '无'}`,
+            },
           ],
           response_format: { type: "json_object" },
-          temperature: 0.9
+          temperature: 0.9,
         })
-      });
+      );
 
       if (!response.ok) {
         throw new Error(`API 错误: ${response.status}`);
       }
 
       const data = await response.json();
-      const content = data.choices[0].message.content;
+      const content = extractTextLlmMessageContent(resolvedTextModel, data);
       res.json(extractJSON(content));
     } catch (error) {
       console.error("Regenerate shot error:", error);
@@ -1008,7 +945,7 @@ ${pixarInstruction}
   });
 
   // Step 2: Generate Image (RunningHub storyboard 或 Third-party 回退)
-  app.post("/api/generate-image", requireImageGate, async (req, res) => {
+  app.post("/api/generate-image", requireSiteGate, async (req, res) => {
     const { prompt, image_size, aspect_ratio, references, scope } = req.body;
     console.log("Received image generation request:", { prompt, image_size, aspect_ratio, scope });
 
@@ -1221,25 +1158,26 @@ ${pixarInstruction}
   });
 
   // Step 2.2: Generate 3x3 storyboard grid (script -> 9 prompts -> one 3x3 image)
-  app.post("/api/generate-9grid", requireImageGate, async (req, res) => {
-    const { story, references, mode, imagePrompt: imagePromptInput, imageModel } = req.body as {
+  app.post("/api/generate-9grid", requireSiteGate, async (req, res) => {
+    const { story, references, mode, imagePrompt: imagePromptInput, imageModel, textModel } = req.body as {
       story?: string;
       references?: Array<{ url?: string; name?: string } | string>;
       mode?: "prompts_only" | "image_only" | "full";
       imagePrompt?: string;
       imageModel?: string;
+      textModel?: string;
     };
     const runMode = mode || "full";
     const requestedImageModel = String(imageModel || "").trim() || (process.env.IMAGE_GRID_MODEL || "nano-banana-pro-稳定").trim();
     const useGptImage2Requested = /^gpt-image-2$/i.test(requestedImageModel);
 
-    const { apiBase: textApiBase, apiKey: textApiKey } = getNineGridTextEnv();
+    const resolvedNineGridTextModel = resolveNineGridTextModel(textModel);
+    const { apiBase: textApiBase, apiKey: textApiKey } = resolveTextLlmEnv(resolvedNineGridTextModel);
     const { apiBase: gridApiBase, apiKey: gridApiKey } = getGridEnv();
 
     if ((runMode === "prompts_only" || runMode === "full") && (!textApiBase || !textApiKey)) {
       return res.status(400).json({
-        error:
-          "缺少九宫格文本 API 配置。请在项目根目录 .env 中设置 NINE_GRID_TEXT_API_BASE（可选）与 NINE_GRID_TEXT_API_KEY，或设置 THIRD_PARTY_API_BASE 与 THIRD_PARTY_API_KEY 作为回退，保存后重启 npm run dev。",
+        error: textLlmConfigError(resolvedNineGridTextModel),
       });
     }
 
@@ -1254,13 +1192,7 @@ ${pixarInstruction}
       return res.status(400).json({ error: "请先输入剧本故事（至少 10 个字符）" });
     }
 
-    let cleanTextBase = textApiBase.replace(/\/+$/, "");
-    if (!cleanTextBase.startsWith("http://") && !cleanTextBase.startsWith("https://")) {
-      cleanTextBase = `https://${cleanTextBase}`;
-    }
-    if (!cleanTextBase.endsWith("/v1") && !cleanTextBase.includes("/v1/")) {
-      cleanTextBase = `${cleanTextBase}/v1`;
-    }
+    const cleanTextBase = textApiBase;
 
     const refItems = Array.isArray(references)
       ? references
@@ -1276,17 +1208,32 @@ ${pixarInstruction}
     const refUrls = refItems.map((r) => r.url);
 
     const systemBase = readPromptFile("./prompts/nine_grid_system_prompt.txt", projectRoot);
-    const systemInstruction =
-      `${systemBase}\n\n` +
-      `【额外强制输出约束】你必须且只能输出一个合法 JSON，对象结构必须为：\n` +
-      `{\n  "shots": [\n    { "n": 1, "specs": "...", "prompt": "..." },\n    ...,\n    { "n": 9, "specs": "...", "prompt": "..." }\n  ]\n}\n` +
-      `要求：shots 长度必须为 9；prompt 为可直接用于文生图的纯中文长句/段落，不要包含任何 Markdown 代码块。`;
+    const systemInstruction = `${systemBase}\n\n${NINE_GRID_JSON_OUTPUT_CONSTRAINT}`;
 
     try {
       let shots: any[] = [];
       let imagePrompt = String(imagePromptInput || "").trim();
 
       if (runMode === "prompts_only" || runMode === "full") {
+        // Phase A0: vision -> reference look anchors (costume / hair / accessories)
+        let refLooks: Awaited<ReturnType<typeof analyzeNineGridReferenceLooks>> = [];
+        if (refItems.length > 0) {
+          console.log("[9grid] Phase A0 ref vision", { refs: refItems.length, model: resolvedNineGridTextModel });
+          refLooks = await analyzeNineGridReferenceLooks(req, projectRoot, refItems, {
+            model: resolvedNineGridTextModel,
+            apiBase: cleanTextBase,
+            apiKey: textApiKey,
+          });
+          const failed = refLooks.filter((l) => l.visionFailed);
+          if (failed.length) {
+            console.warn("[9grid] Phase A0 partial vision", {
+              total: refItems.length,
+              failed: failed.map((l) => ({ index: l.index, name: l.name })),
+            });
+          }
+        }
+        const refAnchorsBlock = formatNineGridRefLooksForPhaseA(refLooks);
+
         // Phase A: text model -> 9 shot prompts
         const citedRefsText =
           refItems.length > 0
@@ -1295,139 +1242,160 @@ ${pixarInstruction}
                 .join("\n")
             : "无";
 
-        const resolvedNineGridTextModel =
-          (process.env.NINE_GRID_TEXT_MODEL || "").trim() ||
-          process.env.TEXT_MODEL ||
-          "gemini-3.1-pro-preview";
+        const phaseAUserContent = `剧本故事：\n${story}\n\n参考图列表（按顺序，用户会用“图1/图2/...”指代）：\n${citedRefsText}${
+          refAnchorsBlock ? `\n\n${refAnchorsBlock}` : ""
+        }`;
 
-        const textReqBody = {
-          model: resolvedNineGridTextModel,
-          messages: [
-            { role: "system", content: systemInstruction },
-            {
-              role: "user",
-              content: `剧本故事：\n${story}\n\n参考图列表（按顺序，用户会用“图1/图2/...”指代）：\n${citedRefsText}`,
-            },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.7,
-        };
+        const phaseAMessages: Array<{ role: string; content: string }> = [
+          { role: "system", content: systemInstruction },
+          { role: "user", content: phaseAUserContent },
+        ];
 
         const maxRetries = Number(process.env.TEXT_API_RETRIES || 4);
         const baseDelayMs = Number(process.env.TEXT_API_RETRY_BASE_DELAY_MS || 1200);
         const textTimeoutMs = Number(process.env.TEXT_API_TIMEOUT_MS || 60000);
+        const qualityRetries = Math.max(0, Math.min(2, Number(process.env.NINE_GRID_TEXT_QUALITY_RETRIES || 1)));
 
-        const textKeySource = (process.env.NINE_GRID_TEXT_API_KEY ?? "").trim()
-          ? "NINE_GRID_TEXT_API_KEY"
-          : "THIRD_PARTY_API_KEY";
+        const textKeySource = (process.env.RUNNINGHUB_LLM_API_KEY ?? "").trim()
+          ? "RUNNINGHUB_LLM_API_KEY"
+          : (process.env.NINE_GRID_TEXT_API_KEY ?? "").trim()
+            ? "NINE_GRID_TEXT_API_KEY"
+            : (process.env.STORYBOARD_IMAGE_API_KEY ?? "").trim()
+              ? "STORYBOARD_IMAGE_API_KEY"
+              : "THIRD_PARTY_API_KEY";
         console.log("[9grid] Phase A chat/completions", {
           model: resolvedNineGridTextModel,
           apiBase: cleanTextBase,
           keySource: textKeySource,
         });
 
-        let textPayload: any = null;
-        let lastStatus = 0;
+        let shotLines: Array<{ n: number; prompt: string; specs?: string }> | null = null;
 
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
-          try {
-            const ctrl = new AbortController();
-            const timer = setTimeout(
-              () => ctrl.abort(new Error(`TEXT_API_TIMEOUT_${textTimeoutMs}ms`)),
-              textTimeoutMs
-            );
+        for (let qualityAttempt = 0; qualityAttempt <= qualityRetries; qualityAttempt++) {
+          const textReqBody = augmentChatCompletionsBody(resolvedNineGridTextModel, {
+            model: resolvedNineGridTextModel,
+            messages: phaseAMessages,
+            response_format: { type: "json_object" },
+            temperature: qualityAttempt > 0 ? 0.55 : 0.7,
+          });
 
-            const textRes = await fetch(`${cleanTextBase}/chat/completions`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${textApiKey}`,
-              },
-              body: JSON.stringify(textReqBody),
-              signal: ctrl.signal,
-            });
-            clearTimeout(timer);
+          let textPayload: any = null;
+          let lastStatus = 0;
 
-            lastStatus = textRes.status;
-            const raw = await textRes.text().catch(() => "");
-            textPayload = (() => {
-              try {
-                return raw ? JSON.parse(raw) : {};
-              } catch {
-                return { error: { message: raw.slice(0, 500) } };
+          for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+              const ctrl = new AbortController();
+              const timer = setTimeout(
+                () => ctrl.abort(new Error(`TEXT_API_TIMEOUT_${textTimeoutMs}ms`)),
+                textTimeoutMs
+              );
+
+              const textRes = await postTextLlm(
+                resolvedNineGridTextModel,
+                cleanTextBase,
+                textApiKey,
+                textReqBody,
+                { signal: ctrl.signal }
+              );
+              clearTimeout(timer);
+
+              lastStatus = textRes.status;
+              const raw = await textRes.text().catch(() => "");
+              textPayload = (() => {
+                try {
+                  return raw ? JSON.parse(raw) : {};
+                } catch {
+                  return { error: { message: raw.slice(0, 500) } };
+                }
+              })();
+
+              if (textRes.ok) break;
+
+              if (!isUpstreamOverloaded(textRes.status, textPayload) || attempt === maxRetries) {
+                const msg =
+                  textPayload?.error?.message || textPayload?.message || JSON.stringify(textPayload).slice(0, 500);
+                return res.status(500).json({
+                  error: `分镜提示词生成失败：${msg}`,
+                  meta: { status: textRes.status, attempt, maxRetries },
+                });
               }
-            })();
 
-            if (textRes.ok) break;
-
-            if (!isUpstreamOverloaded(textRes.status, textPayload) || attempt === maxRetries) {
-              const msg =
-                textPayload?.error?.message || textPayload?.message || JSON.stringify(textPayload).slice(0, 500);
-              return res.status(500).json({
-                error: `分镜提示词生成失败：${msg}`,
-                meta: { status: textRes.status, attempt, maxRetries },
+              const jitter = Math.floor(Math.random() * 260);
+              const delay = Math.min(12000, baseDelayMs * Math.pow(2, attempt) + jitter);
+              console.warn("[9grid] text upstream overloaded, retrying...", {
+                status: textRes.status,
+                attempt,
+                delay,
               });
+              await sleep(delay);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              const jitter = Math.floor(Math.random() * 260);
+              const delay = Math.min(12000, baseDelayMs * Math.pow(2, attempt) + jitter);
+
+              if (attempt === maxRetries) {
+                return res.status(500).json({
+                  error: `分镜提示词生成失败：${msg}`,
+                  meta: { status: lastStatus || 0, attempt, maxRetries },
+                });
+              }
+
+              console.warn("[9grid] text fetch error, retrying...", { msg, attempt, delay });
+              await sleep(delay);
+              continue;
             }
-
-            const jitter = Math.floor(Math.random() * 260);
-            const delay = Math.min(12000, baseDelayMs * Math.pow(2, attempt) + jitter);
-            console.warn("[9grid] text upstream overloaded, retrying...", {
-              status: textRes.status,
-              attempt,
-              delay,
-            });
-            await sleep(delay);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            const jitter = Math.floor(Math.random() * 260);
-            const delay = Math.min(12000, baseDelayMs * Math.pow(2, attempt) + jitter);
-
-            if (attempt === maxRetries) {
-              return res.status(500).json({
-                error: `分镜提示词生成失败：${msg}`,
-                meta: { status: lastStatus || 0, attempt, maxRetries },
-              });
-            }
-
-            console.warn("[9grid] text fetch error, retrying...", { msg, attempt, delay });
-            await sleep(delay);
-            continue;
           }
+
+          const content = extractTextLlmMessageContent(resolvedNineGridTextModel, textPayload || {});
+          const parsed = extractJSON(String(content));
+          shots = Array.isArray(parsed?.shots) ? parsed.shots : [];
+          if (shots.length !== 9) {
+            return res.status(500).json({ error: `分镜提示词生成失败：shots 数量不是 9（得到 ${shots.length}）` });
+          }
+
+          shotLines = mapNineGridShotsFromLlm(shots);
+          if (!shotLines) {
+            return res.status(500).json({ error: "分镜提示词生成失败：shots 解析异常" });
+          }
+
+          const shortNums = nineGridShotsBelowMinChars(shotLines);
+          if (shortNums.length === 0) break;
+
+          console.warn("[9grid] Phase A prompts too short", {
+            qualityAttempt,
+            shortNums,
+            lengths: shotLines.map((s) => ({ n: s.n, len: s.prompt.length })),
+          });
+
+          if (qualityAttempt >= qualityRetries) {
+            return res.status(500).json({
+              error: `分镜提示词生成失败：格子 ${shortNums.join("、")} 的描述不足 ${NINE_GRID_SHOT_PROMPT_MIN_CHARS} 字（请缩短剧本或重试 Phase A）`,
+              meta: {
+                shortShots: shortNums,
+                minChars: NINE_GRID_SHOT_PROMPT_MIN_CHARS,
+                lengths: shotLines.map((s) => ({ n: s.n, chars: s.prompt.length })),
+              },
+              shots: shotLines,
+            });
+          }
+
+          phaseAMessages.push(
+            { role: "assistant", content: String(content) },
+            { role: "user", content: buildNineGridShotExpandRetryMessage(shortNums) }
+          );
         }
 
-        const content = textPayload?.choices?.[0]?.message?.content || "";
-        const parsed = extractJSON(String(content));
-        shots = Array.isArray(parsed?.shots) ? parsed.shots : [];
-        if (shots.length !== 9) {
-          return res.status(500).json({ error: `分镜提示词生成失败：shots 数量不是 9（得到 ${shots.length}）` });
+        if (!shotLines) {
+          return res.status(500).json({ error: "分镜提示词生成失败：未生成有效 shots" });
         }
 
-        const shotLines = shots
-          .map((s: any, idx: number) => {
-            const n = Number(s?.n || idx + 1);
-            const p = String(s?.prompt || "").trim();
-            return `格子${n}：${p}`;
-          })
-          .join("\n");
-
-      const gridPrefix =
-        `在3X3网格中生成9个连贯分镜，固定版式为“从左到右、从上到下 1-9 顺序”。` +
-        `每个格子严格为16:9横屏，整体大图严格为16:9。` +
-        `九格必须无任何分隔线、无边框、无留白、无黑边、无白边、无拼接缝；` +
-        `九格彼此紧贴，像一张完整画布被分为九个镜头。` +
-        `以参考图为主体，保持环境空间布局一致、人物与物品相对位置合理，并通过不同角度推进剧情连贯发展。` +
-        `全图要求高分辨率、超高清细节、电影级质感、风格高度一致。` +
-        `负向约束：禁止任何文字元素、禁止字幕、禁止对白台词字卡、禁止标题字、禁止 logo、禁止水印、禁止网格线、禁止边框、禁止任何装饰性分割元素。` +
-        `如果模型倾向添加文字，必须改为纯画面表达，画面中不得出现可读字符。` +
-        ` "image_generation_model": "${requestedImageModel}", "grid_layout": "3x3", "grid_aspect_ratio": "16:9"。\n`;
-
-        const refMapLines =
-          refItems.length > 0
-            ? refItems.map((r, i) => `图${i + 1}（${r.name}）`).join("、")
-            : "无";
-        imagePrompt = `${gridPrefix}\n参考图命名映射：${refMapLines}\n九宫格内容要求（从左到右、从上到下对应1-9）：\n${shotLines}`;
+        shots = shotLines;
+        imagePrompt = buildNineGridImagePrompt(shotLines, refItems, {
+          refLooks,
+          imageModel: requestedImageModel,
+        });
         if (runMode === "prompts_only") {
-          return res.json({ shots, imagePrompt });
+          return res.json({ shots: shotLines, imagePrompt, refLooks });
         }
       }
 
@@ -1576,7 +1544,7 @@ ${pixarInstruction}
   });
 
   // Step 2.1: Edit Image (Third-party API)
-  app.post("/api/edit-image", requireImageGate, async (req, res) => {
+  app.post("/api/edit-image", requireSiteGate, async (req, res) => {
     const { prompt, target_image, references, images, image_size, aspect_ratio, model, response_format } = req.body;
     console.log("Received image edit request:", {
       prompt_preview: typeof prompt === "string" ? prompt.slice(0, 80) : "",

@@ -121,7 +121,6 @@ export interface AppState {
   setStoryboardLoading: (shotNumber: string, loading: boolean) => void;
   removeStoryboard: (shotNumber: string) => void;
   setSelectedShotNumber: (shotNumber: string | null) => void;
-  setUiTheme: (theme: UiTheme) => void;
   openImageEditor: (target: NonNullable<AppState['imageEditor']['target']>) => void;
   closeImageEditor: () => void;
   updateGlobalSceneImage: (sceneIndex: number, url: string) => void;
@@ -150,12 +149,7 @@ export interface SceneDataCharacter {
   posePreset?: string;
 }
 
-/** 首屏主题：跟随系统浅色/深色，不写 localStorage */
+/** 站点固定暗色电影感；不再提供日/夜切换 */
 export function readStoredUiTheme(): UiTheme {
-  if (typeof window === 'undefined') return 'dark';
-  try {
-    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-  } catch {
-    return 'dark';
-  }
+  return 'dark';
 }

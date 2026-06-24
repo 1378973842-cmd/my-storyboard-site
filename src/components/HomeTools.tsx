@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { motion } from 'motion/react';
 import { ArrowUpRight, Camera, Clapperboard, Grid3x3, ImageIcon, Workflow } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { StudioToolHeroId } from '../shell/studioToolHero';
+import { useShellNavigation } from '../shell/ShellNavigation';
 
 const spring = { type: 'spring' as const, stiffness: 320, damping: 28 };
 
@@ -33,6 +34,14 @@ export const HomeTools: React.FC<HomeToolsProps> = ({
   onOpenInfiniteCanvas,
 }) => {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const { warmInfiniteCanvas } = useShellNavigation();
+
+  const prefetchCanvasAssets = useCallback(() => {
+    warmInfiniteCanvas();
+    void import('./InfiniteCanvas/InfiniteCanvas').then((mod) => {
+      mod.prefetchInfiniteCanvasAssets?.();
+    });
+  }, [warmInfiniteCanvas]);
 
   const tools: ToolItem[] = [
     {
@@ -115,9 +124,15 @@ export const HomeTools: React.FC<HomeToolsProps> = ({
                 type="button"
                 disabled={disabled}
                 onClick={tool.onClick}
-                onMouseEnter={() => setHoveredId(tool.id)}
+                onMouseEnter={() => {
+                  setHoveredId(tool.id);
+                  if (tool.id === 'canvas') prefetchCanvasAssets();
+                }}
                 onMouseLeave={() => setHoveredId(null)}
-                onFocus={() => setHoveredId(tool.id)}
+                onFocus={() => {
+                  setHoveredId(tool.id);
+                  if (tool.id === 'canvas') prefetchCanvasAssets();
+                }}
                 onBlur={() => setHoveredId(null)}
                 initial={{ opacity: 0, y: 28 }}
                 whileInView={{ opacity: 1, y: 0 }}

@@ -5,6 +5,7 @@ import { ShellNavigationProvider } from './shell/ShellNavigation.tsx';
 import App from './App.tsx';
 import './store/useStudioBackgroundStore.ts';
 import './index.css';
+import './components/InfiniteCanvas/infinite-canvas.css';
 
 // 仅清理旧版遗留键；切勿包含 storyboard_gate_ok_v1（门禁标记由 LoginGate 独占）
 const LEGACY_LOCAL_STORAGE_KEYS = [

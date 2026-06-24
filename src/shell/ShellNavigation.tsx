@@ -76,6 +76,8 @@ type ShellNavigationValue = {
   openNineGrid: () => void;
   openDirectorWorkbench: () => void;
   openInfiniteCanvas: () => void;
+  /** 仅预热挂载（不改 screen），主页悬停画布入口时调用 */
+  warmInfiniteCanvas: () => void;
 };
 
 const ShellNavigationContext = createContext<ShellNavigationValue | null>(null);
@@ -138,6 +140,9 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
     setInfiniteCanvasKeepAlive(true);
     setScreen('infinite-canvas');
   }, []);
+  const warmInfiniteCanvas = useCallback(() => {
+    setInfiniteCanvasKeepAlive(true);
+  }, []);
 
   const value = useMemo(
     () => ({
@@ -153,6 +158,7 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
       openNineGrid,
       openDirectorWorkbench,
       openInfiniteCanvas,
+      warmInfiniteCanvas,
     }),
     [
       screen,
@@ -167,6 +173,7 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
       openNineGrid,
       openDirectorWorkbench,
       openInfiniteCanvas,
+      warmInfiniteCanvas,
     ],
   );
 

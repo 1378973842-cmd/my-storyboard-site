@@ -190,39 +190,6 @@ export const useStore = create<AppState>()((set, get) => ({
     })),
   removeNotice: (id) => set((state) => ({ notices: state.notices.filter((n) => n.id !== id) })),
 
-  setUiTheme: (uiTheme) => {
-    const prev = get().uiTheme;
-    if (prev === uiTheme) return;
-
-    const apply = () => {
-      if (typeof document !== 'undefined') {
-        document.documentElement.dataset.theme = uiTheme;
-      }
-      set({ uiTheme });
-    };
-
-    if (typeof window === 'undefined') {
-      apply();
-      return;
-    }
-
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reducedMotion) {
-      apply();
-      return;
-    }
-
-    const doc = document as Document & {
-      startViewTransition?: (callback: () => void) => { finished: Promise<void> };
-    };
-
-    if (typeof doc.startViewTransition === 'function') {
-      doc.startViewTransition(apply);
-    } else {
-      apply();
-    }
-  },
-
   resetProject: () =>
     set((state) => ({
       currentProjectId: null,

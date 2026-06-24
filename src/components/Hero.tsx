@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { cn } from '../lib/utils';
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
@@ -74,11 +73,7 @@ function HeroBackground() {
   );
 }
 
-interface HeroProps {
-  onStart?: () => void;
-}
-
-export const Hero: React.FC<HeroProps> = ({ onStart }) => {
+export const Hero: React.FC = () => {
   return (
     <section className="cover-hero relative h-[100dvh] min-h-[640px] w-full flex items-center overflow-hidden">
       <HeroBackground />
@@ -116,20 +111,8 @@ export const Hero: React.FC<HeroProps> = ({ onStart }) => {
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ ...spring, delay: 0.24 }}
-            className="flex flex-wrap items-center gap-5 md:gap-8 pt-2"
+            className="pt-2"
           >
-            <button
-              type="button"
-              onClick={onStart}
-              disabled={!onStart}
-              className={cn(
-                'cover-hero-cta rounded-full px-8 md:px-10 py-3.5 md:py-4',
-                'text-[15px] font-semibold tracking-[-0.01em]',
-                'cursor-pointer disabled:opacity-50 disabled:pointer-events-none',
-              )}
-            >
-              进入分镜工作台
-            </button>
             <a href="#tools" className="cover-hero-link text-[15px] font-medium tracking-[-0.01em]">
               浏览全部工具
             </a>

@@ -326,7 +326,7 @@ export const ImageEditorStudio: React.FC<Props> = ({ references, data, addRefere
               <motion.div
                 key={item.id}
                 draggable
-                onDragStart={(e) => onDragStartLib(e, item)}
+                onDragStart={(e) => onDragStartLib(e as unknown as React.DragEvent, item)}
                 whileHover={{ y: -2 }}
                 transition={spring}
                 className="group relative aspect-square rounded-xl overflow-hidden outline outline-[0.5px] outline-white/10 cursor-grab active:cursor-grabbing"
