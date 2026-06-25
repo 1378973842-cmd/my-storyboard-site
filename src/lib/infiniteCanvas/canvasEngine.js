@@ -377,6 +377,7 @@ function withCanvasRootClass(mutator) {
 let canvases = [];
 let deletedCanvases = [];
 let canvas = null;
+let favoriteOutputPaths = new Set();
 let nodes = [];
 let connections = [];
 let viewport = {x: -1800, y: -1000, scale: 1};
@@ -455,6 +456,8 @@ let pendingPurgeCanvasId = null;
 let emojiPickerCanvasId = null;
 let localCanvasDirty = false;
 let localStructureRevision = 0;
+/** 最近一次已知落盘的节点数，用于阻止误写空 nodes */
+let lastKnownSavedNodeCount = 0;
 let savingCanvasNow = false;
 let saveCanvasAgain = false;
 let applyingRemoteCanvas = false;
@@ -1919,6 +1922,18 @@ async function saveCanvas(){
         return;
     }
     sanitizeConnections();
+    const nodePayload = serializableCanvasNodes();
+    const knownNodeCount = Math.max(
+        lastKnownSavedNodeCount || 0,
+        Array.isArray(canvas.nodes) ? canvas.nodes.length : 0
+    );
+    if(nodePayload.length === 0 && knownNodeCount > 0){
+        console.error('[infinite-canvas] Refusing to save empty nodes over existing workflow', canvas.id);
+        setStatus(langIsEn() ? 'Save blocked (empty nodes)' : '已阻止空节点覆盖保存');
+        localCanvasDirty = false;
+        saveCanvasAgain = false;
+        return;
+    }
     savingCanvasNow = true;
     saveCanvasAgain = false;
     try {
@@ -1928,7 +1943,7 @@ async function saveCanvas(){
             body:JSON.stringify({
                 title:canvas.title,
                 icon:canvas.icon || '🧩',
-                nodes:serializableCanvasNodes(),
+                nodes:nodePayload,
                 connections,
                 viewport,
                 logs:canvas.logs || [],
@@ -1957,6 +1972,7 @@ async function saveCanvas(){
         if(data.canvas) canvas = {...canvas, ...data.canvas};
         canvas.updated_at = Number(canvas.updated_at || Date.now());
         lastCanvasUpdatedAt = canvas.updated_at;
+        lastKnownSavedNodeCount = Array.isArray(canvas.nodes) ? canvas.nodes.length : nodePayload.length;
         localCanvasDirty = Boolean(saveCanvasAgain);
         if(currentCanvasTime) currentCanvasTime.textContent = formatCanvasTime(canvas.updated_at);
         setStatus('Saved');
@@ -2560,6 +2576,7 @@ async function createCanvas(){
         nodes = canvas.nodes || [];
         connections = canvas.connections || [];
         viewport = canvas.viewport || {x:0, y:0, scale:1};
+        lastKnownSavedNodeCount = nodes.length;
         sanitizeConnections();
         migrateImageBatchNodes();
         migratePromptGroupNodes();
@@ -2624,9 +2641,7 @@ async function setCanvasIcon(id, icon, event){
             body:JSON.stringify({
                 title:target.title,
                 icon:target.icon,
-                nodes:target.nodes || [],
-                connections:target.connections || [],
-                viewport:target.viewport || {x:0, y:0, scale:1}
+                base_updated_at:Number(target.updated_at || lastCanvasUpdatedAt || 0)
             })
         });
         if(!res.ok) throw new Error('图标保存失败');
@@ -2688,9 +2703,7 @@ async function setCanvasTitle(id, title){
             body:JSON.stringify({
                 title:target.title,
                 icon:target.icon,
-                nodes:target.nodes || [],
-                connections:target.connections || [],
-                viewport:target.viewport || {x:0, y:0, scale:1}
+                base_updated_at:Number(target.updated_at || lastCanvasUpdatedAt || 0)
             })
         });
         if(!res.ok) throw new Error('重命名失败');
@@ -2709,6 +2722,10 @@ async function openCanvas(id){
         setStatus('Ready');
         return;
     }
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    clearTimeout(viewportSaveTimer);
+    viewportSaveTimer = null;
     const liveShell = resolveLiveShell();
     if(liveShell?.classList.contains('no-canvas')) liveShell.classList.remove('no-canvas');
     setStatus('Opening...');
@@ -2727,6 +2744,7 @@ async function openCanvas(id){
         connections = canvas.connections || [];
         viewport = canvas.viewport || {x:0, y:0, scale:1};
         lastCanvasUpdatedAt = Number(canvas.updated_at || 0);
+        lastKnownSavedNodeCount = nodes.length;
         localCanvasDirty = false;
         nodes.forEach(n => { if(n.running) n.running = false; });
         sanitizeConnections();
@@ -2736,12 +2754,14 @@ async function openCanvas(id){
         nodes.filter(n => n.type === 'replicaAgent').forEach(syncReplicaAgentRoles);
         pruneMissingComfyWorkflows();
         await refreshMissingCanvasAssets();
+        await loadFavoriteOutputPaths();
         applyBoardBackground(canvas.settings?.boardBg, { save: false });
         selected.clear();
         setCanvasMode(true);
         writeLastCanvasId(canvas.id);
         renderCanvasList();
         safeRender({ force: true });
+        syncOutputFavoriteButtons();
         refreshInfiniteCanvasLayout();
         resumeCanvasImageTasks();
         startCanvasRemotePolling();
@@ -2795,6 +2815,7 @@ function applyRemoteCanvasData(remote){
         canvas = remote;
         canvas.logs = canvas.logs || [];
         lastCanvasUpdatedAt = Number(canvas.updated_at || Date.now());
+        lastKnownSavedNodeCount = Array.isArray(canvas.nodes) ? canvas.nodes.length : 0;
         localCanvasDirty = false;
         applyBoardBackground(canvas.settings?.boardBg, { save: false });
         if(viewportOnly){
@@ -2808,6 +2829,7 @@ function applyRemoteCanvasData(remote){
         connections = canvas.connections || [];
         viewport = canvas.viewport || {x:0, y:0, scale:1};
         if(localViewport) viewport = localViewport;
+        lastKnownSavedNodeCount = nodes.length;
         nodes.forEach(n => { if(n.running) n.running = false; });
         sanitizeConnections();
         migrateImageBatchNodes();
@@ -2941,6 +2963,9 @@ function handleCanvasUpdatedMessage(data){
 }
 async function returnToCanvasManager(){
     clearTimeout(saveTimer);
+    saveTimer = null;
+    clearTimeout(viewportSaveTimer);
+    viewportSaveTimer = null;
     if(canvas && localCanvasDirty) await saveCanvas();
     writeLastCanvasId('');
     stopCanvasRemotePolling();
@@ -4296,9 +4321,12 @@ function openImageNodeMenu(nodeId, clientX, clientY){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || node.type !== 'image') return;
     closeCreateMenu();
-    const canEdit = node.url && mediaKindForNode(node) === 'image' && !isMissingAssetUrl(node.url);
+    const url = String(node.url || '').trim();
+    const canEdit = url && mediaKindForNode(node) === 'image' && !isMissingAssetUrl(url);
+    const canDownload = url && !isMissingAssetUrl(url);
     imageNodeMenu.innerHTML = `
         ${canEdit ? `<button class="menu-btn" data-image-edit="${escapeAttr(nodeId)}"><i data-lucide="image" class="w-4 h-4"></i><span>${escapeHtml(tr('canvas.editImage'))}</span></button>` : ''}
+        ${canDownload ? `<button class="menu-btn" data-image-download="${escapeAttr(nodeId)}"><i data-lucide="download" class="w-4 h-4"></i><span>${tr('canvas.outputDownloadImage')}</span></button>` : ''}
         <button class="menu-btn" data-image-replace="${escapeAttr(nodeId)}"><i data-lucide="image-plus" class="w-4 h-4"></i><span>${langIsEn() ? 'Replace' : '替换'}</span></button>
     `;
     imageNodeMenu.style.left = `${clientX}px`;
@@ -4310,6 +4338,14 @@ function openImageNodeMenu(nodeId, clientX, clientY){
             e.stopPropagation();
             closeImageNodeMenu();
             openImageEditor(nodeId);
+        };
+    }
+    const downloadBtn = imageNodeMenu.querySelector('[data-image-download]');
+    if(downloadBtn){
+        downloadBtn.onclick = e => {
+            e.stopPropagation();
+            closeImageNodeMenu();
+            downloadUrl(url, outputDownloadName(url)).catch(err => alert(err.message || tr('canvas.outputDownloadEmpty')));
         };
     }
     imageNodeMenu.querySelector('[data-image-replace]').onclick = e => {
@@ -4336,46 +4372,31 @@ function openFrameStackImageMenu(ownerNodeId, imageUrl, imageName, clientX, clie
     };
     refreshIcons();
 }
-function openOutputNodeMenu(nodeId, clientX, clientY){
+function openOutputImageMenu(nodeId, imageUrl, clientX, clientY){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || node.type !== 'output') return;
+    const url = String(imageUrl || '').trim();
+    if(!node || node.type !== 'output' || !url || isMissingAssetUrl(url)) return;
     closeCreateMenu();
-    const imageCount = outputImageUrls(node).length;
-    const downloadableCount = outputDownloadableImageUrls(node).length;
+    const imageName = outputImageName(url);
     imageNodeMenu.classList.add('output-node-menu');
     imageNodeMenu.innerHTML = `
-        <div class="menu-section-title">${tr('canvas.outputGroupActions')}</div>
-        <button class="menu-btn" data-output-convert="${escapeAttr(nodeId)}" ${imageCount ? '' : 'disabled'}><i data-lucide="replace" class="w-4 h-4"></i><span>${tr('canvas.outputConvertToInputGroup')}</span></button>
-        <button class="menu-btn" data-output-copy="${escapeAttr(nodeId)}" ${imageCount ? '' : 'disabled'}><i data-lucide="copy-plus" class="w-4 h-4"></i><span>${tr('canvas.outputCopyToInputGroup')}</span></button>
-        <div class="menu-divider"></div>
-        <div class="menu-section-title">${tr('canvas.outputFileActions')}</div>
-        <button class="menu-btn" data-output-download="${escapeAttr(nodeId)}" ${downloadableCount ? '' : 'disabled'}><i data-lucide="download" class="w-4 h-4"></i><span>${tr('canvas.outputDownloadAllImages')}</span></button>
+        <button class="menu-btn" data-output-edit="1"><i data-lucide="image" class="w-4 h-4"></i><span>${escapeHtml(tr('canvas.editImage'))}</span></button>
+        <button class="menu-btn" data-output-download="1"><i data-lucide="download" class="w-4 h-4"></i><span>${tr('canvas.outputDownloadImage')}</span></button>
     `;
-    const menuWidth = 260;
+    const menuWidth = 220;
     imageNodeMenu.style.left = `${Math.max(10, Math.min(window.innerWidth - menuWidth - 10, clientX))}px`;
     imageNodeMenu.style.top = `${clientY}px`;
     imageNodeMenu.classList.add('open');
-    const convertBtn = imageNodeMenu.querySelector('[data-output-convert]');
-    if(convertBtn){
-        convertBtn.onclick = e => {
-            e.stopPropagation();
-            convertOutputNodeToInputGroup(nodeId);
-            closeImageNodeMenu();
-        };
-    }
-    imageNodeMenu.querySelector('[data-output-copy]').onclick = e => {
+    imageNodeMenu.querySelector('[data-output-edit]')?.addEventListener('click', e => {
         e.stopPropagation();
-        copyOutputNodeToInputGroup(nodeId);
         closeImageNodeMenu();
-    };
-    const downloadBtn = imageNodeMenu.querySelector('[data-output-download]');
-    if(downloadBtn){
-        downloadBtn.onclick = e => {
-            e.stopPropagation();
-            downloadOutputNodeImages(nodeId);
-            closeImageNodeMenu();
-        };
-    }
+        openOutputImageEditor(nodeId, url, imageName);
+    }, {once:true});
+    imageNodeMenu.querySelector('[data-output-download]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        closeImageNodeMenu();
+        downloadUrl(url, outputDownloadName(url)).catch(err => alert(err.message || tr('canvas.outputDownloadEmpty')));
+    }, {once:true});
     refreshIcons();
 }
 function closeImageNodeMenu(){
@@ -5357,7 +5378,7 @@ function inferAnnotationBaseUrl(url){
 function getAnnotationBaseUrl(){
     if(!cropState) return '';
     const target = cropState.saveTarget || {type:'node', nodeId:cropState.nodeId};
-    if(target.type === 'frameStack'){
+    if(target.type === 'frameStack' || target.type === 'output'){
         const owner = nodes.find(n => n.id === target.ownerNodeId);
         const cur = String(target.url || '').trim();
         for(const item of (owner?.images || [])){
@@ -5433,7 +5454,7 @@ async function restoreAnnotationBase(){
         ? 'Restore the image before all character marks? Saved marks will be removed.'
         : '确定恢复标注前的原图？已保存的编号标注将全部清除。')) return;
     const target = cropState.saveTarget || {type:'node', nodeId:cropState.nodeId};
-    if(target.type === 'frameStack'){
+    if(target.type === 'frameStack' || target.type === 'output'){
         const owner = nodes.find(n => n.id === target.ownerNodeId);
         const oldUrl = target.url;
         if(!owner || !oldUrl) return;
@@ -6011,7 +6032,7 @@ function resetCropBox(){
 async function commitImageEditorFile(file){
     if(!cropState || !file?.url) return false;
     const target = cropState.saveTarget || {type:'node', nodeId:cropState.nodeId};
-    if(target.type === 'frameStack'){
+    if(target.type === 'frameStack' || target.type === 'output'){
         const owner = nodes.find(n => n.id === target.ownerNodeId);
         const oldUrl = target.url;
         if(!owner || !oldUrl) return false;
@@ -6024,7 +6045,7 @@ async function commitImageEditorFile(file){
             return {...item, url:file.url, name:file.name || item.name, pre_annotation_url:preUrl};
         });
         target.url = file.url;
-        refreshImageStackConsumers(owner.id);
+        if(owner.type === 'frameStack') refreshImageStackConsumers(owner.id);
         refreshNodes([owner.id]);
         scheduleSave();
         return true;
@@ -6090,7 +6111,8 @@ function openImageEditorCore({nodeId, url, name, saveTarget}){
     document.documentElement.classList.add('canvas-image-edit-open');
     img.onload = () => finishImageEditorLayout();
     img.onerror = () => finishImageEditorLayout();
-    img.crossOrigin = 'anonymous';
+    if(shouldUseCrossOriginImage(url)) img.crossOrigin = 'anonymous';
+    else img.removeAttribute('crossorigin');
     setImageEditMode('crop');
     img.src = url;
     if(img.complete && img.naturalWidth > 0) finishImageEditorLayout();
@@ -6112,6 +6134,14 @@ function openFrameStackImageEditor(ownerNodeId, imageUrl, imageName){
         url:imageUrl,
         name:imageName || outputImageName(imageUrl),
         saveTarget:{type:'frameStack', ownerNodeId, url:imageUrl, name:imageName || outputImageName(imageUrl)},
+    });
+}
+function openOutputImageEditor(outputNodeId, imageUrl, imageName){
+    openImageEditorCore({
+        nodeId:outputNodeId,
+        url:imageUrl,
+        name:imageName || outputImageName(imageUrl),
+        saveTarget:{type:'output', ownerNodeId:outputNodeId, url:imageUrl, name:imageName || outputImageName(imageUrl)},
     });
 }
 function closeImageEditor(){
@@ -6217,10 +6247,23 @@ async function uploadImageBlobs(blobs){
     const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
     return data.files || [];
 }
+function shouldUseCrossOriginImage(url){
+    const raw = String(url || '').trim();
+    if(!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return false;
+    try {
+        const parsed = new URL(raw, window.location.origin);
+        return parsed.origin !== window.location.origin;
+    } catch {
+        return false;
+    }
+}
 async function applyImageCrop(){
     if(!cropState) return;
     const img = domGet('cropImage');
-    if(!img.naturalWidth || !img.naturalHeight) return;
+    if(!img.naturalWidth || !img.naturalHeight){
+        alert(langIsEn() ? 'Image not loaded yet. Close and reopen the editor.' : '图片尚未加载完成，请关闭后重新打开编辑。');
+        return;
+    }
     const scaleX = img.naturalWidth / (img.clientWidth || 1);
     const scaleY = img.naturalHeight / (img.clientHeight || 1);
     const sx = Math.max(0, Math.round(cropState.x * scaleX));
@@ -6232,7 +6275,12 @@ async function applyImageCrop(){
     canvasEl.height = sh;
     canvasEl.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
     const blob = await new Promise(resolve => canvasEl.toBlob(resolve, 'image/png'));
-    if(!blob) return;
+    if(!blob){
+        alert(langIsEn()
+            ? 'Crop export failed. Re-upload the image or use a same-site file.'
+            : '裁剪导出失败。请用「替换」重新上传本地图片后再试。');
+        return;
+    }
     const baseName = cropState.saveTarget?.name || cropState.saveTarget?.url || 'image';
     const base = String(baseName).replace(/\.[^.]+$/, '').split('/').pop() || 'image';
     const file = await uploadCroppedBlob(blob, `${base}_crop.png`);
@@ -6508,7 +6556,10 @@ function renderNode(node){
         if(!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'output' && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent') return;
         e.preventDefault();
         e.stopPropagation();
-        if(node.type === 'output') openOutputNodeMenu(node.id, e.clientX, e.clientY);
+        if(node.type === 'output'){
+            if(e.target.closest('.output-img-wrap')) return;
+            return;
+        }
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
     const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'imageBatch' ? (langIsEn() ? 'Image batch' : '图片组') : node.type === 'frameStack' ? (langIsEn() ? 'Frame Stack' : '截帧集') : node.type === 'llm' ? 'LLM' : node.type === 'replicaAgent' ? '复刻 Agent' : node.type === 'imageRepairAgent' ? (langIsEn() ? 'Repair Agent' : '修图 Agent') : node.type === 'batchPosterAgent' ? 'Batch Poster Agent' : node.type === 'nineGridAgent' ? (langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent') : node.type === 'videoReverse' ? '视频反推' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
@@ -6758,6 +6809,116 @@ function renderNode(node){
     bindNodeLayoutObserver(el);
     return el;
 }
+async function loadFavoriteOutputPaths(){
+    try {
+        const res = await fetch('/api/favorites/paths', { credentials: 'same-origin' });
+        if(!res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        favoriteOutputPaths = new Set(
+            (Array.isArray(data.paths) ? data.paths : [])
+                .map(normalizeFavoritePath)
+                .filter(Boolean),
+        );
+    } catch {
+        favoriteOutputPaths = new Set();
+    }
+}
+function normalizeFavoritePath(raw){
+    const text = String(raw || '').trim().replace(/\\/g, '/');
+    if(!text) return '';
+    if(text.startsWith('/uploads/')) return text.split('?')[0];
+    try {
+        const parsed = new URL(text, window.location.origin);
+        if(parsed.pathname.startsWith('/uploads/')) return parsed.pathname;
+    } catch {
+        /* ignore */
+    }
+    return text.split('?')[0];
+}
+function isOutputUrlFavorited(url){
+    const raw = String(url || '').trim();
+    if(!raw) return false;
+    const normalized = normalizeFavoritePath(raw);
+    return favoriteOutputPaths.has(raw)
+        || (normalized && favoriteOutputPaths.has(normalized));
+}
+function rememberFavoritePath(url, favorited){
+    const raw = String(url || '').trim();
+    const normalized = normalizeFavoritePath(raw);
+    if(favorited){
+        if(raw) favoriteOutputPaths.add(raw);
+        if(normalized) favoriteOutputPaths.add(normalized);
+    } else {
+        if(raw) favoriteOutputPaths.delete(raw);
+        if(normalized) favoriteOutputPaths.delete(normalized);
+    }
+}
+function syncOutputFavoriteBtn(btn, url){
+    if(!btn) return;
+    const active = isOutputUrlFavorited(url);
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    btn.title = active
+        ? (langIsEn() ? 'Remove from favorites' : '取消收藏')
+        : (langIsEn() ? 'Add to favorites' : '收藏到我的收藏');
+}
+function syncOutputFavoriteButtons(scope){
+    const root = scope instanceof Element ? scope : nodesEl;
+    if(!root) return;
+    root.querySelectorAll('.output-img-wrap[data-output-url]').forEach(wrap => {
+        const url = wrap.dataset.outputUrl || wrap.querySelector('img')?.dataset?.url || '';
+        syncOutputFavoriteBtn(wrap.querySelector('.output-fav-btn'), url);
+    });
+    refreshIcons(scope instanceof Element ? scope : undefined);
+}
+function outputFavoriteBtnHtml(url){
+    if(!url || isMissingAssetUrl(url)) return '';
+    const active = isOutputUrlFavorited(url);
+    const title = active
+        ? (langIsEn() ? 'Remove from favorites' : '取消收藏')
+        : (langIsEn() ? 'Add to favorites' : '收藏到我的收藏');
+    return `<button type="button" class="output-fav-btn${active ? ' is-active' : ''}" title="${escapeAttr(title)}" aria-pressed="${active ? 'true' : 'false'}"><i data-lucide="star" class="w-3.5 h-3.5"></i></button>`;
+}
+async function toggleOutputFavorite(wrap, node){
+    const url = wrap.dataset.outputUrl || wrap.querySelector('img')?.dataset?.url || '';
+    if(!url) return;
+    const meta = outputMetaFor(url, node);
+    const btn = wrap.querySelector('.output-fav-btn');
+    if(btn) btn.disabled = true;
+    try {
+        const res = await fetch('/api/favorites/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                thumbnail_path: url,
+                prompt: outputMetaPrompt(meta),
+                model: outputImageModelLabel(meta),
+                params: meta.params && typeof meta.params === 'object' ? meta.params : {},
+                canvas_id: canvas?.id || '',
+                node_id: node?.id || '',
+            }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok) throw new Error(data.error || (langIsEn() ? 'Favorite failed' : '收藏失败'));
+        const canonical = normalizeFavoritePath(data.item?.thumbnail_path || url);
+        rememberFavoritePath(canonical || url, !!data.favorited);
+        const liveWrap = wrap.isConnected
+            ? wrap
+            : nodesEl?.querySelector(`.output-img-wrap[data-output-url="${CSS.escape(normalizeFavoritePath(url) || url)}"]`);
+        syncOutputFavoriteBtn(liveWrap?.querySelector('.output-fav-btn'), url);
+        if(liveWrap) refreshIcons(liveWrap);
+        setStatus(data.favorited ? (langIsEn() ? 'Added to favorites' : '已加入我的收藏') : (langIsEn() ? 'Removed from favorites' : '已取消收藏'));
+    } catch(e) {
+        setStatus(e instanceof Error ? e.message : (langIsEn() ? 'Favorite failed' : '收藏失败'));
+    } finally {
+        const liveWrap = wrap.isConnected
+            ? wrap
+            : nodesEl?.querySelector(`.output-img-wrap[data-output-url="${CSS.escape(normalizeFavoritePath(url) || url)}"]`);
+        const liveBtn = liveWrap?.querySelector('.output-fav-btn') || btn;
+        if(liveBtn) liveBtn.disabled = false;
+    }
+}
 function bindOutputWrap(wrap, node){
     const img = wrap.querySelector('img');
     const video = wrap.querySelector('video');
@@ -6786,11 +6947,16 @@ function bindOutputWrap(wrap, node){
             setTimeout(() => { delete img.dataset.dragging; }, 0);
         };
         img.oncontextmenu = e => {
-            if(!isImageStackNode(node)) return;
             e.preventDefault();
             e.stopPropagation();
             const url = img.dataset.url || wrap.dataset.outputUrl || '';
-            openFrameStackImageMenu(node.id, url, outputImageName(url), e.clientX, e.clientY);
+            if(isImageStackNode(node)){
+                openFrameStackImageMenu(node.id, url, outputImageName(url), e.clientX, e.clientY);
+                return;
+            }
+            if(node.type === 'output'){
+                openOutputImageMenu(node.id, url, e.clientX, e.clientY);
+            }
         };
         img.onclick = e => {
             e.stopPropagation();
@@ -6828,6 +6994,14 @@ function bindOutputWrap(wrap, node){
             if(isImageStackNode(node)) refreshImageStackConsumers(node.id);
         };
     }
+    const fav = wrap.querySelector('.output-fav-btn');
+    if(fav && node.type === 'output'){
+        fav.onmousedown = e => e.stopPropagation();
+        fav.onclick = e => {
+            e.stopPropagation();
+            void toggleOutputFavorite(wrap, node);
+        };
+    }
 }
 function outputDomKeyForItem(item){
     return `url:${outputUrlValue(item)}`;
@@ -6849,6 +7023,7 @@ function refreshOutputNodeContent(node){
         const nodeEl = el;
         syncOutputNodeThumbVars(nodeEl, node);
         body.querySelectorAll('.output-img-wrap').forEach(wrap => bindOutputWrap(wrap, node));
+        syncOutputFavoriteButtons(body);
         refreshOutputTimer();
         return true;
     }
@@ -14059,7 +14234,7 @@ function wrapOutputMediaCard(innerHtml, meta, opts={}){
     const cardClass = `output-media-card${opts.useGridLayout ? ' output-media-card--grid' : ''}${prompt ? ' has-prompt' : ''}`;
     return `<div class="${cardClass}"${cardStyle}>${innerHtml}${prompt}</div>`;
 }
-function renderOutputMedia(item, useGridLayout=false){
+function renderOutputMedia(item, useGridLayout=false, renderOpts={}){
     const url = outputUrlValue(item);
     const safe = escapeAttr(url);
     const meta = item && typeof item === 'object' ? item : {};
@@ -14070,6 +14245,7 @@ function renderOutputMedia(item, useGridLayout=false){
         : '';
     const timePill = formatOutputMetaPill(meta);
     const cardOpts = {useGridLayout, grid, promptMaxLen:useGridLayout ? 96 : 140, forceCard:Boolean(outputMetaPrompt(meta))};
+    const favBtn = renderOpts.showFavorite && kind === 'image' ? outputFavoriteBtnHtml(url) : '';
     if(isMissingAssetUrl(url)){
         const inner = `<div class="output-img-wrap" data-output-url="${safe}" data-missing-url="${safe}"${wrapStyle}>${missingAssetHtml(url, true)}${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
         return wrapOutputMediaCard(inner, meta, cardOpts);
@@ -14088,7 +14264,7 @@ function renderOutputMedia(item, useGridLayout=false){
         const inner = `<div class="output-img-wrap output-file-wrap" data-output-url="${safe}"${wrapStyle}><div class="output-file-card"><i data-lucide="${icon}" class="w-7 h-7"></i><span>${escapeHtml(meta.name || outputImageName(url))}</span><small>${label}</small></div>${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
         return wrapOutputMediaCard(inner, meta, cardOpts);
     }
-    const inner = `<div class="output-img-wrap" data-output-url="${safe}"${wrapStyle}><img src="${safe}" data-url="${safe}" alt="generated output">${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
+    const inner = `<div class="output-img-wrap" data-output-url="${safe}"${wrapStyle}><img src="${safe}" data-url="${safe}" alt="generated output">${favBtn}${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
     return wrapOutputMediaCard(inner, meta, cardOpts);
 }
 function outputGridLayout(node){
@@ -14130,7 +14306,7 @@ function renderOutputGrid(node, pendingHtml=''){
     const chunks = chunkOutputImagesForRender(node.images);
     const hasGridSplit = chunks.some(chunk => chunk.type === 'grid');
     if(!hasGridSplit){
-        const itemsHtml = (node.images || []).map(item => renderOutputMedia(item, false)).join('');
+        const itemsHtml = (node.images || []).map(item => renderOutputMedia(item, false, { showFavorite: true })).join('');
         return `<div class="output-grid-stack"><div class="output-grid">${itemsHtml}${pendingHtml}</div></div>`;
     }
     let pendingAttached = false;
@@ -14146,13 +14322,13 @@ function renderOutputGrid(node, pendingHtml=''){
             const groupModel = shortenModelLabel(firstMeta.model || outputImageModelLabel(firstMeta));
             const groupLabel = langIsEn() ? `Nine-grid set ${gridGroupIndex}` : `第 ${gridGroupIndex} 组九宫格`;
             const groupHead = `<div class="output-grid-group-head"><span class="output-grid-group-label">${escapeHtml(groupLabel)}</span>${groupModel ? `<span class="output-grid-group-model">${escapeHtml(groupModel)}</span>` : ''}</div>`;
-            return `${divider}<section class="output-grid-group">${groupHead}<div class="output-grid grid-layout" style="--grid-cols:${cols}">${chunk.items.map(item => renderOutputMedia(item, true)).join('')}</div></section>`;
+            return `${divider}<section class="output-grid-group">${groupHead}<div class="output-grid grid-layout" style="--grid-cols:${cols}">${chunk.items.map(item => renderOutputMedia(item, true, { showFavorite: true })).join('')}</div></section>`;
         }
         const isLastItems = !chunks.slice(idx + 1).some(c => c.type === 'items');
         const tail = isLastItems && pendingHtml ? pendingHtml : '';
         if(tail) pendingAttached = true;
         const chunkDivider = seenGridGroup && idx > 0 ? '<div class="output-grid-group-divider" aria-hidden="true"></div>' : '';
-        return `${chunkDivider}<div class="output-grid">${chunk.items.map(item => renderOutputMedia(item, false)).join('')}${tail}</div>`;
+        return `${chunkDivider}<div class="output-grid">${chunk.items.map(item => renderOutputMedia(item, false, { showFavorite: true })).join('')}${tail}</div>`;
     }).join('');
     const pendingBlock = !pendingAttached && pendingHtml ? `<div class="output-grid">${pendingHtml}</div>` : '';
     return `<div class="output-grid-stack">${body || '<div class="output-grid"></div>'}${pendingBlock}</div>`;

@@ -126,7 +126,20 @@ function readDoc(id: string): CanvasDocument {
 
 function writeDoc(doc: CanvasDocument) {
   doc.updated_at = nowMs();
-  writeFileSync(filePath(doc.id), JSON.stringify(doc, null, 2), "utf8");
+  const fp = filePath(doc.id);
+  if (existsSync(fp)) {
+    try {
+      const prev = JSON.parse(readFileSync(fp, "utf8")) as CanvasDocument;
+      const prevNodeCount = Array.isArray(prev.nodes) ? prev.nodes.length : 0;
+      // 仅在有节点的版本上刷新 .bak，避免空画布覆盖最后一次有效备份
+      if (prevNodeCount > 0) {
+        writeFileSync(`${fp}.bak`, readFileSync(fp));
+      }
+    } catch {
+      /* ignore backup failure */
+    }
+  }
+  writeFileSync(fp, JSON.stringify(doc, null, 2), "utf8");
 }
 
 function toRecord(doc: CanvasDocument): CanvasRecord {
@@ -232,6 +245,7 @@ export function saveCanvas(
     logs?: unknown[];
     settings?: Record<string, unknown>;
     base_updated_at?: number;
+    allow_empty_nodes?: boolean;
   }
 ) {
   const doc = getCanvas(id, true);
@@ -245,8 +259,34 @@ export function saveCanvas(
   }
   doc.title = (payload.title || doc.title || "未命名画布").slice(0, 80);
   doc.icon = (payload.icon || doc.icon || "🧩").slice(0, 32);
-  doc.nodes = payload.nodes ?? doc.nodes ?? [];
-  doc.connections = payload.connections ?? doc.connections ?? [];
+  const existingNodeCount = Array.isArray(doc.nodes) ? doc.nodes.length : 0;
+  const incomingNodes = payload.nodes;
+  if (
+    Array.isArray(incomingNodes) &&
+    incomingNodes.length === 0 &&
+    existingNodeCount > 0 &&
+    payload.allow_empty_nodes !== true
+  ) {
+    console.warn(
+      `[canvas-store] blocked empty nodes overwrite for ${id} (existing ${existingNodeCount} nodes)`
+    );
+  } else if (incomingNodes !== undefined) {
+    doc.nodes = incomingNodes;
+  }
+  const existingConnCount = Array.isArray(doc.connections) ? doc.connections.length : 0;
+  const incomingConnections = payload.connections;
+  if (
+    Array.isArray(incomingConnections) &&
+    incomingConnections.length === 0 &&
+    existingConnCount > 0 &&
+    payload.allow_empty_nodes !== true
+  ) {
+    console.warn(
+      `[canvas-store] blocked empty connections overwrite for ${id} (existing ${existingConnCount} connections)`
+    );
+  } else if (incomingConnections !== undefined) {
+    doc.connections = incomingConnections;
+  }
   doc.viewport = payload.viewport ?? doc.viewport ?? { x: 0, y: 0, scale: 1 };
   doc.logs = Array.isArray(payload.logs) ? payload.logs.slice(-500) : doc.logs || [];
   doc.settings = payload.settings ?? doc.settings ?? {};

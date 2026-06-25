@@ -38,6 +38,7 @@
         "canvas.outputGroupActions": { zh: "分组", en: "Group" },
         "canvas.outputFileActions": { zh: "文件", en: "Files" },
         "canvas.outputDownloadAllImages": { zh: "下载全部图片", en: "Download all images" },
+        "canvas.outputDownloadImage": { zh: "下载图片", en: "Download image" },
         "canvas.outputDownloadEmpty": { zh: "没有可下载的本地图片", en: "No local images to download" },
         "canvas.loopVariablePrompt": { zh: "可变提示词", en: "Variable Prompt" },
         "canvas.loopVariablePlaceholder": { zh: "例如：现在生成第[计数]个卖点", en: "Example: generate item [Count]" },

@@ -83,6 +83,15 @@ export function augmentImagePromptWithReferenceCostumeLock(prompt, refs, refLook
   return base ? `${base}\n\n${block}` : block;
 }
 
+/** 展示收藏/画廊时去掉服务端注入的造型锁定块 */
+export function stripReferenceCostumeLockFromPrompt(prompt) {
+  const text = String(prompt || '');
+  const marker = '【参考图完整造型锁定】';
+  const idx = text.indexOf(marker);
+  if (idx < 0) return text.trim();
+  return text.slice(0, idx).trim();
+}
+
 export function formatNineGridRefLookAnchors(refLooks) {
   const looks = Array.isArray(refLooks) ? refLooks.filter(Boolean) : [];
   if (!looks.length) return '';

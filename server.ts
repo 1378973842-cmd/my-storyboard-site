@@ -18,6 +18,7 @@ import {
 import {
   augmentChatCompletionsBody,
   extractTextLlmMessageContent,
+  parseTextLlmResponseBody,
   postTextLlm,
   resolveTextLlmEnv,
   textLlmConfigError,
@@ -30,10 +31,16 @@ import {
   runStoryboardRunningHubJob,
 } from "./src/services/runningHubStoryboardImage.js";
 import {
-  registerSiteAccessRoutes,
-  requireSiteGate,
-  validateAccessCodeForDeploy,
-} from "./src/services/siteAccessGate.js";
+  bootstrapAdminUser,
+  createRequireAuth,
+  initUserAuthSchema,
+  registerUserAuthRoutes,
+  validateAuthForDeploy,
+} from "./src/services/userAuth.js";
+import {
+  initCanvasGenerationsSchema,
+  registerCanvasGenerationsRoutes,
+} from "./src/services/canvasGenerations.js";
 
 /** 从当前脚本所在目录向上查找 .env（不依赖 process.cwd，避免从别的目录启动时读不到配置） */
 function loadEnvFromProject(): void {
@@ -53,7 +60,7 @@ function loadEnvFromProject(): void {
 }
 
 loadEnvFromProject();
-validateAccessCodeForDeploy();
+validateAuthForDeploy();
 
 function getThirdPartyEnv(): { apiBase: string; apiKey: string } {
   let apiKey = (process.env.THIRD_PARTY_API_KEY ?? "").trim();
@@ -511,6 +518,11 @@ async function startServer() {
     // Column already exists or other error
   }
 
+  initUserAuthSchema(db);
+  bootstrapAdminUser(db);
+  initCanvasGenerationsSchema(db);
+  const requireAuth = createRequireAuth(db);
+
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
   app.use(express.static(path.join(projectRoot, "public")));
@@ -518,11 +530,12 @@ async function startServer() {
   /** 无限画布：内置存储（data/canvases），无需单独启动 canvas_source Python */
   registerInfiniteCanvasRoutes(app, projectRoot, {
     persistImage: (url) => persistAiImageToLocalStorage(url, projectRoot, db),
-    requireGate: requireSiteGate,
+    requireGate: requireAuth,
   });
   mkdirSync(path.join(projectRoot, "data", "canvases"), { recursive: true });
 
-  registerSiteAccessRoutes(app);
+  registerUserAuthRoutes(app, db);
+  registerCanvasGenerationsRoutes(app, db, projectRoot);
 
   // Project Management Routes
   app.get("/api/projects", (req, res) => {
@@ -597,7 +610,7 @@ async function startServer() {
   });
 
   // Step 1: Generate Script JSON (storyboard LLM — same channel as nine-grid Phase A)
-  app.post("/api/generate-script", requireSiteGate, async (req, res) => {
+  app.post("/api/generate-script", requireAuth, async (req, res) => {
     const { script, context, style, references, textModel } = req.body;
 
     const resolvedTextModel = resolveStoryboardTextModel(textModel);
@@ -745,11 +758,14 @@ ${pixarInstruction}
             return res.status(response.status).json({ error: errMsg });
           }
 
-          if (!contentType?.includes("application/json")) {
-            throw new Error(`预期返回 JSON 但收到了: ${raw.slice(0, 100)}...`);
+          data = parseTextLlmResponseBody(raw);
+          if (data?.error && !extractTextLlmMessageContent(resolvedTextModel, data).trim()) {
+            throw new Error(
+              typeof (data.error as { message?: unknown })?.message === "string"
+                ? String((data.error as { message: string }).message)
+                : `预期返回 JSON 但收到了: ${raw.slice(0, 100)}...`
+            );
           }
-
-          data = JSON.parse(raw);
           break;
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -808,7 +824,7 @@ ${pixarInstruction}
   });
 
   // Step 1.2: Generate Scene Description
-  app.post("/api/generate-scene-description", requireSiteGate, async (req, res) => {
+  app.post("/api/generate-scene-description", requireAuth, async (req, res) => {
     const { script, context, style, index, textModel } = req.body;
 
     const resolvedTextModel = resolveStoryboardTextModel(textModel);
@@ -871,7 +887,7 @@ ${pixarInstruction}
   });
 
   // Step 1.5: Regenerate a single shot
-  app.post("/api/regenerate-shot", requireSiteGate, async (req, res) => {
+  app.post("/api/regenerate-shot", requireAuth, async (req, res) => {
     const { script, context, style, references, shot_summary, shot_number, textModel } = req.body;
 
     const resolvedTextModel = resolveStoryboardTextModel(textModel);
@@ -945,7 +961,7 @@ ${pixarInstruction}
   });
 
   // Step 2: Generate Image (RunningHub storyboard 或 Third-party 回退)
-  app.post("/api/generate-image", requireSiteGate, async (req, res) => {
+  app.post("/api/generate-image", requireAuth, async (req, res) => {
     const { prompt, image_size, aspect_ratio, references, scope } = req.body;
     console.log("Received image generation request:", { prompt, image_size, aspect_ratio, scope });
 
@@ -1158,7 +1174,7 @@ ${pixarInstruction}
   });
 
   // Step 2.2: Generate 3x3 storyboard grid (script -> 9 prompts -> one 3x3 image)
-  app.post("/api/generate-9grid", requireSiteGate, async (req, res) => {
+  app.post("/api/generate-9grid", requireAuth, async (req, res) => {
     const { story, references, mode, imagePrompt: imagePromptInput, imageModel, textModel } = req.body as {
       story?: string;
       references?: Array<{ url?: string; name?: string } | string>;
@@ -1301,13 +1317,7 @@ ${pixarInstruction}
 
               lastStatus = textRes.status;
               const raw = await textRes.text().catch(() => "");
-              textPayload = (() => {
-                try {
-                  return raw ? JSON.parse(raw) : {};
-                } catch {
-                  return { error: { message: raw.slice(0, 500) } };
-                }
-              })();
+              textPayload = parseTextLlmResponseBody(raw);
 
               if (textRes.ok) break;
 
@@ -1544,7 +1554,7 @@ ${pixarInstruction}
   });
 
   // Step 2.1: Edit Image (Third-party API)
-  app.post("/api/edit-image", requireSiteGate, async (req, res) => {
+  app.post("/api/edit-image", requireAuth, async (req, res) => {
     const { prompt, target_image, references, images, image_size, aspect_ratio, model, response_format } = req.body;
     console.log("Received image edit request:", {
       prompt_preview: typeof prompt === "string" ? prompt.slice(0, 80) : "",

@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -15,7 +16,18 @@ export type ShellScreen =
   | 'image-editor'
   | 'nine-grid'
   | 'director'
-  | 'infinite-canvas';
+  | 'infinite-canvas'
+  | 'my-favorites'
+  | 'gallery'
+  | 'admin-users';
+
+type SubScreen = 'my-favorites' | 'gallery' | 'admin-users';
+
+const SUB_SCREENS = new Set<ShellScreen>(['my-favorites', 'gallery', 'admin-users']);
+
+function isSubScreen(screen: ShellScreen): screen is SubScreen {
+  return SUB_SCREENS.has(screen);
+}
 
 type Snap = {
   screen: ShellScreen;
@@ -26,27 +38,32 @@ type Snap = {
   infiniteCanvasKeepAlive: boolean;
 };
 
+const VALID_SCREENS = new Set<ShellScreen>([
+  'cover',
+  'studio',
+  'image-editor',
+  'nine-grid',
+  'director',
+  'infinite-canvas',
+  'my-favorites',
+  'gallery',
+  'admin-users',
+]);
+
 function readSnap(): Snap | null {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw) as Partial<Snap>;
     const screen = data.screen;
-    if (
-      screen === 'cover' ||
-      screen === 'studio' ||
-      screen === 'image-editor' ||
-      screen === 'nine-grid' ||
-      screen === 'director' ||
-      screen === 'infinite-canvas'
-    ) {
+    if (screen && VALID_SCREENS.has(screen)) {
       return {
         screen,
         studioKeepAlive: Boolean(data.studioKeepAlive) || screen === 'studio',
         imageEditorKeepAlive: Boolean(data.imageEditorKeepAlive),
         nineGridKeepAlive: Boolean(data.nineGridKeepAlive),
         directorWorkbenchKeepAlive: Boolean(data.directorWorkbenchKeepAlive),
-        infiniteCanvasKeepAlive: Boolean(data.infiniteCanvasKeepAlive),
+        infiniteCanvasKeepAlive: Boolean(data.infiniteCanvasKeepAlive) || screen === 'infinite-canvas',
       };
     }
   } catch {
@@ -76,7 +93,10 @@ type ShellNavigationValue = {
   openNineGrid: () => void;
   openDirectorWorkbench: () => void;
   openInfiniteCanvas: () => void;
-  /** 仅预热挂载（不改 screen），主页悬停画布入口时调用 */
+  openMyFavorites: () => void;
+  openGallery: () => void;
+  openAdminUsers: () => void;
+  goBack: () => void;
   warmInfiniteCanvas: () => void;
 };
 
@@ -84,6 +104,9 @@ const ShellNavigationContext = createContext<ShellNavigationValue | null>(null);
 
 export function ShellNavigationProvider({ children }: { children: React.ReactNode }) {
   const initial = readSnap();
+  const returnToRef = useRef<ShellScreen>(
+    initial?.screen && !isSubScreen(initial.screen) ? initial.screen : 'cover',
+  );
   const [screen, setScreen] = useState<ShellScreen>(initial?.screen ?? 'cover');
   const [studioKeepAlive, setStudioKeepAlive] = useState(
     () => initial?.studioKeepAlive ?? initial?.screen === 'studio',
@@ -119,6 +142,13 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
     infiniteCanvasKeepAlive,
   ]);
 
+  const openSubPage = useCallback((target: SubScreen) => {
+    setScreen((prev) => {
+      if (!isSubScreen(prev)) returnToRef.current = prev;
+      return target;
+    });
+  }, []);
+
   const openCover = useCallback(() => setScreen('cover'), []);
   const openStudio = useCallback(() => {
     setStudioKeepAlive(true);
@@ -140,6 +170,12 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
     setInfiniteCanvasKeepAlive(true);
     setScreen('infinite-canvas');
   }, []);
+  const openMyFavorites = useCallback(() => openSubPage('my-favorites'), [openSubPage]);
+  const openGallery = useCallback(() => openSubPage('gallery'), [openSubPage]);
+  const openAdminUsers = useCallback(() => openSubPage('admin-users'), [openSubPage]);
+  const goBack = useCallback(() => {
+    setScreen(returnToRef.current);
+  }, []);
   const warmInfiniteCanvas = useCallback(() => {
     setInfiniteCanvasKeepAlive(true);
   }, []);
@@ -158,6 +194,10 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
       openNineGrid,
       openDirectorWorkbench,
       openInfiniteCanvas,
+      openMyFavorites,
+      openGallery,
+      openAdminUsers,
+      goBack,
       warmInfiniteCanvas,
     }),
     [
@@ -173,6 +213,10 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
       openNineGrid,
       openDirectorWorkbench,
       openInfiniteCanvas,
+      openMyFavorites,
+      openGallery,
+      openAdminUsers,
+      goBack,
       warmInfiniteCanvas,
     ],
   );

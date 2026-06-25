@@ -1,14 +1,18 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import {
+  ArrowLeft,
   Camera,
   Clapperboard,
   Grid3x3,
   ImageIcon,
+  LogOut,
   Workflow,
   type LucideIcon,
 } from 'lucide-react';
 import { useShellNavigation } from '../shell/ShellNavigation';
+import { logoutSession } from '../lib/authSession';
+import { useAuthStore } from '../stores/authStore';
 import { StudioBackgroundRevealControl } from './StudioBackgroundRevealControl';
 import { cn } from '../lib/utils';
 
@@ -30,8 +34,16 @@ type StudioTopNavProps = {
   onHome?: () => void;
   /** 功能页隐藏分镜/画布/九宫格等栏目，仅保留品牌返回 */
   hideFeatureNav?: boolean;
+  /** 次级页：顶栏显示返回与标题 */
+  subPage?: 'my-favorites' | 'gallery' | 'admin-users';
   /** 画布编辑页：在品牌右侧挂载返回/标题条 */
   showCanvasTopbarSlot?: boolean;
+};
+
+const SUB_PAGE_TITLES: Record<NonNullable<StudioTopNavProps['subPage']>, string> = {
+  'my-favorites': '我的收藏',
+  gallery: '公共画廊',
+  'admin-users': '用户管理',
 };
 
 /** 画布引擎 topbar 挂载点（与 InfiniteCanvas 内 portal 对应） */
@@ -152,6 +164,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
   className,
   onHome,
   hideFeatureNav = false,
+  subPage,
   showCanvasTopbarSlot = false,
 }) => {
   const {
@@ -161,7 +174,13 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
     openNineGrid,
     openDirectorWorkbench,
     openInfiniteCanvas,
+    openMyFavorites,
+    openGallery,
+    openAdminUsers,
+    goBack,
   } = useShellNavigation();
+  const user = useAuthStore((s) => s.user);
+  const isAdmin = useAuthStore((s) => s.isAdmin());
 
   const navItems: NavItem[] = [
     { id: 'storyboard', label: '分镜', icon: Clapperboard, onClick: openStudio },
@@ -223,6 +242,27 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
         />
       )}
 
+      {subPage ? (
+        <div
+          className={cn(
+            'pointer-events-auto z-[2] flex min-w-0 flex-1 items-center justify-end gap-3',
+            isOverlayNav ? 'px-6 pt-5 md:px-10 md:pt-7 lg:px-14' : '',
+          )}
+        >
+          <button
+            type="button"
+            onClick={goBack}
+            className="inline-flex items-center gap-2 rounded-full bg-[#131313]/75 px-3 py-1.5 text-[13px] text-[#e5e2e1]/75 transition-colors hover:bg-[#1c1b1b] hover:text-[#e5e2e1]"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden />
+            返回
+          </button>
+          <span className="hidden text-sm text-[#e5e2e1]/55 sm:inline">
+            {SUB_PAGE_TITLES[subPage]}
+          </span>
+        </div>
+      ) : null}
+
       {!hideFeatureNav ? (
       <nav
         className={cn(
@@ -283,6 +323,46 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
 
             {!isCoverHomeNav && isOverlayNav ? (
               <StudioBackgroundRevealControl heroTone />
+            ) : null}
+
+            <button
+              type="button"
+              onClick={openMyFavorites}
+              className="hidden rounded-full px-3 py-2 text-[12px] text-[#e5e2e1]/60 transition-colors hover:bg-[#1c1b1b]/70 hover:text-[#e5e2e1] md:inline-flex"
+            >
+              我的收藏
+            </button>
+            <button
+              type="button"
+              onClick={openGallery}
+              className="hidden rounded-full px-3 py-2 text-[12px] text-[#e5e2e1]/60 transition-colors hover:bg-[#1c1b1b]/70 hover:text-[#e5e2e1] md:inline-flex"
+            >
+              公共画廊
+            </button>
+            {isAdmin ? (
+              <button
+                type="button"
+                onClick={openAdminUsers}
+                className="hidden rounded-full px-3 py-2 text-[12px] text-[#e5e2e1]/60 transition-colors hover:bg-[#1c1b1b]/70 hover:text-[#e5e2e1] md:inline-flex"
+              >
+                用户管理
+              </button>
+            ) : null}
+
+            {user ? (
+              <div className="hidden items-center gap-2 md:flex">
+                <span className="max-w-[140px] truncate text-[11px] uppercase tracking-[0.08em] text-[#e5e2e1]/45">
+                  {user.display_name || user.email}
+                </span>
+                <button
+                  type="button"
+                  title="退出登录"
+                  onClick={() => void logoutSession().then(() => window.location.reload())}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[#e5e2e1]/50 transition-colors hover:bg-[#1c1b1b]/70 hover:text-[#e5e2e1]"
+                >
+                  <LogOut className="h-4 w-4" aria-hidden />
+                </button>
+              </div>
             ) : null}
           </div>
         </div>

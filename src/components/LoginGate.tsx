@@ -3,22 +3,26 @@ import { motion } from 'motion/react';
 import { Lock, Loader2, ArrowRight } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
-  GATE_AUTH_REQUIRED_EVENT,
-  GATE_LS_KEY,
-  isStoredAuthorized,
-} from '../lib/gateAuth';
+  AUTH_LS_KEY,
+  AUTH_REQUIRED_EVENT,
+  fetchAuthStatus,
+  isStoredAuthenticated,
+} from '../lib/authSession';
+import { useAuthStore } from '../stores/authStore';
 
-export { GATE_LS_KEY };
+export { AUTH_LS_KEY as GATE_LS_KEY };
 
 /**
- * 专业门禁：琥珀 + 毛玻璃 + spring 动效；暗号由服务端 .env ACCESS_CODE 校验（开发缺省 liu888，生产须设强暗号）。
+ * 邮箱登录门禁；Session Cookie 由服务端 userAuth 签发。
  */
 export function LoginGate({ children }: { children: React.ReactNode }) {
+  const setUser = useAuthStore((s) => s.setUser);
+  const setChecked = useAuthStore((s) => s.setChecked);
   const [authorized, setAuthorized] = useState(false);
-  /** 本会话曾通过暗号后保持 App 挂载，避免门禁弹层时卸载导致页面状态（如无限画布）丢失 */
-  const [sessionUnlocked, setSessionUnlocked] = useState(() => isStoredAuthorized());
+  const [sessionUnlocked, setSessionUnlocked] = useState(() => isStoredAuthenticated());
   const [checking, setChecking] = useState(true);
-  const [code, setCode] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -26,91 +30,100 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/auth/status', { credentials: 'same-origin' });
-        const data = (await res.json()) as { ok?: boolean };
+        const data = await fetchAuthStatus();
         if (cancelled) return;
-        if (data.ok) {
+        if (data.ok && data.user) {
           try {
-            localStorage.setItem(GATE_LS_KEY, '1');
+            localStorage.setItem(AUTH_LS_KEY, '1');
           } catch {
             /* ignore */
           }
+          setUser(data.user);
           setSessionUnlocked(true);
           setAuthorized(true);
         } else {
           try {
-            localStorage.removeItem(GATE_LS_KEY);
+            localStorage.removeItem(AUTH_LS_KEY);
           } catch {
             /* ignore */
           }
+          setUser(null);
+          setSessionUnlocked(false);
           setAuthorized(false);
         }
       } catch {
         if (cancelled) return;
-        // 无法确认服务端 Cookie 时，不信任仅 localStorage 的放行（避免「能进站但不能生图」）
-        if (isStoredAuthorized()) {
+        if (isStoredAuthenticated()) {
           try {
-            localStorage.removeItem(GATE_LS_KEY);
+            localStorage.removeItem(AUTH_LS_KEY);
           } catch {
             /* ignore */
           }
         }
+        setUser(null);
+        setSessionUnlocked(false);
         setAuthorized(false);
       } finally {
-        if (!cancelled) setChecking(false);
+        if (!cancelled) {
+          setChecking(false);
+          setChecked(true);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [setUser, setChecked]);
 
   useEffect(() => {
     const onRequired = () => {
       try {
-        localStorage.removeItem(GATE_LS_KEY);
+        localStorage.removeItem(AUTH_LS_KEY);
       } catch {
         /* ignore */
       }
+      setUser(null);
       setAuthorized(false);
     };
-    window.addEventListener(GATE_AUTH_REQUIRED_EVENT, onRequired);
-    return () => window.removeEventListener(GATE_AUTH_REQUIRED_EVENT, onRequired);
-  }, []);
+    window.addEventListener(AUTH_REQUIRED_EVENT, onRequired);
+    return () => window.removeEventListener(AUTH_REQUIRED_EVENT, onRequired);
+  }, [setUser]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = code.trim();
-    if (!trimmed) {
-      setError('请输入访问暗号');
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
+      setError('请输入邮箱与密码');
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch('/api/auth', {
+      const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: trimmed }),
+        credentials: 'same-origin',
+        body: JSON.stringify({ email: trimmedEmail, password }),
       });
-      let data: { error?: string } = {};
+      let data: { error?: string; user?: import('../stores/authStore').AuthUser } = {};
       try {
         data = await res.json();
       } catch {
         data = {};
       }
       if (!res.ok) {
-        throw new Error(typeof data?.error === 'string' ? data.error : '校验失败');
+        throw new Error(typeof data?.error === 'string' ? data.error : '登录失败');
       }
       try {
-        localStorage.setItem(GATE_LS_KEY, '1');
+        localStorage.setItem(AUTH_LS_KEY, '1');
       } catch {
-        /* 隐私模式：仅本会话放行 */
+        /* ignore */
       }
+      if (data.user) setUser(data.user);
       setSessionUnlocked(true);
       setAuthorized(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '校验失败');
+      setError(err instanceof Error ? err.message : '登录失败');
     } finally {
       setSubmitting(false);
     }
@@ -124,7 +137,7 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
         transition={{ type: 'spring', stiffness: 300, damping: 30 }}
         className="fixed inset-0 z-[2147483647] flex min-h-[100dvh] items-center justify-center bg-[#0e0e0e] text-sm text-[#e5e2e1]/80"
         aria-busy="true"
-        aria-label="正在校验访问权限"
+        aria-label="正在校验登录状态"
       >
         <motion.div
           animate={{ rotate: 360 }}
@@ -143,7 +156,6 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="login-gate-title"
-      style={{ opacity: 1, visibility: 'visible' }}
     >
       <div
         aria-hidden
@@ -156,7 +168,7 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
         className={cn(
           'relative w-full max-w-md rounded-[2rem] bg-[#131313]/60 p-10',
           'outline outline-[0.5px] outline-[#45464d]/20',
-          'shadow-[0_48px_100px_-36px_rgba(0,0,0,0.55)] backdrop-blur-[32px]'
+          'shadow-[0_48px_100px_-36px_rgba(0,0,0,0.55)] backdrop-blur-[32px]',
         )}
       >
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
@@ -173,25 +185,36 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
             className="font-serif text-2xl tracking-[-0.02em] text-[#e5e2e1]"
             style={{ fontFamily: '"Noto Serif", ui-serif, Georgia, serif' }}
           >
-            访问暗号
+            登录 LHZ Studio
           </h1>
           <p className="max-w-[300px] text-sm leading-relaxed text-[#e5e2e1]/68">
-            请输入管理员提供的访问暗号。验证通过后可使用工作台与生图等功能。
+            使用管理员分配的邮箱与密码登录，即可使用分镜、画布与生图等功能。
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-          <label className="sr-only" htmlFor="access-code">
-            访问暗号
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <label className="sr-only" htmlFor="login-email">
+            邮箱
           </label>
           <input
-            id="access-code"
+            id="login-email"
+            type="email"
+            autoComplete="username"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="邮箱"
+            className="w-full rounded-2xl bg-[#1c1b1b]/85 px-5 py-3.5 text-[15px] text-[#e5e2e1] placeholder:text-[#e5e2e1]/35 outline-none transition-shadow focus:shadow-[0_0_0_3px_rgba(255,184,102,0.2)]"
+          />
+          <label className="sr-only" htmlFor="login-password">
+            密码
+          </label>
+          <input
+            id="login-password"
             type="password"
-            name="access-code"
-            autoComplete="off"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            placeholder="输入暗号"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="密码"
             className="w-full rounded-2xl bg-[#1c1b1b]/85 px-5 py-3.5 text-[15px] text-[#e5e2e1] placeholder:text-[#e5e2e1]/35 outline-none transition-shadow focus:shadow-[0_0_0_3px_rgba(255,184,102,0.2)]"
           />
           {error ? (
@@ -208,7 +231,7 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
             transition={{ type: 'spring', stiffness: 400, damping: 28 }}
             className={cn(
               'flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-br from-[#ffb866] to-[#b77100] py-3.5 text-[15px] font-medium text-[#1a1208]',
-              'shadow-[0_20px_48px_-14px_rgba(255,184,102,0.38)] disabled:opacity-60'
+              'shadow-[0_20px_48px_-14px_rgba(255,184,102,0.38)] disabled:opacity-60',
             )}
           >
             {submitting ? (

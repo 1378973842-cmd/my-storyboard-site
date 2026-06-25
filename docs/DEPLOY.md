@@ -287,6 +287,39 @@ npm rebuild better-sqlite3
 pm2 restart gemini-deploy
 ```
 
+### 无限画布节点全消失（logs 仍在）
+
+**现象：** 打开某张画布后节点/图片全空，但生成记录（logs）还在；`data/canvases/<id>.json` 里 `nodes: []`。
+
+**优先顺序：**
+
+1. 看同目录 `<id>.json.bak` 是否仍有节点（防护代码上线后，`.bak` 会保留最后一次「有节点」的版本）。
+2. 若 `.bak` 也空，但 `logs[]` 里有大量 `status: "success"` 且带 `outputs`，用仓库脚本**恢复 Output 画廊**（生成器/连线/布局无法还原）。
+
+**本地：**
+
+```powershell
+cd <你的仓库路径>
+npm run recover:canvas-output -- <canvasId> --dry-run
+npm run recover:canvas-output -- <canvasId>
+```
+
+**线上（SSH 进服务器后，在仓库根目录）：**
+
+```bash
+cd /var/www/my-storyboard-site
+node scripts/recover-canvas-output-from-logs.mjs <canvasId> --dry-run
+node scripts/recover-canvas-output-from-logs.mjs <canvasId>
+pm2 restart gemini-deploy
+```
+
+- `<canvasId>` 为文件名去掉 `.json`，例如 `78068d3de1f0454e93d50f1b15acf8b2`。
+- 脚本会先备份为 `<id>.json.pre-recover`，再写入 1 个 Output 节点。
+- 若画布上**已有节点**且仍要覆盖，加 `--force`（慎用）。
+- 恢复后在浏览器**硬刷新**并重新打开该画布。
+
+**预防：** 部署含「拒绝空 nodes 覆盖」的 `infiniteCanvasStore.ts` 与 `canvasEngine.js` 后再观察；服务端日志可见 `[canvas-store] blocked empty nodes overwrite`。
+
 ---
 
 ## 七、与 V1.0 手册差异速查

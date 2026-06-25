@@ -293,6 +293,48 @@ async function resolveApimartConnectIp(hostname: string): Promise<string> {
   }
 }
 
+/** APIMart / OneAPI 有时忽略 stream:false，仍返回 SSE；拼成 choices[0].message.content 供下游解析 */
+export function parseTextLlmResponseBody(raw: string): Record<string, unknown> {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return {};
+
+  try {
+    return JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    /* fall through */
+  }
+
+  if (!/^\s*data:/im.test(trimmed)) {
+    return { error: { message: trimmed.slice(0, 500) } };
+  }
+
+  let assembled = "";
+  for (const line of trimmed.split(/\r?\n/)) {
+    const m = /^data:\s*(.*)\s*$/i.exec(line.trim());
+    if (!m) continue;
+    const payload = m[1].trim();
+    if (!payload || payload === "[DONE]") continue;
+    try {
+      const chunk = JSON.parse(payload) as Record<string, unknown>;
+      const choices = chunk.choices;
+      if (!Array.isArray(choices) || !choices.length) continue;
+      const first = choices[0] as Record<string, unknown>;
+      const delta = first.delta as { content?: unknown } | undefined;
+      const message = first.message as { content?: unknown } | undefined;
+      if (typeof delta?.content === "string") assembled += delta.content;
+      else if (typeof message?.content === "string") assembled += message.content;
+    } catch {
+      /* skip malformed chunk */
+    }
+  }
+
+  if (assembled.trim()) {
+    return { choices: [{ message: { content: assembled.trim() } }] };
+  }
+
+  return { error: { message: trimmed.slice(0, 500) } };
+}
+
 async function fetchApimartWithDnsFix(url: string, init: RequestInit): Promise<Response> {
   const parsed = new URL(url);
   const ip = await resolveApimartConnectIp(parsed.hostname);

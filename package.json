@@ -15,7 +15,8 @@
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "log:daily": "node scripts/daily-log.mjs",
-    "hooks:install": "node scripts/install-git-hooks.mjs"
+    "hooks:install": "node scripts/install-git-hooks.mjs",
+    "recover:canvas-output": "node scripts/recover-canvas-output-from-logs.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

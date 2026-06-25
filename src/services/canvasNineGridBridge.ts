@@ -4,6 +4,7 @@ import path from "path";
 import {
   augmentChatCompletionsBody,
   extractTextLlmMessageContent,
+  parseTextLlmResponseBody,
   postTextLlm,
   resolveTextLlmEnv,
 } from "./canvasTextLlmBridge.js";
@@ -187,12 +188,7 @@ async function callNineGridRefVisionLlm(
     );
     clearTimeout(timer);
     const rawText = await response.text();
-    let data: Record<string, unknown> = {};
-    try {
-      data = rawText ? (JSON.parse(rawText) as Record<string, unknown>) : {};
-    } catch {
-      data = { error: { message: rawText.slice(0, 400) } };
-    }
+    const data = parseTextLlmResponseBody(rawText);
     if (!response.ok) {
       const errMsg =
         (typeof (data?.error as { message?: unknown })?.message === "string" &&

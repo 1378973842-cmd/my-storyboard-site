@@ -43,6 +43,7 @@ export function StudioHeroShell({ active, children, className }: StudioHeroShell
       className={cn(
         'fixed inset-0 flex flex-col min-h-0 min-w-0 overflow-hidden',
         isCanvasShell && 'bg-transparent',
+        !active && '[&_*]:pointer-events-none',
         className,
       )}
       data-shell-active={active ? '1' : '0'}

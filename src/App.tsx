@@ -42,6 +42,9 @@ import { StandaloneImageEditorPage } from './components/StandaloneImageEditorPag
 import { NineGridPage } from './components/NineGridPage';
 import { DirectorWorkbenchPage } from './pages/DirectorWorkbenchPage';
 import { InfiniteCanvasPage } from './pages/InfiniteCanvasPage';
+import { MyFavoritesPage } from './pages/MyFavoritesPage';
+import { GalleryPage } from './pages/GalleryPage';
+import { AdminUsersPage } from './pages/AdminUsersPage';
 import { ZoomableLightboxImage } from './components/ZoomableLightboxImage';
 import { GlobalNoticeCenter } from './components/GlobalNoticeCenter';
 import { Folder, Save } from 'lucide-react';
@@ -281,6 +284,16 @@ export default function App() {
   const showDirectorWorkbenchPage = screen === 'director';
   const showInfiniteCanvasPage = screen === 'infinite-canvas';
   const showMainStudio = screen === 'studio';
+  const showMyFavoritesPage = screen === 'my-favorites';
+  const showGalleryPage = screen === 'gallery';
+  const showAdminUsersPage = screen === 'admin-users';
+  const subPage = showMyFavoritesPage
+    ? 'my-favorites'
+    : showGalleryPage
+      ? 'gallery'
+      : showAdminUsersPage
+        ? 'admin-users'
+        : undefined;
 
   /** 回到首页时确保画布层不挡滚轮（z-index + body 标记） */
   useEffect(() => {
@@ -636,9 +649,13 @@ export default function App() {
         active={resolveStudioNavActive(screen)}
         variant="overlay"
         hideFeatureNav={!showCoverPage}
+        subPage={subPage}
         showCanvasTopbarSlot={showInfiniteCanvasPage && !showCoverPage}
         onHome={showInfiniteCanvasPage && !showCoverPage ? handleCanvasExitHome : undefined}
       />
+      <MyFavoritesPage shellActive={showMyFavoritesPage} />
+      <GalleryPage shellActive={showGalleryPage} />
+      <AdminUsersPage shellActive={showAdminUsersPage} />
       {/* Keep editor mounted after first open (cover / main studio), so draft persists */}
       {(showImageEditorPage || imageEditorKeepAlive) && (
         <StudioHeroShell active={showImageEditorPage && !showCoverPage}>
