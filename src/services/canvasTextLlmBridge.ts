@@ -96,16 +96,20 @@ export function augmentChatCompletionsBody(
   model: string,
   body: Record<string, unknown>
 ): Record<string, unknown> {
-  if (!isRunningHubChatModel(model)) return body;
+  const out: Record<string, unknown> = { ...body };
+  // APIMart（含 api.apib.ai 大陆入口）默认 SSE 流式；服务端需完整 JSON 响应
+  if (isApimartGeminiFlashModel(model) && out.stream === undefined) {
+    out.stream = false;
+  }
+  if (!isRunningHubChatModel(model)) return out;
   const effort =
     String(process.env.RUNNINGHUB_LLM_REASONING_EFFORT || "none").trim() || "none";
-  const out: Record<string, unknown> = {
-    ...body,
+  Object.assign(out, {
     top_p: body.top_p !== undefined ? body.top_p : 1,
     presence_penalty: body.presence_penalty !== undefined ? body.presence_penalty : 0,
     frequency_penalty: body.frequency_penalty !== undefined ? body.frequency_penalty : 0,
     reasoning_effort: body.reasoning_effort !== undefined ? body.reasoning_effort : effort,
-  };
+  });
   if (body.temperature === undefined) out.temperature = 1;
   return out;
 }
