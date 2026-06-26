@@ -5,6 +5,7 @@ import { cn } from '../lib/utils';
 import {
   AUTH_LS_KEY,
   AUTH_REQUIRED_EVENT,
+  clearCanvasLastSessionId,
   fetchAuthStatus,
   isStoredAuthenticated,
 } from '../lib/authSession';
@@ -120,6 +121,7 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
         /* ignore */
       }
       if (data.user) setUser(data.user);
+      clearCanvasLastSessionId();
       setSessionUnlocked(true);
       setAuthorized(true);
     } catch (err) {

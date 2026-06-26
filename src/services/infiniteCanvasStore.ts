@@ -60,7 +60,8 @@ export function canAccessCanvas(doc: CanvasDocument, ctx: CanvasAccessContext | 
   if (!ctx?.userId) return false;
   if (ctx.isAdmin) return true;
   const owner = String(doc.owner_id || "").trim();
-  if (!owner) return true;
+  // 无 owner_id 的旧画布仅管理员可见，避免全员共享
+  if (!owner) return false;
   return owner === ctx.userId;
 }
 
@@ -325,6 +326,9 @@ export function saveCanvas(
   doc.viewport = payload.viewport ?? doc.viewport ?? { x: 0, y: 0, scale: 1 };
   doc.logs = Array.isArray(payload.logs) ? payload.logs.slice(-500) : doc.logs || [];
   doc.settings = payload.settings ?? doc.settings ?? {};
+  if (!String(doc.owner_id || "").trim() && ctx?.userId) {
+    doc.owner_id = ctx.userId;
+  }
   writeDoc(doc);
   return doc;
 }

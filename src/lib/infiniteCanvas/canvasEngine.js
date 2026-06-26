@@ -213,15 +213,14 @@ function syncCanvasPageMarkers(){
     if(!canvasRoot) return;
     try {
         const hasActiveCanvas = Boolean(canvas);
-        const inSession = hasActiveCanvas || Boolean(readLastCanvasId());
         // 门控页（选择画布）时 canvasOpen/is-editor 必须为 false，否则 CSS 会把 gate 藏起来再闪出来
-        canvasRoot.dataset.editorSession = inSession ? '1' : '0';
+        canvasRoot.dataset.editorSession = hasActiveCanvas ? '1' : '0';
         canvasRoot.dataset.canvasOpen = hasActiveCanvas ? '1' : '0';
         canvasRoot.classList.toggle('is-editor', hasActiveCanvas);
     } catch(_) {}
 }
 function shouldKeepEditorShellOpen(){
-    return Boolean(canvas || readLastCanvasId()) && !gateViewRequested;
+    return Boolean(canvas) && !gateViewRequested;
 }
 function syncShellEditorClass(){
     if(syncShellEditorClass._busy) return;
@@ -265,10 +264,11 @@ function rebindDomIfStale(){
 function showCanvasGateView({ clearEditor = false } = {}){
     gateViewRequested = true;
     if(creatingCanvas) setCreateMode(false);
+    if(clearEditor) writeLastCanvasId('');
     if(canvasRoot){
         try {
             canvasRoot.dataset.canvasOpen = '0';
-            canvasRoot.dataset.editorSession = readLastCanvasId() ? '1' : '0';
+            canvasRoot.dataset.editorSession = '0';
         } catch(_) {}
     }
     setCanvasMode(false, { clearEditor, force: true });
@@ -277,7 +277,7 @@ function syncEditorSessionMarker(){
     syncCanvasPageMarkers();
 }
 function ensureEditorShellVisible(){
-    if(!canvas && !readLastCanvasId()) return;
+    if(!canvas) return;
     if(!gateViewRequested) return;
     gateViewRequested = false;
     syncShellEditorClass();
@@ -292,7 +292,7 @@ function markCanvasEditorSession(open){
         } else {
             canvasRoot.classList.remove('is-editor');
             canvasRoot.dataset.canvasOpen = '0';
-            canvasRoot.dataset.editorSession = readLastCanvasId() ? '1' : '0';
+            canvasRoot.dataset.editorSession = '0';
         }
     } catch(_) {}
 }
@@ -1627,7 +1627,6 @@ function setCanvasMode(open, { clearEditor = false, force = false } = {}){
         if(!force && !gateViewRequested) return;
         if(!force && shouldBlockCanvasGateTransition()) return;
         if(!force && clearEditor && canvas) return;
-        if(!force && clearEditor && readLastCanvasId()) return;
     } else {
         gateViewRequested = false;
     }
@@ -2057,7 +2056,7 @@ async function loadCanvasList(openFirst=true){
             if(firstClassic) await openCanvas(firstClassic.id);
         }
         if(!canvas) {
-            if(shouldBlockCanvasGateTransition() || readLastCanvasId() || canvasRoot?.dataset?.editorSession === '1') return;
+            if(shouldBlockCanvasGateTransition() || canvas) return;
             const liveShell = resolveLiveShell();
             if(liveShell?.classList.contains('no-canvas')) {
                 const gateMsg = trashMode ? (deletedCanvases.length ? tr('canvas.trash') : tr('canvas.trashEmpty')) : (canvases.length ? tr('canvas.chooseFirst') : tr('canvas.noCanvasCreateFirst'));
@@ -17044,9 +17043,11 @@ async function mountInfiniteCanvasEngineInner(root) {
   const lastMeta = lastId ? canvases.find(c => c.id === lastId) : null;
   if(!canvas && lastMeta && (lastMeta.kind || 'classic') !== 'smart'){
     try { await openCanvas(lastId); } catch(e) { console.warn('[infinite-canvas] restore last canvas failed', e); }
+  } else if(lastId && !canvas) {
+    writeLastCanvasId('');
   }
   if(!isMountGenerationCurrent(seq)) return disposeInfiniteCanvasEngine;
-  if(!canvas && !readLastCanvasId()) showCanvasGateView({ clearEditor: true });
+  if(!canvas) showCanvasGateView({ clearEditor: true });
   mountedEngineRoot = root;
   syncCanvasPageMarkers();
   return disposeInfiniteCanvasEngine;

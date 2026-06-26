@@ -25,6 +25,7 @@ export function notifyAuthRequired(): void {
   } catch {
     /* ignore */
   }
+  clearCanvasLastSessionId();
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT));
   }
@@ -36,6 +37,18 @@ export async function fetchAuthStatus(): Promise<{ ok: boolean; user?: import('.
   return { ok: Boolean(data.ok), user: data.user };
 }
 
+/** 与 infiniteCanvas/canvasEngine.js 的 LAST_CANVAS_ID_KEY 保持一致 */
+export const CANVAS_LAST_ID_SESSION_KEY = 'gemini-infinite-canvas-last-id';
+
+export function clearCanvasLastSessionId(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.removeItem(CANVAS_LAST_ID_SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function logoutSession(): Promise<void> {
   await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
   try {
@@ -43,4 +56,5 @@ export async function logoutSession(): Promise<void> {
   } catch {
     /* ignore */
   }
+  clearCanvasLastSessionId();
 }
