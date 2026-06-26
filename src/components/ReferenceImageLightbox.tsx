@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { X } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -6,18 +7,30 @@ import { ZoomableLightboxImage } from './ZoomableLightboxImage';
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
+/** 收藏/画廊等页面预览的统一展示上限：大图缩小、小图按原分辨率居中。 */
+export const LIGHTBOX_IMAGE_MAX_CLASS =
+  'max-h-[min(72vh,840px)] max-w-[min(86vw,1120px)]';
+
 type Props = {
   url: string | null;
   onClose: () => void;
   /** 嵌套在 Modal（z-120）内时用更高层级 */
   zIndexClass?: string;
+  imageMaxClassName?: string;
 };
 
 export const ReferenceImageLightbox: React.FC<Props> = ({
   url,
   onClose,
-  zIndexClass = 'z-[96]',
+  zIndexClass = 'z-[100]',
+  imageMaxClassName = LIGHTBOX_IMAGE_MAX_CLASS,
 }) => {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   useEffect(() => {
     if (!url) return;
     const onKey = (e: KeyboardEvent) => {
@@ -27,9 +40,9 @@ export const ReferenceImageLightbox: React.FC<Props> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [url, onClose]);
 
-  if (!url) return null;
+  if (!url || !mounted) return null;
 
-  return (
+  return createPortal(
     <motion.div
       role="presentation"
       initial={{ opacity: 0 }}
@@ -45,7 +58,7 @@ export const ReferenceImageLightbox: React.FC<Props> = ({
         aria-label="关闭预览"
       />
       <div className="pointer-events-none absolute inset-0 flex flex-col p-3 sm:p-4">
-        <div className="pointer-events-auto absolute right-3 top-3 z-20 sm:right-4 sm:top-4">
+        <div className="pointer-events-auto flex shrink-0 items-center justify-end pb-2 sm:pb-3">
           <button
             type="button"
             onClick={onClose}
@@ -56,12 +69,15 @@ export const ReferenceImageLightbox: React.FC<Props> = ({
             <X className="h-5 w-5" strokeWidth={1.75} />
           </button>
         </div>
-        <div className="min-h-0 min-w-0 flex flex-1 flex-col pt-12">
-          <div className="pointer-events-auto min-h-0 min-w-0 flex-1">
+        <div className="pointer-events-auto min-h-0 min-w-0 flex flex-1 flex-col">
+          <div className="min-h-0 min-w-0 flex-1">
             <ZoomableLightboxImage
               url={url}
               className="h-full w-full"
-              imgClassName="rounded-xl outline outline-[0.5px] outline-white/20 shadow-[0_48px_120px_-40px_rgba(0,0,0,0.85)]"
+              imgClassName={cn(
+                'rounded-xl outline outline-[0.5px] outline-white/20 shadow-[0_48px_120px_-40px_rgba(0,0,0,0.85)]',
+                imageMaxClassName,
+              )}
             />
           </div>
           <p className="pointer-events-none shrink-0 pt-2 text-center text-[10px] font-label tracking-[0.14em] text-white/40 uppercase">
@@ -69,6 +85,7 @@ export const ReferenceImageLightbox: React.FC<Props> = ({
           </p>
         </div>
       </div>
-    </motion.div>
+    </motion.div>,
+    document.body,
   );
 };

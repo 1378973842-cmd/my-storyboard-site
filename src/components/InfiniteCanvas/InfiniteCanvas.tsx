@@ -3,6 +3,7 @@ import { InfiniteCanvasShell } from './InfiniteCanvasShell';
 import { installStudioI18n } from '../../lib/infiniteCanvas/studioI18n';
 import {
   disposeInfiniteCanvasEngine,
+  consumeQueuedCanvasFavoriteNavigation,
   isInfiniteCanvasEngineMountedOn,
   mountInfiniteCanvasEngine,
   refreshInfiniteCanvasLayout,
@@ -124,7 +125,10 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
     // 延后一帧再显示 gate，与 StudioConvergePiece 首帧 opacity:0 对齐，避免选择面板硬弹
     let cancelled = false;
     const id = requestAnimationFrame(() => {
-      if (!cancelled) setInfiniteCanvasShellSuspended(false);
+      if (!cancelled) {
+        setInfiniteCanvasShellSuspended(false);
+        void consumeQueuedCanvasFavoriteNavigation();
+      }
     });
     return () => {
       cancelled = true;

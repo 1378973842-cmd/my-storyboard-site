@@ -1,6 +1,7 @@
 node_modules/
 ComfyTV-main/
 .dev-server.mjs
+.dev-server-test.mjs
 .tools/
 build/
 dist/
@@ -20,3 +21,5 @@ data/canvases/*
 !data/canvases/.gitkeep
 data/canvas-workflow-templates/*
 !data/canvas-workflow-templates/.gitkeep
+data/canvas-collections/*
+!data/canvas-collections/.gitkeep

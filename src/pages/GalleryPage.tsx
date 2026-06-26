@@ -2,10 +2,12 @@ import React, { memo, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { Loader2 } from 'lucide-react';
 import { CopyablePromptText } from '../components/CopyablePromptText';
+import { ReferenceImageLightbox } from '../components/ReferenceImageLightbox';
 
 type GalleryItem = {
   id: string;
   thumbnail_path: string;
+  preview_path?: string;
   prompt: string;
   model: string;
   params: Record<string, unknown>;
@@ -20,6 +22,7 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!shellActive) return;
@@ -56,7 +59,7 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
             公共画廊
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[#e5e2e1]/65">
-            同事主动分享的优秀案例。可学习 Prompt 与模型参数，激发创作灵感。
+            同事主动分享的优秀案例。点击图片可放大查看，学习 Prompt 与模型参数，激发创作灵感。
           </p>
         </motion.div>
 
@@ -82,14 +85,20 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
                 transition={spring}
                 className="overflow-hidden rounded-[1.5rem] bg-[#131313]/80 outline outline-[0.5px] outline-[#45464d]/20"
               >
-                <div className="aspect-[4/3] bg-[#1c1b1b]">
+                <button
+                  type="button"
+                  className="group relative block aspect-[4/3] w-full cursor-zoom-in bg-[#1c1b1b] text-left"
+                  onClick={() => setPreviewUrl(item.preview_path || item.thumbnail_path)}
+                  aria-label="放大查看图片"
+                >
                   <img
                     src={item.thumbnail_path}
                     alt=""
-                    className="h-full w-full object-cover"
+                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
                     loading="lazy"
+                    draggable={false}
                   />
-                </div>
+                </button>
                 <div className="space-y-3 p-5">
                   <p className="text-xs uppercase tracking-[0.14em] text-[#ffb866]/75">
                     {item.owner_name || '同事'}
@@ -109,6 +118,8 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
           </div>
         )}
       </main>
+
+      <ReferenceImageLightbox url={previewUrl} onClose={() => setPreviewUrl(null)} />
     </div>
   );
 });

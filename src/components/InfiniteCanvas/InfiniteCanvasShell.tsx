@@ -226,6 +226,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({ rootRef }
                               <button id="gateBackBtn" className="gate-back-link" type="button"><i data-lucide="arrow-left" className="w-3.5 h-3.5"></i><span data-i18n="canvas.backToList">返回画布列表</span></button>
                               <div className="gate-title-row">
                                   <div id="gateTitleText" className="gate-title">选择画布</div>
+                                  <span id="gateCountPill" className="gate-count-pill">0</span>
                               </div>
                               <div id="gateSubtitle" className="gate-subtitle" hidden></div>
                           </div>
@@ -236,6 +237,9 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({ rootRef }
                               <button id="gateTrashBtn" className="gate-icon-btn gate-trash-entry" type="button" title="打开回收站" aria-label="打开回收站" data-i18n-title="canvas.openTrash">
                                   <i data-lucide="trash-2" className="w-4 h-4"></i>
                                   <span id="gateTrashCount" className="gate-trash-badge">0</span>
+                              </button>
+                              <button id="gateCreateCollectionBtn" className="gate-icon-btn" type="button" title="新建合集" aria-label="新建合集">
+                                  <i data-lucide="folder-plus" className="w-4 h-4"></i>
                               </button>
                               <button id="gateCreateBtn" className="primary-btn" type="button"><i data-lucide="plus" className="w-4 h-4"></i><span data-i18n="canvas.newCanvas">新建画布</span></button>
                               {/* 智能画布尚未接入本站，由 canvasEngine.refreshGateViewControls 保持 hidden */}
@@ -249,15 +253,46 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({ rootRef }
                           <button id="gateCancelBtn" className="create-cancel" type="button" title="取消" aria-label="取消" data-i18n-title="common.cancel"><i data-lucide="x" className="w-4 h-4"></i></button>
                       </div>
                       <div className="trash-note"><i data-lucide="info" className="w-3.5 h-3.5 inline-block align-text-bottom mr-1"></i><span data-i18n="canvas.trashNote">回收站中的画布会在 30 天后自动清理。</span></div>
-                      <div className="gate-canvas-section">
-                          <div className="gate-section-head">
-                              <div className="gate-section-title-row">
-                                  <div className="gate-section-title" data-i18n="canvas.myCanvases">我的画布</div>
-                                  <span id="gateCountPill" className="gate-count-pill">0</span>
+                      <div id="gateLibraryRoot" className="gate-library">
+                          <div id="gateCollectionsRoot" className="gate-collections" />
+                          <div id="gateUncategorizedSection" className="gate-canvas-section gate-uncategorized-section">
+                              <div className="gate-section-head">
+                                  <div className="gate-section-title-row">
+                                      <div className="gate-section-title">未分类</div>
+                                      <span id="gateUncategorizedCount" className="gate-count-pill">0</span>
+                                  </div>
                               </div>
+                              <div id="gateCanvasList" className="gate-list"></div>
                           </div>
-                          <div id="gateCanvasList" className="gate-list"></div>
                       </div>
+                  </div>
+              </div>
+
+              <div id="gateContextMenu" className="gate-context-menu" hidden role="menu" />
+
+              <div id="gateCollectionModal" className="gate-collection-modal" aria-hidden="true">
+                  <div className="gate-collection-modal-panel" role="dialog" aria-modal="true" aria-labelledby="gateCollectionModalTitle">
+                      <div id="gateCollectionModalTitle" className="gate-collection-modal-title">创建合集</div>
+                      <input id="gateCollectionNameInput" className="gate-name-input gate-collection-name-input" type="text" maxLength={40} placeholder="合集名称" />
+                      <div className="gate-collection-modal-actions">
+                          <button id="gateCollectionModalCancel" type="button" className="canvas-cancel-btn">取消</button>
+                          <button id="gateCollectionModalConfirm" type="button" className="canvas-confirm-btn">确定</button>
+                      </div>
+                  </div>
+              </div>
+
+              <div id="gateCollectionBrowseModal" className="gate-collection-browse-modal" aria-hidden="true">
+                  <div className="gate-collection-browse-panel" role="dialog" aria-modal="true" aria-labelledby="gateCollectionBrowseTitle">
+                      <div className="gate-collection-browse-head">
+                          <div className="gate-collection-browse-head-text">
+                              <div id="gateCollectionBrowseTitle" className="gate-collection-browse-title">合集</div>
+                              <div id="gateCollectionBrowseCount" className="gate-collection-browse-count">0 张画布</div>
+                          </div>
+                          <button id="gateCollectionBrowseClose" type="button" className="gate-icon-btn gate-collection-browse-close" aria-label="关闭">
+                              <i data-lucide="x" className="w-4 h-4" />
+                          </button>
+                      </div>
+                      <div id="gateCollectionBrowseList" className="gate-list gate-collection-browse-list" />
                   </div>
               </div>
       

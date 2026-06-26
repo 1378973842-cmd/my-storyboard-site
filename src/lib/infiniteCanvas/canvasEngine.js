@@ -10,6 +10,22 @@ import {
     nineGridFallbackSlicePosition,
     splitNineGridToNine,
 } from '../nineGrid/nineGridCore.js';
+import {
+    clearCanvasFavoriteNavigation,
+    readCanvasFavoriteNavigation,
+} from '../canvasFavoriteNavigation.ts';
+import {
+    bindGateCollectionsHost,
+    clearGateReturnCollection,
+    loadCanvasCollections,
+    openCreateCollectionModal,
+    renderGateLibrary,
+    renderGateTrashList,
+    resumeCollectionBrowseAfterGate,
+    beginCollectionBrowseResume,
+    refreshOpenCollectionBrowseIfOpen,
+    wireGateCollectionUi,
+} from './canvasGateCollections.js';
 let canvasRoot = null;
 function apiFetch(url, options = {}) {
     return fetch(url, { credentials: 'same-origin', ...options });
@@ -192,8 +208,13 @@ on(window, 'studio-lang-change', () => {
 let dom = {};
 let shell, canvasGate, board, world, nodesEl, minimap, minimapContent, minimapViewport, linksEl, linkControlsEl;
 let dropOverlay, createMenu, linkCreateMenu, nodeInputMenu, nodeOutputMenu, imageNodeMenu, selectionMenu;
-let selectionBox, selectionHub, gateStatus, gateCreateBtn, gateCreateSmartBtn, gateRefreshBtn;
+let selectionBox, selectionHub, gateStatus, gateCreateBtn, gateCreateCollectionBtn, gateCreateSmartBtn, gateRefreshBtn;
 let gateBackBtn, gateTrashBtn, gateTrashCount, gateTitleText, gateSubtitle, gateCanvasList;
+let gateCollectionsRoot, gateUncategorizedSection, gateUncategorizedCount;
+let gateContextMenuEl, gateCollectionModalEl, gateCollectionModalTitleEl, gateCollectionNameInputEl;
+let gateCollectionModalConfirmEl, gateCollectionModalCancelEl;
+let gateCollectionBrowseModalEl, gateCollectionBrowseTitleEl, gateCollectionBrowseCountEl;
+let gateCollectionBrowseListEl, gateCollectionBrowseCloseEl;
 let gateTitleInput, gateConfirmBtn, gateCancelBtn, backToManagerBtn, currentCanvasTitle, currentCanvasTime;
 let workflowTemplateModal, workflowTemplateList, workflowTemplateBtn;
 let outputLightbox, outputPreview, outputLightboxImg, outputCompareContainer, outputCompareResult;
@@ -322,6 +343,7 @@ function bindDomElements(root) {
   selectionHub = g('selectionHub');
   gateStatus = g('gateStatus');
   gateCreateBtn = g('gateCreateBtn');
+  gateCreateCollectionBtn = g('gateCreateCollectionBtn');
   gateCreateSmartBtn = g('gateCreateSmartBtn');
   gateRefreshBtn = g('gateRefreshBtn');
   gateBackBtn = g('gateBackBtn');
@@ -330,6 +352,20 @@ function bindDomElements(root) {
   gateTitleText = g('gateTitleText');
   gateSubtitle = g('gateSubtitle');
   gateCanvasList = g('gateCanvasList');
+  gateCollectionsRoot = g('gateCollectionsRoot');
+  gateUncategorizedSection = g('gateUncategorizedSection');
+  gateUncategorizedCount = g('gateUncategorizedCount');
+  gateContextMenuEl = g('gateContextMenu');
+  gateCollectionModalEl = g('gateCollectionModal');
+  gateCollectionModalTitleEl = g('gateCollectionModalTitle');
+  gateCollectionNameInputEl = g('gateCollectionNameInput');
+  gateCollectionModalConfirmEl = g('gateCollectionModalConfirm');
+  gateCollectionModalCancelEl = g('gateCollectionModalCancel');
+  gateCollectionBrowseModalEl = g('gateCollectionBrowseModal');
+  gateCollectionBrowseTitleEl = g('gateCollectionBrowseTitle');
+  gateCollectionBrowseCountEl = g('gateCollectionBrowseCount');
+  gateCollectionBrowseListEl = g('gateCollectionBrowseList');
+  gateCollectionBrowseCloseEl = g('gateCollectionBrowseClose');
   gateTitleInput = g('gateTitleInput');
   gateConfirmBtn = g('gateConfirmBtn');
   gateCancelBtn = g('gateCancelBtn');
@@ -378,6 +414,7 @@ function withCanvasRootClass(mutator) {
     mutator(canvasRoot.classList);
 }
 let canvases = [];
+let canvasCollections = [];
 let deletedCanvases = [];
 let canvas = null;
 let favoriteOutputPaths = new Set();
@@ -1609,8 +1646,15 @@ function refreshGateViewControls(){
         const suffix = tr('canvas.countSuffix');
         countPill.textContent = suffix ? `${items.length} ${suffix}` : String(items.length);
     }
+    if(gateUncategorizedCount && !trashMode){
+        const inCol = new Set();
+        canvasCollections.forEach(col => (col.canvas_ids || []).forEach(id => inCol.add(id)));
+        const uncat = canvases.filter(c => !inCol.has(c.id)).length;
+        gateUncategorizedCount.textContent = String(uncat);
+    }
     // 智能画布尚未接入本站，隐藏入口避免与经典「新建画布」混用、也避免有时看见有时没有
     if(gateCreateSmartBtn) gateCreateSmartBtn.hidden = true;
+    if(gateCreateCollectionBtn) gateCreateCollectionBtn.hidden = trashMode;
 }
 function notifySmartCanvasUnavailable(){
     const msg = langIsEn()
@@ -1810,6 +1854,106 @@ function centerViewportOnWorldPoint(point){
     applyViewport();
     renderLinks();
     renderSelectionHub();
+}
+let favoriteImageHighlightTimer = null;
+function clearFavoriteImageHighlight(){
+    if(favoriteImageHighlightTimer){
+        clearTimeout(favoriteImageHighlightTimer);
+        favoriteImageHighlightTimer = null;
+    }
+    if(nodesEl){
+        nodesEl.querySelectorAll('.output-img-wrap.is-favorite-locate-flash').forEach(el => {
+            el.classList.remove('is-favorite-locate-flash');
+        });
+    }
+}
+function nodeContainsFavoriteImage(node, targetUrl){
+    if(!node || !targetUrl) return false;
+    if(node.type === 'image' && normalizeFavoritePath(node.url) === targetUrl) return true;
+    if(node.type === 'output' || node.type === 'frameStack'){
+        return (node.images || []).some(item => normalizeFavoritePath(outputUrlValue(item)) === targetUrl);
+    }
+    if(Array.isArray(node.generatedOutputs)){
+        return node.generatedOutputs.some(url => normalizeFavoritePath(url) === targetUrl);
+    }
+    return false;
+}
+function resolveFavoriteTargetNode(nodeId, imageUrl){
+    const targetUrl = normalizeFavoritePath(imageUrl);
+    if(nodeId){
+        const direct = nodes.find(n => n.id === nodeId);
+        if(direct && (!targetUrl || nodeContainsFavoriteImage(direct, targetUrl) || direct.type === 'output' || direct.type === 'frameStack')) return direct;
+    }
+    if(!targetUrl) return nodeId ? nodes.find(n => n.id === nodeId) || null : null;
+    for(const node of nodes){
+        if(nodeContainsFavoriteImage(node, targetUrl)) return node;
+    }
+    return nodeId ? nodes.find(n => n.id === nodeId) || null : null;
+}
+function flashFavoriteOutputImage(nodeId, imageUrl){
+    clearFavoriteImageHighlight();
+    const targetUrl = normalizeFavoritePath(imageUrl);
+    if(!targetUrl || !nodesEl) return;
+    const nodeEl = nodesEl.querySelector(`.node[data-id="${CSS.escape(String(nodeId))}"]`);
+    if(!nodeEl) return;
+    const wraps = nodeEl.querySelectorAll('.output-img-wrap[data-output-url]');
+    for(const wrap of wraps){
+        const wrapUrl = normalizeFavoritePath(wrap.dataset.outputUrl || wrap.querySelector('img')?.dataset?.url || '');
+        if(wrapUrl !== targetUrl) continue;
+        wrap.classList.add('is-favorite-locate-flash');
+        favoriteImageHighlightTimer = setTimeout(() => {
+            wrap.classList.remove('is-favorite-locate-flash');
+            favoriteImageHighlightTimer = null;
+        }, 4200);
+        break;
+    }
+}
+function focusCanvasFavoriteTarget({ nodeId = '', imageUrl = '' } = {}){
+    if(!canvas || !board || !nodesEl) return false;
+    rebindDomIfStale();
+    const node = resolveFavoriteTargetNode(nodeId, imageUrl);
+    if(!node){
+        setStatus(langIsEn() ? 'Target not found on this canvas' : '未在该画布上找到对应图片');
+        return false;
+    }
+    selected.clear();
+    selected.add(node.id);
+    refreshSelectionVisuals();
+    safeRender({ force: true });
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            const box = nodeBounds([node.id]);
+            centerViewportOnWorldPoint({ x: box.x + box.w / 2, y: box.y + box.h / 2 });
+            flashFavoriteOutputImage(node.id, imageUrl);
+            refreshGeometryAfterLayout();
+        });
+    });
+    setStatus(langIsEn() ? 'Located favorite on canvas' : '已定位到画布中的收藏图片');
+    return true;
+}
+export async function consumeQueuedCanvasFavoriteNavigation(){
+    const target = readCanvasFavoriteNavigation();
+    if(!target?.canvasId) return { ok: false, reason: 'empty' };
+    clearCanvasFavoriteNavigation();
+    try {
+        if(!canvas || canvas.id !== target.canvasId){
+            await openCanvas(target.canvasId);
+        }
+        if(!canvas || canvas.id !== target.canvasId){
+            throw new Error(langIsEn() ? 'Canvas unavailable' : '画布不可用');
+        }
+        const focused = focusCanvasFavoriteTarget(target);
+        return { ok: focused, reason: focused ? 'focused' : 'not_found' };
+    } catch(err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setStatus(langIsEn() ? `Locate failed: ${msg}` : `定位失败：${msg}`);
+        showErrorModal(
+            langIsEn() ? `Could not open canvas: ${msg}` : `无法打开画布：${msg}`,
+            langIsEn() ? 'Locate favorite' : '定位收藏'
+        );
+        console.error('[infinite-canvas] favorite navigation failed', err);
+        return { ok: false, reason: 'error', message: msg };
+    }
 }
 function refreshGeometry(){
     updateLinksGeometry();
@@ -2048,6 +2192,7 @@ async function loadCanvasList(openFirst=true){
         if(!res.ok) throw new Error(tr('canvas.canvasListFailed'));
         const data = await res.json();
         canvases = data.canvases || [];
+        if(!trashMode) await loadCanvasCollections();
         refreshGateViewControls();
         scheduleRenderCanvasList();
         refreshTrashCount();
@@ -2416,39 +2561,31 @@ async function setTrashMode(active){
     else await loadCanvasList(false);
     refreshIcons();
 }
-function renderCanvasList(){
-    renderCanvasListInto(gateCanvasList);
-}
 function canvasDeleteConfirmMessage(title, mode){
     const name = escapeHtml(title || tr('canvas.untitled'));
     if(mode === 'purge') return trf('canvas.purgeConfirmNamed', { name });
     return trf('canvas.moveToTrashConfirmNamed', { name });
 }
-function renderCanvasListInto(list){
-    if(!list) return;
-    refreshGateViewControls();
-    const items = trashMode ? deletedCanvases : canvases;
-    list.innerHTML = '';
-    if(!items.length){
-        const empty = document.createElement('div');
-        empty.className = 'gate-list-empty';
-        empty.innerHTML = trashMode
-            ? `<div class="gate-list-empty-icon"><i data-lucide="trash-2" class="w-6 h-6"></i></div>${tr('canvas.trashEmpty')}`
-            : `<div class="gate-list-empty-icon"><i data-lucide="layout-grid" class="w-6 h-6"></i></div>${tr('canvas.noCanvas')}<br>${tr('canvas.startWithNewCanvas')}`;
-        list.appendChild(empty);
-        refreshIcons(list);
+function renderCanvasList(){
+    if(trashMode){
+        renderGateTrashList(gateCanvasList);
+        if(gateCollectionsRoot) gateCollectionsRoot.innerHTML = '';
         return;
     }
-    items.forEach(item => {
-        const row = document.createElement('div');
-        const isSmartCanvas = (item.kind || 'classic') === 'smart';
-        const isDeletePending = pendingDeleteCanvasId === item.id || pendingPurgeCanvasId === item.id;
-        const previewUrl = String(item.preview_url || item.previewUrl || '').trim();
-        const hasPreview = previewUrl && !isVideoUrl(previewUrl) && !isAudioUrl(previewUrl);
-        const createdLabel = formatCanvasTime(item.created_at);
-        const editedLabel = formatCanvasTime(item.updated_at || item.created_at);
-        row.className = `canvas-item ${isSmartCanvas ? 'smart-canvas' : ''} ${canvas?.id === item.id ? 'active' : ''} ${isDeletePending ? 'is-delete-pending' : ''}`;
-        row.innerHTML = `
+    renderGateLibrary();
+}
+function buildCanvasItemElement(item, { collectionId = '' } = {}){
+    const row = document.createElement('div');
+    const isSmartCanvas = (item.kind || 'classic') === 'smart';
+    const isDeletePending = pendingDeleteCanvasId === item.id || pendingPurgeCanvasId === item.id;
+    const previewUrl = String(item.preview_url || item.previewUrl || '').trim();
+    const hasPreview = previewUrl && !isVideoUrl(previewUrl) && !isAudioUrl(previewUrl);
+    const createdLabel = formatCanvasTime(item.created_at);
+    const editedLabel = formatCanvasTime(item.updated_at || item.created_at);
+    row.className = `canvas-item ${isSmartCanvas ? 'smart-canvas' : ''} ${canvas?.id === item.id ? 'active' : ''} ${isDeletePending ? 'is-delete-pending' : ''}`;
+    row.dataset.canvasId = item.id;
+    if(collectionId) row.dataset.collectionId = collectionId;
+    row.innerHTML = `
             <div class="canvas-open" role="button" tabindex="${trashMode ? '-1' : '0'}">
                 <div class="canvas-card-preview${hasPreview ? ' has-preview' : ''}">
                     <div class="canvas-card-preview-bg" aria-hidden="true">${hasPreview ? `<img class="canvas-card-preview-img" src="${escapeAttr(previewUrl)}" alt="" loading="lazy" draggable="false">` : ''}</div>
@@ -2505,36 +2642,88 @@ function renderCanvasListInto(list){
                 </div>
             ` : ''}
         `;
-        if(!trashMode) row.querySelector('.canvas-open').onclick = () => openCanvas(item.id);
-        const titleEl = row.querySelector('.canvas-card-title');
-        const editBtn = row.querySelector('.canvas-card-edit');
-        if(editBtn && titleEl && !trashMode) {
-            editBtn.onmousedown = e => e.stopPropagation();
-            editBtn.onclick = e => { e.stopPropagation(); startTitleEdit(item.id, titleEl); };
-        }
-        const iconBtn = row.querySelector('.canvas-preview-mark');
-        if(iconBtn && !trashMode) {
-            iconBtn.onclick = e => toggleEmojiPicker(item.id, e);
-            iconBtn.onkeydown = e => {
-                if(e.key === 'Enter' || e.key === ' ') toggleEmojiPicker(item.id, e);
-            };
-        }
-        row.querySelectorAll('.emoji-option').forEach(btn => {
-            btn.onclick = e => setCanvasIcon(item.id, btn.dataset.icon, e);
-        });
-        const deleteBtn = row.querySelector('.canvas-delete');
-        if(deleteBtn) deleteBtn.onclick = e => requestDeleteCanvas(item.id, e);
-        const confirmBtn = row.querySelector('.canvas-confirm-btn');
-        if(confirmBtn) confirmBtn.onclick = e => trashMode ? purgeCanvas(item.id, e) : deleteCanvas(item.id, e);
-        const cancelBtn = row.querySelector('.canvas-cancel-btn');
-        if(cancelBtn) cancelBtn.onclick = e => cancelDeleteCanvas(e);
-        const restoreBtn = row.querySelector('.canvas-restore');
-        if(restoreBtn) restoreBtn.onclick = e => restoreCanvas(item.id, e);
-        const purgeBtn = row.querySelector('.canvas-purge');
-        if(purgeBtn) purgeBtn.onclick = e => requestPurgeCanvas(item.id, e);
-        list.appendChild(row);
+    if(!trashMode) row.querySelector('.canvas-open').onclick = () => openCanvas(item.id);
+    const titleEl = row.querySelector('.canvas-card-title');
+    const editBtn = row.querySelector('.canvas-card-edit');
+    if(editBtn && titleEl && !trashMode) {
+        editBtn.onmousedown = e => e.stopPropagation();
+        editBtn.onclick = e => { e.stopPropagation(); startTitleEdit(item.id, titleEl); };
+    }
+    const iconBtn = row.querySelector('.canvas-preview-mark');
+    if(iconBtn && !trashMode) {
+        iconBtn.onclick = e => toggleEmojiPicker(item.id, e);
+        iconBtn.onkeydown = e => {
+            if(e.key === 'Enter' || e.key === ' ') toggleEmojiPicker(item.id, e);
+        };
+    }
+    row.querySelectorAll('.emoji-option').forEach(btn => {
+        btn.onclick = e => setCanvasIcon(item.id, btn.dataset.icon, e);
+    });
+    const deleteBtn = row.querySelector('.canvas-delete');
+    if(deleteBtn) deleteBtn.onclick = e => requestDeleteCanvas(item.id, e);
+    const confirmBtn = row.querySelector('.canvas-confirm-btn');
+    if(confirmBtn) confirmBtn.onclick = e => trashMode ? purgeCanvas(item.id, e) : deleteCanvas(item.id, e);
+    const cancelBtn = row.querySelector('.canvas-cancel-btn');
+    if(cancelBtn) cancelBtn.onclick = e => cancelDeleteCanvas(e);
+    const restoreBtn = row.querySelector('.canvas-restore');
+    if(restoreBtn) restoreBtn.onclick = e => restoreCanvas(item.id, e);
+    const purgeBtn = row.querySelector('.canvas-purge');
+    if(purgeBtn) purgeBtn.onclick = e => requestPurgeCanvas(item.id, e);
+    return row;
+}
+function renderCanvasListInto(list){
+    if(!list) return;
+    refreshGateViewControls();
+    const items = trashMode ? deletedCanvases : canvases;
+    list.innerHTML = '';
+    if(!items.length){
+        const empty = document.createElement('div');
+        empty.className = 'gate-list-empty';
+        empty.innerHTML = trashMode
+            ? `<div class="gate-list-empty-icon"><i data-lucide="trash-2" class="w-6 h-6"></i></div>${tr('canvas.trashEmpty')}`
+            : `<div class="gate-list-empty-icon"><i data-lucide="layout-grid" class="w-6 h-6"></i></div>${tr('canvas.noCanvas')}<br>${tr('canvas.startWithNewCanvas')}`;
+        list.appendChild(empty);
+        refreshIcons(list);
+        return;
+    }
+    items.forEach(item => {
+        list.appendChild(buildCanvasItemElement(item));
     });
     refreshIcons(list);
+}
+function bindGateCollectionsIntegration(){
+    bindGateCollectionsHost({
+        apiFetch,
+        tr,
+        escapeHtml,
+        getCanvases: () => canvases,
+        getCollections: () => canvasCollections,
+        setCollections: (next) => { canvasCollections = Array.isArray(next) ? next : []; },
+        loadCanvasList,
+        renderCanvasList,
+        renderCanvasListInto,
+        buildCanvasItemElement,
+        refreshGateViewControls,
+        refreshIcons,
+        setStatus,
+        showErrorModal,
+        gateCollectionsRoot,
+        gateCanvasList,
+        gateUncategorizedSection,
+        gateContextMenuEl,
+        gateCollectionModalEl,
+        gateCollectionModalTitleEl,
+        gateCollectionNameInputEl,
+        gateCollectionModalConfirmEl,
+        gateCollectionModalCancelEl,
+        gateCollectionBrowseModalEl,
+        gateCollectionBrowseTitleEl,
+        gateCollectionBrowseCountEl,
+        gateCollectionBrowseListEl,
+        gateCollectionBrowseCloseEl,
+        getCanvasRoot: () => canvasRoot,
+        openCanvas,
+    });
 }
 async function createCanvas(){
     if(createCanvasInFlight) return;
@@ -2716,14 +2905,17 @@ async function setCanvasTitle(id, title){
         console.error(e);
     }
 }
-async function openCanvas(id){
+async function openCanvas(id, options = {}){
+    const fromCollectionBrowse = Boolean(options.fromCollectionBrowse);
     if(canvas?.id === id){
+        if (!fromCollectionBrowse) clearGateReturnCollection();
         setCanvasMode(true);
         applyViewport();
         refreshGeometry();
         setStatus('Ready');
         return;
     }
+    if (!fromCollectionBrowse) clearGateReturnCollection();
     clearTimeout(saveTimer);
     saveTimer = null;
     clearTimeout(viewportSaveTimer);
@@ -2764,7 +2956,11 @@ async function openCanvas(id){
         renderCanvasList();
         safeRender({ force: true });
         syncOutputFavoriteButtons();
-        refreshInfiniteCanvasLayout();
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                refreshInfiniteCanvasLayout();
+            });
+        });
         resumeCanvasImageTasks();
         startCanvasRemotePolling();
         setStatus('Ready');
@@ -2976,12 +3172,14 @@ async function returnToCanvasManager(){
     connections = [];
     selected.clear();
     viewport = {x: -1800, y: -1000, scale: 1};
+    beginCollectionBrowseResume();
     showCanvasGateView({ clearEditor: true });
     trashMode = false;
     pendingPurgeCanvasId = null;
     refreshGateViewControls();
     await loadCanvasList(false);
     setCreateMode(false);
+    refreshOpenCollectionBrowseIfOpen();
 }
 function requestDeleteCanvas(id, event){
     event?.preventDefault();
@@ -3128,7 +3326,13 @@ function ensureImageEditorUi(){
     }, {passive: false});
 }
 function wireCanvasUiEvents() {
+if(!wireCanvasUiEvents._collectionsWired){
+    bindGateCollectionsIntegration();
+    wireGateCollectionUi();
+    wireCanvasUiEvents._collectionsWired = true;
+}
 bindClick(gateCreateBtn, () => setCreateMode(true));
+bindClick(gateCreateCollectionBtn, () => openCreateCollectionModal());
 bindClick(gateCreateSmartBtn, () => createSmartCanvas());
 bindClick(gateBackBtn, () => setTrashMode(false));
 bindClick(gateTrashBtn, () => setTrashMode(true));
@@ -16990,6 +17194,7 @@ export async function mountInfiniteCanvasEngine(root) {
 function attachEngineToRoot(root){
   canvasRoot = root;
   bindDomElements(root);
+  bindGateCollectionsIntegration();
   if(board && !board.onmousedown) boardEventsWired = false;
   applyTheme('dark');
   applyQuickToolbarState();
@@ -17023,6 +17228,7 @@ async function mountInfiniteCanvasEngineInner(root) {
 
   canvasRoot = root;
   bindDomElements(root);
+  bindGateCollectionsIntegration();
   applyTheme('dark');
   applyQuickToolbarState();
   if (window.StudioI18n) window.StudioI18n.apply?.();
@@ -17047,7 +17253,12 @@ async function mountInfiniteCanvasEngineInner(root) {
     writeLastCanvasId('');
   }
   if(!isMountGenerationCurrent(seq)) return disposeInfiniteCanvasEngine;
-  if(!canvas) showCanvasGateView({ clearEditor: true });
+  if(readCanvasFavoriteNavigation()?.canvasId){
+    await consumeQueuedCanvasFavoriteNavigation();
+  }
+  if(!canvas) {
+    showCanvasGateView({ clearEditor: true });
+  }
   mountedEngineRoot = root;
   syncCanvasPageMarkers();
   return disposeInfiniteCanvasEngine;

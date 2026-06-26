@@ -1,15 +1,17 @@
 # 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  1. 参考图区域完成交互重构：去掉 URL 热链；上传命名改为简洁序号；卡片命名改为底部直改输入栏；拖拽换位动画已调顺。
-  2. 日夜模式对比度完成修正：编辑区与参考图叠层在浅色主题下不再“黑底黑字”。
-  3. 图片编辑系统完成两轮重构：从左侧独立区迁移到右侧 Shot 卡片模式；支持 `SHOT_VIEW / IMAGE_EDIT` 切换。
-  4. 编辑模式合并为单上传容器：首图作为 `#1` 主图，其余自动为 `#2+` 参考图，可拖拽换位、可删除。
-  5. 生图区域交互更新：移除右键编辑，改为图上方直接 `编辑` 按钮，点击即进入编辑模式并自动带入当前生图。
-  6. 编辑后端链路修复：`/api/edit-image` 使用 `multipart/form-data` 上传文件字段 `image`；并添加模型与端点 fallback（`/images/edits` + `/images/generations`）。
-- **验证状态**：本会话每次关键改动后均执行 `node init.mjs`，`lint/typecheck/build` 通过。
+  1. **画布合集（选择页分类）**（本地未 push）：按账号隔离存储于 `data/canvas-collections/{userId}.json`。
+     - 右键画布：创建合集 / 加入已有合集 / 从合集移出
+     - 拖拽：拖到合集标题加入；拖到另一张画布上创建双画布合集
+     - 合集标题右键：重命名 / 删除（确认 UI，不删画布）
+     - 展开收起、未分类区、顶部「新建合集」按钮
+     - 画布进回收站或永久删除时自动从合集中剔除
+  2. **收藏定位**（本地未 push）：收藏页右键 → 回到画布对应节点并高亮。
+  3. 生产已部署 `7c998a6`（owner 隔离 + persistOwned 修复）。
+- **验证状态**：`npx esbuild server.ts` 通过；`node init.mjs` 仍因 `ComfyTV-main/` 历史 tsc 报错失败（与本次无关）。
 - **明日焦点**：
-  1. 继续观察编辑接口稳定性，若网关仍偶发 4xx/5xx，基于返回报文定向兼容字段。
-  2. 将编辑模式的文案与交互继续收敛（如按钮常显策略、上传容器尺寸策略）。
-  3. 同步更新 `docs/feature_list.json` 的新增功能条目与状态。
-- **Blockers**：当前无阻塞；若再次出现 “编辑失败(404)”，优先检查 dev 服务是否已重启并加载最新 `server.ts`。
+  1. 本地手动测合集：创建、拖拽、右键、删除合集、回收站模式
+  2. commit + push `deploy`，服务器：`git fetch && reset --hard origin/deploy && npm run build:prod && pm2 restart gemini-deploy`
+  3. 备份时纳入 `data/canvas-collections/`
+- **Blockers**：无。

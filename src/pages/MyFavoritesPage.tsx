@@ -1,19 +1,33 @@
-import React, { memo, useCallback, useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Loader2, Share2, StarOff } from 'lucide-react';
+import { Loader2, MapPin, Share2, StarOff } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { readJsonResponse } from '../lib/readJsonResponse';
 import { CopyablePromptText } from '../components/CopyablePromptText';
+import { ReferenceImageLightbox } from '../components/ReferenceImageLightbox';
+import { useShellNavigation } from '../shell/ShellNavigation';
+import {
+  queueCanvasFavoriteNavigation,
+} from '../lib/canvasFavoriteNavigation';
 
 type FavoriteItem = {
   id: string;
   thumbnail_path: string;
+  preview_path?: string;
   prompt: string;
   model: string;
   params: Record<string, unknown>;
+  canvas_id?: string;
+  node_id?: string;
   shared_at: string | null;
   favorited_at: string | null;
   created_at: string;
+};
+
+type ContextMenuState = {
+  item: FavoriteItem;
+  x: number;
+  y: number;
 };
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
@@ -23,11 +37,15 @@ export const MyFavoritesPage = memo(function MyFavoritesPage({
 }: {
   shellActive: boolean;
 }) {
+  const { openInfiniteCanvas } = useShellNavigation();
   const [items, setItems] = useState<FavoriteItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const loadItems = useCallback(async () => {
     setLoading(true);
@@ -47,6 +65,25 @@ export const MyFavoritesPage = memo(function MyFavoritesPage({
   useEffect(() => {
     if (shellActive) void loadItems();
   }, [shellActive, loadItems]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = (event: MouseEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setContextMenu(null);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setContextMenu(null);
+    };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [contextMenu]);
 
   const toggleShare = async (item: FavoriteItem) => {
     setBusyId(item.id);
@@ -88,6 +125,28 @@ export const MyFavoritesPage = memo(function MyFavoritesPage({
     }
   };
 
+  const locateOnCanvas = (item: FavoriteItem) => {
+    const canvasId = String(item.canvas_id || '').trim();
+    if (!canvasId) {
+      setShareError('该收藏缺少画布定位信息。请在画布中重新收藏此图片后再试。');
+      return;
+    }
+    setShareError(null);
+    queueCanvasFavoriteNavigation({
+      canvasId,
+      nodeId: String(item.node_id || '').trim(),
+      imageUrl: item.thumbnail_path,
+    });
+    setContextMenu(null);
+    openInfiniteCanvas();
+  };
+
+  const openImageContextMenu = (event: React.MouseEvent, item: FavoriteItem) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({ item, x: event.clientX, y: event.clientY });
+  };
+
   if (!shellActive) return null;
 
   return (
@@ -101,7 +160,7 @@ export const MyFavoritesPage = memo(function MyFavoritesPage({
             我的收藏
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[#e5e2e1]/65">
-            在画布 Output 图片右上角点星标收藏。满意的作品可分享到公共画廊；不需要的条目可在此取消收藏。
+            在画布 Output 图片右上角点星标收藏。点击图片可放大查看；右键图片可回到画布中的原始位置；满意的作品可分享到公共画廊。
           </p>
         </motion.div>
 
@@ -135,14 +194,21 @@ export const MyFavoritesPage = memo(function MyFavoritesPage({
                 transition={spring}
                 className="overflow-hidden rounded-[1.5rem] bg-[#131313]/80 outline outline-[0.5px] outline-[#45464d]/20"
               >
-                <div className="aspect-[4/3] bg-[#1c1b1b]">
+                <button
+                  type="button"
+                  className="group relative block aspect-[4/3] w-full cursor-zoom-in bg-[#1c1b1b] text-left"
+                  onClick={() => setPreviewUrl(item.preview_path || item.thumbnail_path)}
+                  onContextMenu={(event) => openImageContextMenu(event, item)}
+                  aria-label="放大查看图片"
+                >
                   <img
                     src={item.thumbnail_path}
                     alt=""
-                    className="h-full w-full object-cover"
+                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
                     loading="lazy"
+                    draggable={false}
                   />
-                </div>
+                </button>
                 <div className="space-y-3 p-5">
                   <CopyablePromptText text={item.prompt} />
                   <p className="text-xs uppercase tracking-[0.12em] text-[#e5e2e1]/45">
@@ -191,6 +257,38 @@ export const MyFavoritesPage = memo(function MyFavoritesPage({
           </div>
         )}
       </main>
+
+      {contextMenu ? (
+        <div
+          ref={menuRef}
+          className="fixed z-[80] min-w-[240px] overflow-hidden rounded-2xl bg-[#1c1b1b]/95 p-1.5 shadow-[0_24px_64px_rgba(0,0,0,0.45)] backdrop-blur-xl outline outline-[0.5px] outline-[#45464d]/20"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          role="menu"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!String(contextMenu.item.canvas_id || '').trim()}
+            onClick={() => locateOnCanvas(contextMenu.item)}
+            className={cn(
+              'flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-[13px] transition-colors',
+              String(contextMenu.item.canvas_id || '').trim()
+                ? 'text-[#e5e2e1] hover:bg-[#252525]'
+                : 'cursor-not-allowed text-[#e5e2e1]/35'
+            )}
+          >
+            <MapPin className="h-4 w-4 shrink-0 text-[#ffb866]" />
+            回到该图片所在画布的位置
+          </button>
+          {!String(contextMenu.item.canvas_id || '').trim() ? (
+            <p className="px-3 pb-2 text-[11px] leading-relaxed text-[#e5e2e1]/45">
+              旧收藏无定位信息，请在画布中重新收藏。
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      <ReferenceImageLightbox url={previewUrl} onClose={() => setPreviewUrl(null)} />
     </div>
   );
 });

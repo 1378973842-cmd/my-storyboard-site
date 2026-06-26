@@ -173,6 +173,21 @@ export function normalizeUploadPath(raw: string): string {
   return `/uploads/${rel}`;
 }
 
+/** 画廊列表存缩略图路径；预览时尽量还原 uploads 下的原图。 */
+export function resolveFullUploadPath(projectRoot: string, thumbnailPath: string): string {
+  const normalized = normalizeUploadPath(thumbnailPath);
+  if (!normalized) return thumbnailPath;
+  const galleryMatch = normalized.match(/^\/uploads\/gallery\/(.+)_thumb\.webp$/i);
+  if (!galleryMatch) return normalized;
+  const baseName = galleryMatch[1];
+  const uploadsDir = path.join(projectRoot, "public", "uploads");
+  for (const ext of [".jpg", ".jpeg", ".png", ".webp", ".gif"]) {
+    const abs = path.join(uploadsDir, `${baseName}${ext}`);
+    if (existsSync(abs)) return `/uploads/${baseName}${ext}`;
+  }
+  return normalized;
+}
+
 async function ensureGalleryThumbnail(
   projectRoot: string,
   sourcePath: string
@@ -371,7 +386,7 @@ export function registerCanvasGenerationsRoutes(
         .get(result.id) as CanvasGenerationRow | undefined;
       res.json({
         favorited: result.favorited,
-        item: row ? parseGenerationRow(row) : null,
+        item: row ? parseGenerationRow(row, projectRoot) : null,
       });
     } catch (e) {
       res.status(400).json({ error: e instanceof Error ? e.message : "收藏失败" });
@@ -391,7 +406,7 @@ export function registerCanvasGenerationsRoutes(
            LIMIT 500`
         )
         .all(userId) as CanvasGenerationRow[];
-      res.json({ items: rows.map(parseGenerationRow) });
+      res.json({ items: rows.map((row) => parseGenerationRow(row, projectRoot)) });
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : "加载收藏失败" });
     }
@@ -409,7 +424,7 @@ export function registerCanvasGenerationsRoutes(
          LIMIT 300`
       )
       .all() as CanvasGenerationRow[];
-    res.json({ items: rows.map(parseGenerationRow) });
+    res.json({ items: rows.map((row) => parseGenerationRow(row, projectRoot)) });
   });
 
   app.post("/api/my-favorites/:id/share", requireAuth, async (req, res) => {
@@ -429,7 +444,7 @@ export function registerCanvasGenerationsRoutes(
                   favorited_at, shared_at, created_at FROM canvas_generations WHERE id = ?`
         )
         .get(row.id) as CanvasGenerationRow;
-      res.json({ item: parseGenerationRow(updated) });
+      res.json({ item: parseGenerationRow(updated, projectRoot) });
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : "分享失败" });
     }
@@ -445,7 +460,7 @@ export function registerCanvasGenerationsRoutes(
                 favorited_at, shared_at, created_at FROM canvas_generations WHERE id = ?`
       )
       .get(row.id) as CanvasGenerationRow;
-    res.json({ item: parseGenerationRow(updated) });
+    res.json({ item: parseGenerationRow(updated, projectRoot) });
   });
 
   app.delete("/api/my-favorites/:id", requireAuth, (req, res) => {
@@ -472,17 +487,22 @@ function getOwnedFavorite(
     .get(id, userId) as CanvasGenerationRow | undefined;
 }
 
-function parseGenerationRow(row: CanvasGenerationRow) {
+function parseGenerationRow(row: CanvasGenerationRow, projectRoot?: string) {
   let params: Record<string, unknown> = {};
   try {
     params = JSON.parse(row.params_json || "{}") as Record<string, unknown>;
   } catch {
     params = {};
   }
+  const thumbnail_path = row.thumbnail_path;
+  const preview_path = projectRoot
+    ? resolveFullUploadPath(projectRoot, thumbnail_path)
+    : thumbnail_path;
   return {
     id: row.id,
     user_id: row.user_id,
-    thumbnail_path: row.thumbnail_path,
+    thumbnail_path,
+    preview_path,
     prompt: stripReferenceCostumeLockFromPrompt(row.prompt),
     model: row.model,
     params,

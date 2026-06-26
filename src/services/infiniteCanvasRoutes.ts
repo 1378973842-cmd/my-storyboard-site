@@ -28,6 +28,16 @@ import {
   listWorkflowTemplates,
   saveUserWorkflowTemplate,
 } from "./canvasWorkflowTemplates.js";
+import {
+  addCanvasToCollection,
+  createCanvasCollection,
+  deleteCanvasCollection,
+  initCanvasCollectionsStore,
+  listCanvasCollections,
+  pruneCanvasFromAllCollections,
+  removeCanvasFromCollection,
+  updateCanvasCollection,
+} from "./canvasCollectionsStore.js";
 import { requireSiteGate } from "./siteAccessGate.js";
 import { recordFileOwnership } from "./canvasGenerations.js";
 import type Database from "better-sqlite3";
@@ -73,9 +83,10 @@ export function registerInfiniteCanvasRoutes(
 ) {
   initInfiniteCanvasStore(projectRoot);
   initCanvasWorkflowTemplatesStore(projectRoot);
+  initCanvasCollectionsStore(projectRoot);
   const gate = deps?.requireGate ?? requireSiteGate;
   console.log(
-    "[infinite-canvas] routes ready: /api/canvases, /api/canvas-workflow-templates, /api/config (login required)"
+    "[infinite-canvas] routes ready: /api/canvases, /api/canvas-collections, /api/canvas-workflow-templates, /api/config (login required)"
   );
   const uploadsDir = path.join(projectRoot, "public", "uploads", "canvas");
   mkdirSync(uploadsDir, { recursive: true });
@@ -146,7 +157,9 @@ export function registerInfiniteCanvasRoutes(
 
   app.delete("/api/canvases/:id", gate, (req, res) => {
     try {
-      res.json(softDeleteCanvas(req.params.id, canvasAccessCtx(req)));
+      const result = softDeleteCanvas(req.params.id, canvasAccessCtx(req));
+      pruneCanvasFromAllCollections(req.params.id, canvasAccessCtx(req));
+      res.json(result);
     } catch (err) {
       canvasError(res, err);
     }
@@ -162,9 +175,77 @@ export function registerInfiniteCanvasRoutes(
 
   app.delete("/api/canvases/:id/purge", gate, (req, res) => {
     try {
-      res.json(purgeCanvas(req.params.id, canvasAccessCtx(req)));
+      const result = purgeCanvas(req.params.id, canvasAccessCtx(req));
+      pruneCanvasFromAllCollections(req.params.id, canvasAccessCtx(req));
+      res.json(result);
     } catch (err) {
       canvasError(res, err);
+    }
+  });
+
+  app.get("/api/canvas-collections", gate, (req, res) => {
+    try {
+      res.json({ collections: listCanvasCollections(canvasAccessCtx(req)) });
+    } catch (err) {
+      canvasError(res, err, "加载合集失败");
+    }
+  });
+
+  app.post("/api/canvas-collections", gate, (req, res) => {
+    try {
+      const body = req.body || {};
+      const collection = createCanvasCollection(
+        { name: body.name, canvas_ids: body.canvas_ids },
+        canvasAccessCtx(req)
+      );
+      res.status(201).json({ collection });
+    } catch (err) {
+      canvasError(res, err, "创建合集失败");
+    }
+  });
+
+  app.patch("/api/canvas-collections/:id", gate, (req, res) => {
+    try {
+      const body = req.body || {};
+      const collection = updateCanvasCollection(
+        req.params.id,
+        { name: body.name, canvas_ids: body.canvas_ids },
+        canvasAccessCtx(req)
+      );
+      res.json({ collection });
+    } catch (err) {
+      canvasError(res, err, "更新合集失败");
+    }
+  });
+
+  app.delete("/api/canvas-collections/:id", gate, (req, res) => {
+    try {
+      res.json(deleteCanvasCollection(req.params.id, canvasAccessCtx(req)));
+    } catch (err) {
+      canvasError(res, err, "删除合集失败");
+    }
+  });
+
+  app.post("/api/canvas-collections/:id/canvases", gate, (req, res) => {
+    try {
+      const canvasId = String((req.body || {}).canvas_id || "");
+      const collection = addCanvasToCollection(req.params.id, canvasId, canvasAccessCtx(req));
+      res.json({ collection });
+    } catch (err) {
+      canvasError(res, err, "加入合集失败");
+    }
+  });
+
+  app.delete("/api/canvas-collections/:id/canvases/:canvasId", gate, (req, res) => {
+    try {
+      const collection = removeCanvasFromCollection(
+        req.params.id,
+        req.params.canvasId,
+        canvasAccessCtx(req)
+      );
+      res.json({ collection });
+    } catch (err) {
+      canvasError(res, err, "移出合集失败");
     }
   });
 
