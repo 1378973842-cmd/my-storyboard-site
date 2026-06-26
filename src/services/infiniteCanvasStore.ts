@@ -58,10 +58,9 @@ function sanitizeCanvasId(id: string) {
 
 export function canAccessCanvas(doc: CanvasDocument, ctx: CanvasAccessContext | null): boolean {
   if (!ctx?.userId) return false;
-  if (ctx.isAdmin) return true;
   const owner = String(doc.owner_id || "").trim();
-  // 无 owner_id 的旧画布仅管理员可见，避免全员共享
-  if (!owner) return false;
+  // 无 owner_id 的旧画布仅管理员可见（迁移用）；有 owner 时管理员也只看自己的
+  if (!owner) return ctx.isAdmin === true;
   return owner === ctx.userId;
 }
 

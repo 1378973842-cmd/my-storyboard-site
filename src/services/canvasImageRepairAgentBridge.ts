@@ -300,6 +300,9 @@ async function runImageRepairTask(
   const task = tasks.get(taskId);
   if (!task) return;
 
+  const persistOwned = (url: string, meta?: { userId?: string }) =>
+    deps.persistImage(url, { ...meta, userId: req.authUser?.id ?? meta?.userId });
+
   const normalized = normalizeRunBody(body);
   const sourceInput = normalizeImageInputForUpload(normalized.sourceUrl, deps.projectRoot);
   if (!sourceInput) {
@@ -343,7 +346,7 @@ async function runImageRepairTask(
       aspectRatio: normalized.aspectRatio,
       projectRoot: deps.projectRoot,
     });
-    task.lineart_image_url = await deps.persistImage(lineartUpstream);
+    task.lineart_image_url = await persistOwned(lineartUpstream);
 
     task.status = "processing_blur";
     task.stage_label = "正在生成模糊固有色参考…";
@@ -355,7 +358,7 @@ async function runImageRepairTask(
       aspect_ratio: normalized.aspectRatio,
       projectRoot: deps.projectRoot,
     });
-    task.blur_image_url = await deps.persistImage(blurUpstream);
+    task.blur_image_url = await persistOwned(blurUpstream);
 
     task.status = "processing_composite";
     task.stage_label = "正在合成修复画面…";
