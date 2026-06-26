@@ -20,9 +20,9 @@
 
 ---
 
-## 本手册已与代码核对（2026-06）
+## 本手册已与代码核对（2026-06-26）
 
-以下条目已对照 `package.json`、`ecosystem.config.cjs`、`server.ts`、`siteAccessGate.ts` 验证：
+以下条目已对照 `package.json`、`ecosystem.config.cjs`、`server.ts`、`userAuth.ts` 验证：
 
 | 操作 | 结论 |
 |------|------|
@@ -30,9 +30,12 @@
 | `pm2 start ecosystem.config.cjs` | ✅ 进程名 `gemini-deploy`，`cwd` 为仓库根 |
 | 生产读 `.env` | ✅ 从仓库根加载（与 `dist-server/` 无关） |
 | `NODE_ENV=production` | ✅ PM2 已设；`.env` 勿写 `development` |
-| 生产 `ACCESS_CODE` | ✅ 必填 ≥8 位，且不得为 `liu888`，否则进程 `exit(1)` |
+| 生产登录 | ✅ 邮箱 + 密码（`SESSION_SECRET` + `ADMIN_EMAIL` + `ADMIN_PASSWORD`） |
+| 生产 APIMart（大陆 ECS） | ✅ 建议 `APIMART_API_BASE=https://api.apib.ai`（见第六节） |
 | 重启后数据 | ✅ 在磁盘；见下方「持久化路径」 |
 | `git reset --hard` 更新 | ✅ 不删未跟踪的 `uploads/`；**勿**再跟踪 `projects.db` / `data/` |
+
+> **已废弃：** 旧版全站暗号 `ACCESS_CODE`（`siteAccessGate.ts`）**不再用于主线服务**。`.env.example` 里若仍注释提及，可忽略；上线以邮箱登录为准。
 
 ---
 
@@ -92,22 +95,42 @@ scp "D:\刘恒志\代码\gemini-deploy\.env" root@8.163.127.198:/var/www/my-stor
 
 ### B. 在服务器上单独补生产专用项
 
-SSH 里**一行一行**执行：
+SSH 里**一行一行**执行（勿整段粘贴）：
 
 ```bash
 cd /var/www/my-storyboard-site
 sed -i '/^\.env:/d' .env
 sed -i '/^ACCESS_CODE=/d' .env
 sed -i 's/^PORT=.*/PORT=3000/' .env
-echo 'ACCESS_CODE=你的强暗号至少8位' >> .env
-grep -E '^(PORT|ACCESS_CODE|APIMART_API_KEY)=' .env
+```
+
+用 `nano .env` 确认或追加（**首次上线必填**）：
+
+```env
+PORT=3000
+SESSION_SECRET=至少32位随机字符串
+ADMIN_EMAIL=admin@your-studio.com
+ADMIN_PASSWORD=至少8位强密码
+
+# 大陆 ECS 必填：gemini-3.5-flash / 九宫格 Phase A 走 APIMart 兼容网关
+APIMART_API_BASE="https://api.apib.ai"
+APIMART_API_KEY="sk-……"
+APIMART_DNS_FIX="0"
+```
+
+自检：
+
+```bash
+grep -E '^(PORT|SESSION_SECRET|ADMIN_EMAIL|APIMART_API_BASE|APIMART_API_KEY)=' .env
 ```
 
 | 变量 | 本地 | 线上 |
 |------|------|------|
-| API Key 等 | 与 `.env` 相同 | scp 拷贝 |
-| `ACCESS_CODE` | 可缺省（默认 `liu888`） | **必填 ≥8 位，不能是 `liu888`** |
-| `PORT` | 可能是 `3005` | **建议固定 `3000`**（与旧站、安全组一致） |
+| API Key 等 | 与 `.env` 相同 | scp 拷贝后按上表补全 |
+| `SESSION_SECRET` / `ADMIN_*` | 开发可缺省或用弱默认值 | **必填**；勿用 `admin123456` |
+| `APIMART_API_BASE` | 可用默认 `api.apimart.ai` | **大陆 ECS 建议 `https://api.apib.ai`** |
+| `PORT` | 可能是 `3005` | **固定 `3000`**（与安全组一致） |
+| `ACCESS_CODE` | 已废弃 | **删除**；勿再配置 |
 
 **不要**在服务器 `.env` 写 `NODE_ENV=development`（PM2 已是 `production`）。
 
@@ -122,7 +145,8 @@ pm2 logs gemini-deploy --lines 8 --nostream
 
 - `injecting env (15)` 或更多（若只有 `(2)` 说明 `.env` 被粘贴命令弄坏，重新 scp）
 - `Server running on http://localhost:3000`
-- 无 `[site-gate]` 报错
+- 无 `[auth] 生产环境必须在 .env 设置 SESSION_SECRET` 等启动报错
+- 浏览器打开站点出现**邮箱登录**页（不是旧版暗号输入框）
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/
@@ -159,16 +183,20 @@ nano .env
 `.env` 最少配置：
 
 ```env
-ACCESS_CODE=至少8位的强暗号
 PORT=3000
+SESSION_SECRET=至少32位随机字符串
+ADMIN_EMAIL=admin@your-studio.com
+ADMIN_PASSWORD=至少8位强密码
 
 THIRD_PARTY_API_BASE=...
 THIRD_PARTY_API_KEY=...
+APIMART_API_BASE="https://api.apib.ai"
 APIMART_API_KEY=...
+APIMART_DNS_FIX="0"
 STORYBOARD_IMAGE_API_KEY=...
 ```
 
-其余见 `.env.example`。**不必**在 `.env` 写 `NODE_ENV`（PM2 已设为 `production`）。
+其余见 `.env.example`。**不必**在 `.env` 写 `NODE_ENV`（PM2 已设为 `production`）。首次启动会用 `ADMIN_*` 创建管理员；之后在站内「用户管理」为同事建号。
 
 ```bash
 npm ci
@@ -233,7 +261,7 @@ pm2 start ecosystem.config.cjs --env production
 pm2 save
 ```
 
-### 改了暗号或 API Key 不生效
+### 改了 `.env`（登录、APIMart、API Key）不生效
 
 ```bash
 nano /var/www/my-storyboard-site/.env
@@ -248,15 +276,55 @@ mkswap /swapfile && swapon /swapfile
 npm run build:prod
 ```
 
-### 启动即退出：ACCESS_CODE
+### 启动即退出：登录配置（SESSION_SECRET / ADMIN）
 
-生产环境必须设置 ≥8 位且非 `liu888` 的 `ACCESS_CODE`，见 `src/services/siteAccessGate.ts`。
+生产环境 `NODE_ENV=production` 时，`validateAuthForDeploy()` 要求：
 
-日志若反复出现 `[site-gate]`，且 `injecting env (2)` 远少于正常条数：
+- `SESSION_SECRET` ≥ 32 位
+- `ADMIN_EMAIL` + `ADMIN_PASSWORD`（≥ 8 位）
 
-1. `.env` 可能已被粘贴命令损坏（出现 `.env:ACCESS_CODE=...` 等非法行）。
-2. 按上文 **「二点五、服务器 .env 配置」** 重新 `scp` 并修复。
-3. `pm2 restart gemini-deploy --update-env`
+日志若出现 `[auth] 生产环境必须在 .env 设置 SESSION_SECRET` 或管理员相关报错：
+
+1. 按 **「二点五、服务器 .env 配置」** 补全上述变量。
+2. `pm2 restart gemini-deploy --update-env`
+
+若 `injecting env (2)` 远少于正常条数，说明 `.env` 被粘贴命令损坏（可能出现 `.env:SESSION_SECRET=...` 等非法行），请重新 `scp` 并 `sed -i '/^\.env:/d' .env`。
+
+### 九宫格 / Gemini 文本：`fetch failed`（大陆 ECS · APIMart）
+
+**现象：** 浏览器 Network 里 `POST /api/generate-9grid` 返回 500，响应类似：
+
+```json
+{ "error": "分镜提示词生成失败: fetch failed", "meta": { "status": 0, "attempt": 4 } }
+```
+
+**原因：** 广州/大陆阿里云 ECS 往往**无法稳定访问**默认 `https://api.apimart.ai`（DNS 或出站网络），导致 Phase A 文本 LLM 请求在 TCP 层失败（`status: 0` 不是 401/502）。
+
+**修复（已在 8.163.127.198 实测）：** 服务器 `.env` 改用兼容网关：
+
+```env
+APIMART_API_BASE="https://api.apib.ai"
+APIMART_API_KEY="你的 APIMart Key"
+APIMART_DNS_FIX="0"
+```
+
+保存后：
+
+```bash
+pm2 restart gemini-deploy --update-env
+```
+
+**验证出站网络：**
+
+```bash
+curl -I --connect-timeout 10 https://api.apib.ai
+curl -I --connect-timeout 10 https://api.apimart.ai   # 大陆机房常失败，属预期
+```
+
+- `api.apib.ai` 通、应用仍失败 → 查 Key 是否有效、`pm2 logs` 具体报错。
+- 两者都不通 → 查 ECS **出站 443** 与安全组/防火墙。
+
+**说明：** 本地开发机（Windows）可能仍能用默认 `api.apimart.ai`；**线上与本地 APIMART_API_BASE 可以不同**，以各自网络实测为准。
 
 ### 3000 打不开但 3005 能开
 
@@ -275,10 +343,11 @@ pm2 restart gemini-deploy --update-env
 cd /var/www/my-storyboard-site
 cp .env .env.bak.$(date +%Y%m%d)
 sed -i '/^\.env:/d' .env
-grep -E '^(PORT|ACCESS_CODE)=' .env
+sed -i '/^ACCESS_CODE=/d' .env
+grep -E '^(PORT|SESSION_SECRET|ADMIN_EMAIL|APIMART_API_BASE)=' .env
 ```
 
-若 API Key 行大量缺失，从本机重新 `scp .env` 后再补 `ACCESS_CODE` 与 `PORT=3000`。
+若 API Key 行大量缺失，从本机重新 `scp .env` 后再补 `SESSION_SECRET`、`ADMIN_*`、`PORT=3000` 与 APIMart 镜像地址。
 
 ### better-sqlite3 报错
 
@@ -320,6 +389,21 @@ pm2 restart gemini-deploy
 
 **预防：** 部署含「拒绝空 nodes 覆盖」的 `infiniteCanvasStore.ts` 与 `canvasEngine.js` 后再观察；服务端日志可见 `[canvas-store] blocked empty nodes overwrite`。
 
+### API 需登录（2026-06 起）
+
+以下接口未登录会返回 `401`，需先通过 `/api/auth/login` 获取 `sb_session_v1` Cookie：
+
+- `/api/projects/*`、 `/api/canvases/*`、 `/api/canvas-workflow-templates/*`
+- `/api/config`、 `/api/generate-*`、 `/api/edit-image`、画布 Agent 等
+
+生产环境务必配置 `.env` 中的 `SESSION_SECRET`（≥32 位）、`ADMIN_EMAIL`、`ADMIN_PASSWORD`；建议尽快上 HTTPS 并设 `AUTH_COOKIE_SECURE=1`、`TRUST_PROXY=1`（见下方 **HTTPS 反代**）。
+
+**数据隔离（2026-06）：**
+
+- 新建画布 / 分镜项目会绑定当前登录用户；管理员可见全部。
+- 无 `owner_id` / `user_id` 的旧数据：任一已登录用户可读写（团队 legacy 池）。
+- `/uploads/*` 需登录；文件归属见 `file_ownership`，公共画廊已分享图全员可读。
+
 ---
 
 ## 七、与 V1.0 手册差异速查
@@ -328,6 +412,8 @@ pm2 restart gemini-deploy
 |------|------|
 | `pm2 restart storyboard` | `pm2 restart gemini-deploy --update-env` |
 | `npm run build` | `npm run build:prod` |
+| 全站暗号 `ACCESS_CODE` | 邮箱登录 + `SESSION_SECRET` / `ADMIN_*` |
+| 默认 `api.apimart.ai`（大陆 ECS） | 建议 `APIMART_API_BASE=https://api.apib.ai` |
 | 手册内明文 SSH 密码 | **禁止**；请改密码并用密钥 |
 | 默认以为线上=本地数据 | **线上独立空白**；数据只在服务器磁盘增长 |
 | 只备份 `projects.db` | 备份 `projects.db` + `data/` + `uploads/` + `.env` |
@@ -344,12 +430,45 @@ pm2 restart gemini-deploy
 
 ---
 
-## 九、首次上线检查清单（2026-06 实测）
+## 九、HTTPS 反代（推荐）
+
+当前 ECS 若直接用 `http://IP:3000`，登录 Cookie 明文传输，存在被嗅探风险。建议用 **Caddy** 或 Nginx 终结 TLS，Node 仍监听 `3000`。
+
+### Caddy 示例（域名 `studio.example.com`）
+
+```bash
+apt install -y caddy
+cat >/etc/caddy/Caddyfile <<'EOF'
+studio.example.com {
+    reverse_proxy 127.0.0.1:3000
+}
+EOF
+systemctl reload caddy
+```
+
+服务器 `.env` 追加：
+
+```bash
+TRUST_PROXY=1
+AUTH_COOKIE_SECURE=1
+PORT=3000
+```
+
+然后 `pm2 restart gemini-deploy --update-env`。浏览器访问 `https://studio.example.com`。
+
+阿里云安全组放行 **443**；可关闭公网 **3000** 直连，仅本机 `127.0.0.1:3000` 供反代使用。
+
+---
+
+## 十、首次上线检查清单（2026-06-26）
 
 - [ ] 本地 `git push origin deploy` 成功
 - [ ] 服务器 `git reset --hard origin/deploy` + `npm run build:prod`
-- [ ] `scp` 本地 `.env` 到服务器，并设 `ACCESS_CODE` + `PORT=3000`
-- [ ] `pm2 logs` 出现 `Server running on http://localhost:3000`
+- [ ] `scp` 本地 `.env` 到服务器；删除 `ACCESS_CODE`；设 `PORT=3000`
+- [ ] 服务器 `.env` 含 `SESSION_SECRET`（≥32 位）、`ADMIN_EMAIL`、`ADMIN_PASSWORD`（≥8 位）
+- [ ] 大陆 ECS：`APIMART_API_BASE=https://api.apib.ai` 且 `APIMART_DNS_FIX=0`
+- [ ] `pm2 logs` 出现 `Server running on http://localhost:3000`；env 注入条数 ≥ 15
 - [ ] `curl 127.0.0.1:3000` 返回 200
-- [ ] 浏览器 `http://8.163.127.198:3000` 可进，暗号用服务器 `.env` 里的值
+- [ ] 浏览器 `http://8.163.127.198:3000` 可进，用 `ADMIN_EMAIL` / `ADMIN_PASSWORD` 登录
+- [ ] 九宫格或画布 gemini-3.5-flash 试跑无 `fetch failed`
 - [ ] `pm2 save` 已执行

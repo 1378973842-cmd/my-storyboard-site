@@ -77,7 +77,7 @@ export type ImageRepairAgentRunBody = {
 
 export type ImageRepairAgentBridgeDeps = {
   projectRoot: string;
-  persistImage: (url: string) => Promise<string>;
+  persistImage: (url: string, meta?: { userId?: string }) => Promise<string>;
   requireGate?: RequestHandler;
 };
 
@@ -369,7 +369,7 @@ async function runImageRepairTask(
       aspectRatio: normalized.aspectRatio,
       projectRoot: deps.projectRoot,
     });
-    task.final_image_url = await deps.persistImage(compositeUpstream);
+    task.final_image_url = await persistOwned(compositeUpstream);
 
     task.status = "completed";
     task.stage_label = "完成";

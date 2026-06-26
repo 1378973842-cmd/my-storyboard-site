@@ -195,7 +195,7 @@ export function mapCanvasToEditorRequest(
 
 export type CanvasImageBridgeDeps = {
   projectRoot: string;
-  persistImage: (url: string) => Promise<string>;
+  persistImage: (url: string, meta?: { userId?: string }) => Promise<string>;
   requireGate?: RequestHandler;
 };
 
@@ -270,7 +270,7 @@ async function executeCanvasGeneration(
       sref: imageUrls[1] || null,
       projectRoot: deps.projectRoot,
     });
-    const localUrl = await deps.persistImage(upstreamUrl);
+    const localUrl = await deps.persistImage(upstreamUrl, { userId: req.authUser?.id });
     return { images: [localUrl], url: localUrl };
   }
 
@@ -298,7 +298,7 @@ async function executeCanvasGeneration(
       sref: imageUrls[1] || null,
       projectRoot: deps.projectRoot,
     });
-    const localUrl = await deps.persistImage(upstreamUrl);
+    const localUrl = await deps.persistImage(upstreamUrl, { userId: req.authUser?.id });
     return { images: [localUrl], url: localUrl };
   }
 
@@ -337,7 +337,7 @@ async function executeCanvasGeneration(
       if (!upstreamUrl) throw new Error("接口未返回图片 URL");
       return { images: [upstreamUrl], url: upstreamUrl };
     }
-    const localUrl = await deps.persistImage(upstreamUrl);
+    const localUrl = await deps.persistImage(upstreamUrl, { userId: req.authUser?.id });
     return { images: [localUrl], url: localUrl };
   }
 
@@ -349,7 +349,7 @@ async function executeCanvasGeneration(
       references: [],
       projectRoot: deps.projectRoot,
     });
-    const localUrl = await deps.persistImage(upstreamUrl);
+    const localUrl = await deps.persistImage(upstreamUrl, { userId: req.authUser?.id });
     return { images: [localUrl], url: localUrl };
   }
 

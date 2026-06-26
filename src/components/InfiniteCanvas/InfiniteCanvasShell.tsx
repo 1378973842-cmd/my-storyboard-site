@@ -34,6 +34,19 @@ function seedCanvasRootMarkers(node: HTMLDivElement) {
 
 type Props = { rootRef: Ref<HTMLDivElement> };
 
+type AgentFlyoutItem = {
+  icon: string;
+  label: string;
+  action: () => void;
+};
+
+const AGENT_FLYOUT_ITEMS: AgentFlyoutItem[] = [
+  { icon: 'bot', label: '复刻 Agent', action: () => canvasWin['addReplicaAgentNode']?.() },
+  { icon: 'wand-sparkles', label: '修图 Agent', action: () => canvasWin['addImageRepairAgentNode']?.() },
+  { icon: 'layout-grid', label: 'Poster Agent', action: () => canvasWin['addBatchPosterAgentNode']?.() },
+  { icon: 'grid-3x3', label: '九宫格 Agent', action: () => canvasWin['addNineGridAgentNode']?.() },
+];
+
 function ToolbarAgentFlyout() {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeTimerRef = useRef<number | null>(null);
@@ -92,37 +105,32 @@ function ToolbarAgentFlyout() {
 
   const menu = open && portalRoot ? createPortal(
     <div
-      className="toolbar-flyout-menu toolbar-flyout-menu-portal is-open"
+      className="toolbar-flyout-menu toolbar-flyout-menu-portal toolbar-flyout-menu-agents is-open"
       role="menu"
       aria-label="Agent nodes"
       style={{ left: `${menuPos.left}px`, bottom: `${menuPos.bottom}px` }}
       onMouseEnter={openMenu}
       onMouseLeave={scheduleClose}
     >
-      <button
-        type="button"
-        className="toolbar-flyout-item"
-        role="menuitem"
-        onClick={() => {
-          setOpen(false);
-          canvasWin['addReplicaAgentNode']?.();
-        }}
-      >
-        <i data-lucide="bot" className="w-4 h-4"></i>
-        <span>复刻 Agent</span>
-      </button>
-      <button
-        type="button"
-        className="toolbar-flyout-item"
-        role="menuitem"
-        onClick={() => {
-          setOpen(false);
-          canvasWin['addBatchPosterAgentNode']?.();
-        }}
-      >
-        <i data-lucide="layout-grid" className="w-4 h-4"></i>
-        <span>Batch Poster Agent</span>
-      </button>
+      <div className="toolbar-flyout-heading">Agent</div>
+      <div className="toolbar-flyout-grid">
+        {AGENT_FLYOUT_ITEMS.map((item) => (
+          <button
+            key={item.label}
+            type="button"
+            className="toolbar-flyout-item toolbar-flyout-item-grid"
+            role="menuitem"
+            title={item.label}
+            onClick={() => {
+              setOpen(false);
+              item.action();
+            }}
+          >
+            <i data-lucide={item.icon} className="w-4 h-4"></i>
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </div>
     </div>,
     portalRoot,
   ) : null;
@@ -266,16 +274,18 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({ rootRef }
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('prompt')}><i data-lucide="text-cursor-input" className="w-4 h-4"></i><span data-i18n="canvas.prompt">提示词</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('loop')}><i data-lucide="repeat-2" className="w-4 h-4"></i><span data-i18n="canvas.loopNode">循环节点</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('llm')}><i data-lucide="message-square-text" className="w-4 h-4"></i><span data-i18n="canvas.llmNode">LLM 节点</span></button>
+                      <div className="menu-section-title">生成</div>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('generator')}><i data-lucide="wand-sparkles" className="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('nineGridAgent')}><i data-lucide="grid-3x3" className="w-4 h-4"></i><span>九宫格 Agent</span></button>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('video')}><i data-lucide="clapperboard" className="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('rh')}><i data-lucide="workflow" className="w-4 h-4"></i><span data-i18n="canvas.rhGenerate">RH生成</span></button>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('videoReverse')}><i data-lucide="scan-search" className="w-4 h-4"></i><span>视频反推</span></button>
                       <div className="menu-section-title">Agent</div>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('replicaAgent')}><i data-lucide="bot" className="w-4 h-4"></i><span>复刻 Agent</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('imageRepairAgent')}><i data-lucide="wand-sparkles" className="w-4 h-4"></i><span>修图 Agent</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('batchPosterAgent')}><i data-lucide="layout-grid" className="w-4 h-4"></i><span>Batch Poster Agent</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('videoReverse')}><i data-lucide="scan-search" className="w-4 h-4"></i><span>视频反推</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('video')}><i data-lucide="clapperboard" className="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('rh')}><i data-lucide="workflow" className="w-4 h-4"></i><span data-i18n="canvas.rhGenerate">RH生成</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('output')}><i data-lucide="circle-dot" className="w-4 h-4"></i>Output</button>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('nineGridAgent')}><i data-lucide="grid-3x3" className="w-4 h-4"></i><span>九宫格 Agent</span></button>
+                      <div className="menu-section-title">输出</div>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('output')}><i data-lucide="circle-dot" className="w-4 h-4"></i><span>Output</span></button>
                   </div>
                   <div id="linkCreateMenu" className="create-menu"></div>
                   <div id="nodeInputMenu" className="create-menu"></div>

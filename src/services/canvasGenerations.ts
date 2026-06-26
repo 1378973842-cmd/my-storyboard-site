@@ -302,7 +302,9 @@ export function canAccessUploadPath(
   const owner = db
     .prepare("SELECT user_id FROM file_ownership WHERE relative_path = ?")
     .get(p) as { user_id: string } | undefined;
-  if (owner?.user_id === userId) return true;
+  // 尚无归属记录：登录体系上线前的团队共享文件，任一已登录用户可读
+  if (!owner) return true;
+  if (owner.user_id === userId) return true;
 
   const shared = db
     .prepare(
@@ -444,6 +446,17 @@ export function registerCanvasGenerationsRoutes(
       )
       .get(row.id) as CanvasGenerationRow;
     res.json({ item: parseGenerationRow(updated) });
+  });
+
+  app.delete("/api/my-favorites/:id", requireAuth, (req, res) => {
+    const row = getOwnedFavorite(db, req.params.id, req.authUser!.id);
+    if (!row) return res.status(404).json({ error: "收藏不存在" });
+    if (row.shared_at) {
+      db.prepare("UPDATE canvas_generations SET favorited_at = NULL WHERE id = ?").run(row.id);
+    } else {
+      db.prepare("DELETE FROM canvas_generations WHERE id = ?").run(row.id);
+    }
+    res.json({ ok: true });
   });
 }
 

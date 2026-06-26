@@ -40,7 +40,14 @@ import {
 import {
   initCanvasGenerationsSchema,
   registerCanvasGenerationsRoutes,
+  createPersistImageHandler,
+  backfillLegacyGeneratedImageOwnership,
+  recordFileOwnership,
 } from "./src/services/canvasGenerations.js";
+import {
+  registerProtectedUploadRoutes,
+  publicStaticExceptUploads,
+} from "./src/services/protectedUploads.js";
 
 /** 从当前脚本所在目录向上查找 .env（不依赖 process.cwd，避免从别的目录启动时读不到配置） */
 function loadEnvFromProject(): void {
@@ -311,7 +318,8 @@ function extractGeneratedImageFromResponse(responseData: any): string | null {
 async function persistAiImageToLocalStorage(
   imageUrl: string,
   projectRoot: string,
-  db: InstanceType<typeof Database>
+  db: InstanceType<typeof Database>,
+  ownerUserId?: string
 ): Promise<string> {
   const uploadsAbs = path.join(projectRoot, "public", "uploads");
   mkdirSync(uploadsAbs, { recursive: true });
@@ -374,6 +382,8 @@ async function persistAiImageToLocalStorage(
   } catch (e) {
     console.warn("[persist-image] generated_images insert skipped:", e);
   }
+
+  if (ownerUserId) recordFileOwnership(db, relativeWebPath, ownerUserId);
 
   return relativeWebPath;
 }
@@ -517,20 +527,58 @@ async function startServer() {
   } catch (e) {
     // Column already exists or other error
   }
+  try {
+    db.prepare("ALTER TABLE projects ADD COLUMN user_id TEXT").run();
+  } catch (e) {
+    /* column exists */
+  }
+  try {
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id)").run();
+  } catch (e) {
+    /* ignore */
+  }
 
   initUserAuthSchema(db);
   bootstrapAdminUser(db);
+  const adminBootstrap = db.prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY created_at ASC LIMIT 1").get() as
+    | { id: string }
+    | undefined;
+  if (adminBootstrap?.id) {
+    const n = backfillLegacyGeneratedImageOwnership(db, adminBootstrap.id);
+    if (n > 0) console.log(`[auth] 已为 ${n} 张历史 AI 图片登记文件归属（管理员）`);
+  }
   initCanvasGenerationsSchema(db);
   const requireAuth = createRequireAuth(db);
 
+  const canAccessProject = (
+    row: { user_id?: string | null } | undefined,
+    userId: string,
+    isAdmin: boolean
+  ): boolean => {
+    if (isAdmin) return true;
+    if (!row) return false;
+    const owner = String(row.user_id || "").trim();
+    if (!owner) return true;
+    return owner === userId;
+  };
+
+  if (String(process.env.TRUST_PROXY || "").trim() === "1" || process.env.NODE_ENV === "production") {
+    app.set("trust proxy", 1);
+  }
+
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
-  app.use(express.static(path.join(projectRoot, "public")));
+  registerProtectedUploadRoutes(app, db, projectRoot, requireAuth);
+  app.use(publicStaticExceptUploads(projectRoot));
+
+  const basePersistImage = (url: string) => persistAiImageToLocalStorage(url, projectRoot, db);
+  const persistImageWithOwner = createPersistImageHandler(db, basePersistImage);
 
   /** 无限画布：内置存储（data/canvases），无需单独启动 canvas_source Python */
   registerInfiniteCanvasRoutes(app, projectRoot, {
-    persistImage: (url) => persistAiImageToLocalStorage(url, projectRoot, db),
+    persistImage: persistImageWithOwner,
     requireGate: requireAuth,
+    db,
   });
   mkdirSync(path.join(projectRoot, "data", "canvases"), { recursive: true });
 
@@ -538,19 +586,33 @@ async function startServer() {
   registerCanvasGenerationsRoutes(app, db, projectRoot);
 
   // Project Management Routes
-  app.get("/api/projects", (req, res) => {
+  app.get("/api/projects", requireAuth, (req, res) => {
     try {
-      const projects = db.prepare("SELECT id, title, updatedAt FROM projects ORDER BY updatedAt DESC").all();
+      const user = req.authUser!;
+      const projects =
+        user.role === "admin"
+          ? db.prepare("SELECT id, title, updatedAt FROM projects ORDER BY updatedAt DESC").all()
+          : db
+              .prepare(
+                "SELECT id, title, updatedAt FROM projects WHERE user_id IS NULL OR user_id = ? ORDER BY updatedAt DESC"
+              )
+              .all(user.id);
       res.json(projects);
     } catch (error) {
       res.status(500).json({ error: "无法获取项目列表" });
     }
   });
 
-  app.get("/api/projects/:id", (req, res) => {
+  app.get("/api/projects/:id", requireAuth, (req, res) => {
     try {
-      const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id);
+      const user = req.authUser!;
+      const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id) as
+        | { user_id?: string | null }
+        | undefined;
       if (!project) return res.status(404).json({ error: "项目不存在" });
+      if (!canAccessProject(project, user.id, user.role === "admin")) {
+        return res.status(403).json({ error: "无权访问该项目" });
+      }
       
       // Parse JSON fields
       res.json({
@@ -563,12 +625,19 @@ async function startServer() {
     }
   });
 
-  app.post("/api/projects", (req, res) => {
+  app.post("/api/projects", requireAuth, (req, res) => {
     const { id, title, context, script, selectedStyle, imageSize, aspectRatio, references, data } = req.body;
+    const user = req.authUser!;
     try {
+      const existing = db.prepare("SELECT user_id FROM projects WHERE id = ?").get(id) as
+        | { user_id?: string | null }
+        | undefined;
+      if (existing && !canAccessProject(existing, user.id, user.role === "admin")) {
+        return res.status(403).json({ error: "无权修改该项目" });
+      }
       const stmt = db.prepare(`
-        INSERT INTO projects (id, title, context, script, selectedStyle, imageSize, aspectRatio, references_json, data_json, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO projects (id, title, context, script, selectedStyle, imageSize, aspectRatio, references_json, data_json, user_id, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(id) DO UPDATE SET
           title = excluded.title,
           context = excluded.context,
@@ -578,6 +647,7 @@ async function startServer() {
           aspectRatio = excluded.aspectRatio,
           references_json = excluded.references_json,
           data_json = excluded.data_json,
+          user_id = COALESCE(projects.user_id, excluded.user_id),
           updatedAt = CURRENT_TIMESTAMP
       `);
       
@@ -590,7 +660,8 @@ async function startServer() {
         imageSize, 
         aspectRatio, 
         JSON.stringify(references || []), 
-        JSON.stringify(data || null)
+        JSON.stringify(data || null),
+        user.id
       );
       
       res.json({ success: true });
@@ -600,8 +671,16 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/projects/:id", (req, res) => {
+  app.delete("/api/projects/:id", requireAuth, (req, res) => {
     try {
+      const user = req.authUser!;
+      const existing = db.prepare("SELECT user_id FROM projects WHERE id = ?").get(req.params.id) as
+        | { user_id?: string | null }
+        | undefined;
+      if (!existing) return res.status(404).json({ error: "项目不存在" });
+      if (!canAccessProject(existing, user.id, user.role === "admin")) {
+        return res.status(403).json({ error: "无权删除该项目" });
+      }
       db.prepare("DELETE FROM projects WHERE id = ?").run(req.params.id);
       res.json({ success: true });
     } catch (error) {
@@ -978,7 +1057,7 @@ ${pixarInstruction}
           references: Array.isArray(references) ? references : [],
           projectRoot,
         });
-        const localUrl = await persistAiImageToLocalStorage(url, projectRoot, db);
+        const localUrl = await persistAiImageToLocalStorage(url, projectRoot, db, req.authUser!.id);
         return res.json({ url: localUrl });
       } catch (error) {
         console.error("[generate-image/runninghub] error:", error);
@@ -1158,7 +1237,7 @@ ${pixarInstruction}
       const imageUrl = extractGeneratedImageFromResponse(responseData);
 
       if (imageUrl) {
-        const localUrl = await persistAiImageToLocalStorage(imageUrl, projectRoot, db);
+        const localUrl = await persistAiImageToLocalStorage(imageUrl, projectRoot, db, req.authUser!.id);
         res.json({ url: localUrl });
       } else {
         console.error("API response missing image url/b64:", JSON.stringify(responseData).slice(0, 2000));
@@ -1545,7 +1624,7 @@ ${pixarInstruction}
         return res.status(500).json({ error: "九宫格生图失败：未解析到图片 url/b64_json" });
       }
 
-      const localUrl = await persistAiImageToLocalStorage(url, projectRoot, db);
+      const localUrl = await persistAiImageToLocalStorage(url, projectRoot, db, req.authUser!.id);
       return res.json({ url: localUrl, shots });
     } catch (e) {
       console.error("Generate 9-grid error:", e);
@@ -1629,7 +1708,7 @@ ${pixarInstruction}
               aspect_ratio,
               projectRoot,
             });
-        const localUrl = await persistAiImageToLocalStorage(url, projectRoot, db);
+        const localUrl = await persistAiImageToLocalStorage(url, projectRoot, db, req.authUser!.id);
         return res.json({
           url: localUrl,
           meta: gptRequested ? { model: requestModel || "gpt-image-2" } : undefined,
@@ -1819,7 +1898,7 @@ ${pixarInstruction}
                     attempt: cfg.label,
                     retry: httpAttempt,
                   });
-                  const localUrl = await persistAiImageToLocalStorage(imageUrl, projectRoot, db);
+                  const localUrl = await persistAiImageToLocalStorage(imageUrl, projectRoot, db, req.authUser!.id);
                   return res.json({
                     url: localUrl,
                     meta: isGpt2Model ? { model: modelName, image_count_used: variant.blobs.length } : undefined,

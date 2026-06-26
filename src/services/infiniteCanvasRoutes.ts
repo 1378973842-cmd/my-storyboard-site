@@ -14,6 +14,7 @@ import {
   restoreCanvas,
   saveCanvas,
   softDeleteCanvas,
+  type CanvasAccessContext,
 } from "./infiniteCanvasStore.js";
 import { registerCanvasSiteImageRoutes } from "./canvasSiteImageBridge.js";
 import { registerCanvasLlmRoutes } from "./canvasLlmBridge.js";
@@ -28,6 +29,8 @@ import {
   saveUserWorkflowTemplate,
 } from "./canvasWorkflowTemplates.js";
 import { requireSiteGate } from "./siteAccessGate.js";
+import { recordFileOwnership } from "./canvasGenerations.js";
+import type Database from "better-sqlite3";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 80 * 1024 * 1024 } });
 
@@ -43,14 +46,24 @@ function canvasError(res: Response, err: unknown, fallback = "操作失败") {
     });
   }
   const msg = e?.message || fallback;
-  const code = /不存在/.test(msg) ? 404 : 400;
+  const code =
+    e.status === 403 ? 403 : e.status === 401 ? 401 : /不存在/.test(msg) ? 404 : 400;
   return res.status(code).json({ error: msg, detail: msg });
 }
 
+function canvasAccessCtx(req: Request): CanvasAccessContext | null {
+  const u = req.authUser;
+  if (!u) return null;
+  return { userId: u.id, isAdmin: u.role === "admin" };
+}
+
+export type PersistImageMeta = { userId?: string };
+
 export type InfiniteCanvasRouteDeps = {
-  persistImage: (url: string) => Promise<string>;
-  /** 与生图/LLM 共用的暗号 Cookie 校验；缺省 requireSiteGate */
+  persistImage: (url: string, meta?: PersistImageMeta) => Promise<string>;
+  /** 与生图/LLM 共用的登录 Cookie 校验；缺省 requireSiteGate（仅独立画布服务） */
   requireGate?: RequestHandler;
+  db?: InstanceType<typeof Database>;
 };
 
 export function registerInfiniteCanvasRoutes(
@@ -62,97 +75,104 @@ export function registerInfiniteCanvasRoutes(
   initCanvasWorkflowTemplatesStore(projectRoot);
   const gate = deps?.requireGate ?? requireSiteGate;
   console.log(
-    "[infinite-canvas] routes ready: /api/canvases, /api/canvas-workflow-templates, /api/canvas-image-tasks, /api/canvas-llm, /api/canvas/batch-poster-brainstorm, /api/canvas/replica-agent-run, /api/canvas/image-repair-agent-run, /api/config (P0 gated)"
+    "[infinite-canvas] routes ready: /api/canvases, /api/canvas-workflow-templates, /api/config (login required)"
   );
   const uploadsDir = path.join(projectRoot, "public", "uploads", "canvas");
   mkdirSync(uploadsDir, { recursive: true });
 
-  app.get("/api/canvases", (_req, res) => {
-    res.json({ canvases: listCanvases() });
+  app.get("/api/canvases", gate, (req, res) => {
+    res.json({ canvases: listCanvases(canvasAccessCtx(req)) });
   });
 
-  app.get("/api/canvases/trash", (_req, res) => {
-    res.json({ canvases: listDeletedCanvases(), retention_days: 30 });
+  app.get("/api/canvases/trash", gate, (req, res) => {
+    res.json({ canvases: listDeletedCanvases(canvasAccessCtx(req)), retention_days: 30 });
   });
 
-  app.post("/api/canvases", (req, res) => {
+  app.post("/api/canvases", gate, (req, res) => {
     try {
       const body = req.body || {};
-      const canvas = createCanvas({
-        title: body.title,
-        icon: body.icon,
-        kind: body.kind,
-      });
+      const canvas = createCanvas(
+        {
+          title: body.title,
+          icon: body.icon,
+          kind: body.kind,
+        },
+        canvasAccessCtx(req)
+      );
       res.json({ canvas });
     } catch (err) {
       canvasError(res, err, "创建画布失败");
     }
   });
 
-  app.get("/api/canvases/:id/meta", (req, res) => {
+  app.get("/api/canvases/:id/meta", gate, (req, res) => {
     try {
-      res.json(getCanvasMeta(req.params.id));
+      res.json(getCanvasMeta(req.params.id, canvasAccessCtx(req)));
     } catch (err) {
       canvasError(res, err);
     }
   });
 
-  app.get("/api/canvases/:id", (req, res) => {
+  app.get("/api/canvases/:id", gate, (req, res) => {
     try {
-      res.json({ canvas: getCanvas(req.params.id) });
+      res.json({ canvas: getCanvas(req.params.id, false, canvasAccessCtx(req)) });
     } catch (err) {
       canvasError(res, err);
     }
   });
 
-  app.put("/api/canvases/:id", (req, res) => {
+  app.put("/api/canvases/:id", gate, (req, res) => {
     try {
       const body = req.body || {};
-      const canvas = saveCanvas(req.params.id, {
-        title: body.title,
-        icon: body.icon,
-        nodes: body.nodes,
-        connections: body.connections,
-        viewport: body.viewport,
-        logs: body.logs,
-        settings: body.settings,
-        base_updated_at: body.base_updated_at,
-      });
+      const canvas = saveCanvas(
+        req.params.id,
+        {
+          title: body.title,
+          icon: body.icon,
+          nodes: body.nodes,
+          connections: body.connections,
+          viewport: body.viewport,
+          logs: body.logs,
+          settings: body.settings,
+          base_updated_at: body.base_updated_at,
+        },
+        canvasAccessCtx(req)
+      );
       res.json({ canvas });
     } catch (err) {
       canvasError(res, err, "保存画布失败");
     }
   });
 
-  app.delete("/api/canvases/:id", (req, res) => {
+  app.delete("/api/canvases/:id", gate, (req, res) => {
     try {
-      res.json(softDeleteCanvas(req.params.id));
+      res.json(softDeleteCanvas(req.params.id, canvasAccessCtx(req)));
     } catch (err) {
       canvasError(res, err);
     }
   });
 
-  app.post("/api/canvases/:id/restore", (req, res) => {
+  app.post("/api/canvases/:id/restore", gate, (req, res) => {
     try {
-      res.json({ canvas: restoreCanvas(req.params.id) });
+      res.json({ canvas: restoreCanvas(req.params.id, canvasAccessCtx(req)) });
     } catch (err) {
       canvasError(res, err);
     }
   });
 
-  app.delete("/api/canvases/:id/purge", (req, res) => {
+  app.delete("/api/canvases/:id/purge", gate, (req, res) => {
     try {
-      res.json(purgeCanvas(req.params.id));
+      res.json(purgeCanvas(req.params.id, canvasAccessCtx(req)));
     } catch (err) {
       canvasError(res, err);
     }
   });
 
-  app.get("/api/canvas-workflow-templates", (_req, res) => {
+  app.get("/api/canvas-workflow-templates", gate, (_req, res) => {
     res.json({ templates: listWorkflowTemplates() });
   });
 
-  app.get("/api/canvas-workflow-templates/:id", (req, res) => {
+  app.get("/api/canvas-workflow-templates/:id", gate, (req, res) => {
     try {
       res.json({ template: getWorkflowTemplate(req.params.id) });
     } catch (err) {
@@ -160,7 +180,7 @@ export function registerInfiniteCanvasRoutes(
     }
   });
 
-  app.post("/api/canvas-workflow-templates", (req, res) => {
+  app.post("/api/canvas-workflow-templates", gate, (req, res) => {
     try {
       const template = saveUserWorkflowTemplate(req.body || {});
       res.json({ template });
@@ -169,7 +189,7 @@ export function registerInfiniteCanvasRoutes(
     }
   });
 
-  app.delete("/api/canvas-workflow-templates/:id", (req, res) => {
+  app.delete("/api/canvas-workflow-templates/:id", gate, (req, res) => {
     try {
       res.json(deleteUserWorkflowTemplate(req.params.id));
     } catch (err) {
@@ -208,7 +228,7 @@ export function registerInfiniteCanvasRoutes(
   }
 
   /** 画布前端 loadConfig（模型列表与 .env 一致） */
-  app.get("/api/config", (_req, res) => {
+  app.get("/api/config", gate, (_req, res) => {
     const defaultImage = (process.env.IMAGE_MODEL || "nano-banana-pro-稳定").trim();
     const editModel = (process.env.IMAGE_EDIT_MODEL || "").trim();
     const imageModels = Array.from(
@@ -250,7 +270,7 @@ export function registerInfiniteCanvasRoutes(
     });
   });
 
-  app.get("/api/workflows", (_req, res) => {
+  app.get("/api/workflows", gate, (_req, res) => {
     res.json({ workflows: [] });
   });
 
@@ -273,6 +293,7 @@ export function registerInfiniteCanvasRoutes(
   app.post("/api/ai/upload", gate, upload.array("files"), (req, res) => {
     const files = (req.files as Express.Multer.File[]) || [];
     const uploaded: { url: string; name: string; kind: string }[] = [];
+    const userId = req.authUser?.id;
     for (const file of files) {
       if (!file?.buffer?.length) continue;
       const mime = (file.mimetype || "").toLowerCase();
@@ -290,8 +311,10 @@ export function registerInfiniteCanvasRoutes(
       const filename = `canvas_${uuidv4().replace(/-/g, "").slice(0, 12)}${ext}`;
       const abs = path.join(uploadsDir, filename);
       writeFileSync(abs, file.buffer);
+      const url = `/uploads/canvas/${filename}`;
+      if (userId && deps?.db) recordFileOwnership(deps.db, url, userId);
       uploaded.push({
-        url: `/uploads/canvas/${filename}`,
+        url,
         name: file.originalname || filename,
         kind,
       });

@@ -1,6 +1,6 @@
 import React, { memo, useCallback, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Loader2, UserPlus } from 'lucide-react';
+import { KeyRound, Loader2, UserPlus } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 type AdminUser = {
@@ -23,6 +23,10 @@ export const AdminUsersPage = memo(function AdminUsersPage({ shellActive }: { sh
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [createdHint, setCreatedHint] = useState<string | null>(null);
+  const [resetUserId, setResetUserId] = useState<string | null>(null);
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetSubmitting, setResetSubmitting] = useState(false);
+  const [resetHint, setResetHint] = useState<string | null>(null);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -76,6 +80,7 @@ export const AdminUsersPage = memo(function AdminUsersPage({ shellActive }: { sh
 
   const toggleDisabled = async (user: AdminUser) => {
     setError(null);
+    setResetHint(null);
     try {
       const res = await fetch(`/api/admin/users/${user.id}`, {
         method: 'PATCH',
@@ -88,6 +93,45 @@ export const AdminUsersPage = memo(function AdminUsersPage({ shellActive }: { sh
       await loadUsers();
     } catch (e) {
       setError(e instanceof Error ? e.message : '更新失败');
+    }
+  };
+
+  const openReset = (user: AdminUser) => {
+    setError(null);
+    setResetHint(null);
+    setResetUserId(user.id);
+    setResetPassword('');
+  };
+
+  const cancelReset = () => {
+    setResetUserId(null);
+    setResetPassword('');
+  };
+
+  const handleResetPassword = async (user: AdminUser) => {
+    const next = resetPassword.trim();
+    if (next.length < 8) {
+      setError('新密码至少 8 位');
+      return;
+    }
+    setResetSubmitting(true);
+    setError(null);
+    setResetHint(null);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ password: next }),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(data.error || '重置失败');
+      setResetHint(`已为 ${user.email} 重置密码，请将新密码私下发给对方。其画布与项目不受影响。`);
+      cancelReset();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '重置失败');
+    } finally {
+      setResetSubmitting(false);
     }
   };
 
@@ -104,7 +148,7 @@ export const AdminUsersPage = memo(function AdminUsersPage({ shellActive }: { sh
             账号管理
           </h1>
           <p className="mt-3 text-sm leading-relaxed text-[#e5e2e1]/65">
-            仅管理员可见。为同事创建账号后，将邮箱与初始密码私下发送给对方即可登录。
+            仅管理员可见。创建账号或将重置后的新密码私下发给同事即可；原密码无法查看，重置不会影响其画布与项目。
           </p>
         </motion.div>
 
@@ -153,6 +197,7 @@ export const AdminUsersPage = memo(function AdminUsersPage({ shellActive }: { sh
             {error}
           </p>
         ) : null}
+        {resetHint ? <p className="mt-4 text-sm text-[#8fd5ff]/85">{resetHint}</p> : null}
 
         <section className="mt-10">
           <h2 className="mb-4 text-sm font-medium text-[#e5e2e1]/70">团队成员</h2>
@@ -165,31 +210,77 @@ export const AdminUsersPage = memo(function AdminUsersPage({ shellActive }: { sh
               {users.map((user) => (
                 <li
                   key={user.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[#131313]/70 px-4 py-3 outline outline-[0.5px] outline-[#45464d]/15"
+                  className="rounded-2xl bg-[#131313]/70 px-4 py-3 outline outline-[0.5px] outline-[#45464d]/15"
                 >
-                  <div>
-                    <p className="text-sm text-[#e5e2e1]">{user.display_name}</p>
-                    <p className="text-xs text-[#e5e2e1]/50">{user.email}</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[11px] uppercase tracking-[0.12em] text-[#e5e2e1]/40">
-                      {user.role === 'admin' ? '管理员' : '成员'}
-                    </span>
-                    {user.role !== 'admin' ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm text-[#e5e2e1]">{user.display_name}</p>
+                      <p className="text-xs text-[#e5e2e1]/50">{user.email}</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] uppercase tracking-[0.12em] text-[#e5e2e1]/40">
+                        {user.role === 'admin' ? '管理员' : '成员'}
+                      </span>
                       <button
                         type="button"
-                        onClick={() => void toggleDisabled(user)}
+                        onClick={() => (resetUserId === user.id ? cancelReset() : openReset(user))}
                         className={cn(
-                          'rounded-full px-3 py-1.5 text-xs',
-                          user.disabled
+                          'inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs',
+                          resetUserId === user.id
                             ? 'bg-[#ffb866]/15 text-[#ffb866]'
                             : 'bg-[#1c1b1b] text-[#e5e2e1]/60 hover:text-[#e5e2e1]'
                         )}
                       >
-                        {user.disabled ? '启用' : '停用'}
+                        <KeyRound className="h-3 w-3" />
+                        {resetUserId === user.id ? '取消' : '重置密码'}
                       </button>
-                    ) : null}
+                      {user.role !== 'admin' ? (
+                        <button
+                          type="button"
+                          onClick={() => void toggleDisabled(user)}
+                          className={cn(
+                            'rounded-full px-3 py-1.5 text-xs',
+                            user.disabled
+                              ? 'bg-[#ffb866]/15 text-[#ffb866]'
+                              : 'bg-[#1c1b1b] text-[#e5e2e1]/60 hover:text-[#e5e2e1]'
+                          )}
+                        >
+                          {user.disabled ? '启用' : '停用'}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
+                  {resetUserId === user.id ? (
+                    <form
+                      className="mt-4 space-y-3 rounded-2xl bg-[#1c1b1b]/50 p-4"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void handleResetPassword(user);
+                      }}
+                    >
+                      <label className="block">
+                        <span className="mb-2 block text-xs text-[#e5e2e1]/50">新密码（至少 8 位）</span>
+                        <input
+                          type="text"
+                          value={resetPassword}
+                          onChange={(e) => setResetPassword(e.target.value)}
+                          placeholder="输入新密码"
+                          required
+                          minLength={8}
+                          autoFocus
+                          className="w-full rounded-2xl bg-[#131313]/85 px-4 py-2.5 text-sm outline-none focus:shadow-[0_0_0_3px_rgba(255,184,102,0.18)]"
+                        />
+                      </label>
+                      <button
+                        type="submit"
+                        disabled={resetSubmitting}
+                        className="inline-flex items-center gap-2 rounded-full bg-gradient-to-br from-[#ffb866] to-[#b77100] px-4 py-2.5 text-xs font-medium text-[#1a1208] disabled:opacity-60"
+                      >
+                        {resetSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                        确认重置
+                      </button>
+                    </form>
+                  ) : null}
                 </li>
               ))}
             </ul>

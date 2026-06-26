@@ -25,11 +25,18 @@ export type CanvasDocument = {
   created_at: number;
   updated_at: number;
   deleted_at?: number;
+  /** 创建者；缺省表示登录体系上线前的团队共享画布 */
+  owner_id?: string;
   nodes: unknown[];
   connections: unknown[];
   viewport: { x: number; y: number; scale: number };
   logs?: unknown[];
   settings?: Record<string, unknown>;
+};
+
+export type CanvasAccessContext = {
+  userId: string;
+  isAdmin?: boolean;
 };
 
 let canvasDir = "";
@@ -47,6 +54,22 @@ function sanitizeCanvasId(id: string) {
   const cleaned = String(id || "").replace(/[^a-zA-Z0-9_-]/g, "");
   if (!cleaned) throw new Error("无效的画布 ID");
   return cleaned;
+}
+
+export function canAccessCanvas(doc: CanvasDocument, ctx: CanvasAccessContext | null): boolean {
+  if (!ctx?.userId) return false;
+  if (ctx.isAdmin) return true;
+  const owner = String(doc.owner_id || "").trim();
+  if (!owner) return true;
+  return owner === ctx.userId;
+}
+
+function assertCanvasAccess(doc: CanvasDocument, ctx: CanvasAccessContext | null): void {
+  if (!canAccessCanvas(doc, ctx)) {
+    const err = new Error("无权访问该画布") as Error & { status?: number };
+    err.status = 403;
+    throw err;
+  }
 }
 
 function filePath(id: string) {
@@ -172,7 +195,7 @@ function cleanupTrash() {
   }
 }
 
-function iterRecords(deleted: boolean): CanvasRecord[] {
+function iterRecords(deleted: boolean, ctx?: CanvasAccessContext | null): CanvasRecord[] {
   cleanupTrash();
   const out: CanvasRecord[] = [];
   for (const name of readdirSync(canvasDir)) {
@@ -181,6 +204,7 @@ function iterRecords(deleted: boolean): CanvasRecord[] {
       const doc = JSON.parse(readFileSync(path.join(canvasDir, name), "utf8")) as CanvasDocument;
       const isDeleted = Boolean(doc.deleted_at);
       if (isDeleted !== deleted) continue;
+      if (ctx && !canAccessCanvas(doc, ctx)) continue;
       out.push(toRecord(doc));
     } catch {
       /* skip */
@@ -189,15 +213,23 @@ function iterRecords(deleted: boolean): CanvasRecord[] {
   return out.sort((a, b) => (deleted ? (b.deleted_at || 0) - (a.deleted_at || 0) : b.updated_at - a.updated_at));
 }
 
-export function listCanvases() {
-  return iterRecords(false);
+export function listCanvases(ctx?: CanvasAccessContext | null) {
+  return iterRecords(false, ctx);
 }
 
-export function listDeletedCanvases() {
-  return iterRecords(true);
+export function listDeletedCanvases(ctx?: CanvasAccessContext | null) {
+  return iterRecords(true, ctx);
 }
 
-export function createCanvas(payload: { title?: string; icon?: string; kind?: string }) {
+export function createCanvas(
+  payload: { title?: string; icon?: string; kind?: string; owner_id?: string },
+  ctx?: CanvasAccessContext | null
+) {
+  if (!ctx?.userId) {
+    const err = new Error("请先登录后再创建画布") as Error & { status?: number };
+    err.status = 401;
+    throw err;
+  }
   const kind = normalizeKind(payload.kind);
   const ts = nowMs();
   const doc: CanvasDocument = {
@@ -205,6 +237,7 @@ export function createCanvas(payload: { title?: string; icon?: string; kind?: st
     title: (payload.title || (kind === "smart" ? "智能画布" : "未命名画布")).slice(0, 80),
     icon: (payload.icon || (kind === "smart" ? "sparkles" : "🧩")).slice(0, 32),
     kind,
+    owner_id: ctx.userId,
     created_at: ts,
     updated_at: ts,
     nodes: [],
@@ -217,14 +250,15 @@ export function createCanvas(payload: { title?: string; icon?: string; kind?: st
   return doc;
 }
 
-export function getCanvas(id: string, allowDeleted = false) {
+export function getCanvas(id: string, allowDeleted = false, ctx?: CanvasAccessContext | null) {
   const doc = readDoc(id);
   if (!allowDeleted && doc.deleted_at) throw new Error("画布已在回收站");
+  assertCanvasAccess(doc, ctx ?? null);
   return doc;
 }
 
-export function getCanvasMeta(id: string) {
-  const doc = getCanvas(id);
+export function getCanvasMeta(id: string, ctx?: CanvasAccessContext | null) {
+  const doc = getCanvas(id, false, ctx);
   return {
     id: doc.id,
     updated_at: doc.updated_at,
@@ -246,9 +280,10 @@ export function saveCanvas(
     settings?: Record<string, unknown>;
     base_updated_at?: number;
     allow_empty_nodes?: boolean;
-  }
+  },
+  ctx?: CanvasAccessContext | null
 ) {
-  const doc = getCanvas(id, true);
+  const doc = getCanvas(id, true, ctx);
   const current = Number(doc.updated_at || 0);
   if (payload.base_updated_at && current && Number(payload.base_updated_at) < current) {
     const err = new Error("画布已被其他页面更新") as Error & { status?: number; canvas?: CanvasDocument; updated_at?: number };
@@ -294,21 +329,24 @@ export function saveCanvas(
   return doc;
 }
 
-export function softDeleteCanvas(id: string) {
-  const doc = getCanvas(id);
+export function softDeleteCanvas(id: string, ctx?: CanvasAccessContext | null) {
+  const doc = getCanvas(id, false, ctx);
   doc.deleted_at = nowMs();
   writeDoc(doc);
   return { ok: true as const };
 }
 
-export function restoreCanvas(id: string) {
+export function restoreCanvas(id: string, ctx?: CanvasAccessContext | null) {
   const doc = readDoc(id);
+  assertCanvasAccess(doc, ctx ?? null);
   delete doc.deleted_at;
   writeDoc(doc);
   return doc;
 }
 
-export function purgeCanvas(id: string) {
+export function purgeCanvas(id: string, ctx?: CanvasAccessContext | null) {
+  const doc = readDoc(id);
+  assertCanvasAccess(doc, ctx ?? null);
   const fp = filePath(id);
   if (existsSync(fp)) unlinkSync(fp);
   return { ok: true as const };

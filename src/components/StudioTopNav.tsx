@@ -168,6 +168,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
   showCanvasTopbarSlot = false,
 }) => {
   const {
+    screen,
     openCover,
     openStudio,
     openImageEditor,
@@ -195,7 +196,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
       onHome();
       return;
     }
-    if (active === 'cover') {
+    if (screen === 'cover') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
@@ -234,7 +235,8 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
           onHome={handleHome}
           heroTone={isOverlayNav}
           className={cn(
-            'pointer-events-auto z-[2]',
+            'pointer-events-auto',
+            subPage ? 'z-[4]' : 'z-[2]',
             isOverlayNav
               ? 'absolute left-6 top-5 md:left-10 md:top-7 lg:left-14'
               : 'shrink-0',
@@ -245,14 +247,14 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
       {subPage ? (
         <div
           className={cn(
-            'pointer-events-auto z-[2] flex min-w-0 flex-1 items-center justify-end gap-3',
+            'pointer-events-none z-[2] flex min-w-0 flex-1 items-center justify-end gap-3',
             isOverlayNav ? 'px-6 pt-5 md:px-10 md:pt-7 lg:px-14' : '',
           )}
         >
           <button
             type="button"
             onClick={goBack}
-            className="inline-flex items-center gap-2 rounded-full bg-[#131313]/75 px-3 py-1.5 text-[13px] text-[#e5e2e1]/75 transition-colors hover:bg-[#1c1b1b] hover:text-[#e5e2e1]"
+            className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-[#131313]/75 px-3 py-1.5 text-[13px] text-[#e5e2e1]/75 transition-colors hover:bg-[#1c1b1b] hover:text-[#e5e2e1]"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden />
             返回

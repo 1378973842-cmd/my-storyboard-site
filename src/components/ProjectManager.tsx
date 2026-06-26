@@ -87,7 +87,7 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
   const fetchProjects = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/projects');
+      const res = await fetch('/api/projects', { credentials: 'same-origin' });
       const list = await res.json();
       setProjects(list);
     } catch (error) {
@@ -111,6 +111,7 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({
           id,
           title: projectTitle,
@@ -140,7 +141,7 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
   const handleLoad = async (id: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/projects/${id}`);
+      const res = await fetch(`/api/projects/${id}`, { credentials: 'same-origin' });
       const project = await res.json();
       
       // Load into store
@@ -173,7 +174,7 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
       variant: 'danger',
       onConfirm: async () => {
         try {
-          const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+          const res = await fetch(`/api/projects/${id}`, { method: 'DELETE', credentials: 'same-origin' });
           if (res.ok) {
             if (currentProjectId === id) {
               resetProject();
@@ -192,13 +193,14 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
     e.stopPropagation();
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/projects/${id}`);
+      const res = await fetch(`/api/projects/${id}`, { credentials: 'same-origin' });
       const project = await res.json();
       
       const newId = Math.random().toString(36).substr(2, 9);
       await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({
           ...project,
           id: newId,
@@ -216,7 +218,7 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
   const handleExport = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     try {
-      const res = await fetch(`/api/projects/${id}`);
+      const res = await fetch(`/api/projects/${id}`, { credentials: 'same-origin' });
       const project = await res.json();
       
       const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
@@ -244,6 +246,7 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
         await fetch('/api/projects', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
           body: JSON.stringify({
             ...project,
             id: newId,

@@ -211,7 +211,7 @@ const tasks = new Map<string, ReplicaAgentTask>();
 
 export type ReplicaAgentBridgeDeps = {
   projectRoot: string;
-  persistImage: (url: string) => Promise<string>;
+  persistImage: (url: string, meta?: { userId?: string }) => Promise<string>;
   requireGate?: RequestHandler;
 };
 
@@ -278,7 +278,7 @@ function shouldCropTurnaroundPanel(w: number, h: number): "horizontal" | "vertic
 async function extractTurnaroundFrontPanel(
   projectRoot: string,
   imageInput: string,
-  persistImage: (url: string) => Promise<string>
+  persistImage: (url: string, meta?: { userId?: string }) => Promise<string>
 ): Promise<string> {
   const normalized = normalizeImageInputForUpload(String(imageInput || "").trim(), projectRoot);
   if (!normalized) return imageInput;
@@ -320,7 +320,7 @@ async function extractTurnaroundFrontPanel(
 async function prepareCharacterRefsForSwap(
   projectRoot: string,
   inputs: string[],
-  persistImage: (url: string) => Promise<string>
+  persistImage: (url: string, meta?: { userId?: string }) => Promise<string>
 ): Promise<string[]> {
   const out: string[] = [];
   for (const input of inputs) {
@@ -690,6 +690,9 @@ async function runReplicaAgentTask(
   const task = tasks.get(taskId);
   if (!task) return;
 
+  const persistOwned = (url: string, meta?: { userId?: string }) =>
+    deps.persistImage(url, { ...meta, userId: req.authUser?.id ?? meta?.userId });
+
   const normalized = normalizeReplicaRunBody(body);
   // 传给 RunningHub 时用 /uploads 相对路径，由 resolveInputsToRunningHubUrls 读本地并上传到 RH
   const backgroundInput = normalizeImageInputForUpload(normalized.backgroundUrl, deps.projectRoot);
@@ -779,7 +782,7 @@ async function runReplicaAgentTask(
       aspect_ratio: aspectRatio,
       projectRoot: deps.projectRoot,
     });
-    task.washed_image_url = await deps.persistImage(washedUpstream);
+    task.washed_image_url = await persistOwned(washedUpstream);
 
     if (!runStage2) {
       task.final_image_url = task.washed_image_url;
@@ -797,7 +800,7 @@ async function runReplicaAgentTask(
     const swapCharacterInputs = await prepareCharacterRefsForSwap(
       deps.projectRoot,
       characterInputs,
-      deps.persistImage
+      persistOwned
     );
     const swapPrompt = buildSwapPrompt(stylePrompt, swapMarkers, swapCharacterInputs.length);
     task.swap_prompt = swapPrompt;
@@ -817,7 +820,7 @@ async function runReplicaAgentTask(
       aspect_ratio: aspectRatio,
       projectRoot: deps.projectRoot,
     });
-    task.final_image_url = await deps.persistImage(finalUpstream);
+    task.final_image_url = await persistOwned(finalUpstream);
 
     task.status = "completed";
     task.stage_label = stageLabelForStatus("completed", task);

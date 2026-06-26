@@ -1,6 +1,6 @@
 import React, { memo, useCallback, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { Loader2, Share2 } from 'lucide-react';
+import { Loader2, Share2, StarOff } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { readJsonResponse } from '../lib/readJsonResponse';
 import { CopyablePromptText } from '../components/CopyablePromptText';
@@ -70,6 +70,24 @@ export const MyFavoritesPage = memo(function MyFavoritesPage({
     }
   };
 
+  const removeFavorite = async (item: FavoriteItem) => {
+    setBusyId(item.id);
+    setShareError(null);
+    try {
+      const res = await fetch(`/api/my-favorites/${item.id}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      const data = await readJsonResponse<{ ok?: boolean; error?: string }>(res);
+      if (!res.ok) throw new Error(data.error || '取消收藏失败');
+      setItems((prev) => prev.filter((row) => row.id !== item.id));
+    } catch (e) {
+      setShareError(e instanceof Error ? e.message : '取消收藏失败');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   if (!shellActive) return null;
 
   return (
@@ -83,7 +101,7 @@ export const MyFavoritesPage = memo(function MyFavoritesPage({
             我的收藏
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[#e5e2e1]/65">
-            在画布 Output 图片右上角点星标收藏。满意的作品可分享到公共画廊，供同事学习 Prompt 与参数。
+            在画布 Output 图片右上角点星标收藏。满意的作品可分享到公共画廊；不需要的条目可在此取消收藏。
           </p>
         </motion.div>
 
@@ -130,29 +148,43 @@ export const MyFavoritesPage = memo(function MyFavoritesPage({
                   <p className="text-xs uppercase tracking-[0.12em] text-[#e5e2e1]/45">
                     {item.model || '未知模型'}
                   </p>
-                  <button
-                    type="button"
-                    disabled={busyId === item.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void toggleShare(item);
-                    }}
-                    className={cn(
-                      'relative z-[1] inline-flex cursor-pointer items-center gap-2 rounded-full px-4 py-2 text-[13px] font-medium transition-colors',
-                      item.shared_at
-                        ? 'bg-[#1c1b1b] text-[#ffb866]/90 hover:bg-[#252525]'
-                        : 'bg-gradient-to-br from-[#ffb866] to-[#b77100] text-[#1a1208] hover:brightness-105'
-                    )}
-                  >
-                    {busyId === item.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : item.shared_at ? (
-                      <Share2 className="h-4 w-4 rotate-180" />
-                    ) : (
-                      <Share2 className="h-4 w-4" />
-                    )}
-                    {item.shared_at ? '取消分享' : '分享到画廊'}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={busyId === item.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void toggleShare(item);
+                      }}
+                      className={cn(
+                        'relative z-[1] inline-flex cursor-pointer items-center gap-2 rounded-full px-4 py-2 text-[13px] font-medium transition-colors',
+                        item.shared_at
+                          ? 'bg-[#1c1b1b] text-[#ffb866]/90 hover:bg-[#252525]'
+                          : 'bg-gradient-to-br from-[#ffb866] to-[#b77100] text-[#1a1208] hover:brightness-105'
+                      )}
+                    >
+                      {busyId === item.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : item.shared_at ? (
+                        <Share2 className="h-4 w-4 rotate-180" />
+                      ) : (
+                        <Share2 className="h-4 w-4" />
+                      )}
+                      {item.shared_at ? '取消分享' : '分享到画廊'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyId === item.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void removeFavorite(item);
+                      }}
+                      className="relative z-[1] inline-flex cursor-pointer items-center gap-2 rounded-full bg-[#1c1b1b] px-4 py-2 text-[13px] text-[#e5e2e1]/60 transition-colors hover:bg-[#252525] hover:text-[#e5e2e1]"
+                    >
+                      <StarOff className="h-4 w-4" />
+                      取消收藏
+                    </button>
+                  </div>
                 </div>
               </motion.article>
             ))}

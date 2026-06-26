@@ -11,6 +11,9 @@ import {
     splitNineGridToNine,
 } from '../nineGrid/nineGridCore.js';
 let canvasRoot = null;
+function apiFetch(url, options = {}) {
+    return fetch(url, { credentials: 'same-origin', ...options });
+}
 function domGet(id) {
   if (!canvasRoot) return null;
   const key = String(id).replace(/^#/, '');
@@ -541,7 +544,7 @@ function formatBatchPosterTitleCopyForPrompt(titleCopy){
 }
 async function extractBatchPosterTitleCopy(posterUrl, node){
     try {
-        const res = await fetch('/api/canvas/batch-poster-extract-titles', {
+        const res = await apiFetch('/api/canvas/batch-poster-extract-titles', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
@@ -594,7 +597,7 @@ let batchPosterThemeCatalogPromise = null;
 async function ensureBatchPosterThemeCatalog(){
     if(batchPosterThemeCatalogCache) return batchPosterThemeCatalogCache;
     if(!batchPosterThemeCatalogPromise){
-        batchPosterThemeCatalogPromise = fetch('/api/canvas/batch-poster-theme-catalog')
+        batchPosterThemeCatalogPromise = apiFetch('/api/canvas/batch-poster-theme-catalog')
             .then(res => res.ok ? res.json() : null)
             .catch(() => null)
             .then(data => {
@@ -1937,7 +1940,7 @@ async function saveCanvas(){
     savingCanvasNow = true;
     saveCanvasAgain = false;
     try {
-        const res = await fetch(`/api/canvases/${canvas.id}`, {
+        const res = await apiFetch(`/api/canvases/${canvas.id}`, {
             method:'PUT',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
@@ -1992,7 +1995,7 @@ async function saveCanvas(){
 async function loadConfig(){
     loadLocalModelLists();
     try {
-        const cfg = await fetch('/api/config').then(r=>r.json());
+        const cfg = await apiFetch('/api/config').then(r=>r.json());
         imageModels = cfg.image_models?.length ? cfg.image_models : imageModels;
         chatModels = cfg.chat_models?.length ? cfg.chat_models : chatModels;
         videoModels = cfg.video_models?.length ? cfg.video_models : DEFAULT_VIDEO_MODELS;
@@ -2003,7 +2006,7 @@ async function loadConfig(){
         models.nano = imageModels.find(m => m.toLowerCase().includes('nano')) || 'nano-banana-pro';
         models.gpt = imageModels.find(m => !m.toLowerCase().includes('nano')) || cfg.image_model || 'gpt-image-2';
         try {
-            const wf = await fetch('/api/workflows').then(r=>r.json());
+            const wf = await apiFetch('/api/workflows').then(r=>r.json());
             comfyWorkflows = wf.workflows || [];
         } catch(_) {
             comfyWorkflows = [];
@@ -2042,7 +2045,7 @@ function msChatModelOptions(selected){
 }
 async function loadCanvasList(openFirst=true){
     try {
-        const res = await fetch('/api/canvases');
+        const res = await apiFetch('/api/canvases');
         if(!res.ok) throw new Error(tr('canvas.canvasListFailed'));
         const data = await res.json();
         canvases = data.canvases || [];
@@ -2194,7 +2197,7 @@ function instantiateWorkflowTemplate(template, offset={x:0, y:0}){
     return {nodes:newNodes, connections:newConnections};
 }
 async function fetchWorkflowTemplate(templateId){
-    const res = await fetch(`/api/canvas-workflow-templates/${encodeURIComponent(templateId)}`);
+    const res = await apiFetch(`/api/canvas-workflow-templates/${encodeURIComponent(templateId)}`);
     if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Failed to load workflow template' : '加载工作流模板失败'));
     const data = await res.json();
     if(!data.template) throw new Error(langIsEn() ? 'Workflow template not found' : '工作流模板不存在');
@@ -2202,7 +2205,7 @@ async function fetchWorkflowTemplate(templateId){
 }
 async function loadWorkflowTemplates(){
     try {
-        const res = await fetch('/api/canvas-workflow-templates');
+        const res = await apiFetch('/api/canvas-workflow-templates');
         if(!res.ok) throw new Error('workflow templates failed');
         const data = await res.json();
         workflowTemplates = data.templates || [];
@@ -2281,7 +2284,7 @@ async function createCanvasFromWorkflowTemplate(templateId){
     try {
         const template = await fetchWorkflowTemplate(templateId);
         const title = `${template.title || tr('canvas.untitled')} ${new Date().toLocaleTimeString(window.StudioI18n?.lang() === 'en' ? 'en-US' : 'zh-CN', {hour:'2-digit', minute:'2-digit'})}`;
-        const res = await fetch('/api/canvases', {
+        const res = await apiFetch('/api/canvases', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({title, kind:'classic', icon: template.icon || 'workflow'})
@@ -2362,7 +2365,7 @@ async function deleteWorkflowTemplate(templateId){
         : `确定删除工作流模板「${item?.title || templateId}」？`);
     if(!ok) return;
     try {
-        const res = await fetch(`/api/canvas-workflow-templates/${encodeURIComponent(templateId)}`, {method:'DELETE'});
+        const res = await apiFetch(`/api/canvas-workflow-templates/${encodeURIComponent(templateId)}`, {method:'DELETE'});
         if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Delete failed' : '删除失败'));
         await loadWorkflowTemplates();
     } catch(e) {
@@ -2380,7 +2383,7 @@ function closeWorkflowTemplateModal(){
 }
 async function loadTrashList(){
     try {
-        const res = await fetch('/api/canvases/trash');
+        const res = await apiFetch('/api/canvases/trash');
         if(!res.ok) throw new Error(tr('canvas.trashLoadFailed'));
         const data = await res.json();
         deletedCanvases = data.canvases || [];
@@ -2395,7 +2398,7 @@ async function loadTrashList(){
 async function refreshTrashCount(){
     if(trashMode) return;
     try {
-        const res = await fetch('/api/canvases/trash');
+        const res = await apiFetch('/api/canvases/trash');
         if(!res.ok) return;
         const data = await res.json();
         deletedCanvases = data.canvases || [];
@@ -2548,7 +2551,7 @@ async function createCanvas(){
     const abort = new AbortController();
     const timeoutId = setTimeout(() => abort.abort(), 30000);
     try {
-        const res = await fetch('/api/canvases', {
+        const res = await apiFetch('/api/canvases', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({title, icon:isSmart ? 'sparkles' : '🧩', kind:isSmart ? 'smart' : 'classic'}),
@@ -2631,11 +2634,11 @@ async function setCanvasIcon(id, icon, event){
     try {
         let target = canvas?.id === id ? canvas : null;
         if(!target) {
-            const data = await fetch(`/api/canvases/${id}`).then(r => r.json());
+            const data = await apiFetch(`/api/canvases/${id}`).then(r => r.json());
             target = data.canvas;
         }
         target.icon = icon || 'layers';
-        const res = await fetch(`/api/canvases/${id}`, {
+        const res = await apiFetch(`/api/canvases/${id}`, {
             method:'PUT',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
@@ -2693,11 +2696,11 @@ async function setCanvasTitle(id, title){
     try {
         let target = canvas?.id === id ? canvas : null;
         if(!target){
-            const data = await fetch(`/api/canvases/${id}`).then(r => r.json());
+            const data = await apiFetch(`/api/canvases/${id}`).then(r => r.json());
             target = data.canvas;
         }
         target.title = title;
-        const res = await fetch(`/api/canvases/${id}`, {
+        const res = await apiFetch(`/api/canvases/${id}`, {
             method:'PUT',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
@@ -2730,7 +2733,7 @@ async function openCanvas(id){
     if(liveShell?.classList.contains('no-canvas')) liveShell.classList.remove('no-canvas');
     setStatus('Opening...');
     try {
-        const res = await fetch(`/api/canvases/${id}`);
+        const res = await apiFetch(`/api/canvases/${id}`);
         if(!res.ok) throw new Error(tr('canvas.openFailed'));
         const data = await res.json();
         canvas = data.canvas;
@@ -2882,7 +2885,7 @@ async function refreshMissingCanvasAssets(){
     const urls = canvasLocalAssetUrls();
     if(!urls.length) return;
     try {
-        const data = await fetch('/api/canvas-assets/check', {
+        const data = await apiFetch('/api/canvas-assets/check', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({urls})
@@ -2906,7 +2909,7 @@ async function syncRemoteCanvasNow(){
         return;
     }
     try {
-        const res = await fetch(`/api/canvases/${canvas.id}`);
+        const res = await apiFetch(`/api/canvases/${canvas.id}`);
         if(!res.ok) throw new Error(tr('canvas.openFailed'));
         const data = await res.json();
         const remote = data.canvas;
@@ -2927,7 +2930,7 @@ async function checkRemoteCanvasVersion(){
     if(Date.now() - lastBoardInteractionAt < CANVAS_INTERACTION_COOLDOWN_MS) return;
     remoteSyncBusy = true;
     try {
-        const res = await fetch(`/api/canvases/${canvas.id}/meta`);
+        const res = await apiFetch(`/api/canvases/${canvas.id}/meta`);
         if(!res.ok) throw new Error('meta failed');
         const meta = await res.json();
         const remoteUpdatedAt = Number(meta.updated_at || 0);
@@ -3011,7 +3014,7 @@ async function deleteCanvas(id, event){
     event?.stopPropagation();
     setStatus('Moving to trash...');
     try {
-        const res = await fetch(`/api/canvases/${id}`, {method:'DELETE'});
+        const res = await apiFetch(`/api/canvases/${id}`, {method:'DELETE'});
         if(!res.ok) throw new Error(tr('canvas.moveToTrashFailed'));
         const deletingCurrent = canvas?.id === id;
         pendingDeleteCanvasId = null;
@@ -3037,7 +3040,7 @@ async function restoreCanvas(id, event){
     event?.stopPropagation();
     setStatus('Restoring...');
     try {
-        const res = await fetch(`/api/canvases/${id}/restore`, {method:'POST'});
+        const res = await apiFetch(`/api/canvases/${id}/restore`, {method:'POST'});
         if(!res.ok) throw new Error(tr('canvas.restoreFailed'));
         pendingPurgeCanvasId = null;
         deletedCanvases = deletedCanvases.filter(item => item.id !== id);
@@ -3054,7 +3057,7 @@ async function purgeCanvas(id, event){
     event?.stopPropagation();
     setStatus('Deleting...');
     try {
-        const res = await fetch(`/api/canvases/${id}/purge`, {method:'DELETE'});
+        const res = await apiFetch(`/api/canvases/${id}/purge`, {method:'DELETE'});
         if(!res.ok) throw new Error(tr('canvas.purgeFailed'));
         pendingPurgeCanvasId = null;
         deletedCanvases = deletedCanvases.filter(item => item.id !== id);
@@ -3152,6 +3155,7 @@ on(window, 'resize', () => {
     if(cropState) syncImageEditOverflow();
 });
 bindClick(backToManagerBtn, () => returnToCanvasManager());
+bindCanvasMenuWheelScroll();
 }
 
 
@@ -4011,7 +4015,7 @@ async function uploadImagesToImageBatch(batchId, files){
     if(!imgs.length) return;
     const form = new FormData();
     imgs.forEach(file => form.append('files', file));
-    const res = await fetch('/api/ai/upload', {method:'POST', body:form});
+    const res = await apiFetch('/api/ai/upload', {method:'POST', body:form});
     if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Upload failed' : '上传失败'));
     const data = await res.json();
     const uploaded = (data.files || []).filter(file => file?.url);
@@ -4084,6 +4088,20 @@ function ensureFrameStackForVideo(videoNode){
         connections.push({id:uid('c'), from:videoNode.id, to:stack.id});
     }
     return stack;
+}
+function isOpenScrollableCanvasMenu(target){
+    const menu = target?.closest?.('.create-menu.open');
+    if(!menu) return false;
+    return menu.scrollHeight > menu.clientHeight + 1;
+}
+function bindCanvasMenuWheelScroll(){
+    [createMenu, linkCreateMenu, nodeInputMenu, nodeOutputMenu, imageNodeMenu, selectionMenu].forEach(menu => {
+        if(!menu) return;
+        on(menu, 'wheel', e => {
+            if(!menu.classList.contains('open')) return;
+            e.stopPropagation();
+        }, {passive: true});
+    });
 }
 function openCreateMenu(clientX, clientY){
     menuPoint = screenToWorld(clientX, clientY);
@@ -4158,7 +4176,7 @@ function buildWorkflowTemplateFromNodeIds(nodeIdSource){
     return {nodes:templateNodes, connections:templateConnections};
 }
 async function saveWorkflowTemplatePayload(payload){
-    const res = await fetch('/api/canvas-workflow-templates', {
+    const res = await apiFetch('/api/canvas-workflow-templates', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify(payload),
@@ -4491,7 +4509,7 @@ async function downloadOutputNodeImages(nodeId){
         return;
     }
     try {
-        const res = await fetch('/api/canvas-assets/download', {
+        const res = await apiFetch('/api/canvas-assets/download', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
@@ -4761,7 +4779,7 @@ async function resolveImageDropPayload(dataTransfer){
 }
 async function importLocalImages(paths){
     if(!paths?.length) return [];
-    const response = await fetch('/api/ai/import-local-image', {
+    const response = await apiFetch('/api/ai/import-local-image', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({paths})
@@ -4811,7 +4829,7 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
     if(!supported.length) return [];
     const form = new FormData();
     supported.forEach(file => form.append('files', file));
-    const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
+    const data = await apiFetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
     const base = point || screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
     const created = [];
     (data.files || []).forEach((file, i) => {
@@ -4949,7 +4967,7 @@ async function uploadImagesToStackNode(nodeId, files){
     if(!imgs.length) return;
     const form = new FormData();
     imgs.forEach(file => form.append('files', file));
-    const res = await fetch('/api/ai/upload', {method:'POST', body:form});
+    const res = await apiFetch('/api/ai/upload', {method:'POST', body:form});
     if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Upload failed' : '上传失败'));
     const data = await res.json();
     const uploaded = (data.files || []).filter(file => file?.url);
@@ -5030,7 +5048,7 @@ async function captureVideoFrameFromNode(nodeId){
     const filename = `${baseName}_frame_${Date.now()}.jpg`;
     const form = new FormData();
     form.append('files', blob, filename);
-    const res = await fetch('/api/ai/upload', {method:'POST', body:form});
+    const res = await apiFetch('/api/ai/upload', {method:'POST', body:form});
     if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Upload failed' : '上传失败'));
     const data = await res.json();
     const file = (data.files || [])[0];
@@ -5212,7 +5230,7 @@ async function fillImageNode(nodeId, files, opts={}){
     }
     const form = new FormData();
     form.append('files', imgs[0]);
-    const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
+    const data = await apiFetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
     const file = data.files?.[0];
     const node = nodes.find(n => n.id === nodeId);
     if(file && node){
@@ -6238,13 +6256,13 @@ on(window, 'mouseup', () => { cropDrag = null; });
 async function uploadCroppedBlob(blob, name){
     const form = new FormData();
     form.append('files', blob, name);
-    const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
+    const data = await apiFetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
     return data.files?.[0];
 }
 async function uploadImageBlobs(blobs){
     const form = new FormData();
     blobs.forEach(item => form.append('files', item.blob, item.name));
-    const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
+    const data = await apiFetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
     return data.files || [];
 }
 function shouldUseCrossOriginImage(url){
@@ -6811,7 +6829,7 @@ function renderNode(node){
 }
 async function loadFavoriteOutputPaths(){
     try {
-        const res = await fetch('/api/favorites/paths', { credentials: 'same-origin' });
+        const res = await apiFetch('/api/favorites/paths', { credentials: 'same-origin' });
         if(!res.ok) return;
         const data = await res.json().catch(() => ({}));
         favoriteOutputPaths = new Set(
@@ -6886,7 +6904,7 @@ async function toggleOutputFavorite(wrap, node){
     const btn = wrap.querySelector('.output-fav-btn');
     if(btn) btn.disabled = true;
     try {
-        const res = await fetch('/api/favorites/toggle', {
+        const res = await apiFetch('/api/favorites/toggle', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'same-origin',
@@ -8391,7 +8409,7 @@ async function brainstormBatchPosterThemes(count, node){
         pipelineMode:normalizeBatchPosterPipelineMode(node.pipelineMode),
     };
     if(themeId) payload.themeId = themeId;
-    const res = await fetch('/api/canvas/batch-poster-brainstorm', {
+    const res = await apiFetch('/api/canvas/batch-poster-brainstorm', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify(payload)
@@ -8891,7 +8909,7 @@ async function buildNineGridImageTaskPayload(node, imagePrompt, refs, opts={}){
 }
 async function waitForCanvasImageTask(taskId){
     while(true){
-        const res = await fetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`);
+        const res = await apiFetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`);
         if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Image task poll failed' : '生图任务查询失败'));
         const data = await res.json();
         if(data.status === 'succeeded') return data.result || {};
@@ -8900,7 +8918,7 @@ async function waitForCanvasImageTask(taskId){
     }
 }
 async function fetchCanvasImageTaskResult(taskId){
-    const res = await fetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`);
+    const res = await apiFetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`);
     if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Failed to load image task' : '读取生图任务失败'));
     const data = await res.json();
     const result = data.result || {};
@@ -8987,7 +9005,7 @@ function updateNineGridRunButtons(node){
     if(full) full.textContent = langIsEn() ? 'Run all' : '一键全流程';
 }
 async function nineGridFetchJson(body){
-    const res = await fetch('/api/generate-9grid', {
+    const res = await apiFetch('/api/generate-9grid', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify(body),
@@ -9888,7 +9906,7 @@ async function runReplicaAgent(nodeId, opts={}){
     const run = runSnapshot(node, node.style_prompt ? `复刻 Agent：${node.style_prompt}` : '复刻 Agent 双阶段生图', refs);
     const pendingId = uid('p');
     try {
-        const res = await fetch('/api/canvas/replica-agent-run', {
+        const res = await apiFetch('/api/canvas/replica-agent-run', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
@@ -9977,7 +9995,7 @@ async function runImageRepairAgent(nodeId, opts={}){
     };
     try {
         await Promise.all(Array.from({length:count}, async () => {
-            const res = await fetch('/api/canvas/image-repair-agent-run', {
+            const res = await apiFetch('/api/canvas/image-repair-agent-run', {
                 method:'POST',
                 headers:{'Content-Type':'application/json'},
                 body:JSON.stringify(taskPayload)
@@ -10794,7 +10812,7 @@ function currentComfyWorkflow(node){
 async function ensureComfyWorkflow(name){
     if(!hasComfyWorkflow(name)) return null;
     if(comfyWorkflowCache[name]) return comfyWorkflowCache[name];
-    const res = await fetch(`/api/workflows/${encodeURIComponent(name)}`);
+    const res = await apiFetch(`/api/workflows/${encodeURIComponent(name)}`);
     if(!res.ok){
         delete comfyWorkflowCache[name];
         return null;
@@ -10814,7 +10832,7 @@ async function ensureRunningHubWorkflow(workflowId){
     workflowId = validRunningHubWorkflowId(workflowId);
     if(!workflowId) return null;
     if(runningHubWorkflowCache[workflowId]) return runningHubWorkflowCache[workflowId];
-    const res = await fetch(`/api/runninghub/workflows/${encodeURIComponent(workflowId)}`);
+    const res = await apiFetch(`/api/runninghub/workflows/${encodeURIComponent(workflowId)}`);
     if(!res.ok){
         delete runningHubWorkflowCache[workflowId];
         return null;
@@ -11577,7 +11595,7 @@ async function rhFetchAppInfo(nodeId, showAlert=true){
     node.rhFetching = true;
     refreshNodes([node.id]);
     try {
-        const res = await fetch(`/api/runninghub/app-info?webappId=${encodeURIComponent(node.webappId.trim())}`);
+        const res = await apiFetch(`/api/runninghub/app-info?webappId=${encodeURIComponent(node.webappId.trim())}`);
         const data = await res.json();
         if(!res.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhFailed'));
         node.rhAppInfo = data.data || {};
@@ -11609,7 +11627,7 @@ async function rhFetchWorkflowInfo(nodeId, showAlert=true){
     refreshNodes([node.id]);
     try {
         const saved = await ensureRunningHubWorkflow(node.workflowId.trim());
-        const res = await fetch(`/api/runninghub/workflow-info?workflowId=${encodeURIComponent(node.workflowId.trim())}`);
+        const res = await apiFetch(`/api/runninghub/workflow-info?workflowId=${encodeURIComponent(node.workflowId.trim())}`);
         const data = await res.json();
         if(!res.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhFailed'));
         const info = data.data || {};
@@ -11666,7 +11684,7 @@ async function rhUploadValueIfNeeded(value, node=null){
     const text = String(value || '').trim();
     if(!text) return '';
     if(!/^https?:\/\//i.test(text) && !text.startsWith('/output/') && !text.startsWith('/assets/')) return text;
-    const res = await fetch('/api/runninghub/upload-asset', {
+    const res = await apiFetch('/api/runninghub/upload-asset', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({url:text, useWallet:rhUseWallet(node)})
@@ -11743,7 +11761,7 @@ async function runRhNode(nodeId, opts={}){
         let result = null;
         for(let i = 0; i < 720; i++){
             await sleep(2500);
-            const data = await fetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}`).then(async r => {
+            const data = await apiFetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}`).then(async r => {
                 const json = await r.json();
                 if(!r.ok || json.success === false) throw new Error(json.detail || json.error || tr('canvas.rhFailed'));
                 return json.data || json;
@@ -12345,7 +12363,7 @@ async function runGeneratorLegacy(genId, opts={}){
         };
         const quality = normalizedImageQuality(gen.quality);
         if(quality) payload.quality = quality;
-        const results = await Promise.all(Array.from({length:count}, () => fetch('/api/online-image', {
+        const results = await Promise.all(Array.from({length:count}, () => apiFetch('/api/online-image', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify(payload)
@@ -12389,7 +12407,7 @@ async function runVideoNode(nodeId, opts={}){
     if(!opts.cascade){ node.running = true; refreshRunNodes(node, out); }
     else refreshRunNodes(node, out);
     try {
-        const result = await fetch('/api/canvas-video', {
+        const result = await apiFetch('/api/canvas-video', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
@@ -12443,7 +12461,7 @@ async function uploadCanvasUrlToComfy(url){
     const filename = (url || '').split('/').pop()?.split('?')[0] || `canvas_${Date.now()}.png`;
     const form = new FormData();
     form.append('files', blob, filename);
-    const data = await fetch('/api/upload', {method:'POST', body:form}).then(async r => {
+    const data = await apiFetch('/api/upload', {method:'POST', body:form}).then(async r => {
         if(!r.ok) throw new Error(await responseErrorMessage(r, langIsEn() ? 'Image upload to ComfyUI failed' : '图片上传到 ComfyUI 失败'));
         return r.json();
     });
@@ -12457,7 +12475,7 @@ async function comfyNameForRef(ref){
 async function runComfyUpscale(imageUrl, resolution){
     if(!imageUrl) throw new Error(actionFailed('studio.superResolution', langIsEn() ? 'missing input image' : '缺少输入图片'));
     const nextInput = await uploadCanvasUrlToComfy(imageUrl);
-    const upscale = await fetch('/api/generate', {
+    const upscale = await apiFetch('/api/generate', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
@@ -12885,7 +12903,7 @@ async function runLTXDirectorNode(nodeId, opts={}){
             [LTX_DIRECTOR_WF_NODE]:directorInputs,
             [LTX_DIRECTOR_SEED_NODE]:{noise_seed:Number(node.noiseSeed ?? 12)}
         };
-        const result = await fetch('/api/generate', {
+        const result = await apiFetch('/api/generate', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
@@ -12960,7 +12978,7 @@ async function runComfyNode(nodeId, opts={}){
         let images = [];
         if(mode === 'text'){
             run.taskLabel = tr('canvas.comfyText');
-            const result = await fetch('/api/generate', {
+            const result = await apiFetch('/api/generate', {
                 method:'POST',
                 headers:{'Content-Type':'application/json'},
                 body:JSON.stringify({
@@ -12977,7 +12995,7 @@ async function runComfyNode(nodeId, opts={}){
         } else if(mode === 'enhance'){
             run.taskLabel = tr('canvas.comfyEnhance');
             const inputName = await comfyNameForRef(refs[0]);
-            const enhance = await fetch('/api/generate', {
+            const enhance = await apiFetch('/api/generate', {
                 method:'POST',
                 headers:{'Content-Type':'application/json'},
                 body:JSON.stringify({
@@ -13037,7 +13055,7 @@ async function runComfyNode(nodeId, opts={}){
                 }
                 params[f.node][f.input] = comfyParamValue(node, f);
             });
-            const result = await fetch('/api/generate', {
+            const result = await apiFetch('/api/generate', {
                 method:'POST',
                 headers:{'Content-Type':'application/json'},
                 body:JSON.stringify({
@@ -13056,7 +13074,7 @@ async function runComfyNode(nodeId, opts={}){
             run.taskLabel = tr('canvas.comfyEdit');
             const names = [];
             for (const ref of refs.slice(0, 3)) names.push(await comfyNameForRef(ref));
-            const result = await fetch('/api/generate', {
+            const result = await apiFetch('/api/generate', {
                 method:'POST',
                 headers:{'Content-Type':'application/json'},
                 body:JSON.stringify({
@@ -13103,7 +13121,7 @@ async function callCanvasLLM(node, message, messages=[], mediaOpts={}){
     const model = resolveChatModel(node.model || node.llmMsModel, llmProv);
     const videos = mediaOpts.videos || (node.type === 'videoReverse' ? videoReverseInputVideos(node) : llmInputVideos(node));
     const images = mediaOpts.images || llmInputImages(node);
-    const result = await fetch('/api/canvas-llm', {
+    const result = await apiFetch('/api/canvas-llm', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
@@ -14013,7 +14031,7 @@ function findPendingTask(taskId){
     return null;
 }
 async function createCanvasImageTask(payload){
-    const res = await fetch('/api/canvas-image-tasks', {
+    const res = await apiFetch('/api/canvas-image-tasks', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify(payload)
@@ -14030,7 +14048,7 @@ async function pollReplicaAgentTask(taskId){
         while(true){
             const found = findPendingTask(taskId);
             if(!found) return 'missing';
-            const res = await fetch(`/api/canvas/replica-agent-tasks/${encodeURIComponent(taskId)}`);
+            const res = await apiFetch(`/api/canvas/replica-agent-tasks/${encodeURIComponent(taskId)}`);
             if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Replica Agent poll failed' : '复刻 Agent 任务查询失败'));
             const data = await res.json();
             if(found.pending && data.stage_label){
@@ -14113,7 +14131,7 @@ async function pollImageRepairAgentTask(taskId){
         while(true){
             const found = findPendingTask(taskId);
             if(!found) return 'missing';
-            const res = await fetch(`/api/canvas/image-repair-agent-tasks/${encodeURIComponent(taskId)}`);
+            const res = await apiFetch(`/api/canvas/image-repair-agent-tasks/${encodeURIComponent(taskId)}`);
             if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Repair Agent poll failed' : '修图 Agent 任务查询失败'));
             const data = await res.json();
             if(found.pending && data.stage_label){
@@ -14145,7 +14163,7 @@ async function pollCanvasImageTask(taskId){
         while(true){
             const found = findPendingTask(taskId);
             if(!found) return 'missing';
-            const res = await fetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`);
+            const res = await apiFetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`);
             if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.generationFailed')));
             const data = await res.json();
             if(data.status === 'succeeded'){
@@ -16618,6 +16636,7 @@ on(board, 'auxclick', e => {
 });
 on(board, "wheel", e => {
     if(!canvas || !board) return;
+    if(isOpenScrollableCanvasMenu(e.target)) return;
     e.preventDefault();
     lastBoardInteractionAt = Date.now();
     const before = screenToWorld(e.clientX, e.clientY);
