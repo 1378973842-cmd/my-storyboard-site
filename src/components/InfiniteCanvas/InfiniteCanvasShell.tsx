@@ -45,6 +45,7 @@ const AGENT_FLYOUT_ITEMS: AgentFlyoutItem[] = [
   { icon: 'wand-sparkles', label: '修图 Agent', action: () => canvasWin['addImageRepairAgentNode']?.() },
   { icon: 'layout-grid', label: 'Poster Agent', action: () => canvasWin['addBatchPosterAgentNode']?.() },
   { icon: 'grid-3x3', label: '九宫格 Agent', action: () => canvasWin['addNineGridAgentNode']?.() },
+  { icon: 'repeat-2', label: 'Slots 循环视频 Agent', action: () => canvasWin['addSlotsLoopVideoAgentNode']?.() },
 ];
 
 function ToolbarAgentFlyout() {
@@ -319,6 +320,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({ rootRef }
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('imageRepairAgent')}><i data-lucide="wand-sparkles" className="w-4 h-4"></i><span>修图 Agent</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('batchPosterAgent')}><i data-lucide="layout-grid" className="w-4 h-4"></i><span>Batch Poster Agent</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('nineGridAgent')}><i data-lucide="grid-3x3" className="w-4 h-4"></i><span>九宫格 Agent</span></button>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('slotsLoopVideoAgent')}><i data-lucide="repeat-2" className="w-4 h-4"></i><span>Slots 循环视频 Agent</span></button>
                       <div className="menu-section-title">输出</div>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('output')}><i data-lucide="circle-dot" className="w-4 h-4"></i><span>Output</span></button>
                   </div>

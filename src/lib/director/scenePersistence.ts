@@ -23,6 +23,8 @@ export function parseProjectJson(text: string): DirectorSceneSnapshot | null {
       savedPoses: data.savedPoses ?? [],
       showGrid: data.showGrid ?? true,
       showGround: data.showGround ?? true,
+      cameraKeyframes: data.cameraKeyframes ?? {},
+      objectKeyframes: data.objectKeyframes ?? {},
     };
   } catch {
     return null;

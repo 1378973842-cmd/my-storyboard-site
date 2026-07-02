@@ -2,8 +2,11 @@ import type { Express, Request, RequestHandler } from "express";
 import {
   augmentChatCompletionsBody,
   extractTextLlmMessageContent,
+  isApimartGeminiFlashModel,
+  normalizeOpenAiApiBase,
   postTextLlm,
   resolveTextLlmEnv,
+  stripBearerKey,
   textLlmConfigError,
 } from "./canvasTextLlmBridge.js";
 import { existsSync, readFileSync } from "fs";
@@ -20,6 +23,7 @@ export type BatchPosterBrainstormBody = {
   count?: number;
   selectedPreset?: string;
   themeId?: number;
+  customTheme?: string;
   selectedAspectRatio?: string;
   model?: string;
   pipelineMode?: string;
@@ -32,7 +36,10 @@ export type BatchPosterTitleStyleLayers = {
   cta: string;
 };
 
-export type BatchPosterTitleCopyLayers = BatchPosterTitleStyleLayers;
+export type BatchPosterTitleCopyLayers = BatchPosterTitleStyleLayers & {
+  /** 海报上每一段独立可见文案（从上到下），用于多行促销字锁定 */
+  blocks?: string[];
+};
 
 export type BatchPosterExtractTitlesBody = {
   posterUrl?: string;
@@ -44,6 +51,30 @@ export type BatchPosterThemeSlot = {
   title_style: BatchPosterTitleStyleLayers;
   title_copy?: BatchPosterTitleCopyLayers;
 };
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isUpstreamOverloaded(status: number, payload: unknown): boolean {
+  if ([408, 425, 429, 500, 502, 503, 504].includes(status)) return true;
+  const msg = (
+    typeof payload === "object" && payload
+      ? (payload as { error?: { message?: unknown }; message?: unknown }).error?.message ||
+        (payload as { message?: unknown }).message ||
+        JSON.stringify(payload)
+      : String(payload || "")
+  )
+    .toString()
+    .toLowerCase();
+  return (
+    msg.includes("负载") ||
+    msg.includes("饱和") ||
+    msg.includes("rate") ||
+    msg.includes("too many") ||
+    msg.includes("overload")
+  );
+}
 
 export const BATCH_POSTER_DEFAULT_TITLE_STYLE_LAYERS: BatchPosterTitleStyleLayers = {
   headline:
@@ -234,11 +265,11 @@ const BATCH_POSTER_CANVAS_RATIO_TO_ASPECT: Record<string, string> = {
 
 const BATCH_POSTER_ASPECT_COMPOSITION_RULES: Record<"1:1" | "16:9" | "9:16", string> = {
   "1:1":
-    "【规则 3 / 🚨 1:1 正方形向心构图规范】：当前输出严格为正方形海报。禁止长条状载具（车、船、飞艇）横向侧写，必须描述为正面直冲屏幕或大角度对角线斜切。双主体互动禁止左右排开，必须采用一前一后（过肩对视）或上下重叠的紧凑V字型向心结构，视觉核心牢牢收紧在画面正中央，最顶部与最底部 15% 区域留空给海报固定文字，只能有烟雾、水花或飞溅的金币碎屑点缀。",
+    "【规则 3 / 🚨 1:1 正方形向心构图规范】：当前输出严格为正方形海报。禁止长条状载具（车、船、飞艇）横向侧写，必须描述为正面直冲屏幕或大角度对角线斜切。双主体互动禁止左右排开，必须采用一前一后（过肩对视）或上下重叠的紧凑V字型向心结构，视觉核心牢牢收紧在画面正中央。顶部与底部需为标题预留构图空间，但背景必须连续延伸（天空/环境/光效自然过渡），禁止出现横向硬切分隔条、纯色空条或上下两块独立色带。",
   "16:9":
-    "【规则 3 / 🚨 16:9 电影全景构图规范】：当前输出为横屏。允许展示宏大的全景叙事、载具的完整侧面以及宽广的背景空间。双主体互动请使用标准的左右分屏横向对峙布局，拉开故事的横向拉扯感。",
+    "【规则 3 / 🚨 16:9 电影全景构图规范】：当前输出为横屏。允许展示宏大的全景叙事、载具的完整侧面以及宽广的背景空间。双主体互动请使用标准的左右分屏横向对峙布局，拉开故事的横向拉扯感。背景需全幅连续，禁止上下横向硬切分隔条。",
   "9:16":
-    "【规则 3 / 🚨 纵向瀑布流构图规范】：当前输出为垂直竖屏。必须使用极端的纵向透视，多用强烈的仰视或俯视镜头。双主体采用垂直位阶压迫。重点描述大批财富（如金币、宝石、筹码）从画面上方成瀑布状、雨点状向前方中央喷涌跌落的纵向流动感，顶部和底部保留纯粹的动态特效背景，防止遮挡买量文案。",
+    "【规则 3 / 🚨 纵向瀑布流构图规范】：当前输出为垂直竖屏。必须使用极端的纵向透视，多用强烈的仰视或俯视镜头。双主体采用垂直位阶压迫。重点描述大批财富（如金币、宝石、筹码）从画面上方成瀑布状、雨点状向前方中央喷涌跌落的纵向流动感。顶部与底部标题区背景须与场景自然融合延伸，禁止出现横向硬切分隔条或纯色空条。",
 };
 
 function normalizeSelectedAspectRatio(value: unknown): string {
@@ -393,6 +424,64 @@ function batchPosterStrictFormatExample(pipelineMode?: string): string {
     return `[{"theme_prompt":"English scene 1","title_style":{"headline":"...","emphasis":"...","secondary":"...","cta":"..."},"title_copy":{"headline":"WILD WEST GOLD RUSH","emphasis":"FREE 2 TRILLION COINS","secondary":"up to","cta":"CLAIM NOW"}}]`;
   }
   return `[{"theme_prompt":"English scene 1","title_style":{"headline":"...","emphasis":"...","secondary":"...","cta":"..."}}]`;
+}
+
+function normalizeCustomTheme(value: unknown): string {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 120);
+}
+
+function buildCustomThemeSystemPrompt(
+  count: number,
+  customTheme: string,
+  selectedAspectRatio?: string,
+  pipelineMode?: string
+): string {
+  const titleOutputs = needsThemeCreativeTitleCopy(pipelineMode)
+    ? "theme_prompt（四段式客观场景英文）、title_style（四层配色对象）与 title_copy（四层主题原创英文文案，禁止 $）"
+    : "theme_prompt（四段式客观场景英文）与 title_style（headline/emphasis/secondary/cta 四层对象）";
+  const themeCopyBlock = needsThemeCreativeTitleCopy(pipelineMode)
+    ? `\n\n${BATCH_POSTER_THEME_COPY_LLM_RULES}`
+    : "";
+  return finalizeBatchPosterSystemPrompt(
+    `你是一个 Slots 广告创意导演。用户自定义了主题：【${customTheme}】。
+
+你的任务是：围绕该主题的世界观、标志性角色、道具与环境符号，连续构思出 ${count} 个【完全不同构图、不同动作、不同前景道具互动】的深度细节描述。
+- 若用户用中文或其他语言描述（如「忍者神龟」），请先理解其 IP/文化含义，再转为纯正客观的英文场景堆叠；严禁在 theme_prompt 中写中文。
+- 每个变体必须从该主题宇宙中挑选【不同的主体或场景切面】，不得 ${count} 张都画同一姿势的证件照。
+- 示例：主题「忍者神龟」→ 海报1 在下水道披萨旁翻腾金币；海报2 四龟围战反派金币飞溅；海报3 屋顶夜战霓虹与宝石宝箱前景。
+每个对象必须包含 ${titleOutputs}。
+
+${BATCH_POSTER_STYLE_ANTI_POLLUTION_RULES}${themeCopyBlock}
+
+返回包含 ${count} 个对象的 JSON 数组。`,
+    [],
+    selectedAspectRatio
+  );
+}
+
+function buildCustomThemeUserMessage(
+  count: number,
+  customTheme: string,
+  strict = false,
+  pipelineMode?: string
+): string {
+  const batchNonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const strictLine = strict
+    ? `\n【强制格式】仅输出 JSON 对象数组，例如 ${batchPosterStrictFormatExample(pipelineMode)}。禁止 Markdown、禁止解释、禁止字符串数组与单层 title_style 字符串。`
+    : "";
+  const titleLine = needsThemeCreativeTitleCopy(pipelineMode)
+    ? "每个对象含 theme_prompt（场景四段式英文，无画风词）、title_style（四层配色描述）与 title_copy（四层主题原创英文文案，契合 Slots 买量风格，禁止 $）。"
+    : "每个对象含 theme_prompt（场景四段式英文，无画风词）与 title_style（headline/emphasis/secondary/cta 四层，emphasis 高亮促销数字与 FREE/TRILLION 等词）。";
+  return [
+    `创意批次 ${batchNonce}。用户自定义主题：「${customTheme}」。`,
+    `请围绕该主题连续输出 ${count} 个英文变体。`,
+    `${count} 个变体之间必须构图不同、主体动作不同、前景道具互动不同，不得重复同一画面套路。`,
+    titleLine,
+    `仅返回 JSON 对象数组（${count} 项）。${strictLine}`,
+  ].join("\n");
 }
 
 function buildPreciseThemeUserMessage(
@@ -710,46 +799,77 @@ async function callBatchPosterLlm(
     throw new Error(textLlmConfigError(model));
   }
   const timeoutMs = Number(process.env.TEXT_API_TIMEOUT_MS || 300000);
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const response = await postTextLlm(
-      model,
-      apiBase,
-      apiKey,
-      augmentChatCompletionsBody(model, {
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
-        ],
-        max_tokens: Number(process.env.CANVAS_LLM_MAX_TOKENS || 4096),
-        temperature: Math.max(0, Math.min(2, temperature)),
-        stream: false,
-      }),
-      { signal: ctrl.signal }
-    );
-    clearTimeout(timer);
-    const rawText = await response.text();
-    let data: Record<string, unknown> = {};
+  const maxRetries = 4;
+  const baseDelayMs = 2000;
+  let lastError = "";
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      data = rawText ? (JSON.parse(rawText) as Record<string, unknown>) : {};
-    } catch {
-      data = { error: { message: rawText.slice(0, 400) } };
+      const response = await postTextLlm(
+        model,
+        apiBase,
+        apiKey,
+        augmentChatCompletionsBody(model, {
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage },
+          ],
+          max_tokens: Number(process.env.CANVAS_LLM_MAX_TOKENS || 4096),
+          temperature: Math.max(0, Math.min(2, temperature)),
+          stream: false,
+        }),
+        { signal: ctrl.signal }
+      );
+      clearTimeout(timer);
+      const rawText = await response.text();
+      let data: Record<string, unknown> = {};
+      try {
+        data = rawText ? (JSON.parse(rawText) as Record<string, unknown>) : {};
+      } catch {
+        data = { error: { message: rawText.slice(0, 400) } };
+      }
+      if (!response.ok) {
+        const errMsg =
+          (typeof (data?.error as { message?: unknown })?.message === "string" &&
+            (data.error as { message: string }).message) ||
+          rawText.slice(0, 400) ||
+          `上游接口错误 (${response.status})`;
+        if (isUpstreamOverloaded(response.status, errMsg) && attempt < maxRetries) {
+          const jitter = Math.floor(Math.random() * 260);
+          const delay = Math.min(12000, baseDelayMs * Math.pow(2, attempt) + jitter);
+          console.warn("[batch-poster-llm] upstream overloaded, retrying...", {
+            model,
+            attempt,
+            delay,
+          });
+          await sleep(delay);
+          lastError = errMsg;
+          continue;
+        }
+        throw new Error(errMsg);
+      }
+      return extractTextLlmMessageContent(model, data).trim();
+    } catch (err) {
+      clearTimeout(timer);
+      const msg = err instanceof Error ? err.message : String(err);
+      const retryable =
+        isUpstreamOverloaded(0, msg) ||
+        /fetch failed|network|econnreset|aborted/i.test(msg);
+      if (retryable && attempt < maxRetries) {
+        const jitter = Math.floor(Math.random() * 260);
+        const delay = Math.min(12000, baseDelayMs * Math.pow(2, attempt) + jitter);
+        console.warn("[batch-poster-llm] transient error, retrying...", { model, attempt, delay, msg });
+        await sleep(delay);
+        lastError = msg;
+        continue;
+      }
+      throw err instanceof Error ? err : new Error(msg);
     }
-    if (!response.ok) {
-      const errMsg =
-        (typeof (data?.error as { message?: unknown })?.message === "string" &&
-          (data.error as { message: string }).message) ||
-        rawText.slice(0, 400) ||
-        `上游接口错误 (${response.status})`;
-      throw new Error(errMsg);
-    }
-    return extractTextLlmMessageContent(model, data).trim();
-  } catch (err) {
-    clearTimeout(timer);
-    throw err;
   }
+  throw new Error(lastError || "Batch Poster LLM 请求失败");
 }
 
 export function getBatchPosterThemeCatalog() {
@@ -759,13 +879,14 @@ export function getBatchPosterThemeCatalog() {
   };
 }
 
-const BATCH_POSTER_TITLE_COPY_EXTRACTION_SYSTEM = `你是 Slots 买量海报标题 OCR 专家。请阅读用户提供的参考海报，把所有可见标题/促销文案按四个角色提取为 JSON。
-- headline：主标题/横幅大字/游戏名
-- emphasis：数字金额、FREE、TRILLION、BONUS、JACKPOT、% 等高亮促销词
-- secondary：弱化副文案（如 up to）
-- cta：按钮文字（如 CLAIM NOW）
-规则：逐字照抄，保持原语言、大小写与标点；禁止翻译、改写或合并；某角色不存在则填空字符串。
-仅返回 JSON 对象：{"headline":"...","emphasis":"...","secondary":"...","cta":"..."}`;
+const BATCH_POSTER_TITLE_COPY_EXTRACTION_SYSTEM = `你是 Slots 买量海报标题 OCR 专家。请阅读用户提供的参考海报，把所有可见标题/促销文案提取为 JSON。
+- headline：主标题/横幅大字/顶部 slogan
+- emphasis：最醒目的数字金额或 FREE/TRILLION/BONUS/JACKPOT/% 促销词（仅一段）
+- secondary：弱化副文案（如 up to、for new players）
+- cta：按钮文字（如 CLAIM NOW、SPIN NOW）
+- blocks：【必填】数组，按从上到下、从左到右列出海报上每一段独立可见的标题/促销/按钮文案（逐字照抄，一段一行，不得遗漏）。例如三块字：["NEW SLOTS FOR YOU","200 FREE SPINS","UP TO 10T FREE COINS"]
+规则：逐字照抄，保持原语言、大小写与标点；禁止翻译、改写、合并或臆造；某角色不存在则填空字符串。
+仅返回 JSON：{"headline":"...","emphasis":"...","secondary":"...","cta":"...","blocks":["...","..."]}`;
 
 function listenPort(): number {
   return Number(process.env.PORT) || 3000;
@@ -794,6 +915,9 @@ function guessPosterMime(filePath: string): string {
 function resolvePosterImageForVision(req: Request, projectRoot: string, rawUrl: string): string {
   const url = String(rawUrl || "").trim();
   if (!url) return "";
+  if (url.startsWith("blob:")) {
+    throw new Error("参考图为浏览器临时地址(blob)，请重新连接图片或先上传到画布");
+  }
   if (url.startsWith("data:") || /^https?:\/\//i.test(url)) return url;
   if (url.startsWith("/uploads/")) {
     const rel = url.replace(/^\/uploads\//, "").replace(/\\/g, "/");
@@ -829,18 +953,30 @@ function extractBalancedJsonObject(text: string): unknown {
 
 export function normalizeBatchPosterTitleCopy(raw: unknown): BatchPosterTitleCopyLayers {
   if (typeof raw === "string" && raw.trim()) {
-    return { headline: raw.trim(), emphasis: "", secondary: "", cta: "" };
+    const headline = raw.trim();
+    return { headline, emphasis: "", secondary: "", cta: "", blocks: [headline] };
   }
   if (raw && typeof raw === "object") {
     const obj = raw as Record<string, unknown>;
-    return {
-      headline: pickTitleStyleLayer(obj, ["headline", "main", "banner", "primary", "title"]),
-      emphasis: pickTitleStyleLayer(obj, ["emphasis", "highlight", "promo", "accent"]),
-      secondary: pickTitleStyleLayer(obj, ["secondary", "support", "micro", "sub"]),
-      cta: pickTitleStyleLayer(obj, ["cta", "button", "action"]),
-    };
+    const headline = pickTitleStyleLayer(obj, ["headline", "main", "banner", "primary", "title"]);
+    const emphasis = pickTitleStyleLayer(obj, ["emphasis", "highlight", "promo", "accent"]);
+    const secondary = pickTitleStyleLayer(obj, ["secondary", "support", "micro", "sub"]);
+    const cta = pickTitleStyleLayer(obj, ["cta", "button", "action"]);
+    const rawBlocks = Array.isArray(obj.blocks)
+      ? obj.blocks
+      : Array.isArray(obj.lines)
+        ? obj.lines
+        : Array.isArray(obj.text_blocks)
+          ? obj.text_blocks
+          : [];
+    const blocks = rawBlocks
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+    const layered = [headline, emphasis, secondary, cta].filter(Boolean);
+    const merged = [...new Set([...blocks, ...layered])];
+    return { headline, emphasis, secondary, cta, blocks: merged };
   }
-  return { headline: "", emphasis: "", secondary: "", cta: "" };
+  return { headline: "", emphasis: "", secondary: "", cta: "", blocks: [] };
 }
 
 export function parseBatchPosterTitleCopy(raw: string): BatchPosterTitleCopyLayers {
@@ -857,10 +993,30 @@ export function parseBatchPosterTitleCopy(raw: string): BatchPosterTitleCopyLaye
     throw new Error("标题 OCR 未返回有效 JSON");
   }
   const copy = normalizeBatchPosterTitleCopy(parsed);
-  if (!copy.headline && !copy.emphasis && !copy.secondary && !copy.cta) {
+  if (!copy.headline && !copy.emphasis && !copy.secondary && !copy.cta && !(copy.blocks || []).length) {
     throw new Error("标题 OCR 未识别到任何文案");
   }
   return copy;
+}
+
+type VisionLlmRoute = { apiBase: string; apiKey: string; model: string; label: string };
+
+/** gemini-3.5-flash 优先 APIMart（与脑暴同路）；饱和时可回退 comfly/THIRD_PARTY */
+function batchPosterVisionLlmRoutes(model: string): VisionLlmRoute[] {
+  const visionModel = /gemini/i.test(model) ? model : "gemini-3.5-flash";
+  const routes: VisionLlmRoute[] = [];
+  const primary = resolveTextLlmEnv(visionModel);
+  if (primary.apiBase && primary.apiKey) {
+    routes.push({ ...primary, model: visionModel, label: "primary" });
+  }
+  if (isApimartGeminiFlashModel(visionModel)) {
+    const fbBase = normalizeOpenAiApiBase((process.env.THIRD_PARTY_API_BASE || "").trim());
+    const fbKey = stripBearerKey((process.env.THIRD_PARTY_API_KEY || "").trim());
+    if (fbBase && fbKey && !routes.some((r) => r.apiBase === fbBase && r.apiKey === fbKey)) {
+      routes.push({ apiBase: fbBase, apiKey: fbKey, model: visionModel, label: "third-party-fallback" });
+    }
+  }
+  return routes;
 }
 
 async function callBatchPosterVisionLlm(
@@ -869,61 +1025,99 @@ async function callBatchPosterVisionLlm(
   imageDataUrl: string,
   model: string
 ): Promise<string> {
-  const apiBase = (process.env.THIRD_PARTY_API_BASE || "").trim().replace(/\/$/, "");
-  const apiKey = (process.env.THIRD_PARTY_API_KEY || "").trim();
-  if (!apiBase || !apiKey) {
-    throw new Error("缺少 LLM API 配置（THIRD_PARTY_API_BASE / THIRD_PARTY_API_KEY）");
+  const routes = batchPosterVisionLlmRoutes(model);
+  if (!routes.length) {
+    throw new Error(textLlmConfigError(/gemini/i.test(model) ? model : "gemini-3.5-flash"));
   }
   const timeoutMs = Number(process.env.TEXT_API_TIMEOUT_MS || 300000);
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const response = await fetch(`${apiBase}/v1/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: userMessage },
-              { type: "image_url", image_url: { url: imageDataUrl } },
+  const maxRetries = 4;
+  const baseDelayMs = 2000;
+  let lastError = "";
+
+  for (const route of routes) {
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const response = await postTextLlm(
+          route.model,
+          route.apiBase,
+          route.apiKey,
+          augmentChatCompletionsBody(route.model, {
+            model: route.model,
+            messages: [
+              { role: "system", content: systemPrompt },
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: userMessage },
+                  { type: "image_url", image_url: { url: imageDataUrl } },
+                ],
+              },
             ],
-          },
-        ],
-        max_tokens: Number(process.env.CANVAS_LLM_MAX_TOKENS || 2048),
-        temperature: 0,
-        stream: false,
-      }),
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
-    const rawText = await response.text();
-    let data: Record<string, unknown> = {};
-    try {
-      data = rawText ? (JSON.parse(rawText) as Record<string, unknown>) : {};
-    } catch {
-      data = { error: { message: rawText.slice(0, 400) } };
+            max_tokens: Number(process.env.CANVAS_LLM_MAX_TOKENS || 2048),
+            temperature: 0,
+            stream: false,
+          }),
+          { signal: ctrl.signal }
+        );
+        clearTimeout(timer);
+        const rawText = await response.text();
+        let data: Record<string, unknown> = {};
+        try {
+          data = rawText ? (JSON.parse(rawText) as Record<string, unknown>) : {};
+        } catch {
+          data = { error: { message: rawText.slice(0, 400) } };
+        }
+        if (!response.ok) {
+          const errMsg =
+            (typeof (data?.error as { message?: unknown })?.message === "string" &&
+              (data.error as { message: string }).message) ||
+            rawText.slice(0, 400) ||
+            `上游接口错误 (${response.status})`;
+          if (isUpstreamOverloaded(response.status, errMsg) && attempt < maxRetries) {
+            const jitter = Math.floor(Math.random() * 260);
+            const delay = Math.min(12000, baseDelayMs * Math.pow(2, attempt) + jitter);
+            console.warn("[batch-poster-vision] upstream overloaded, retrying...", {
+              model: route.model,
+              route: route.label,
+              attempt,
+              delay,
+            });
+            await sleep(delay);
+            lastError = errMsg;
+            continue;
+          }
+          lastError = errMsg;
+          break;
+        }
+        return extractTextLlmMessageContent(route.model, data).trim();
+      } catch (err) {
+        clearTimeout(timer);
+        const msg = err instanceof Error ? err.message : String(err);
+        const retryable =
+          isUpstreamOverloaded(0, msg) ||
+          /fetch failed|network|econnreset|aborted/i.test(msg);
+        if (retryable && attempt < maxRetries) {
+          const jitter = Math.floor(Math.random() * 260);
+          const delay = Math.min(12000, baseDelayMs * Math.pow(2, attempt) + jitter);
+          console.warn("[batch-poster-vision] transient error, retrying...", {
+            model: route.model,
+            route: route.label,
+            attempt,
+            delay,
+            msg,
+          });
+          await sleep(delay);
+          lastError = msg;
+          continue;
+        }
+        lastError = msg;
+        break;
+      }
     }
-    if (!response.ok) {
-      const errMsg =
-        (typeof (data?.error as { message?: unknown })?.message === "string" &&
-          (data.error as { message: string }).message) ||
-        rawText.slice(0, 400) ||
-        `上游接口错误 (${response.status})`;
-      throw new Error(errMsg);
-    }
-    return extractTextLlmMessageContent(model, data).trim();
-  } catch (err) {
-    clearTimeout(timer);
-    throw err;
   }
+  throw new Error(lastError || "Batch Poster 视觉 OCR 请求失败");
 }
 
 export async function extractBatchPosterTitleCopyOnServer(
@@ -939,22 +1133,27 @@ export async function extractBatchPosterTitleCopyOnServer(
     String(body.model || "").trim() ||
     (process.env.TEXT_MODEL || "").trim() ||
     "gemini-3.5-flash";
-  const maxAttempts = 2;
+  const visionModel = /gemini/i.test(model) ? model : "gemini-3.5-flash";
+  const maxAttempts = 3;
   let lastError = "";
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       const text = await callBatchPosterVisionLlm(
         BATCH_POSTER_TITLE_COPY_EXTRACTION_SYSTEM,
         attempt === 0
-          ? "请提取这张海报上所有标题与促销文案，按 headline/emphasis/secondary/cta 返回 JSON。"
-          : "再次检查：必须逐字照抄海报上的每一个标题区块，禁止翻译或改写。仅返回 JSON。",
+          ? "请提取这张海报上所有标题与促销文案，返回 JSON（含 headline/emphasis/secondary/cta 与必填 blocks 数组，blocks 逐段列出每一段可见标题字）。"
+          : "再次检查：必须逐字照抄海报上每一段标题/促销/按钮文案，blocks 不得遗漏任何一段。禁止翻译或改写。仅返回 JSON。",
         imageDataUrl,
-        model
+        visionModel
       );
       return parseBatchPosterTitleCopy(text);
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
-      console.warn("[batch-poster-extract-titles] attempt failed:", { attempt, model, lastError });
+      console.warn("[batch-poster-extract-titles] attempt failed:", { attempt, model: visionModel, lastError });
+      if (isUpstreamOverloaded(0, lastError) && attempt < maxAttempts - 1) {
+        const delay = Math.min(8000, 1500 * Math.pow(2, attempt));
+        await sleep(delay);
+      }
     }
   }
   throw new Error(lastError || "参考海报标题提取失败");
@@ -1020,10 +1219,78 @@ async function brainstormPreciseThemeVariantsOnServer(
       });
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
+      if (isUpstreamOverloaded(0, lastError) && attempt < maxAttempts - 1) {
+        await sleep(Math.min(8000, 1500 * Math.pow(2, attempt)));
+      }
     }
   }
 
   throw new Error(lastError || "精准主题变体脑暴失败");
+}
+
+async function brainstormCustomThemeVariantsOnServer(
+  count: number,
+  customTheme: string,
+  model: string,
+  selectedAspectRatio?: string,
+  pipelineMode?: string
+) {
+  const theme = normalizeCustomTheme(customTheme);
+  if (!theme) throw new Error("自定义主题不能为空");
+  const maxAttempts = 3;
+  let lastError = "";
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const systemPrompt = buildCustomThemeSystemPrompt(count, theme, selectedAspectRatio, pipelineMode);
+    const userMessage = buildCustomThemeUserMessage(count, theme, attempt > 0, pipelineMode);
+    try {
+      const text = await callBatchPosterLlm(
+        systemPrompt,
+        userMessage,
+        model,
+        attempt === 0 ? 1 : 0.85
+      );
+      let parsed: BatchPosterThemeSlot[];
+      try {
+        parsed = parseBatchPosterThemeSlots(text);
+        assertThemeCreativeCopy(parsed, pipelineMode);
+      } catch (parseErr) {
+        console.warn("[batch-poster-brainstorm] custom parse failed:", {
+          customTheme: theme,
+          attempt,
+          model,
+          preview: text.slice(0, 500),
+        });
+        throw parseErr;
+      }
+      const unique = dedupeBatchPosterThemeSlots(parsed, 0.72);
+      if (unique.length >= count) {
+        return {
+          themes: unique.slice(0, count),
+          selectedPreset: "custom",
+          presetLabel: `Custom / 自定义：${theme}`,
+          mode: "custom" as const,
+          customTheme: theme,
+          selectedAspectRatio: normalizeSelectedAspectRatio(selectedAspectRatio),
+          model,
+        };
+      }
+      lastError = `自定义主题去重后仅 ${unique.length} 个，需要 ${count} 个`;
+      console.warn("[batch-poster-brainstorm] custom dedupe shortfall:", {
+        customTheme: theme,
+        count,
+        unique: unique.length,
+        attempt,
+      });
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      if (isUpstreamOverloaded(0, lastError) && attempt < maxAttempts - 1) {
+        await sleep(Math.min(8000, 1500 * Math.pow(2, attempt)));
+      }
+    }
+  }
+
+  throw new Error(lastError || "自定义主题脑暴失败");
 }
 
 export async function brainstormBatchPosterThemesOnServer(body: BatchPosterBrainstormBody) {
@@ -1035,6 +1302,16 @@ export async function brainstormBatchPosterThemesOnServer(body: BatchPosterBrain
     (process.env.TEXT_MODEL || "").trim() ||
     "gemini-3.5-flash";
   const selectedAspectRatio = normalizeSelectedAspectRatio(body.selectedAspectRatio);
+  const customTheme = normalizeCustomTheme(body.customTheme);
+  if (customTheme) {
+    return brainstormCustomThemeVariantsOnServer(
+      count,
+      customTheme,
+      model,
+      selectedAspectRatio,
+      pipelineMode
+    );
+  }
   const themeId = Number(body.themeId);
   if (Number.isFinite(themeId) && themeId > 0) {
     return brainstormPreciseThemeVariantsOnServer(
@@ -1112,6 +1389,9 @@ export async function brainstormBatchPosterThemesOnServer(body: BatchPosterBrain
       });
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
+      if (isUpstreamOverloaded(0, lastError) && attempt < maxAttempts - 1) {
+        await sleep(Math.min(8000, 1500 * Math.pow(2, attempt)));
+      }
     }
   }
 

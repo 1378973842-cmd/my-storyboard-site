@@ -171,6 +171,9 @@ function SceneObjectMesh({
 }) {
   const selectObject = useDirectorSceneStore((s) => s.selectObject);
   const updateObjectTransform = useDirectorSceneStore((s) => s.updateObjectTransform);
+  const timelineIsPlaying = useDirectorSceneStore((s) => s.timelineIsPlaying);
+  const timelineIsRecording = useDirectorSceneStore((s) => s.timelineIsRecording);
+  const editorHelpersHidden = timelineIsRecording;
 
   return (
     <SelectableGroup
@@ -182,7 +185,7 @@ function SceneObjectMesh({
       transformSpace={transformSpace}
       transformAxis={transformAxis}
       visible={object.visible}
-      locked={object.locked}
+      locked={object.locked || timelineIsPlaying || editorHelpersHidden}
       onTransformDragging={onTransformDragging}
       onSelect={() => selectObject(object.id)}
       syncToStore={(patch) => updateObjectTransform(object.id, patch)}
@@ -198,6 +201,7 @@ function SceneCameraMesh({
   transformMode,
   transformSpace,
   transformAxis,
+  showFrustum,
   onTransformDragging,
 }: {
   camera: SceneCamera;
@@ -205,10 +209,14 @@ function SceneCameraMesh({
   transformMode: TransformMode;
   transformSpace: 'local' | 'world';
   transformAxis: TransformAxis;
+  showFrustum: boolean;
   onTransformDragging: (dragging: boolean) => void;
 }) {
   const selectCamera = useDirectorSceneStore((s) => s.selectCamera);
   const updateCameraTransform = useDirectorSceneStore((s) => s.updateCameraTransform);
+  const timelineIsPlaying = useDirectorSceneStore((s) => s.timelineIsPlaying);
+  const timelineIsRecording = useDirectorSceneStore((s) => s.timelineIsRecording);
+  const editorHelpersHidden = timelineIsRecording;
 
   return (
     <SelectableGroup
@@ -220,13 +228,13 @@ function SceneCameraMesh({
       transformSpace={transformSpace}
       transformAxis={transformAxis}
       visible={camera.visible}
-      locked={camera.locked}
+      locked={camera.locked || timelineIsPlaying || editorHelpersHidden}
       rawGizmo
       onTransformDragging={onTransformDragging}
       onSelect={() => selectCamera(camera.id)}
       syncToStore={(patch) => updateCameraTransform(camera.id, patch)}
     >
-      <DirectorCameraGizmo fov={camera.fov} selected={isSelected} />
+      <DirectorCameraGizmo fov={camera.fov} selected={isSelected} showFrustum={showFrustum} />
     </SelectableGroup>
   );
 }
@@ -241,14 +249,17 @@ export function DirectorWorkbenchScene({ orbitRef, transformMode, onTransformDra
   const showGrid = useDirectorSceneStore((s) => s.showGrid);
   const showGround = useDirectorSceneStore((s) => s.showGround);
   const lockViewToCamera = useDirectorSceneStore((s) => s.lockViewToCamera);
+  const timelineIsPlaying = useDirectorSceneStore((s) => s.timelineIsPlaying);
+  const timelineIsRecording = useDirectorSceneStore((s) => s.timelineIsRecording);
   const transformSpace = useDirectorSceneStore((s) => s.transformSpace);
   const transformAxis = useDirectorSceneStore((s) => s.transformAxis);
 
   return (
     <>
-      <DirectorSceneEnvironment showGrid={showGrid} showGround={showGround} />
+      <DirectorSceneEnvironment showGrid={showGrid && !timelineIsRecording} showGround={showGround} />
 
-      {cameras.map((camera) => {
+      {!timelineIsRecording &&
+        cameras.map((camera) => {
         const isSelected = selectedCameraId === camera.id;
         if (!camera.visible && !isSelected) return null;
         if (!showCameraGizmo && !isSelected) return null;
@@ -260,6 +271,7 @@ export function DirectorWorkbenchScene({ orbitRef, transformMode, onTransformDra
             transformMode={transformMode}
             transformSpace={transformSpace}
             transformAxis={transformAxis}
+            showFrustum={showCameraGizmo}
             onTransformDragging={onTransformDragging}
           />
         );
@@ -287,7 +299,7 @@ export function DirectorWorkbenchScene({ orbitRef, transformMode, onTransformDra
       <OrbitControls
         ref={orbitRef}
         makeDefault
-        enabled={!lockViewToCamera}
+        enabled={!lockViewToCamera && !timelineIsPlaying && !timelineIsRecording}
         enableDamping
         dampingFactor={0.08}
         mouseButtons={ORBIT_MOUSE_BUTTONS}

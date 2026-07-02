@@ -344,23 +344,62 @@ async function persistAiImageToLocalStorage(
     mime = m[1];
     buffer = Buffer.from(m[2].replace(/\s/g, ""), "base64");
   } else if (/^https?:\/\//i.test(input)) {
-    const maxBytes = Number(process.env.UPSTREAM_IMAGE_PROXY_MAX_BYTES || 10 * 1024 * 1024);
+    const maxBytes = Number(process.env.UPSTREAM_IMAGE_PROXY_MAX_BYTES || 50 * 1024 * 1024);
     const timeoutMs = Number(process.env.UPSTREAM_IMAGE_PROXY_TIMEOUT_MS || 120000);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(new Error(`IMAGE_PERSIST_FETCH_TIMEOUT_${timeoutMs}ms`)), timeoutMs);
-    try {
-      const r = await fetch(input, { signal: ctrl.signal });
-      if (!r.ok) throw new Error(`下载图片失败 (${r.status})`);
-      const ct = (r.headers.get("content-type") || "").toLowerCase();
-      if (ct.includes("image/")) mime = ct.split(";")[0].trim() || mime;
-      const arr = await r.arrayBuffer();
-      if (arr.byteLength <= 0 || arr.byteLength > maxBytes) {
-        throw new Error("图片过大或为空");
+    const maxAttempts = 3;
+    let lastErr: Error | null = null;
+    let downloaded: Buffer | undefined;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(new Error(`IMAGE_PERSIST_FETCH_TIMEOUT_${timeoutMs}ms`)), timeoutMs);
+      try {
+        const r = await fetch(input, { signal: ctrl.signal });
+        if (!r.ok) throw new Error(`下载图片失败 (${r.status})`);
+        const ct = (r.headers.get("content-type") || "").toLowerCase();
+        if (ct.includes("image/")) mime = ct.split(";")[0].trim() || mime;
+        const arr = await r.arrayBuffer();
+        const byteLength = arr.byteLength;
+        if (byteLength <= 0) {
+          throw new Error("__PERSIST_EMPTY_BODY__");
+        }
+        if (byteLength > maxBytes) {
+          const mb = (byteLength / (1024 * 1024)).toFixed(2);
+          const maxMb = (maxBytes / (1024 * 1024)).toFixed(0);
+          throw new Error(`图片过大（${mb} MB，上限 ${maxMb} MB）`);
+        }
+        if (ct && !ct.includes("image/") && !ct.includes("octet-stream")) {
+          console.warn("[persist-image] unexpected content-type", {
+            contentType: ct,
+            bytes: byteLength,
+            url: input.slice(0, 160),
+          });
+        }
+        downloaded = Buffer.from(arr);
+        lastErr = null;
+        break;
+      } catch (e) {
+        lastErr = e instanceof Error ? e : new Error(String(e));
+        if (lastErr.message === "__PERSIST_EMPTY_BODY__" && attempt < maxAttempts) {
+          console.warn("[persist-image] upstream body empty, retrying", {
+            attempt,
+            maxAttempts,
+            url: input.slice(0, 160),
+          });
+          await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+          continue;
+        }
+        if (lastErr.message === "__PERSIST_EMPTY_BODY__") {
+          throw new Error("上游图片为空（RunningHub 返回的 URL 暂无可下载内容，请稍后重试）");
+        }
+        throw lastErr;
+      } finally {
+        clearTimeout(timer);
       }
-      buffer = Buffer.from(arr);
-    } finally {
-      clearTimeout(timer);
     }
+    if (!downloaded) {
+      throw lastErr || new Error("下载图片失败");
+    }
+    buffer = downloaded;
   } else if (/^[a-z0-9+/=\r\n]+$/i.test(input) && input.length > 200) {
     buffer = Buffer.from(input.replace(/\s/g, ""), "base64");
   } else {
@@ -438,28 +477,81 @@ type GptImage2Size =
   | "3840x2160"
   | "2160x3840";
 
+function gcdInt(a: number, b: number): number {
+  a = Math.abs(Math.round(a));
+  b = Math.abs(Math.round(b));
+  while (b) {
+    const t = b;
+    b = a % b;
+    a = t;
+  }
+  return a || 1;
+}
+
+const GPT_IMAGE2_SIZE_BY_ASPECT_RES: Record<
+  string,
+  Partial<Record<"1k" | "2k" | "4k", GptImage2Size>>
+> = {
+  "1:1": { "1k": "1024x1024", "2k": "2048x2048", "4k": "2048x2048" },
+  "9:16": { "1k": "720x1280", "2k": "1152x2048", "4k": "2160x3840" },
+  "16:9": { "1k": "2048x1152", "2k": "2048x1152", "4k": "3840x2160" },
+  "2:3": { "1k": "1024x1536", "2k": "1152x2048", "4k": "2160x3840" },
+  "3:2": { "1k": "1536x1024", "2k": "2048x1152", "4k": "3840x2160" },
+  "3:4": { "1k": "1024x1536", "2k": "1152x2048", "4k": "2160x3840" },
+  "4:3": { "1k": "1536x1024", "2k": "2048x1152", "4k": "3840x2160" },
+};
+
+function normalizeGptImage2ResolutionTier(imageSize: unknown): "1k" | "2k" | "4k" {
+  const raw = String(imageSize ?? "2K").trim().toUpperCase();
+  if (raw === "1K") return "1k";
+  if (raw === "4K") return "4k";
+  if (raw === "2K") return "2k";
+  return "2k";
+}
+
 function resolveGptImage2Size(imageSize: unknown, aspectRatio: unknown): GptImage2Size {
-  const rawSize = String(imageSize ?? "").trim().toUpperCase();
-  if (rawSize === "1024X1024") return "1024x1024";
-  if (rawSize === "1536X1024") return "1536x1024";
-  if (rawSize === "1024X1536") return "1024x1536";
-  if (rawSize === "2048X2048") return "2048x2048";
-  if (rawSize === "2048X1152") return "2048x1152";
-  if (rawSize === "2016X864") return "2016x864";
-  if (rawSize === "720X1280") return "720x1280";
-  if (rawSize === "1152X2048") return "1152x2048";
-  if (rawSize === "3840X2160") return "3840x2160";
-  if (rawSize === "2160X3840") return "2160x3840";
-  if (rawSize === "1K") return "1024x1024";
-  if (rawSize === "2K") return "2048x2048";
-  if (rawSize === "4K") return "3840x2160";
+  const rawSize = String(imageSize ?? "").trim();
+  const upper = rawSize.toUpperCase();
+  if (upper === "1024X1024") return "1024x1024";
+  if (upper === "1536X1024") return "1536x1024";
+  if (upper === "1024X1536") return "1024x1536";
+  if (upper === "2048X2048") return "2048x2048";
+  if (upper === "2048X1152") return "2048x1152";
+  if (upper === "2016X864") return "2016x864";
+  if (upper === "720X1280") return "720x1280";
+  if (upper === "1152X2048") return "1152x2048";
+  if (upper === "3840X2160") return "3840x2160";
+  if (upper === "2160X3840") return "2160x3840";
 
+  const wxh = /^(\d+)\s*[xX]\s*(\d+)$/.exec(rawSize);
+  if (wxh) {
+    const w = Number(wxh[1]);
+    const h = Number(wxh[2]);
+    if (w > 0 && h > 0) {
+      const normalized = `${w}x${h}`;
+      const normalizedUpper = normalized.toUpperCase();
+      if (normalizedUpper === "720X1280") return "720x1280";
+      if (normalizedUpper === "1152X2048") return "1152x2048";
+      if (normalizedUpper === "2160X3840") return "2160x3840";
+      if (normalizedUpper === "3840X2160") return "3840x2160";
+      if (normalizedUpper === "2048X1152") return "2048x1152";
+      if (normalizedUpper === "1024X1536") return "1024x1536";
+      if (normalizedUpper === "1536X1024") return "1536x1024";
+      if (normalizedUpper === "1024X1024") return "1024x1024";
+      if (normalizedUpper === "2048X2048") return "2048x2048";
+      const g = gcdInt(w, h);
+      const aspect = `${Math.round(w / g)}:${Math.round(h / g)}`;
+      const tier = Math.max(w, h) >= 3000 ? "4k" : Math.max(w, h) >= 1800 ? "2k" : "1k";
+      const mapped = GPT_IMAGE2_SIZE_BY_ASPECT_RES[aspect]?.[tier];
+      if (mapped) return mapped;
+    }
+  }
+
+  const tier = normalizeGptImage2ResolutionTier(imageSize);
   const ratio = String(aspectRatio ?? "").trim();
-  if (ratio === "1:1") return "1024x1024";
-  if (ratio === "9:16") return "2160x3840";
-  if (ratio === "16:9") return "3840x2160";
+  const mapped = GPT_IMAGE2_SIZE_BY_ASPECT_RES[ratio]?.[tier];
+  if (mapped) return mapped;
 
-  // gpt-image-2 常用 landscape / portrait 规格；按前端比例做方向映射。
   const portraitRatios = new Set(["3:4", "9:16", "2:3", "4:5"]);
   return portraitRatios.has(ratio) ? "1024x1536" : "1536x1024";
 }

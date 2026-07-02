@@ -104,6 +104,21 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
   const [error, setError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const undockTopbarRef = useRef<(() => void) | null>(null);
+  /** 避免 boot 回调闭包读到过期的 shellActive=false，把已打开的 canvas 再次挂起 */
+  const shellActiveRef = useRef(shellActive);
+  shellActiveRef.current = shellActive;
+
+  const applyShellActiveState = useCallback((active: boolean) => {
+    const root = rootRef.current;
+    if (root) {
+      root.dataset.shellActive = active ? '1' : '0';
+    }
+    setInfiniteCanvasShellSuspended(!active);
+    if (active) {
+      syncCanvasTopbarDom();
+      refreshInfiniteCanvasLayout();
+    }
+  }, []);
 
   const syncTopbarDock = useCallback((root: HTMLDivElement | null) => {
     undockTopbarRef.current?.();
@@ -114,19 +129,15 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
   }, [shellActive]);
 
   useLayoutEffect(() => {
-    const root = rootRef.current;
-    if (root) {
-      root.dataset.shellActive = shellActive ? '1' : '0';
-    }
     if (!shellActive) {
-      setInfiniteCanvasShellSuspended(true);
+      applyShellActiveState(false);
       return;
     }
     // 延后一帧再显示 gate，与 StudioConvergePiece 首帧 opacity:0 对齐，避免选择面板硬弹
     let cancelled = false;
     const id = requestAnimationFrame(() => {
       if (!cancelled) {
-        setInfiniteCanvasShellSuspended(false);
+        applyShellActiveState(true);
         void consumeQueuedCanvasFavoriteNavigation();
       }
     });
@@ -134,7 +145,7 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
       cancelled = true;
       cancelAnimationFrame(id);
     };
-  }, [shellActive]);
+  }, [shellActive, applyShellActiveState]);
 
   useLayoutEffect(() => {
     return () => {
@@ -192,24 +203,24 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
       activeRoot = null;
       return;
     }
-    if (activeRoot === node && isInfiniteCanvasEngineMountedOn(node)) return;
+    if (activeRoot === node && isInfiniteCanvasEngineMountedOn(node)) {
+      node.dataset.shellActive = shellActiveRef.current ? '1' : '0';
+      applyShellActiveState(shellActiveRef.current);
+      return;
+    }
 
-    node.dataset.shellActive = shellActive ? '1' : '0';
+    node.dataset.shellActive = shellActiveRef.current ? '1' : '0';
     syncTopbarDock(node);
 
     void bootEngineOnRoot(node)
       .then(() => {
         setError(null);
-        setInfiniteCanvasShellSuspended(!shellActive);
-        if (shellActive) {
-          syncCanvasTopbarDom();
-          refreshInfiniteCanvasLayout();
-        }
+        applyShellActiveState(shellActiveRef.current);
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : '画布初始化失败');
       });
-  }, [shellActive, syncTopbarDock]);
+  }, [applyShellActiveState, syncTopbarDock]);
 
   if (error) {
     return (

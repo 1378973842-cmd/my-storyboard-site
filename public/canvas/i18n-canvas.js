@@ -84,6 +84,8 @@
         "canvas.mergeImageBatch": { zh: "合并为图片组", en: "Merge into image batch" },
         "canvas.mergeImageBatchHint": { zh: "将多张图片合并到一个图片组节点", en: "Combine selected images into one batch node" },
         "canvas.imageBatchNode": { zh: "图片组", en: "Image batch" },
+        "canvas.imageBatchPerItemHint": { zh: "图片组 {n} 张 · 将并行逐张生成（同一提示词）", en: "{n} images · parallel per-image generation (same prompt)" },
+        "canvas.imageBatchConnectHint": { zh: "直连图片生成节点时，每张图独立并行生成（同一提示词）", en: "When connected to Image Gen, each image is generated in parallel with the same prompt" },
         "canvas.promptGroupNode": { zh: "提示词组", en: "Prompt group" },
         "canvas.trashSubtitle": { zh: "已删除画布可恢复，30 天后自动清理。", en: "Deleted canvases can be restored and are cleaned after 30 days." },
         "canvas.refresh": { zh: "刷新列表", en: "Refresh list" },

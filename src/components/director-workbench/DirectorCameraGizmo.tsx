@@ -8,10 +8,12 @@ const ASPECT = 16 / 10;
 type Props = {
   fov: number;
   selected?: boolean;
+  /** 是否绘制绿色视锥线；关闭后仍保留机身与点击区域 */
+  showFrustum?: boolean;
 };
 
 /** 图1风格：浅蓝机身 + 绿色线框视锥（沿 -Z 为镜头朝向） */
-export function DirectorCameraGizmo({ fov, selected }: Props) {
+export function DirectorCameraGizmo({ fov, selected, showFrustum = true }: Props) {
   const frustumGeometry = useMemo(() => {
     const fovRad = (fov * Math.PI) / 180;
     const tan = Math.tan(fovRad / 2);
@@ -49,14 +51,16 @@ export function DirectorCameraGizmo({ fov, selected }: Props) {
           emissiveIntensity={selected ? 0.45 : 0.22}
         />
       </mesh>
-      <lineSegments
-        geometry={frustumGeometry}
-        ref={(m) => {
-          if (m) m.raycast = () => undefined;
-        }}
-      >
-        <lineBasicMaterial color="#4ade80" transparent opacity={0.95} />
-      </lineSegments>
+      {showFrustum && (
+        <lineSegments
+          geometry={frustumGeometry}
+          ref={(m) => {
+            if (m) m.raycast = () => undefined;
+          }}
+        >
+          <lineBasicMaterial color="#4ade80" transparent opacity={0.95} />
+        </lineSegments>
+      )}
       {/* 扩大点击区域，便于选中与拖 Gizmo */}
       <mesh visible={false}>
         <sphereGeometry args={[0.55, 12, 12]} />

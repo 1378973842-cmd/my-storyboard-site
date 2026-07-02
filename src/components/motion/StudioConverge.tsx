@@ -125,7 +125,10 @@ export function StudioConvergePiece({
       void controls.set(to);
       return;
     }
-    if (lastPlayedKeyRef.current === enterKey) return;
+    if (lastPlayedKeyRef.current === enterKey) {
+      void controls.set(to);
+      return;
+    }
     lastPlayedKeyRef.current = enterKey;
 
     void controls.set(from);

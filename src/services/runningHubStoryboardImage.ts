@@ -13,6 +13,15 @@ export type StoryboardImageEnv = {
   gptQuality: string;
 };
 
+/** 九宫格 Agent Phase B / 单格编辑：gpt-image-2 官方稳定图生图 */
+export const RUNNINGHUB_G2_OFFICIAL_I2I_PATH = "/openapi/v2/rhart-image-g-2-official/image-to-image";
+
+export function getNineGridG2Path(): string {
+  return (
+    (process.env.NINE_GRID_GPT_PATH ?? RUNNINGHUB_G2_OFFICIAL_I2I_PATH).trim() || RUNNINGHUB_G2_OFFICIAL_I2I_PATH
+  );
+}
+
 export const RUNNINGHUB_G2_RATIOS = [
   "1:1",
   "1:2",
@@ -64,9 +73,17 @@ export function getStoryboardImageEnv(): StoryboardImageEnv | null {
 }
 
 export function mapRunningHubResolution(imageSize: unknown): "1k" | "2k" | "4k" {
-  const raw = String(imageSize ?? "2K").trim().toUpperCase();
-  if (raw === "1K") return "1k";
-  if (raw === "4K") return "4k";
+  const raw = String(imageSize ?? "2K").trim();
+  const wxh = /^(\d+)\s*[xX]\s*(\d+)$/.exec(raw);
+  if (wxh) {
+    const maxEdge = Math.max(Number(wxh[1]), Number(wxh[2]));
+    if (maxEdge >= 3000) return "4k";
+    if (maxEdge >= 1800) return "2k";
+    return "1k";
+  }
+  const upper = raw.toUpperCase();
+  if (upper === "1K") return "1k";
+  if (upper === "4K") return "4k";
   return "2k";
 }
 
@@ -394,6 +411,8 @@ export async function runStoryboardRunningHubG2Job(opts: {
   aspect_ratio?: unknown;
   quality?: unknown;
   projectRoot: string;
+  /** 覆盖 STORYBOARD_IMAGE_GPT_PATH（如九宫格 Agent 走官方渠道） */
+  pathOverride?: string;
 }): Promise<string> {
   const env = getStoryboardImageEnv();
   if (!env) throw new Error("未配置 STORYBOARD_IMAGE_API_KEY");
@@ -407,7 +426,8 @@ export async function runStoryboardRunningHubG2Job(opts: {
     aspectRatio: g2.aspectRatio,
     quality: g2.quality,
   };
-  return submitAndPollRunningHub(env, env.gptPath, body, "edit-image/runninghub-g2");
+  const path = (opts.pathOverride?.trim() || env.gptPath).trim() || env.gptPath;
+  return submitAndPollRunningHub(env, path, body, "edit-image/runninghub-g2");
 }
 
 export function extractCitedReferenceIndices(text: string, maxReferences: number): number[] {

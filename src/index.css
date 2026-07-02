@@ -1273,14 +1273,159 @@ html[data-theme="light"] .custom-scrollbar::-webkit-scrollbar-thumb:hover {
 }
 
 [data-cover-page][data-studio-page].director-page {
-  --studio-page-bg-image: url('/director-bg.png');
-  --studio-page-bg-position: center center;
-  --studio-page-scrim: linear-gradient(
-    180deg,
-    rgba(28, 22, 16, 0.36) 0%,
-    rgba(22, 18, 14, 0.44) 45%,
-    rgba(14, 12, 10, 0.52) 100%
+  background-color: #0a0a0a;
+  --studio-page-bg-image: none;
+  --studio-page-scrim: transparent;
+}
+
+[data-cover-page].director-page .studio-page-bg,
+[data-cover-page].director-page .studio-page-scrim,
+[data-cover-page].director-page .studio-page-glow {
+  display: none;
+}
+
+[data-cover-page].director-page .director-edge-trigger {
+  pointer-events: auto;
+}
+
+/* 悬停提示：视口左/右缘中部细线，仅桌面端 */
+@media (hover: hover) {
+  [data-cover-page].director-page .director-edge-trigger::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2px;
+    height: 48px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  [data-cover-page].director-page .director-edge-trigger:hover::after {
+    opacity: 1;
+  }
+
+  [data-cover-page].director-page .director-edge-trigger.left-0::after {
+    right: 2px;
+  }
+
+  [data-cover-page].director-page .director-edge-trigger.right-0::after {
+    left: 2px;
+  }
+}
+
+[data-cover-page].director-page .director-hover-rail-panel .ai-editor-sidebar-panel {
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+}
+
+[data-cover-page].director-page .director-hover-rail-panel .ai-editor-sidebar {
+  width: 100%;
+}
+
+[data-cover-page].director-page .director-canvas-shell {
+  background: #0a0a0a;
+  outline: none;
+  border-radius: 0;
+  overflow: visible;
+}
+
+[data-cover-page].director-page .director-top-toolbar {
+  overflow: visible;
+}
+
+[data-cover-page].director-page .director-camera-pip--floating {
+  touch-action: none;
+  user-select: none;
+}
+
+[data-cover-page].director-page .director-camera-pip-resize-handle {
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(
+    135deg,
+    transparent 0 45%,
+    rgba(74, 222, 128, 0.55) 45% 55%,
+    transparent 55% 100%
   );
+}
+
+[data-cover-page].director-page .director-camera-pip-resize-handle::after {
+  content: '';
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid rgba(74, 222, 128, 0.75);
+  border-bottom: 2px solid rgba(74, 222, 128, 0.75);
+  pointer-events: none;
+}
+
+[data-cover-page].director-page .director-character-inspector {
+  box-shadow: -8px 0 32px -12px rgba(0, 0, 0, 0.65);
+}
+
+[data-cover-page].director-page .director-character-inspector .ai-editor-panel {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* 导演台：沉浸式布局，顶栏与 LHZ 导航衔接 */
+.director-page .studio-page-content.director-page-content.ai-editor-layout {
+  padding-top: 2.625rem;
+  padding-bottom: 0;
+  padding-inline: 0;
+  height: 100%;
+  max-width: none;
+}
+
+@media (min-width: 768px) {
+  .director-page .studio-page-content.director-page-content.ai-editor-layout {
+    padding-top: 2.75rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .director-page .studio-page-content.director-page-content.ai-editor-layout {
+    padding-top: 2.875rem;
+  }
+}
+
+[data-cover-page].director-page .director-top-toolbar-row {
+  padding-left: clamp(7.5rem, 16vw, 12.5rem);
+}
+
+/* 顶栏下拉：打开态保持暖色文字 + 半透明底，不用白 pill */
+[data-cover-page].director-page .director-toolbar-menu-btn--open {
+  color: var(--cover-fg-warm);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.2);
+}
+
+[data-cover-page].director-page .director-toolbar-menu-btn--open svg,
+[data-cover-page].director-page .director-toolbar-menu-btn--open .ai-editor-stat {
+  color: inherit;
+}
+
+[data-cover-page].director-page .director-toolbar-menu-btn--open .ai-editor-stat {
+  opacity: 0.72;
+}
+
+@media (min-width: 768px) {
+  [data-cover-page].director-page .director-top-toolbar-row {
+    padding-left: clamp(8.5rem, 17vw, 13rem);
+  }
+}
+
+@media (min-width: 1024px) {
+  [data-cover-page].director-page .director-top-toolbar-row {
+    padding-left: clamp(9.5rem, 18vw, 14rem);
+  }
 }
 
 [data-cover-page][data-studio-page].ai-editor-page:not(.storyboard-page):not(.director-page):not(.nine-grid-page) {
@@ -1326,12 +1471,8 @@ html[data-theme="dark"] [data-cover-page][data-studio-page].storyboard-page {
 }
 
 html[data-theme="dark"] [data-cover-page][data-studio-page].director-page {
-  --studio-page-scrim: linear-gradient(
-    180deg,
-    rgba(18, 14, 10, 0.34) 0%,
-    rgba(14, 11, 8, 0.42) 45%,
-    rgba(10, 8, 6, 0.5) 100%
-  );
+  background-color: #0a0a0a;
+  --studio-page-scrim: transparent;
 }
 
 html[data-theme="dark"] [data-cover-page][data-studio-page].ai-editor-page:not(.storyboard-page):not(.director-page):not(.nine-grid-page) {
@@ -1446,7 +1587,6 @@ html[data-theme="dark"] [data-cover-page][data-studio-page].studio-page-shell {
 .ai-editor-page .studio-page-content.ai-editor-layout,
 .nine-grid-page .studio-page-content.ai-editor-layout,
 .storyboard-page .studio-page-content.ai-editor-layout,
-.director-page .studio-page-content.ai-editor-layout,
 .canvas-page .studio-page-content.canvas-page-content {
   padding-top: 5.25rem;
   padding-bottom: 1rem;
@@ -2160,6 +2300,11 @@ html[data-theme="light"] [data-cover-page].storyboard-page .storyboard-workspace
   color: var(--cover-btn-fg);
   background: var(--cover-btn-bg);
   box-shadow: 0 8px 24px -14px rgba(0, 0, 0, 0.45);
+}
+
+/* active 仅叠加在 .ai-editor-mode-btn 上，不改变 padding/尺寸 */
+.ai-editor-mode-btn.ai-editor-mode-btn--active {
+  padding: 0.5rem 1rem;
 }
 
 .ai-editor-dropzone {

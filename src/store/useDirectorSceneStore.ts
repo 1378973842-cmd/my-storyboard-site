@@ -15,6 +15,8 @@ import { DUMMY_GLB_URL } from '../lib/director/skeleton';
 
 import type { BoneRotationsMap } from '../lib/director/skeleton';
 import { buildSceneDataPatch } from '../lib/director/buildSceneDataPatch';
+import { sampleCameraAtFrame, sampleObjectAtFrame } from '../lib/director/cameraKeyframeInterpolation';
+import { normalizeSceneCamera } from '../lib/director/cameraShake';
 import type { SceneData } from '../types';
 
 
@@ -99,7 +101,53 @@ export interface SceneCamera {
 
   locked: boolean;
 
+  /** 播放/录制时在插值位姿上叠加镜头抖动（不写入关键帧） */
+  shakeEnabled: boolean;
+
+  /** 抖动强度 0–1 */
+  shakeIntensity: number;
+
 }
+
+
+
+export interface CameraKeyframe {
+
+  id: string;
+
+  frame: number;
+
+  position: Vec3Tuple;
+
+  rotation: Vec3Tuple;
+
+  fov: number;
+
+}
+
+
+
+export interface ObjectKeyframe {
+
+  id: string;
+
+  frame: number;
+
+  position: Vec3Tuple;
+
+  rotation: Vec3Tuple;
+
+  scale: Vec3Tuple;
+
+}
+
+
+
+export const TIMELINE_FPS = 24;
+
+export const TIMELINE_DURATION_SEC = 5;
+
+export const TIMELINE_TOTAL_FRAMES = TIMELINE_FPS * TIMELINE_DURATION_SEC;
 
 
 
@@ -114,6 +162,10 @@ export type DirectorSceneSnapshot = {
   showGrid: boolean;
 
   showGround: boolean;
+
+  cameraKeyframes?: Record<string, CameraKeyframe[]>;
+
+  objectKeyframes?: Record<string, ObjectKeyframe[]>;
 
 };
 
@@ -149,6 +201,10 @@ function takeSnapshot(state: DirectorSceneState): DirectorSceneSnapshot {
 
     showGround: state.showGround,
 
+    cameraKeyframes: structuredClone(state.cameraKeyframes),
+
+    objectKeyframes: structuredClone(state.objectKeyframes),
+
   };
 
 }
@@ -179,6 +235,16 @@ type DirectorSceneState = DirectorSceneSnapshot & {
 
   previewLive: boolean;
 
+  /** 预览窗是否脱离时间轴、浮动在视口上 */
+  previewFloating: boolean;
+
+  previewFloatPosition: { x: number; y: number };
+
+  previewFloatSize: { width: number; height: number };
+
+  /** 上次成功测量的 dock 屏幕坐标（避免同步失败时预览消失） */
+  previewDockRect: { left: number; top: number; width: number; height: number } | null;
+
   isGizmoDragging: boolean;
 
   historyPast: DirectorSceneSnapshot[];
@@ -187,6 +253,38 @@ type DirectorSceneState = DirectorSceneSnapshot & {
 
   /** 连续拖拽（骨骼/比例/FOV）开始前捕获的快照 */
   historyCheckpoint: DirectorSceneSnapshot | null;
+
+  timelineFps: number;
+
+  timelineTotalFrames: number;
+
+  timelineCurrentFrame: number;
+
+  timelineIsPlaying: boolean;
+
+  timelineIsRecording: boolean;
+
+  cameraKeyframes: Record<string, CameraKeyframe[]>;
+
+  objectKeyframes: Record<string, ObjectKeyframe[]>;
+
+  setTimelineCurrentFrame: (frame: number) => void;
+
+  setTimelinePlaying: (playing: boolean) => void;
+
+  setTimelineRecording: (recording: boolean) => void;
+
+  toggleTimelinePlaying: () => void;
+
+  addCameraKeyframe: (cameraId: string) => void;
+
+  addObjectKeyframe: (objectId: string) => void;
+
+  removeCameraKeyframe: (cameraId: string, keyframeId: string) => void;
+
+  removeObjectKeyframe: (objectId: string, keyframeId: string) => void;
+
+  applyTimelineFrame: (frame: number) => void;
 
   setShowCameraGizmo: (show: boolean) => void;
 
@@ -205,6 +303,21 @@ type DirectorSceneState = DirectorSceneSnapshot & {
   setPreviewMinimized: (min: boolean) => void;
 
   setPreviewLive: (live: boolean) => void;
+
+  setPreviewFloating: (floating: boolean) => void;
+
+  setPreviewFloatPosition: (position: { x: number; y: number }) => void;
+
+  setPreviewFloatSize: (size: { width: number; height: number }) => void;
+
+  setPreviewDockRect: (
+    rect: { left: number; top: number; width: number; height: number } | null,
+  ) => void;
+
+  /** 预览窗弹出到视口（放大可拖动） */
+  popOutPreview: (bounds?: { width: number; height: number }) => void;
+
+  dockPreview: () => void;
 
   setGizmoDragging: (dragging: boolean) => void;
 
@@ -233,6 +346,11 @@ type DirectorSceneState = DirectorSceneSnapshot & {
   resetAllBoneRotations: (objectId: string) => void;
 
   updateCameraFov: (id: string, fov: number) => void;
+
+  updateCameraShake: (
+    id: string,
+    patch: { shakeEnabled?: boolean; shakeIntensity?: number },
+  ) => void;
 
   addCharacter: () => void;
 
@@ -365,6 +483,10 @@ function createSceneCamera(index: number): SceneCamera {
 
     locked: false,
 
+    shakeEnabled: false,
+
+    shakeIntensity: 0.35,
+
   };
 
 }
@@ -431,6 +553,14 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
 
   previewLive: true,
 
+  previewFloating: false,
+
+  previewFloatPosition: { x: 16, y: 16 },
+
+  previewFloatSize: { width: 400, height: 268 },
+
+  previewDockRect: null,
+
   isGizmoDragging: false,
 
   historyPast: [],
@@ -439,7 +569,142 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
 
   historyCheckpoint: null,
 
+  timelineFps: TIMELINE_FPS,
 
+  timelineTotalFrames: TIMELINE_TOTAL_FRAMES,
+
+  timelineCurrentFrame: 0,
+
+  timelineIsPlaying: false,
+
+  timelineIsRecording: false,
+
+  cameraKeyframes: {},
+
+  objectKeyframes: {},
+
+
+
+  setTimelineCurrentFrame: (frame) =>
+    set({
+      timelineCurrentFrame: Math.max(0, Math.min(get().timelineTotalFrames, frame)),
+    }),
+
+  setTimelinePlaying: (playing) => set({ timelineIsPlaying: playing }),
+
+  setTimelineRecording: (recording) => set({ timelineIsRecording: recording }),
+
+  toggleTimelinePlaying: () => {
+    const state = get();
+    if (state.timelineIsRecording) return;
+    const next = !state.timelineIsPlaying;
+    if (next) {
+      state.applyTimelineFrame(state.timelineCurrentFrame);
+    }
+    set({ timelineIsPlaying: next });
+  },
+
+  addCameraKeyframe: (cameraId) => {
+    const state = get();
+    const cam = state.cameras.find((c) => c.id === cameraId);
+    if (!cam) return;
+    const frame = Math.round(state.timelineCurrentFrame);
+    const keyframe: CameraKeyframe = {
+      id: uuidv4(),
+      frame,
+      position: [...cam.position] as Vec3Tuple,
+      rotation: [...cam.rotation] as Vec3Tuple,
+      fov: cam.fov,
+    };
+    const existing = state.cameraKeyframes[cameraId] ?? [];
+    const filtered = existing.filter((k) => k.frame !== frame);
+    withHistory(set, () => ({
+      cameraKeyframes: {
+        ...state.cameraKeyframes,
+        [cameraId]: [...filtered, keyframe].sort((a, b) => a.frame - b.frame),
+      },
+    }));
+  },
+
+  addObjectKeyframe: (objectId) => {
+    const state = get();
+    const obj = state.objects.find((o) => o.id === objectId);
+    if (!obj) return;
+    const frame = Math.round(state.timelineCurrentFrame);
+    const keyframe: ObjectKeyframe = {
+      id: uuidv4(),
+      frame,
+      position: [...obj.position] as Vec3Tuple,
+      rotation: [...obj.rotation] as Vec3Tuple,
+      scale: [...obj.scale] as Vec3Tuple,
+    };
+    const existing = state.objectKeyframes[objectId] ?? [];
+    const filtered = existing.filter((k) => k.frame !== frame);
+    withHistory(set, () => ({
+      objectKeyframes: {
+        ...state.objectKeyframes,
+        [objectId]: [...filtered, keyframe].sort((a, b) => a.frame - b.frame),
+      },
+    }));
+  },
+
+  removeCameraKeyframe: (cameraId, keyframeId) =>
+    withHistory(set, (state) => {
+      const list = state.cameraKeyframes[cameraId];
+      if (!list?.length) return {};
+      return {
+        cameraKeyframes: {
+          ...state.cameraKeyframes,
+          [cameraId]: list.filter((k) => k.id !== keyframeId),
+        },
+      };
+    }),
+
+  removeObjectKeyframe: (objectId, keyframeId) =>
+    withHistory(set, (state) => {
+      const list = state.objectKeyframes[objectId];
+      if (!list?.length) return {};
+      return {
+        objectKeyframes: {
+          ...state.objectKeyframes,
+          [objectId]: list.filter((k) => k.id !== keyframeId),
+        },
+      };
+    }),
+
+  applyTimelineFrame: (frame) =>
+    set((state) => {
+      let camerasChanged = false;
+      let objectsChanged = false;
+      const cameras = state.cameras.map((cam) => {
+        const kfs = state.cameraKeyframes[cam.id];
+        if (!kfs?.length) return cam;
+        const sample = sampleCameraAtFrame(kfs, frame);
+        if (!sample) return cam;
+        camerasChanged = true;
+        return {
+          ...cam,
+          position: sample.position,
+          rotation: sample.rotation,
+          fov: sample.fov,
+        };
+      });
+      const objects = state.objects.map((obj) => {
+        const kfs = state.objectKeyframes[obj.id];
+        if (!kfs?.length) return obj;
+        const sample = sampleObjectAtFrame(kfs, frame);
+        if (!sample) return obj;
+        objectsChanged = true;
+        return {
+          ...obj,
+          position: sample.position,
+          rotation: sample.rotation,
+          scale: sample.scale,
+        };
+      });
+      if (!camerasChanged && !objectsChanged) return state;
+      return { cameras, objects };
+    }),
 
   setShowCameraGizmo: (show) => set({ showCameraGizmo: show }),
 
@@ -453,11 +718,46 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
 
   setTransformAxis: (axis) => set({ transformAxis: axis }),
 
-  setPreviewOpen: (open) => set({ previewOpen: open }),
+  setPreviewOpen: (open) =>
+    set({
+      previewOpen: open,
+      previewFloating: false,
+    }),
 
   setPreviewMinimized: (min) => set({ previewMinimized: min }),
 
   setPreviewLive: (live) => set({ previewLive: live }),
+
+  setPreviewFloating: (floating) =>
+    set((state) => ({
+      previewFloating: floating,
+      previewMinimized: floating ? false : state.previewMinimized,
+    })),
+
+  setPreviewFloatPosition: (position) => set({ previewFloatPosition: position }),
+
+  setPreviewFloatSize: (size) => set({ previewFloatSize: size }),
+
+  setPreviewDockRect: (rect) => set({ previewDockRect: rect }),
+
+  popOutPreview: (bounds) =>
+    set((state) => {
+      const h = state.previewFloatSize.height;
+      return {
+        previewOpen: true,
+        previewFloating: true,
+        previewMinimized: false,
+        previewFloatPosition: bounds
+          ? {
+              x: 16,
+              y: Math.max(16, Math.round((bounds.height - h) * 0.5)),
+            }
+          : { x: 16, y: 16 },
+      };
+    }),
+
+  dockPreview: () =>
+    set({ previewFloating: false, previewMinimized: false, previewOpen: true }),
   setGizmoDragging: (dragging) => set({ isGizmoDragging: dragging }),
 
 
@@ -516,7 +816,7 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
 
       objects: snap.objects.map(normalizeObject),
 
-      cameras: snap.cameras,
+      cameras: snap.cameras.map(normalizeSceneCamera),
 
       savedPoses: snap.savedPoses ?? [],
 
@@ -524,9 +824,17 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
 
       showGround: snap.showGround ?? true,
 
+      cameraKeyframes: snap.cameraKeyframes ?? {},
+
+      objectKeyframes: snap.objectKeyframes ?? {},
+
       selectedId: null,
 
       selectedCameraId: snap.cameras[0]?.id ?? null,
+
+      timelineCurrentFrame: 0,
+
+      timelineIsPlaying: false,
 
       historyPast: [],
 
@@ -599,7 +907,19 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
       ),
     })),
 
-
+  updateCameraShake: (id, patch) =>
+    set((state) => ({
+      cameras: state.cameras.map((c) =>
+        c.id === id
+          ? normalizeSceneCamera({
+              ...c,
+              shakeEnabled: patch.shakeEnabled ?? c.shakeEnabled,
+              shakeIntensity:
+                patch.shakeIntensity === undefined ? c.shakeIntensity : patch.shakeIntensity,
+            })
+          : c,
+      ),
+    })),
 
   addCharacter: () =>
 
@@ -743,7 +1063,9 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
 
       if (selectedId === id) selectedId = objects.length > 0 ? objects[objects.length - 1]!.id : null;
 
-      return { objects, selectedId };
+      const { [id]: _removed, ...objectKeyframes } = state.objectKeyframes;
+
+      return { objects, selectedId, objectKeyframes };
 
     }),
 
@@ -763,7 +1085,9 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
 
       }
 
-      return { cameras, selectedCameraId };
+      const { [id]: _removed, ...cameraKeyframes } = state.cameraKeyframes;
+
+      return { cameras, selectedCameraId, cameraKeyframes };
 
     }),
 

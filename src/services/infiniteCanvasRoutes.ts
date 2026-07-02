@@ -19,6 +19,7 @@ import {
 import { registerCanvasSiteImageRoutes } from "./canvasSiteImageBridge.js";
 import { registerCanvasLlmRoutes } from "./canvasLlmBridge.js";
 import { registerCanvasBatchPosterRoutes } from "./canvasBatchPosterBridge.js";
+import { registerCanvasSlotsLoopVideoRoutes } from "./canvasSlotsLoopVideoBridge.js";
 import { registerCanvasReplicaAgentRoutes } from "./canvasReplicaAgentBridge.js";
 import { registerCanvasImageRepairAgentRoutes } from "./canvasImageRepairAgentBridge.js";
 import {
@@ -291,6 +292,7 @@ export function registerInfiniteCanvasRoutes(
 
   registerCanvasLlmRoutes(app, projectRoot, gate);
   registerCanvasBatchPosterRoutes(app, projectRoot, gate);
+  registerCanvasSlotsLoopVideoRoutes(app, projectRoot, gate);
 
   if (deps?.persistImage) {
     registerCanvasReplicaAgentRoutes(app, { projectRoot, persistImage: deps.persistImage, requireGate: gate });

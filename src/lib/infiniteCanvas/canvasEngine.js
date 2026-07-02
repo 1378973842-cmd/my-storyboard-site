@@ -508,6 +508,7 @@ let lastCanvasUpdatedAt = 0;
 let models = {gpt:'gpt-image-2', nano:'nano-banana-pro'};
 let imageModels = ['gpt-image-2', 'nano-banana-pro'];
 const BATCH_POSTER_BASE_PROMPT = '【标题文字规则 — 结构锁定 / 视觉随主题 / 分层配色】必须完全保留参考海报上所有标题的字面文案（逐字一致，不得增删改字、不得翻译、不得改大小写或标点）；必须完全保留标题在画面中的位置、行数、对齐方式与排版层级（不得移动、合并或拆分标题区域）；必须重新设计标题的字体风格与配色，使其与下方场景主题的世界观和主色系统一；同一海报内主标题、促销高亮词/数字（FREE/TRILLION/BONUS/JACKPOT/%/纯数字）、副文案（如 up to）、CTA 按钮文字须使用不同配色层级，至少 3 种可区分的填充/发光色，禁止所有标题区块同一渐变色；含数字或 FREE 类促销词须用最高对比度高亮色；禁止照搬参考图标题的字体外观与颜色；参考图仅用于标题文案与排版参考，不复制参考图的背景、角色或整体配色。\n\n博弈游戏美术风格，老虎机手游广告，2D美式卡通风格，粗黑的闭合轮廓线，矢量插画，平涂赛璐璐风格，高饱和度，鲜艳的色彩，高对比度。\n\n场景：{theme_prompt}\n\n{title_style}';
+const BATCH_POSTER_PLAN_B_SCENE_BASE = '博弈游戏美术风格，老虎机手游广告，2D美式卡通风格，粗黑的闭合轮廓线，矢量插画，平涂赛璐璐风格，高饱和度，鲜艳的色彩，高对比度。';
 const BATCH_POSTER_DEFAULT_TITLE_STYLE_LAYERS = {
     headline:'Bold display lettering with theme-primary gradient fill and dark stroke for main banner text',
     emphasis:'Brilliant high-contrast accent fill with strong outer glow for numeric amounts and promo words like FREE, TRILLION, BONUS, JACKPOT, %',
@@ -545,7 +546,10 @@ function formatBatchPosterTitleStyleForPrompt(layers){
     ].join('\n');
 }
 function normalizeBatchPosterTitleCopy(raw){
-    if(typeof raw === 'string' && raw.trim()) return {headline:raw.trim(), emphasis:'', secondary:'', cta:''};
+    if(typeof raw === 'string' && raw.trim()){
+        const headline = raw.trim();
+        return {headline, emphasis:'', secondary:'', cta:'', blocks:[headline]};
+    }
     if(raw && typeof raw === 'object'){
         const pick = keys => {
             for(const key of keys){
@@ -554,14 +558,28 @@ function normalizeBatchPosterTitleCopy(raw){
             }
             return '';
         };
-        return {
-            headline:pick(['headline','main','banner','primary','title']),
-            emphasis:pick(['emphasis','highlight','promo','accent']),
-            secondary:pick(['secondary','support','micro','sub']),
-            cta:pick(['cta','button','action']),
-        };
+        const headline = pick(['headline','main','banner','primary','title']);
+        const emphasis = pick(['emphasis','highlight','promo','accent']);
+        const secondary = pick(['secondary','support','micro','sub']);
+        const cta = pick(['cta','button','action']);
+        const rawBlocks = Array.isArray(raw.blocks)
+            ? raw.blocks
+            : Array.isArray(raw.lines)
+                ? raw.lines
+                : Array.isArray(raw.text_blocks)
+                    ? raw.text_blocks
+                    : [];
+        const blocks = rawBlocks.map(item => String(item || '').trim()).filter(Boolean);
+        const layered = [headline, emphasis, secondary, cta].filter(Boolean);
+        const merged = [...new Set([...blocks, ...layered])];
+        return {headline, emphasis, secondary, cta, blocks:merged};
     }
-    return {headline:'', emphasis:'', secondary:'', cta:''};
+    return {headline:'', emphasis:'', secondary:'', cta:'', blocks:[]};
+}
+function batchPosterTitleCopyHasContent(copy){
+    const normalized = normalizeBatchPosterTitleCopy(copy);
+    if(normalized.headline || normalized.emphasis || normalized.secondary || normalized.cta) return true;
+    return Array.isArray(normalized.blocks) && normalized.blocks.some(item => String(item || '').trim());
 }
 function batchPosterTitleCopyRulesFromBase(basePrompt){
     const text = String(basePrompt || BATCH_POSTER_BASE_PROMPT);
@@ -579,27 +597,175 @@ function formatBatchPosterTitleCopyForPrompt(titleCopy){
     lines.push('若 nano 场景稿上已有错误、乱码或与以上不一致的文字，必须用以上字面文案完整替换；不得保留任何错误字符。');
     return lines.join('\n');
 }
+const BATCH_POSTER_VISION_TEXT_MODEL = 'gemini-3.5-flash';
+function isBatchPosterUpstreamOverloaded(message){
+    const m = String(message || '').toLowerCase();
+    return m.includes('负载') || m.includes('饱和') || m.includes('overload') || m.includes('too many') || /\b429\b/.test(m);
+}
+async function resolveBatchPosterPosterUrlForApi(posterUrl){
+    const url = String(posterUrl || '').trim();
+    if(!url) return '';
+    if(url.startsWith('data:')) return url;
+    if(url.startsWith('blob:')) return await urlToBase64(url);
+    if(url.startsWith('/') && !url.startsWith('//')){
+        if(url.startsWith('/uploads/')) return url;
+        try { return await urlToBase64(url); } catch { return url; }
+    }
+    return url;
+}
 async function extractBatchPosterTitleCopy(posterUrl, node){
+    let visionUrl = '';
+    try {
+        visionUrl = await resolveBatchPosterPosterUrlForApi(posterUrl);
+    } catch(err) {
+        throw new Error(langIsEn()
+            ? `Cannot read reference poster image: ${err?.message || err}`
+            : `无法读取参考海报图片：${err?.message || err}`);
+    }
+    if(!visionUrl){
+        throw new Error(langIsEn() ? 'Reference poster URL is empty' : '参考海报地址为空');
+    }
     try {
         const res = await apiFetch('/api/canvas/batch-poster-extract-titles', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
-                posterUrl,
-                model:resolveBatchPosterChatModel(node),
+                posterUrl:visionUrl,
+                model:BATCH_POSTER_VISION_TEXT_MODEL,
             }),
         });
         if(!res.ok){
-            console.warn('[batch-poster] title copy extraction failed:', await responseErrorMessage(res, 'extract titles'));
-            return null;
+            const msg = await responseErrorMessage(res, langIsEn() ? 'Title OCR failed' : '标题 OCR 失败');
+            if(isBatchPosterUpstreamOverloaded(msg)){
+                console.warn('[batch-poster] title OCR upstream busy, skipping locked copy:', msg);
+                return null;
+            }
+            throw new Error(msg);
         }
         const data = await res.json();
         const copy = normalizeBatchPosterTitleCopy(data?.titleCopy || data);
-        if(!copy.headline && !copy.emphasis && !copy.secondary && !copy.cta) return null;
+        if(!batchPosterTitleCopyHasContent(copy)){
+            throw new Error(langIsEn()
+                ? 'Title OCR returned no text. Try a sharper reference poster or re-connect the image.'
+                : '标题 OCR 未识别到任何文案，请换更清晰的参考图或重新连接图片。');
+        }
         return copy;
-    } catch(err){
-        console.warn('[batch-poster] title copy extraction error:', err);
-        return null;
+    } catch(err) {
+        const msg = err?.message || String(err);
+        if(isBatchPosterUpstreamOverloaded(msg)){
+            console.warn('[batch-poster] title OCR upstream busy, skipping locked copy:', msg);
+            return null;
+        }
+        throw err;
+    }
+}
+function formatBatchPosterTitleCopyPreview(copy){
+    const normalized = normalizeBatchPosterTitleCopy(copy);
+    const blocks = Array.isArray(normalized.blocks) ? normalized.blocks.filter(item => String(item || '').trim()) : [];
+    if(blocks.length) return blocks.slice(0, 4).map(item => String(item).trim()).join(' · ');
+    return [normalized.headline, normalized.emphasis, normalized.secondary, normalized.cta].filter(Boolean).join(' · ');
+}
+function batchPosterCachedTitleCopyForPoster(node, posterUrl){
+    if(!node || !posterUrl) return null;
+    if(String(node.planBTitleCopyPosterUrl || '').trim() !== String(posterUrl || '').trim()) return null;
+    const cached = normalizeBatchPosterTitleCopy(node.planBTitleCopy);
+    return batchPosterTitleCopyHasContent(cached) ? cached : null;
+}
+async function resolveBatchPosterPlanBTitleCopy(posterRef, node){
+    const posterUrl = String(posterRef?.url || '').trim();
+    if(!posterUrl){
+        throw new Error(langIsEn() ? 'Connect a reference poster image to the Image input.' : '请通过 Image 端口连接一张参考海报图。');
+    }
+    const cached = batchPosterCachedTitleCopyForPoster(node, posterUrl);
+    if(cached){
+        console.log('[batch-poster] plan B using cached title copy for poster');
+        return cached;
+    }
+    const copy = await extractBatchPosterTitleCopy(posterUrl, node);
+    if(copy){
+        node.planBTitleCopy = copy;
+        node.planBTitleCopyPosterUrl = posterUrl;
+        node.planBTitleCopyStatus = langIsEn() ? 'Title copy locked' : '标题文案已锁定';
+        scheduleSave();
+        return copy;
+    }
+    throw new Error(langIsEn()
+        ? 'Plan B requires locked reference title copy, but title OCR failed (upstream busy). Connect the poster and click「Extract reference titles」, wait a minute, then run again.'
+        : 'B计划·复刻参考文案需要锁定参考标题，但标题 OCR 失败（上游繁忙）。请先连接参考海报并点击「提取参考标题」，稍等片刻后再一键批量生成。');
+}
+async function prefetchBatchPosterTitleCopyForNode(node, {force = false} = {}){
+    if(!node || node.type !== 'batchPosterAgent' || !isBatchPosterPlanBReferenceCopy(node)) return;
+    const posterRef = batchPosterAgentPosterRef(node);
+    const posterUrl = String(posterRef?.url || '').trim();
+    if(!posterUrl) return;
+    if(!force && batchPosterCachedTitleCopyForPoster(node, posterUrl)) return;
+    if(node._batchPosterTitlePrefetchBusy) return;
+    node._batchPosterTitlePrefetchBusy = true;
+    node.planBTitleCopyStatus = langIsEn() ? 'Extracting reference titles…' : '正在提取参考标题…';
+    refreshNodes([node.id]);
+    try {
+        const copy = await extractBatchPosterTitleCopy(posterUrl, node);
+        if(copy){
+            node.planBTitleCopy = copy;
+            node.planBTitleCopyPosterUrl = posterUrl;
+            node.planBTitleCopyStatus = langIsEn() ? 'Title copy locked' : '标题文案已锁定';
+            scheduleSave();
+        } else {
+            node.planBTitleCopyStatus = langIsEn()
+                ? 'OCR skipped (upstream busy). Retry extract or run batch later.'
+                : 'OCR 已跳过（上游繁忙），请稍后点「提取参考标题」或再试批量生成。';
+        }
+    } catch(err) {
+        node.planBTitleCopyStatus = err?.message || String(err);
+    } finally {
+        node._batchPosterTitlePrefetchBusy = false;
+        refreshNodes([node.id]);
+    }
+}
+function batchPosterPlanBCopySectionHtml(node){
+    if(!isBatchPosterPlanBReferenceCopy(node)) return '';
+    const copy = normalizeBatchPosterTitleCopy(node.planBTitleCopy);
+    const hasCopy = batchPosterTitleCopyHasContent(copy);
+    const status = String(node.planBTitleCopyStatus || '').trim()
+        || (hasCopy
+            ? (langIsEn() ? 'Title copy locked' : '标题文案已锁定')
+            : (langIsEn() ? 'Not extracted yet — required before batch run' : '尚未提取 — 批量生成前必须锁定参考标题'));
+    const preview = hasCopy ? formatBatchPosterTitleCopyPreview(copy) : '';
+    return `
+        <div class="batch-poster-planb-copy-section">
+            <div class="batch-poster-field">
+                <span class="batch-poster-field-label">${langIsEn() ? 'Reference title copy' : '参考标题文案'}</span>
+                <p class="batch-poster-field-hint batch-poster-planb-copy-status">${escapeHtml(status)}</p>
+                ${preview ? `<p class="batch-poster-field-hint batch-poster-planb-copy-preview">${escapeHtml(preview)}</p>` : ''}
+                <button type="button" class="batch-poster-extract-titles-btn setting-input">${langIsEn() ? 'Extract reference titles' : '提取参考标题'}</button>
+                <span class="batch-poster-field-hint batch-poster-field-hint-muted">${langIsEn()
+                    ? 'Plan B locks exact wording from the poster. Extract when connected, before running batch.'
+                    : 'B计划需逐字锁定参考海报标题。连接参考图后先提取，再一键批量生成。'}</span>
+            </div>
+        </div>`;
+}
+function syncBatchPosterPlanBCopyUi(wrap, node){
+    if(!wrap || !node) return;
+    const section = wrap.querySelector('.batch-poster-planb-copy-section');
+    if(section) section.style.display = isBatchPosterPlanBReferenceCopy(node) ? '' : 'none';
+    const statusEl = wrap.querySelector('.batch-poster-planb-copy-status');
+    const previewEl = wrap.querySelector('.batch-poster-planb-copy-preview');
+    const copy = normalizeBatchPosterTitleCopy(node.planBTitleCopy);
+    const hasCopy = batchPosterTitleCopyHasContent(copy);
+    if(statusEl){
+        statusEl.textContent = String(node.planBTitleCopyStatus || '').trim()
+            || (hasCopy
+                ? (langIsEn() ? 'Title copy locked' : '标题文案已锁定')
+                : (langIsEn() ? 'Not extracted yet — required before batch run' : '尚未提取 — 批量生成前必须锁定参考标题'));
+    }
+    if(previewEl){
+        if(hasCopy){
+            previewEl.textContent = formatBatchPosterTitleCopyPreview(copy);
+            previewEl.style.display = '';
+        } else {
+            previewEl.textContent = '';
+            previewEl.style.display = 'none';
+        }
     }
 }
 const BATCH_POSTER_PRESET_OPTIONS = [
@@ -655,6 +821,63 @@ function normalizeBatchPosterThemeId(value){
     const id = Number(value);
     return Number.isFinite(id) && id > 0 ? id : null;
 }
+function normalizeBatchPosterCustomTheme(value){
+    return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 120);
+}
+function normalizeBatchPosterThemeSource(value, node){
+    const key = String(value || '').trim();
+    if(key === 'custom') return 'custom';
+    if(key === 'preset') return 'preset';
+    if(node && normalizeBatchPosterCustomTheme(node.custom_theme)) return 'custom';
+    return 'preset';
+}
+function batchPosterUsesCustomTheme(node){
+    return normalizeBatchPosterThemeSource(node?.theme_source, node) === 'custom';
+}
+function batchPosterThemeSectionHtml(node){
+    const mode = normalizeBatchPosterThemeSource(node?.theme_source, node);
+    const customValue = normalizeBatchPosterCustomTheme(node?.custom_theme);
+    const presetLabel = langIsEn() ? 'Preset catalog' : '预设主题库';
+    const customLabel = langIsEn() ? 'Custom theme' : '自定义主题';
+    const ipNote = langIsEn()
+        ? 'Style reference only; you are responsible for IP and commercial use.'
+        : '仅作风格参考，请注意版权与商用合规。';
+    return `
+        <div class="batch-poster-theme-section">
+            <span class="batch-poster-field-label">${langIsEn() ? 'Theme Source' : '主题来源'}</span>
+            <div class="batch-poster-theme-segmented" role="tablist" aria-label="${langIsEn() ? 'Theme source' : '主题来源'}">
+                <button type="button" class="batch-poster-theme-segment${mode === 'preset' ? ' active' : ''}" data-theme-source="preset" role="tab" aria-selected="${mode === 'preset'}">${escapeHtml(presetLabel)}</button>
+                <button type="button" class="batch-poster-theme-segment${mode === 'custom' ? ' active' : ''}" data-theme-source="custom" role="tab" aria-selected="${mode === 'custom'}">${escapeHtml(customLabel)}</button>
+            </div>
+            <div class="batch-poster-theme-preset-panel"${mode === 'preset' ? '' : ' hidden'}>
+                ${batchPosterPresetSelectHtml(node)}
+                ${batchPosterSpecificThemeSelectHtml(node)}
+            </div>
+            <div class="batch-poster-theme-custom-panel"${mode === 'custom' ? '' : ' hidden'}>
+                <label class="batch-poster-field batch-poster-custom-theme-field">
+                    <span class="batch-poster-field-label">${langIsEn() ? 'Your theme' : '主题描述'}</span>
+                    <input class="batch-poster-custom-theme setting-input" type="text" maxlength="120" placeholder="${langIsEn() ? 'Ninja Turtles, cyberpunk street…' : '忍者神龟、赛博朋克街头…'}" value="${escapeAttr(customValue)}">
+                    <span class="batch-poster-field-hint">${langIsEn() ? 'Any IP or concept; LLM will expand into poster scenes.' : '任意 IP 或概念，将由 LLM 扩写为多张海报场景。'}</span>
+                    <span class="batch-poster-field-hint batch-poster-field-hint-muted">${escapeHtml(ipNote)}</span>
+                </label>
+            </div>
+        </div>`;
+}
+function syncBatchPosterThemeControls(wrap, node){
+    if(!wrap || !node) return;
+    const mode = normalizeBatchPosterThemeSource(node.theme_source, node);
+    wrap.querySelectorAll('.batch-poster-theme-segment').forEach(btn => {
+        const active = btn.dataset.themeSource === mode;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    const presetPanel = wrap.querySelector('.batch-poster-theme-preset-panel');
+    const customPanel = wrap.querySelector('.batch-poster-theme-custom-panel');
+    if(presetPanel) presetPanel.hidden = mode !== 'preset';
+    if(customPanel) customPanel.hidden = mode !== 'custom';
+    const themeSelect = wrap.querySelector('.batch-poster-specific-theme');
+    if(themeSelect) themeSelect.disabled = mode !== 'preset' || normalizeBatchPosterPreset(node.selectedPreset) === 'random';
+}
 function batchPosterSpecificThemeSelectHtml(node){
     const preset = normalizeBatchPosterPreset(node?.selectedPreset);
     const isRandom = preset === 'random';
@@ -684,7 +907,7 @@ function refreshBatchPosterSpecificThemeSelect(wrap, node, catalog){
     const isRandom = preset === 'random';
     const randomLabel = langIsEn() ? 'All Themes (Random)' : '全部主题（随机）';
     const presetRandomLabel = langIsEn() ? 'Random within preset' : '预设内随机';
-    select.disabled = isRandom;
+    select.disabled = batchPosterUsesCustomTheme(node) || isRandom;
     select.innerHTML = '';
     if(isRandom){
         node.selectedThemeId = null;
@@ -2301,10 +2524,23 @@ function instantiateWorkflowTemplate(template, offset={x:0, y:0}){
             normalizeBatchPosterAgentNode(node);
             node.selectedPreset = normalizeBatchPosterPreset(node.selectedPreset);
             node.selectedThemeId = normalizeBatchPosterThemeId(node.selectedThemeId);
+            node.custom_theme = normalizeBatchPosterCustomTheme(node.custom_theme);
+            node.theme_source = normalizeBatchPosterThemeSource(node.theme_source, node);
             syncBatchPosterSelectedAspectRatio(node);
             node.batchProgress = null;
+            node._batchPosterRuns = null;
             node.running = false;
             node.runStatus = 'idle';
+            node.runError = '';
+        }
+        if(node.type === 'slotsLoopVideoAgent'){
+            node.inputs = [];
+            node.model = clampAgentTextModel(node.model);
+            node.duration = normalizeSlotsLoopVideoDuration(node.duration);
+            node.creative_idea = String(node.creative_idea || '').trim().slice(0, 500);
+            node.outputText = String(node.outputText || '');
+            node.running = false;
+            node.runStatus = node.runStatus || 'idle';
             node.runError = '';
         }
         if(node.type === 'nineGridAgent'){
@@ -3507,6 +3743,8 @@ function addBatchPosterAgentNode(point){
         batch_count:3,
         selectedPreset:'random',
         selectedThemeId:null,
+        theme_source:'preset',
+        custom_theme:'',
         base_prompt:BATCH_POSTER_BASE_PROMPT,
         llmProvider:llmProv,
         model:defaultAgentChatModel(llmProv),
@@ -3544,6 +3782,25 @@ function addVideoReverseNode(point){
         outputText:'',
         runStatus:'idle',
         running:false
+    });
+}
+function addSlotsLoopVideoAgentNode(point){
+    const p = point || defaultPoint(200, 0);
+    return addNode({
+        id:uid('slotsloop'),
+        type:'slotsLoopVideoAgent',
+        x:p.x,
+        y:p.y,
+        w:380,
+        h:520,
+        model:defaultAgentChatModel(),
+        duration:5,
+        creative_idea:'',
+        outputText:'',
+        outputData:null,
+        runStatus:'idle',
+        runError:'',
+        running:false,
     });
 }
 function addMsGenNode(point){
@@ -3787,8 +4044,8 @@ function renderMsGenBody(node){
                 ${!msLoras.length ? `<div class="gen-settings-row"><div style="color:var(--faint);font-size:11px;font-weight:700;line-height:1.45">${tr('canvas.noLoraForModel')}</div></div>` : ''}
             </div>
             <div class="gen-run-row">
-                <button class="gen-btn ${node.running?'running':''}" ${node.running?'disabled':''}>
-                    <i data-lucide="zap" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tr('canvas.msGenerate')}
+                <button class="gen-btn ${agentPendingRunState(node.id, tr('canvas.msGenerate'), tr('canvas.generating')).runningCls}">
+                    <i data-lucide="zap" class="w-4 h-4"></i>${escapeHtml(agentPendingRunState(node.id, tr('canvas.msGenerate'), tr('canvas.generating')).label)}
                 </button>
                 ${cascadeBtnHtml(node)}
             </div>
@@ -4016,7 +4273,7 @@ function renderMsGenBody(node){
 }
 async function runMsGenNode(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || (node.running && !opts.cascade)) return;
+    if(!node || isNodeDisabled(node)) return;
     const loopCtx = opts.loopContext !== undefined ? opts.loopContext : loopContext;
     const sources = orderedSources(node, generatorSources(node, loopCtx));
     const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
@@ -4033,12 +4290,9 @@ async function runMsGenNode(nodeId, opts={}){
     const pendingIds = Array.from({length:count}, () => uid('p'));
     const run = runSnapshot(node, prompt, refs);
     if(out) out._pending = [...(out._pending || []), ...pendingIds.map(id => makePending(id, run))];
-    if(!opts.cascade){
-        node.running = true;
-        refreshRunNodes(node, out);
-        setTimeout(() => { node.running = false; refreshRunNodes(node, out); }, 2000);
-    }
-    else refreshRunNodes(node, out);
+    syncAppendableNodeRunState(node);
+    refreshRunNodes(node, out);
+    const execute = async () => {
     try {
         const size = apiImageSize(node.msRatio ?? 'square', node.msResolution || '1k', node.msCustomRatio || '', node.msCustomSize || '');
         const parsed = parseSizeValue(size);
@@ -4097,18 +4351,21 @@ async function runMsGenNode(nodeId, opts={}){
         appendOutputImages(out, outputUrls, refs[0], metas);
         mergeGeneratedOutputs(node, outputUrls, Boolean(opts.cascade));
         addGenerationLog({run, outputs:outputUrls, runMs:Math.max(...metas.map(m => m.runMs || 0), 0)});
-        node.runStatus = 'done'; node.runError = '';
+        syncAgentRunStatusAfterTask(node, {completed:agentPendingCount(node.id) === 0});
         refreshRunNodes(node, out);
         scheduleSave();
     } catch(err){
         const metas = collectRunMetas(out, pendingIds);
         addGenerationLog({run, outputs:[], runMs:Math.max(...metas.map(m => m.runMs || 0), 0), error:err.message || String(err)});
         if(out) out._pending = (out._pending || []).filter(p => !pendingIds.includes(p.id));
-        node.runStatus = 'failed'; node.runError = err.message || String(err);
+        syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
         refreshRunNodes(node, out);
         if(opts.cascade) throw err;
         alert(err.message || tr('canvas.msFailed'));
     }
+    };
+    if(opts.cascade) await execute();
+    else void execute();
 }
 function addComfyNode(point){
     const p = point || defaultPoint(160, 0);
@@ -4450,6 +4707,7 @@ function linkCreateOptions(state){
                 {type:'imageRepairAgent', label:langIsEn() ? 'Repair Agent' : '修图 Agent', icon:'wand-sparkles'},
                 {type:'batchPosterAgent', label:'Batch Poster Agent', icon:'layout-grid'},
                 {type:'nineGridAgent', label:langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent', icon:'grid-3x3'},
+                {type:'slotsLoopVideoAgent', label:langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent', icon:'repeat-2'},
                 {type:'videoReverse', label:'视频反推', icon:'scan-search'},
                 {type:'llm', label:'LLM', icon:'message-square-text'}
             ]);
@@ -4488,7 +4746,7 @@ function openLinkCreateMenu(originId, originKind, clientX, clientY){
 }
 function openGeneratorNodeMenu(nodeId, clientX, clientY){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || (!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent')) return false;
+    if(!node || (!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent' && node.type !== 'slotsLoopVideoAgent')) return false;
     const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(nodeId)}"]`);
     const rect = el?.getBoundingClientRect();
     const point = screenToWorld(clientX, clientY);
@@ -4766,6 +5024,7 @@ function createNodeByType(type, point){
     if(type === 'imageRepairAgent') return addImageRepairAgentNode(point);
     if(type === 'batchPosterAgent') return addBatchPosterAgentNode(point);
     if(type === 'nineGridAgent') return addNineGridAgentNode(point);
+    if(type === 'slotsLoopVideoAgent') return addSlotsLoopVideoAgentNode(point);
     if(type === 'videoReverse') return addVideoReverseNode(point);
     if(type === 'msgen') return addMsGenNode(point);
     if(type === 'video') return addVideoNode(point);
@@ -4788,6 +5047,7 @@ function menuAdd(type){
     if(type === 'imageRepairAgent') addImageRepairAgentNode(menuPoint);
     if(type === 'batchPosterAgent') addBatchPosterAgentNode(menuPoint);
     if(type === 'nineGridAgent') addNineGridAgentNode(menuPoint);
+    if(type === 'slotsLoopVideoAgent') addSlotsLoopVideoAgentNode(menuPoint);
     if(type === 'videoReverse') addVideoReverseNode(menuPoint);
     if(type === 'msgen') addMsGenNode(menuPoint);
     if(type === 'video') addVideoNode(menuPoint);
@@ -6742,7 +7002,7 @@ function restoreOutputScrolls(state){
     });
 }
 function isNodeControl(target){
-    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area');
+    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn');
 }
 function destroyLTXEditor(node){
     if(!node?._ltxEditor) return;
@@ -6774,7 +7034,7 @@ function renderNode(node){
         applyNodeSelection(node.id, e);
     };
     el.oncontextmenu = e => {
-        if(!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'output' && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent') return;
+        if(!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'output' && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent' && node.type !== 'slotsLoopVideoAgent') return;
         e.preventDefault();
         e.stopPropagation();
         if(node.type === 'output'){
@@ -6783,10 +7043,10 @@ function renderNode(node){
         }
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'imageBatch' ? (langIsEn() ? 'Image batch' : '图片组') : node.type === 'frameStack' ? (langIsEn() ? 'Frame Stack' : '截帧集') : node.type === 'llm' ? 'LLM' : node.type === 'replicaAgent' ? '复刻 Agent' : node.type === 'imageRepairAgent' ? (langIsEn() ? 'Repair Agent' : '修图 Agent') : node.type === 'batchPosterAgent' ? 'Batch Poster Agent' : node.type === 'nineGridAgent' ? (langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent') : node.type === 'videoReverse' ? '视频反推' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'imageBatch' ? (langIsEn() ? 'Image batch' : '图片组') : node.type === 'frameStack' ? (langIsEn() ? 'Frame Stack' : '截帧集') : node.type === 'llm' ? 'LLM' : node.type === 'replicaAgent' ? '复刻 Agent' : node.type === 'imageRepairAgent' ? (langIsEn() ? 'Repair Agent' : '修图 Agent') : node.type === 'batchPosterAgent' ? 'Batch Poster Agent' : node.type === 'nineGridAgent' ? (langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent') : node.type === 'slotsLoopVideoAgent' ? (langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent') : node.type === 'videoReverse' ? '视频反推' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
-    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','videoReverse'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','videoReverse'].includes(node.type) && node.runStatus
         && node.runStatus !== 'idle'
         && (node.runStatus !== 'failed' || node._cascadeFailed);
     const statusHtml = showStatus ? (() => {
@@ -6886,6 +7146,7 @@ function renderNode(node){
             syncGeneratorInputs();
             refreshGeneratorInputViews();
             refreshDownstreamVideoReverseNodes(node.id);
+            refreshDownstreamSlotsLoopVideoNodes(node.id);
             scheduleLinkGeometryRefresh([node.id]);
         };
     }
@@ -6958,6 +7219,7 @@ function renderNode(node){
     if(node.type === 'imageRepairAgent') body.appendChild(renderImageRepairAgentBody(node));
     if(node.type === 'batchPosterAgent') body.appendChild(renderBatchPosterAgentBody(node));
     if(node.type === 'nineGridAgent') body.appendChild(renderNineGridAgentBody(node));
+    if(node.type === 'slotsLoopVideoAgent') body.appendChild(renderSlotsLoopVideoAgentBody(node));
     if(node.type === 'videoReverse') body.appendChild(renderVideoReverseBody(node));
     if(node.type === 'msgen') body.appendChild(renderMsGenBody(node));
     if(node.type === 'video') body.appendChild(renderVideoBody(node));
@@ -6999,7 +7261,7 @@ function renderNode(node){
             <div class="image-batch-body">
                 <div class="image-batch-meta text-[11px] text-gray-400">${text}</div>
                 <button type="button" class="secondary-btn image-batch-upload-btn"><i data-lucide="image-plus" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Upload' : '上传图片'}</span></button>
-                <div class="image-batch-hint text-[10px] text-gray-500">${langIsEn() ? 'Drag images in/out like prompt group' : '可拖入/拖出图片，类似提示词组'}</div>
+                <div class="image-batch-hint text-[10px] text-gray-500">${escapeHtml(tr('canvas.imageBatchConnectHint'))}</div>
             </div>
         `;
         bindImageBatchUpload(body, node);
@@ -7020,8 +7282,8 @@ function renderNode(node){
         if(!isNodeDragSurface(e.target)) return;
         startNodeDrag(e, node);
     };
-    const canInput = ['generator','comfy','ltxDirector','output','llm','msgen','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','videoReverse','frameStack','loop'].includes(node.type);
-    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','replicaAgent','imageRepairAgent','videoReverse','frameStack','imageBatch'].includes(node.type);
+    const canInput = ['generator','comfy','ltxDirector','output','llm','msgen','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','videoReverse','frameStack','loop'].includes(node.type);
+    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','replicaAgent','imageRepairAgent','videoReverse','slotsLoopVideoAgent','frameStack','imageBatch'].includes(node.type);
     if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
     if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"></div>`);
     el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
@@ -7305,6 +7567,7 @@ function defaultNodeSize(type){
     if(type === 'imageRepairAgent') return {w:320, h:460};
     if(type === 'batchPosterAgent') return {w:340, h:520};
     if(type === 'nineGridAgent') return {w:360, h:560};
+    if(type === 'slotsLoopVideoAgent') return {w:380, h:520};
     if(type === 'videoReverse') return {w:380, h:460};
     if(type === 'msgen') return {w:380, h:0};
     if(type === 'video') return {w:400, h:0};
@@ -8175,6 +8438,230 @@ function videoReverseConnectedPromptNodes(node){
 function videoReverseInputVideos(node){
     return llmInputVideos(node);
 }
+const SLOTS_LOOP_VIDEO_DURATION_MIN = 3;
+const SLOTS_LOOP_VIDEO_DURATION_MAX = 15;
+const SLOTS_LOOP_VIDEO_DURATION_DEFAULT = 5;
+function normalizeSlotsLoopVideoDuration(value){
+    const n = Math.round(Number(value));
+    if(!Number.isFinite(n)) return SLOTS_LOOP_VIDEO_DURATION_DEFAULT;
+    return Math.max(SLOTS_LOOP_VIDEO_DURATION_MIN, Math.min(SLOTS_LOOP_VIDEO_DURATION_MAX, n));
+}
+function slotsLoopVideoAgentImageRef(node, ctx=loopContext){
+    const sources = orderedSources(node, generatorSources(node, ctx));
+    const refs = imageRefsOnly(sources.flatMap(s => s.refs || []));
+    return refs[0] || null;
+}
+function slotsLoopVideoAgentCreativeIdea(node){
+    const sources = orderedSources(node, generatorSources(node));
+    const promptSrc = sources.find(s => s.prompt && !s.refs?.length);
+    const upstream = String(promptSrc?.prompt || '').trim();
+    const inline = String(node.creative_idea || '').trim();
+    if(upstream && inline) return `${upstream}\n${inline}`.trim();
+    return upstream || inline;
+}
+async function resolveSlotsLoopVideoImageUrlForApi(rawUrl){
+    const url = String(rawUrl || '').trim();
+    if(!url) return '';
+    if(url.startsWith('data:')) return url;
+    if(url.startsWith('blob:')) return await urlToBase64(url);
+    if(url.startsWith('/') && !url.startsWith('//')){
+        if(url.startsWith('/uploads/')) return url;
+        try { return await urlToBase64(url); } catch { return url; }
+    }
+    return url;
+}
+function formatSlotsLoopVideoOutputText(data){
+    if(!data) return '';
+    if(typeof data.display_text === 'string' && data.display_text.trim()) return data.display_text.trim();
+    const segments = Array.isArray(data.segments) ? data.segments : [];
+    const lines = segments.map(seg => {
+        const from = Number(seg?.from || 0);
+        const to = Number(seg?.to || 0);
+        const prompt = String(seg?.prompt || '').trim();
+        const pad = n => String(n).padStart(2, '0');
+        return `（${pad(from)} - ${to} 秒）：\n${prompt}`;
+    }).filter(Boolean);
+    const full = String(data.full_prompt || '').trim();
+    if(!full) return lines.join('\n\n');
+    return `${lines.join('\n\n')}\n\n---\n【合并版 · 可直接用于 Seedance】\n${full}`;
+}
+function refreshDownstreamSlotsLoopVideoNodes(fromNodeId){
+    const targetIds = connections
+        .filter(c => c.from === fromNodeId)
+        .map(c => c.to)
+        .filter(id => nodes.find(n => n.id === id)?.type === 'slotsLoopVideoAgent');
+    if(targetIds.length) refreshNodes(targetIds);
+}
+function renderSlotsLoopVideoAgentBody(node){
+    node.model = clampAgentTextModel(node.model);
+    node.duration = normalizeSlotsLoopVideoDuration(node.duration);
+    const imageRef = slotsLoopVideoAgentImageRef(node);
+    const creative = slotsLoopVideoAgentCreativeIdea(node);
+    const outputText = String(node.outputText || '').trim();
+    const outputPlaceholder = langIsEn()
+        ? 'Run to generate Seedance loop video prompts…'
+        : '运行后将在此显示 Seedance 循环视频提示词…';
+    const themeLabel = node.outputData?.theme_label ? String(node.outputData.theme_label) : '';
+    const wrap = document.createElement('div');
+    wrap.className = 'generator-body slots-loop-video-body';
+    wrap.innerHTML = `
+        <div class="slots-loop-video-section">
+            <div class="slots-loop-video-section-title">${langIsEn() ? 'Image input' : '图片输入'}</div>
+            <div class="input-list slots-loop-input-list"></div>
+        </div>
+        <div class="slots-loop-video-badge-row">
+            ${imageRef?.url
+                ? `<div class="slots-loop-video-badge ok"><i data-lucide="image" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Slots image connected' : '已连接 Slots 静态图'}</span></div>`
+                : `<div class="slots-loop-video-badge warn"><i data-lucide="image-off" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Connect an Image node' : '请连接 Image 图片节点'}</span></div>`}
+            ${creative
+                ? `<div class="slots-loop-video-badge ok"><i data-lucide="lightbulb" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Creative idea set' : '已设置创意想法'}</span></div>`
+                : `<div class="slots-loop-video-badge warn"><i data-lucide="lightbulb" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Optional: add creative idea below or connect Prompt' : '可选：下方填写创意或连接提示词节点'}</span></div>`}
+        </div>
+        <label class="field">
+            <div class="setting-title">${langIsEn() ? 'Duration (seconds)' : '视频时长（秒）'}</div>
+            <input class="setting-input slots-loop-duration" type="number" min="${SLOTS_LOOP_VIDEO_DURATION_MIN}" max="${SLOTS_LOOP_VIDEO_DURATION_MAX}" step="1" value="${normalizeSlotsLoopVideoDuration(node.duration)}">
+            <span class="batch-poster-field-hint">${langIsEn() ? `Custom ${SLOTS_LOOP_VIDEO_DURATION_MIN}–${SLOTS_LOOP_VIDEO_DURATION_MAX}s` : `可自定义 ${SLOTS_LOOP_VIDEO_DURATION_MIN}–${SLOTS_LOOP_VIDEO_DURATION_MAX} 秒`}</span>
+        </label>
+        <label class="field">
+            <div class="setting-title">${langIsEn() ? 'Text model' : '文本模型'}</div>
+            <select class="select-lite slots-loop-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
+        </label>
+        <label class="field">
+            <div class="setting-title">${langIsEn() ? 'Creative idea (optional)' : '创意想法（可选）'}</div>
+            <textarea class="slots-loop-creative-idea" placeholder="${langIsEn() ? 'e.g. buffalo stomps, fireball drops…' : '如：野牛跺脚、火球砸下…'}">${escapeHtml(node.creative_idea || '')}</textarea>
+        </label>
+        <div class="llm-pane-label">${langIsEn() ? 'Video prompts' : '视频提示词'}${themeLabel ? ` · ${escapeHtml(themeLabel)}` : ''}</div>
+        <div class="slots-loop-video-output ${outputText ? '' : 'is-empty'}">${escapeHtml(outputText || outputPlaceholder)}</div>
+        <div class="slots-loop-copy-row" style="display:${outputText ? 'flex' : 'none'}">
+            <button type="button" class="gen-btn slots-loop-copy-btn"><i data-lucide="copy" class="w-4 h-4"></i><span>${langIsEn() ? 'Copy all' : '复制全部'}</span></button>
+            <button type="button" class="gen-btn slots-loop-copy-full-btn"><i data-lucide="clipboard-copy" class="w-4 h-4"></i><span>${langIsEn() ? 'Copy merged' : '复制合并版'}</span></button>
+        </div>
+        ${node.runError ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
+        <div class="gen-run-row">
+            <button class="gen-btn slots-loop-run-btn ${node.running ? 'running' : ''}"><i data-lucide="repeat-2" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Generating…' : '生成中…') : (langIsEn() ? 'Generate prompts' : '生成提示词')}</span></button>
+        </div>
+    `;
+    const durationInput = wrap.querySelector('.slots-loop-duration');
+    durationInput.onmousedown = e => e.stopPropagation();
+    durationInput.onclick = e => e.stopPropagation();
+    durationInput.oninput = e => {
+        e.stopPropagation();
+        node.duration = normalizeSlotsLoopVideoDuration(e.target.value);
+        scheduleSave();
+    };
+    durationInput.onblur = e => {
+        e.target.value = String(normalizeSlotsLoopVideoDuration(node.duration));
+    };
+    const modelSelect = wrap.querySelector('.slots-loop-text-model');
+    modelSelect.onmousedown = e => e.stopPropagation();
+    modelSelect.onclick = e => e.stopPropagation();
+    modelSelect.onchange = e => {
+        e.stopPropagation();
+        node.model = clampAgentTextModel(e.target.value);
+        scheduleSave();
+    };
+    const creativeEl = wrap.querySelector('.slots-loop-creative-idea');
+    bindScrollableText(creativeEl);
+    creativeEl.oninput = e => {
+        node.creative_idea = String(e.target.value || '').slice(0, 500);
+        scheduleSave();
+    };
+    bindScrollableText(wrap.querySelector('.slots-loop-video-output'));
+    const copyAllBtn = wrap.querySelector('.slots-loop-copy-btn');
+    if(copyAllBtn){
+        copyAllBtn.onclick = async e => {
+            e.stopPropagation();
+            const ok = await copyTextToClipboard(node.outputText || '');
+            setStatus(ok ? (langIsEn() ? 'Copied video prompts' : '已复制视频提示词') : (langIsEn() ? 'Copy failed' : '复制失败'));
+        };
+    }
+    const copyFullBtn = wrap.querySelector('.slots-loop-copy-full-btn');
+    if(copyFullBtn){
+        copyFullBtn.onclick = async e => {
+            e.stopPropagation();
+            const full = String(node.outputData?.full_prompt || '').trim();
+            const ok = await copyTextToClipboard(full || node.outputText || '');
+            setStatus(ok ? (langIsEn() ? 'Copied merged prompt' : '已复制合并版提示词') : (langIsEn() ? 'Copy failed' : '复制失败'));
+        };
+    }
+    wrap.querySelector('.slots-loop-run-btn').onclick = e => {
+        e.stopPropagation();
+        void runSlotsLoopVideoAgent(node.id);
+    };
+    const sources = orderedSources(node, generatorSources(node));
+    const imageInputs = sources
+        .map(src => ({...src, refs:imageRefsOnly(src.refs || [])}))
+        .filter(src => src.refs?.length);
+    renderImageInputList(wrap.querySelector('.slots-loop-input-list'), node, imageInputs, langIsEn() ? 'Connect Slots static image' : '请连接 Slots 静态图');
+    return wrap;
+}
+async function runSlotsLoopVideoAgent(nodeId, opts={}){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || node.type !== 'slotsLoopVideoAgent' || isNodeDisabled(node)) return;
+    const imageRef = slotsLoopVideoAgentImageRef(node);
+    if(!imageRef?.url){
+        const msg = langIsEn() ? 'Connect a Slots static image to the Image input.' : '请通过 Image 端口连接一张 Slots 静态图。';
+        node.runError = msg;
+        refreshNodes([nodeId]);
+        alert(msg);
+        return;
+    }
+    if(!opts.cascade){
+        node.runStatus = 'running';
+        node.runError = '';
+        node.running = true;
+        refreshNodes([nodeId]);
+    }
+    setStatus(langIsEn() ? 'Slots Loop Video Agent: generating prompts…' : 'Slots 循环视频 Agent：正在生成提示词…');
+    const execute = async () => {
+    try {
+        let visionUrl = '';
+        try {
+            visionUrl = await resolveSlotsLoopVideoImageUrlForApi(imageRef.url);
+        } catch(err) {
+            throw new Error(langIsEn()
+                ? `Cannot read Slots image: ${err?.message || err}`
+                : `无法读取 Slots 静态图：${err?.message || err}`);
+        }
+        const res = await apiFetch('/api/canvas/slots-loop-video-prompt', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                imageUrl:visionUrl,
+                durationSec:normalizeSlotsLoopVideoDuration(node.duration),
+                creativeIdea:slotsLoopVideoAgentCreativeIdea(node),
+                model:clampAgentTextModel(node.model),
+            }),
+        });
+        if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Prompt generation failed' : '视频提示词生成失败'));
+        const data = await res.json();
+        node.outputData = data;
+        node.outputText = formatSlotsLoopVideoOutputText(data);
+        if(!opts.cascade) node.running = false;
+        node.runStatus = 'done';
+        node.runError = '';
+        refreshNodes([nodeId]);
+        setStatus(langIsEn() ? 'Slots loop video prompts ready' : 'Slots 循环视频提示词已生成');
+        scheduleSave();
+    } catch(err) {
+        if(!opts.cascade) node.running = false;
+        node.runStatus = 'failed';
+        node.runError = err.message || String(err);
+        refreshNodes([nodeId]);
+        if(opts.cascade) throw err;
+        showErrorModal(err.message || (langIsEn() ? 'Slots Loop Video Agent failed' : 'Slots 循环视频 Agent 失败'), langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent');
+        scheduleSave();
+    }
+    };
+    if(opts.cascade) await execute();
+    else void execute();
+}
+function runSlotsLoopVideoFromButton(nodeId, event){
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    void runSlotsLoopVideoAgent(nodeId);
+}
+window.runSlotsLoopVideoFromButton = runSlotsLoopVideoFromButton;
 function replicaAgentUpstreamImages(node, ctx=loopContext){
     if(!node || node.type !== 'replicaAgent') return [];
     return orderedSources(node, generatorSources(node, ctx))
@@ -8525,6 +9012,8 @@ function batchPosterPlanBHintText(mode){
 function normalizeBatchPosterAgentNode(node){
     if(!node || node.type !== 'batchPosterAgent') return;
     node.pipelineMode = normalizeBatchPosterPipelineMode(node.pipelineMode);
+    node.custom_theme = normalizeBatchPosterCustomTheme(node.custom_theme);
+    node.theme_source = normalizeBatchPosterThemeSource(node.theme_source, node);
     if(!node.apiProvider) node.apiProvider = imageApiProviders()[0]?.id || managedProviderId || 'comfly';
     if(!node.resolution) node.resolution = '2k';
     const legacy = String(node.imageModel || '').trim();
@@ -8556,6 +9045,7 @@ function syncBatchPosterPipelineUi(wrap, node){
         planBHint.style.display = planB ? 'block' : 'none';
         if(planB) planBHint.textContent = batchPosterPlanBHintText(mode);
     }
+    syncBatchPosterPlanBCopyUi(wrap, node);
 }
 function resolveBatchPosterImageModel(node){
     normalizeBatchPosterAgentNode(node);
@@ -8596,22 +9086,110 @@ function batchPosterPresetSelectHtml(node){
             <select class="batch-poster-preset setting-input">${options}</select>
         </label>`;
 }
-async function brainstormBatchPosterThemes(count, node){
-    const model = resolveBatchPosterChatModel(node);
-    if(node.model !== model){
+function snapshotBatchPosterGenStub(node){
+    const stub = JSON.parse(JSON.stringify(node || {}));
+    stub.type = 'batchPosterAgent';
+    normalizeBatchPosterAgentNode(stub);
+    syncBatchPosterSelectedAspectRatio(stub);
+    return stub;
+}
+function snapshotBatchPosterBrainstormConfig(node){
+    syncBatchPosterSelectedAspectRatio(node);
+    const useCustom = batchPosterUsesCustomTheme(node);
+    return {
+        model:resolveBatchPosterChatModel(node),
+        useCustom,
+        customTheme:useCustom ? normalizeBatchPosterCustomTheme(node.custom_theme) : '',
+        themeId:useCustom ? null : normalizeBatchPosterThemeId(node.selectedThemeId),
+        selectedPreset:normalizeBatchPosterPreset(node.selectedPreset),
+        selectedAspectRatio:node.selectedAspectRatio || resolveBatchPosterSelectedAspectRatio(node),
+        pipelineMode:normalizeBatchPosterPipelineMode(node.pipelineMode),
+    };
+}
+function snapshotBatchPosterRunContext(node, count, posterRef){
+    const pipelineMode = normalizeBatchPosterPipelineMode(node.pipelineMode);
+    return {
+        count,
+        posterRef:{url:posterRef.url, name:posterRef.name || 'poster'},
+        genStub:snapshotBatchPosterGenStub(node),
+        brainstorm:snapshotBatchPosterBrainstormConfig(node),
+        planB:pipelineMode === 'plan_b' || pipelineMode === 'plan_b_theme',
+        planBThemeCopy:pipelineMode === 'plan_b_theme',
+        planBReferenceCopy:pipelineMode === 'plan_b',
+        pipelineMode,
+        basePrompt:String(node.base_prompt || BATCH_POSTER_BASE_PROMPT),
+    };
+}
+function ensureBatchPosterRuns(node){
+    if(!node._batchPosterRuns || typeof node._batchPosterRuns !== 'object') node._batchPosterRuns = {};
+}
+function registerBatchPosterRun(node, runToken, meta={}){
+    ensureBatchPosterRuns(node);
+    node._batchPosterRuns[runToken] = {
+        status:'running',
+        llmPendingIds:meta.llmPendingIds || [],
+        progress:{phase:'llm', current:0, total:Number(meta.count || 0)},
+        error:'',
+    };
+}
+function updateBatchPosterRunProgress(node, runToken, patch){
+    const entry = node._batchPosterRuns?.[runToken];
+    if(!entry) return;
+    entry.progress = {...(entry.progress || {}), ...patch};
+    updateBatchPosterRunButton(node);
+}
+function activeBatchPosterRunCount(node){
+    return Object.values(node._batchPosterRuns || {}).filter(entry => entry?.status === 'running').length;
+}
+function finishBatchPosterRun(node, runToken, {error=''}={}){
+    if(node._batchPosterRuns?.[runToken]) delete node._batchPosterRuns[runToken];
+    if(error) node.runError = error;
+    else if(!Object.keys(node._batchPosterRuns || {}).length) node.runError = '';
+    syncBatchPosterNodeRunState(node);
+    updateBatchPosterRunButton(node);
+}
+function removeBatchPosterRunPending(out, runToken, extraIds=[]){
+    if(!out) return;
+    const drop = new Set(extraIds);
+    out._pending = (out._pending || []).filter(p => {
+        if(drop.has(p.id)) return false;
+        if(p.batchPosterRunToken === runToken) return false;
+        return true;
+    });
+}
+function batchPosterBrainstormStatusLabelFromCfg(cfg){
+    if(cfg?.useCustom){
+        const custom = String(cfg.customTheme || '').trim();
+        if(custom) return langIsEn() ? `Brainstorming "${custom}"…` : `正在围绕「${custom}」脑暴…`;
+        return langIsEn() ? 'Enter custom theme…' : '请填写自定义主题…';
+    }
+    if(cfg?.themeId) return langIsEn() ? 'Generating theme variants…' : '正在生成主题变体…';
+    return langIsEn() ? 'Brainstorming themes…' : '正在脑暴主题…';
+}
+function syncBatchPosterNodeRunState(node){
+    if(!node || node.type !== 'batchPosterAgent') return;
+    const pendingN = agentPendingCount(node.id);
+    const activeN = activeBatchPosterRunCount(node);
+    node.running = pendingN > 0 || activeN > 0;
+    if(node.running) node.runStatus = 'running';
+    else if(node.runStatus === 'running') node.runStatus = node.runError ? 'failed' : 'idle';
+}
+async function brainstormBatchPosterThemes(count, node, brainstormCfg=null){
+    const cfg = brainstormCfg || snapshotBatchPosterBrainstormConfig(node);
+    const model = cfg.model;
+    if(!brainstormCfg && node.model !== model){
         node.model = model;
         scheduleSave();
     }
-    const themeId = normalizeBatchPosterThemeId(node.selectedThemeId);
-    syncBatchPosterSelectedAspectRatio(node);
     const payload = {
         count,
-        selectedPreset:normalizeBatchPosterPreset(node.selectedPreset),
-        selectedAspectRatio:node.selectedAspectRatio || resolveBatchPosterSelectedAspectRatio(node),
+        selectedPreset:cfg.selectedPreset,
+        selectedAspectRatio:cfg.selectedAspectRatio,
         model,
-        pipelineMode:normalizeBatchPosterPipelineMode(node.pipelineMode),
+        pipelineMode:cfg.pipelineMode,
     };
-    if(themeId) payload.themeId = themeId;
+    if(cfg.useCustom && cfg.customTheme) payload.customTheme = cfg.customTheme;
+    else if(cfg.themeId) payload.themeId = cfg.themeId;
     const res = await apiFetch('/api/canvas/batch-poster-brainstorm', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
@@ -8646,11 +9224,27 @@ function normalizeBatchPosterThemeSlot(item){
     if(rawCopy) slot.title_copy = normalizeBatchPosterTitleCopy(rawCopy);
     return slot;
 }
+function formatBatchPosterReferenceTitleStyleForPrompt(){
+    return [
+        'Title typography (reference copy mode):',
+        '- Match image 2 title block positions, alignment, line breaks, hierarchy, and relative sizes exactly.',
+        '- Recolor fonts to harmonize with image 1 scene palette; do NOT copy image 2 font colors.',
+        '- Use at least 3 distinct color tiers across text blocks; promo/numeric lines highest contrast.',
+    ].join('\n');
+}
 function formatBatchPosterThemeTitleCopyForPrompt(titleCopy, themeCreative = false){
     const copy = normalizeBatchPosterTitleCopy(titleCopy);
     const lines = themeCreative
         ? ['【主题原创标题文案 — 必须逐字渲染，禁止复刻参考图文字】']
         : ['【参考海报标题字面文案 — 逐字锁定】'];
+    const blocks = Array.isArray(copy.blocks) ? copy.blocks.filter(item => String(item || '').trim()) : [];
+    if(blocks.length){
+        lines.push('【全部标题区块 — 每一段必须独立渲染，与参考图2完全一致】');
+        blocks.forEach((block, idx) => {
+            lines.push(`${idx + 1}. "${String(block).trim()}"`);
+        });
+        lines.push('若下方四层字段与 blocks 不一致，以 blocks 为准。禁止编造未列出的 JACKPOT、CLAIM NOW、100 FREE SPINS 等买量套话。');
+    }
     if(copy.headline) lines.push(`- Main headline / 主标题字面（必须完全一致）: "${copy.headline}"`);
     if(copy.emphasis) lines.push(`- Promo emphasis / 促销高亮字面: "${copy.emphasis}"`);
     if(copy.secondary) lines.push(`- Supporting micro-copy / 副文案字面: "${copy.secondary}"`);
@@ -8659,9 +9253,19 @@ function formatBatchPosterThemeTitleCopyForPrompt(titleCopy, themeCreative = fal
     if(themeCreative){
         lines.push('全文禁止出现美元符号 $。字号层级、字距、行距与区块间距须符合专业 Slots 买量海报排版。');
     } else {
-        lines.push('若 nano 场景稿上已有错误、乱码或与以上不一致的文字，必须用以上字面文案完整替换；不得保留任何错误字符。');
+        lines.push('必须逐字渲染以上全部文案；禁止翻译、改写、合并或替换为其它促销套话。若图1上有错误/乱码文字，必须用以上字面完整替换。图2为排版与字面权威参考。');
     }
     return lines.join('\n');
+}
+function batchPosterPlanBSceneTitleZoneSuffix(){
+    return langIsEn()
+        ? '\n\n[Scene pass — seamless full-bleed illustration] Single continuous poster illustration edge-to-edge. Do NOT draw any readable letters, numbers, words, or button text. Reserve top and bottom areas for titles later, but extend the same sky/environment/atmosphere naturally into those bands — NO horizontal seam, NO letterbox bars, NO solid empty strips, NO hard divider between "scene" and "title zone". Characters and props stay in the middle; only soft bokeh/smoke/light may spill into title bands.'
+        : '\n\n【场景阶段 — 全幅连续插画】整张海报为一张连续无裁切插画，禁止任何可读文字、字母、数字或按钮文案。顶部与底部虽预留给标题，但必须让天空/环境/光效自然延伸进这些区域，禁止出现横向硬切分隔线、上下色带、纯色空条或「场景条+标题条」拼贴感。角色与道具居中，仅允许柔和 bokeh/烟雾/光效渗入标题区。';
+}
+function batchPosterPlanBTypoSeamRules(){
+    return langIsEn()
+        ? 'Seamless title integration: remove any visible horizontal divider or letterbox bar between the middle scene and top/bottom title bands. Extend/blend atmosphere from the scene into title areas so the poster reads as ONE continuous illustration with typography on top — like professional mobile slot ads. You may repaint only pixels in title bands to eliminate seams; do NOT move or alter central characters, props, or core composition.'
+        : '标题无缝融合：消除画面中部与上下标题区之间的任何横向硬切分隔线、色带或 letterbox 条。将场景氛围自然延伸进标题区，使整张海报像专业 Slots 买量广告一样是一张连续插画+叠字。仅允许重绘标题区像素以消除接缝，禁止移动或改变中央角色、道具与核心构图。';
 }
 function buildBatchPosterSceneOnlyPrompt(basePrompt, themePrompt, retryAttempt = 0){
     const theme = String(themePrompt || '').trim();
@@ -8670,15 +9274,15 @@ function buildBatchPosterSceneOnlyPrompt(basePrompt, themePrompt, retryAttempt =
     else prompt = `${prompt}\n\n${theme}`;
     if(prompt.includes('{title_style}')) prompt = prompt.replace('{title_style}', '');
     prompt = prompt.replace(/\n{3,}/g, '\n\n').trim();
-    prompt += langIsEn()
-        ? '\n\n[Scene pass — blank title zones] Do NOT draw any readable letters, numbers, words, or button text in this pass. Leave the top and bottom ~15% as clean gradient/smoke/glow placeholders only (no glyphs, no garbled text). All titles will be added in the next pass.'
-        : '\n\n【场景阶段 — 标题区留白】本阶段禁止在画面上绘制任何可读文字、字母、数字或按钮文案。顶部与底部各约 15% 区域仅保留与场景融合的纯色渐变/烟雾/光效留白，不得出现标题或乱码。所有标题将在下一阶段单独叠加。';
+    prompt += batchPosterPlanBSceneTitleZoneSuffix();
     if(retryAttempt > 0) prompt += BATCH_POSTER_SAFE_RETRY_SUFFIX;
     return prompt;
 }
 function buildBatchPosterTypographyEditPrompt(titleStyle, titleCopy, basePrompt, opts={}){
     const themeCreative = opts.titleMode === 'theme_creative';
-    const titleBlock = formatBatchPosterTitleStyleForPrompt(titleStyle);
+    const titleBlock = themeCreative
+        ? formatBatchPosterTitleStyleForPrompt(titleStyle)
+        : formatBatchPosterReferenceTitleStyleForPrompt();
     const copyBlock = formatBatchPosterThemeTitleCopyForPrompt(titleCopy, themeCreative);
     const titleRules = themeCreative ? '' : batchPosterTitleCopyRulesFromBase(basePrompt);
     const lead = themeCreative
@@ -8686,16 +9290,16 @@ function buildBatchPosterTypographyEditPrompt(titleStyle, titleCopy, basePrompt,
             ? 'Edit image 1 (nano scene draft). Keep scene, characters, props, background, and composition EXACTLY unchanged. Image 2 is LAYOUT-ONLY reference: copy title block positions, alignment, hierarchy, line breaks, margins, and relative sizes — do NOT copy its wording.'
             : '编辑图1（nano 场景稿）。场景、角色、道具、背景与构图完全不变。图2仅作排版参考：借鉴标题区块位置、对齐、层级、换行、边距与相对字号，禁止复刻其字面文案。')
         : (langIsEn()
-            ? 'Edit the first image (nano scene draft). Keep scene, characters, props, background, and composition EXACTLY unchanged. The second image is the title wording/layout reference.'
-            : '编辑第一张图（nano 场景稿）。场景、角色、道具、背景与构图必须完全保持不变。第二张图为标题文案与排版参考。');
+            ? 'Edit image 1 (nano scene draft). Keep scene, characters, props, background, and composition EXACTLY unchanged. Image 2 is the authoritative reference for BOTH title wording and layout — every visible title string on image 2 must appear on image 1 with identical spelling, casing, and punctuation.'
+            : '编辑图1（nano 场景稿）。场景、角色、道具、背景与构图必须完全保持不变。图2是标题【字面文案+排版】的权威参考——图2上每一段可见标题必须逐字出现在图1上，拼写、大小写、标点完全一致。');
     const rules = themeCreative
         ? (langIsEn()
             ? 'ONLY add/replace title typography and layered colors on image 1. Do NOT change scene art. Render the exact title_copy strings below with title_style fonts/colors. Never copy text from image 2. No dollar sign ($) anywhere. Use professional Slots ad typography: balanced font sizes, clear letter-spacing, comfortable line-height between stacked lines, and proper padding between headline/emphasis/cta blocks.'
             : '仅在图1叠加/替换标题字体与分层配色，禁止改动场景。必须逐字渲染下方 title_copy，并套用 title_style 配色字体；禁止复制图2文字；全文禁止 $；专业 Slots 海报排版：字号层级合理、字距清晰、行距舒适、各标题区块间距得体。')
         : (langIsEn()
-            ? 'ONLY add/replace title typography and layered colors. Do NOT change scene art. You MUST render the exact literal title strings provided below (character-for-character). Replace any wrong or garbled text on image 1. Never use one color for all title blocks.'
-            : '仅叠加/替换标题字体与分层配色，禁止改动场景画面；必须逐字渲染下方提供的标题字面文案；用其完整替换 nano 稿上的任何错误文字；禁止移动标题区域；禁止所有标题区块使用同一配色。');
-    return [lead, titleRules, rules, copyBlock, titleBlock].filter(Boolean).join('\n\n');
+            ? 'ONLY add/replace title typography and layered colors on image 1. Do NOT change scene art. You MUST render ONLY the exact literal strings listed below and visible on image 2 — character-for-character. Do NOT invent generic slot ad copy (no random JACKPOT, CLAIM NOW, 100 FREE SPINS, COWABUNGA COINS, etc. unless explicitly listed). Replace any wrong or garbled text on image 1. Never use one color for all title blocks.'
+            : '仅在图1叠加/替换标题字体与分层配色，禁止改动场景。必须且只能渲染下方列出的字面文案（与图2一致），逐字一致；禁止编造通用买量套话（不得随机出现 JACKPOT、CLAIM NOW、100 FREE SPINS、COWABUNGA COINS 等，除非已明确列出）；完整替换图1上任何错误文字；禁止所有标题同一配色。');
+    return [lead, titleRules, rules, batchPosterPlanBTypoSeamRules(), copyBlock, titleBlock].filter(Boolean).join('\n\n');
 }
 async function buildBatchPosterImagePayload(node, prompt, posterRef, opts={}){
     const imageModel = opts.modelOverride ? resolveImageModel(opts.modelOverride) : resolveBatchPosterImageModel(node);
@@ -8757,12 +9361,13 @@ function batchPosterModerationRetryAttempt(lastError, round){
     if(!round) return 0;
     return /1501|内容安全|content security/i.test(String(lastError || '')) ? round : 0;
 }
-async function runBatchPosterImageSlot(node, themeSlot, basePrompt, posterRef, run, out, retryAttempt = 0){
+async function runBatchPosterImageSlot(genStub, themeSlot, basePrompt, posterRef, run, out, ownerNodeId, runToken, retryAttempt = 0){
+    const ownerNode = nodes.find(n => n.id === ownerNodeId);
     const slot = typeof themeSlot === 'string'
         ? {theme_prompt:themeSlot, title_style:{...BATCH_POSTER_DEFAULT_TITLE_STYLE_LAYERS}}
         : (themeSlot || {});
     const prompt = buildBatchPosterThemePrompt(basePrompt, slot.theme_prompt, slot.title_style, retryAttempt);
-    const payload = await buildBatchPosterImagePayload(node, prompt, posterRef);
+    const payload = await buildBatchPosterImagePayload(genStub, prompt, posterRef);
     const taskInfo = await createCanvasImageTask(payload);
     if(out){
         out._pending = [
@@ -8770,177 +9375,139 @@ async function runBatchPosterImageSlot(node, themeSlot, basePrompt, posterRef, r
             makePending(uid('p'), {...run, prompt}, {
                 canvasTaskId:taskInfo.task_id,
                 canvasTaskType:'online-image',
+                batchPosterRunToken:runToken,
             }),
         ];
     }
-    refreshRunNodes(node, out);
+    refreshRunNodes(ownerNode, out);
     scheduleSave();
-    node.runStatus = 'running';
     const status = await pollCanvasImageTask(taskInfo.task_id);
-    return {status, error: node.runError || ''};
+    const errNode = nodes.find(n => n.id === ownerNodeId);
+    return {status, error: errNode?.runError || ''};
 }
-async function runBatchPosterImageSlotPlanB(node, themeSlot, basePrompt, posterRef, refTitleCopy, run, out, retryAttempt = 0){
+async function runBatchPosterImageSlotPlanB(genStub, themeSlot, basePrompt, posterRef, refTitleCopy, run, out, ownerNodeId, runToken, opts={}){
+    const ownerNode = nodes.find(n => n.id === ownerNodeId);
+    const planBThemeCopy = Boolean(opts.planBThemeCopy);
+    const retryAttempt = Number(opts.retryAttempt || 0);
+    const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
     const slot = typeof themeSlot === 'string'
         ? {theme_prompt:themeSlot, title_style:{...BATCH_POSTER_DEFAULT_TITLE_STYLE_LAYERS}}
         : (themeSlot || {});
-    const themeCreative = isBatchPosterPlanBThemeCopy(node);
-    const titleMode = themeCreative ? 'theme_creative' : 'reference';
-    const titleCopy = themeCreative
+    const titleMode = planBThemeCopy ? 'theme_creative' : 'reference';
+    const titleCopy = planBThemeCopy
         ? normalizeBatchPosterTitleCopy(slot.title_copy)
-        : refTitleCopy;
+        : normalizeBatchPosterTitleCopy(refTitleCopy);
+    if(!planBThemeCopy && !batchPosterTitleCopyHasContent(titleCopy)){
+        throw new Error(langIsEn()
+            ? 'Plan B reference copy mode requires locked title copy before typography pass.'
+            : 'B计划·复刻参考文案在标题精修前必须已有锁定的参考标题文案。');
+    }
     const nanoModel = models.nano || 'nano-banana-pro';
-    node.batchProgress = {...(node.batchProgress || {}), subPhase:'scene'};
-    updateBatchPosterRunButton(node);
-    refreshNodes([node.id]);
-    try {
-        const scenePrompt = buildBatchPosterSceneOnlyPrompt(basePrompt, slot.theme_prompt, retryAttempt);
-        const scenePayload = await buildBatchPosterImagePayload(node, scenePrompt, posterRef, {modelOverride:nanoModel});
-        const sceneTask = await createCanvasImageTask(scenePayload);
-        const sceneResult = await waitForCanvasImageTask(sceneTask.task_id);
-        const draftUrl = batchPosterDraftUrlFromTaskResult(sceneResult);
-        if(!draftUrl) throw new Error(langIsEn() ? 'Plan B scene pass returned no image' : 'B计划场景阶段未返回图片');
-        node.batchProgress = {...(node.batchProgress || {}), subPhase:'typography'};
-        updateBatchPosterRunButton(node);
-        refreshNodes([node.id]);
-        const typoPayload = await buildBatchPosterTypographyEditPayload(node, draftUrl, posterRef, slot.title_style, titleCopy, basePrompt, {titleMode});
-        const taskInfo = await createCanvasImageTask(typoPayload);
-        if(out){
-            out._pending = [
-                ...(out._pending || []),
-                makePending(uid('p'), {...run, prompt:typoPayload.prompt}, {
-                    canvasTaskId:taskInfo.task_id,
-                    canvasTaskType:'online-image',
-                    stageLabel:langIsEn() ? 'Refining titles (gpt-image-2)…' : '标题精修 (gpt-image-2)…',
-                }),
-            ];
-        }
-        refreshRunNodes(node, out);
-        scheduleSave();
-        node.runStatus = 'running';
-        const status = await pollCanvasImageTask(taskInfo.task_id);
-        return {status, error: node.runError || ''};
-    } finally {
-        if(node.batchProgress) delete node.batchProgress.subPhase;
-    }
-}
-function updateBatchPosterRunButton(node){
-    const el = nodesEl?.querySelector?.(`.node[data-id="${CSS.escape(node.id)}"] .batch-poster-run-btn`);
-    if(!el) return;
-    const span = el.querySelector('span');
-    if(node.running){
-        el.disabled = true;
-        el.classList.add('running');
-        const progress = node.batchProgress || {};
-        if(progress.phase === 'llm'){
-            const precise = normalizeBatchPosterThemeId(node.selectedThemeId);
-            if(span) span.textContent = precise
-                ? (langIsEn() ? 'Generating theme variants…' : '正在生成主题变体…')
-                : (langIsEn() ? 'Brainstorming themes…' : '正在脑暴主题…');
-        } else if(progress.total){
-            const current = Math.max(0, Math.min(progress.total, Number(progress.current || 0)));
-            if(isBatchPosterPlanB(node) && progress.phase === 'image'){
-                if(progress.subPhase === 'scene'){
-                    if(span) span.textContent = langIsEn()
-                        ? `Plan B: scene (${current}/${progress.total})…`
-                        : `B计划场景 (${current}/${progress.total})…`;
-                } else if(progress.subPhase === 'typography'){
-                    if(span) span.textContent = langIsEn()
-                        ? `Plan B: titles (${current}/${progress.total})…`
-                        : `B计划标题精修 (${current}/${progress.total})…`;
-                } else if(span) span.textContent = langIsEn()
-                    ? `Plan B (${current}/${progress.total})…`
-                    : `B计划 (${current}/${progress.total})…`;
-            } else if(span) span.textContent = langIsEn()
-                ? `Generating (${current}/${progress.total})…`
-                : `生成中 (${current}/${progress.total})…`;
-        } else if(span) span.textContent = langIsEn() ? 'Generating…' : '生成中…';
-        return;
-    }
-    el.disabled = false;
-    el.classList.remove('running');
-    if(span) span.textContent = langIsEn() ? 'Run Batch' : '一键批量生成';
-}
-async function runBatchPosterAgent(nodeId){
-    const node = nodes.find(n => n.id === nodeId);
-    if(!node || node.type !== 'batchPosterAgent' || node.running) return;
-    const count = Math.max(1, Math.min(10, Number(node.batch_count || 3)));
-    const posterRef = batchPosterAgentPosterRef(node);
-    if(!posterRef?.url){
-        const msg = langIsEn() ? 'Connect a reference poster image to the Image input.' : '请通过 Image 端口连接一张参考海报图。';
-        node.runError = msg;
-        refreshNodes([nodeId]);
-        alert(msg);
-        return;
-    }
-    node.running = true;
-    node.runStatus = 'running';
-    node.runError = '';
-    node.batchProgress = {current:0, total:count, phase:'llm'};
-    updateBatchPosterRunButton(node);
-    const refs = [{url:posterRef.url, name:posterRef.name || 'poster'}];
-    const planB = isBatchPosterPlanB(node);
-    const run = runSnapshot(node, planB
-        ? (isBatchPosterPlanBThemeCopy(node)
-            ? (langIsEn() ? 'Batch Poster Agent (Plan B theme copy)' : 'Batch Poster B计划·主题文案')
-            : (langIsEn() ? 'Batch Poster Agent (Plan B)' : 'Batch Poster B计划'))
-        : (langIsEn() ? 'Batch Poster Agent' : 'Batch Poster 批量海报'), refs);
-    let out = outputForNode(node, 460);
-    const llmStageLabel = normalizeBatchPosterThemeId(node.selectedThemeId)
-        ? (langIsEn() ? 'Generating theme variants…' : '正在生成主题变体…')
-        : (langIsEn() ? 'Brainstorming themes…' : '正在脑暴主题…');
-    const llmPendingIds = Array.from({length:count}, () => uid('p'));
+    onProgress?.({phase:'image', subPhase:'scene'});
+    const scenePrompt = buildBatchPosterSceneOnlyPrompt(BATCH_POSTER_PLAN_B_SCENE_BASE, slot.theme_prompt, retryAttempt);
+    const scenePayload = await buildBatchPosterImagePayload(genStub, scenePrompt, null, {modelOverride:nanoModel});
+    const sceneTask = await createCanvasImageTask(scenePayload);
+    const sceneResult = await waitForCanvasImageTask(sceneTask.task_id);
+    const draftUrl = batchPosterDraftUrlFromTaskResult(sceneResult);
+    if(!draftUrl) throw new Error(langIsEn() ? 'Plan B scene pass returned no image' : 'B计划场景阶段未返回图片');
+    onProgress?.({phase:'image', subPhase:'typography'});
+    const typoPayload = await buildBatchPosterTypographyEditPayload(genStub, draftUrl, posterRef, slot.title_style, titleCopy, basePrompt, {titleMode});
+    const taskInfo = await createCanvasImageTask(typoPayload);
     if(out){
         out._pending = [
             ...(out._pending || []),
-            ...llmPendingIds.map(id => makePending(id, run, {
-                stageLabel:llmStageLabel,
-            })),
+            makePending(uid('p'), {...run, prompt:typoPayload.prompt}, {
+                canvasTaskId:taskInfo.task_id,
+                canvasTaskType:'online-image',
+                batchPosterRunToken:runToken,
+                stageLabel:langIsEn() ? 'Refining titles (gpt-image-2)…' : '标题精修 (gpt-image-2)…',
+            }),
         ];
     }
-    refreshRunNodes(node, out);
+    refreshRunNodes(ownerNode, out);
     scheduleSave();
-    refreshNodes([nodeId]);
-    setStatus(normalizeBatchPosterThemeId(node.selectedThemeId)
-        ? (langIsEn() ? 'Batch Poster: generating theme variants…' : 'Batch Poster：正在生成主题变体…')
-        : (langIsEn() ? 'Batch Poster: brainstorming themes…' : 'Batch Poster：正在脑暴主题…'));
-    try {
-        const themes = await brainstormBatchPosterThemes(count, node);
-        const basePrompt = String(node.base_prompt || BATCH_POSTER_BASE_PROMPT);
-        let planBTitleCopy = null;
-        if(planB && isBatchPosterPlanBReferenceCopy(node)){
-            setStatus(langIsEn() ? 'Batch Poster Plan B: extracting title copy…' : 'Batch Poster B计划：正在提取参考标题文案…');
-            planBTitleCopy = await extractBatchPosterTitleCopy(posterRef.url, node);
-            if(planBTitleCopy){
-                console.log('[batch-poster] plan B title copy extracted', planBTitleCopy);
+    const status = await pollCanvasImageTask(taskInfo.task_id);
+    const errNode = nodes.find(n => n.id === ownerNodeId);
+    return {status, error: errNode?.runError || ''};
+}
+function batchPosterBrainstormStatusLabel(node){
+    if(batchPosterUsesCustomTheme(node)){
+        const custom = normalizeBatchPosterCustomTheme(node?.custom_theme);
+        if(custom) return langIsEn() ? `Brainstorming "${custom}"…` : `正在围绕「${custom}」脑暴…`;
+        return langIsEn() ? 'Enter custom theme…' : '请填写自定义主题…';
+    }
+    if(normalizeBatchPosterThemeId(node?.selectedThemeId)) return langIsEn() ? 'Generating theme variants…' : '正在生成主题变体…';
+    return langIsEn() ? 'Brainstorming themes…' : '正在脑暴主题…';
+}
+function batchPosterGlobalStatusLabel(node){
+    if(batchPosterUsesCustomTheme(node)){
+        const custom = normalizeBatchPosterCustomTheme(node?.custom_theme);
+        if(custom) return langIsEn() ? `Batch Poster: brainstorming "${custom}"…` : `Batch Poster：正在围绕「${custom}」脑暴…`;
+        return langIsEn() ? 'Batch Poster: enter custom theme' : 'Batch Poster：请填写自定义主题';
+    }
+    if(normalizeBatchPosterThemeId(node?.selectedThemeId)) return langIsEn() ? 'Batch Poster: generating theme variants…' : 'Batch Poster：正在生成主题变体…';
+    return langIsEn() ? 'Batch Poster: brainstorming themes…' : 'Batch Poster：正在脑暴主题…';
+}
+function updateBatchPosterRunButton(node){
+    syncBatchPosterNodeRunState(node);
+    const el = nodesEl?.querySelector?.(`.node[data-id="${CSS.escape(node.id)}"] .batch-poster-run-btn`);
+    if(!el) return;
+    const span = el.querySelector('span');
+    const pendingN = agentPendingCount(node.id);
+    const activeN = activeBatchPosterRunCount(node);
+    const busy = pendingN > 0 || activeN > 0;
+    el.disabled = false;
+    el.classList.toggle('running', busy);
+    if(busy){
+        if(span){
+            if(activeN > 1){
+                span.textContent = langIsEn()
+                    ? `Generating (${pendingN}, ${activeN} batches)…`
+                    : `生成中 (${pendingN}，${activeN} 批)…`;
             } else {
-                console.warn('[batch-poster] plan B title copy extraction skipped; falling back to vision reference only');
+                span.textContent = langIsEn() ? `Generating (${pendingN})…` : `生成中 (${pendingN})…`;
             }
-        } else if(planB && isBatchPosterPlanBThemeCopy(node)){
-            setStatus(langIsEn() ? 'Batch Poster Plan B: theme copy will be generated per slot…' : 'Batch Poster B计划：将为每张海报生成主题原创文案…');
         }
-        if(out) out._pending = (out._pending || []).filter(p => !llmPendingIds.includes(p.id));
-        node.batchProgress = {current:0, total:count, phase:'image'};
-        updateBatchPosterRunButton(node);
-        refreshNodes([nodeId]);
+        return;
+    }
+    el.classList.remove('running');
+    if(span) span.textContent = langIsEn() ? 'Run Batch' : '一键批量生成';
+}
+async function executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPendingIds){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node) return;
+    const posterRef = ctx.posterRef;
+    const count = ctx.count;
+    try {
+        const themes = await brainstormBatchPosterThemes(count, node, ctx.brainstorm);
+        let planBTitleCopy = null;
+        if(ctx.planBReferenceCopy){
+            planBTitleCopy = await resolveBatchPosterPlanBTitleCopy(posterRef, node);
+        }
+        removeBatchPosterRunPending(out, runToken, llmPendingIds);
+        updateBatchPosterRunProgress(node, runToken, {phase:'image', current:0, total:count});
         const slots = themes.map(entry => ({...entry, status:'pending', lastError:''}));
-        const refreshBatchPosterImageProgress = () => {
-            const done = slots.filter(slot => slot.status === 'succeeded').length;
-            node.batchProgress = {current:done, total:count, phase:'image'};
-            node.running = true;
-            node.runStatus = 'running';
-            updateBatchPosterRunButton(node);
-            refreshNodes([nodeId]);
-        };
+        const onProgress = patch => updateBatchPosterRunProgress(node, runToken, patch);
         const generateBatchPosterSlot = async (slot, round) => {
-            node.runError = '';
-            const retryAttempt = batchPosterModerationRetryAttempt(slot.lastError, round);
-            const result = planB
-                ? await runBatchPosterImageSlotPlanB(node, slot, basePrompt, posterRef, planBTitleCopy, run, out, retryAttempt)
-                : await runBatchPosterImageSlot(node, slot, basePrompt, posterRef, run, out, retryAttempt);
-            slot.status = result.status;
-            slot.lastError = result.error;
-            refreshBatchPosterImageProgress();
-            return result.status;
+            try {
+                const retryAttempt = batchPosterModerationRetryAttempt(slot.lastError, round);
+                const result = ctx.planB
+                    ? await runBatchPosterImageSlotPlanB(ctx.genStub, slot, ctx.basePrompt, posterRef, planBTitleCopy, run, out, nodeId, runToken, {
+                        planBThemeCopy:ctx.planBThemeCopy,
+                        retryAttempt,
+                        onProgress,
+                    })
+                    : await runBatchPosterImageSlot(ctx.genStub, slot, ctx.basePrompt, posterRef, run, out, nodeId, runToken, retryAttempt);
+                slot.status = result.status;
+                slot.lastError = result.error || (result.status !== 'succeeded' ? (result.error || '') : '');
+                const done = slots.filter(s => s.status === 'succeeded').length;
+                updateBatchPosterRunProgress(node, runToken, {phase:'image', current:done, total:count});
+                return result.status;
+            } catch(slotErr) {
+                slot.status = 'failed';
+                slot.lastError = slotErr.message || String(slotErr);
+                return 'failed';
+            }
         };
         await Promise.all(slots.map(slot => generateBatchPosterSlot(slot, 0)));
         for(let round = 1; round <= BATCH_POSTER_IMAGE_MAX_RETRIES; round++){
@@ -8951,38 +9518,84 @@ async function runBatchPosterAgent(nodeId){
         await saveCanvas();
         const generatedCount = slots.filter(slot => slot.status === 'succeeded').length;
         const lastFailure = slots.find(slot => slot.status !== 'succeeded')?.lastError || '';
-        node.running = false;
-        node.batchProgress = null;
-        updateBatchPosterRunButton(node);
-        if(!generatedCount) throw new Error(lastFailure || (langIsEn() ? 'Batch Poster image generation failed' : 'Batch Poster 图片生成失败'));
+        if(!generatedCount){
+            finishBatchPosterRun(node, runToken, {error:lastFailure || (langIsEn() ? 'Batch Poster image generation failed' : 'Batch Poster 图片生成失败')});
+            refreshRunNodes(node, out);
+            showErrorModal(lastFailure || (langIsEn() ? 'Batch Poster failed' : 'Batch Poster 批量生成失败'), 'Batch Poster Agent');
+            scheduleSave();
+            return;
+        }
         if(generatedCount < count){
             const partialMsg = langIsEn()
                 ? `Batch Poster: ${generatedCount}/${count} image(s) added (${count - generatedCount} failed after retries)`
                 : `Batch Poster：已追加 ${generatedCount}/${count} 张海报（${count - generatedCount} 张重试后仍失败）`;
-            node.runStatus = 'done';
             node.runError = partialMsg;
+            finishBatchPosterRun(node, runToken);
             refreshRunNodes(node, out);
             setStatus(partialMsg);
             scheduleSave();
             return;
         }
-        node.runStatus = 'done';
-        node.runError = '';
-        updateBatchPosterRunButton(node);
+        finishBatchPosterRun(node, runToken);
         refreshRunNodes(node, out);
         setStatus(langIsEn() ? `Batch Poster: added ${generatedCount} image(s) to output` : `Batch Poster：已向 Output 追加 ${generatedCount} 张海报`);
         scheduleSave();
     } catch(err) {
-        if(out) out._pending = (out._pending || []).filter(p => !llmPendingIds.includes(p.id));
-        node.running = false;
-        node.runStatus = 'failed';
-        node.runError = err.message || String(err);
-        node.batchProgress = null;
-        updateBatchPosterRunButton(node);
+        removeBatchPosterRunPending(out, runToken, llmPendingIds);
+        finishBatchPosterRun(node, runToken, {error:err.message || String(err)});
         refreshRunNodes(node, out);
         showErrorModal(err.message || (langIsEn() ? 'Batch Poster failed' : 'Batch Poster 批量生成失败'), 'Batch Poster Agent');
         scheduleSave();
     }
+}
+async function runBatchPosterAgent(nodeId){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || node.type !== 'batchPosterAgent' || isNodeDisabled(node)) return;
+    const count = Math.max(1, Math.min(10, Number(node.batch_count || 3)));
+    const posterRef = batchPosterAgentPosterRef(node);
+    if(!posterRef?.url){
+        const msg = langIsEn() ? 'Connect a reference poster image to the Image input.' : '请通过 Image 端口连接一张参考海报图。';
+        node.runError = msg;
+        refreshNodes([nodeId]);
+        alert(msg);
+        return;
+    }
+    if(batchPosterUsesCustomTheme(node) && !normalizeBatchPosterCustomTheme(node.custom_theme)){
+        const msg = langIsEn() ? 'Enter a custom theme before running.' : '请先填写自定义主题。';
+        node.runError = msg;
+        refreshNodes([nodeId]);
+        alert(msg);
+        return;
+    }
+    const runToken = uid('bpr');
+    const ctx = snapshotBatchPosterRunContext(node, count, posterRef);
+    const llmPendingIds = Array.from({length:count}, () => uid('p'));
+    registerBatchPosterRun(node, runToken, {count, llmPendingIds});
+    syncBatchPosterNodeRunState(node);
+    node.runError = '';
+    updateBatchPosterRunButton(node);
+    const refs = [{url:posterRef.url, name:posterRef.name || 'poster'}];
+    const run = runSnapshot(node, ctx.planB
+        ? (ctx.planBThemeCopy
+            ? (langIsEn() ? 'Batch Poster Agent (Plan B theme copy)' : 'Batch Poster B计划·主题文案')
+            : (langIsEn() ? 'Batch Poster Agent (Plan B)' : 'Batch Poster B计划'))
+        : (langIsEn() ? 'Batch Poster Agent' : 'Batch Poster 批量海报'), refs);
+    let out = outputForNode(node, 460);
+    const llmStageLabel = batchPosterBrainstormStatusLabelFromCfg(ctx.brainstorm);
+    if(out){
+        out._pending = [
+            ...(out._pending || []),
+            ...llmPendingIds.map(id => makePending(id, run, {
+                stageLabel:llmStageLabel,
+                batchPosterRunToken:runToken,
+            })),
+        ];
+    }
+    refreshRunNodes(node, out);
+    scheduleSave();
+    refreshNodes([nodeId]);
+    setStatus(batchPosterBrainstormStatusLabelFromCfg(ctx.brainstorm));
+    void executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPendingIds);
 }
 function runBatchPosterFromButton(nodeId, event){
     event?.preventDefault?.();
@@ -9108,7 +9721,9 @@ async function buildNineGridImageTaskPayload(node, imagePrompt, refs, opts={}){
         customRatio:'',
         quality:opts.quality || node.quality || 'medium',
     };
-    return buildGeneratorTaskPayload(genStub, imagePrompt, refs);
+    const payload = await buildGeneratorTaskPayload(genStub, imagePrompt, refs);
+    payload.nine_grid_agent = true;
+    return payload;
 }
 async function waitForCanvasImageTask(taskId){
     while(true){
@@ -9253,7 +9868,7 @@ async function syncNineGridSpawnedOutputs(node, croppedUrls, opts={}){
 }
 async function runNineGridPhaseA(nodeId){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || node.type !== 'nineGridAgent' || node.running || isNodeDisabled(node)) return;
+    if(!node || node.type !== 'nineGridAgent' || isNodeDisabled(node)) return;
     const story = nineGridAgentStory(node);
     const refs = nineGridAgentRefsPayload(node);
     if(story.length < 10){
@@ -9310,7 +9925,7 @@ async function runNineGridPhaseA(nodeId){
 }
 async function runNineGridPhaseB(nodeId){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || node.type !== 'nineGridAgent' || node.running || isNodeDisabled(node)) return;
+    if(!node || node.type !== 'nineGridAgent' || isNodeDisabled(node)) return;
     const refs = nineGridAgentRefsPayload(node);
     const shots = normalizeNineGridShots(node.shots);
     if(!refs.length){
@@ -9377,7 +9992,7 @@ async function runNineGridFull(nodeId){
 }
 async function runNineGridCrop(nodeId){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || node.type !== 'nineGridAgent' || !node.gridUrl || node.running) return;
+    if(!node || node.type !== 'nineGridAgent' || !node.gridUrl || isNodeDisabled(node)) return;
     node.running = true;
     node.runError = '';
     updateNineGridAgentProgress(node, 'crop', 0, 1);
@@ -9536,10 +10151,10 @@ function renderNineGridAgentBody(node){
     const runRow = document.createElement('div');
     runRow.className = 'gen-run-row nine-grid-run-row';
     runRow.innerHTML = `
-        <button type="button" class="gen-btn nine-grid-phase-a-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><span>${langIsEn() ? 'Phase A: Prompts' : '① 生成分镜'}</span></button>
-        <button type="button" class="gen-btn nine-grid-phase-b-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><span>${langIsEn() ? 'Phase B: Grid image' : '② 生成大图'}</span></button>
-        <button type="button" class="gen-btn nine-grid-full-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><span>${langIsEn() ? 'Run all' : '一键全流程'}</span></button>
-        <button type="button" class="gen-btn nine-grid-crop-btn ${node.running ? 'running' : ''}" ${node.running || !node.gridUrl ? 'disabled' : ''}><span>${langIsEn() ? 'Re-crop 9' : '重新切 9 张'}</span></button>
+        <button type="button" class="gen-btn nine-grid-phase-a-btn ${node.running ? 'running' : ''}"><span>${langIsEn() ? 'Phase A: Prompts' : '① 生成分镜'}</span></button>
+        <button type="button" class="gen-btn nine-grid-phase-b-btn ${node.running ? 'running' : ''}"><span>${langIsEn() ? 'Phase B: Grid image' : '② 生成大图'}</span></button>
+        <button type="button" class="gen-btn nine-grid-full-btn ${node.running ? 'running' : ''}"><span>${langIsEn() ? 'Run all' : '一键全流程'}</span></button>
+        <button type="button" class="gen-btn nine-grid-crop-btn ${node.running ? 'running' : ''}" ${!node.gridUrl || isNodeDisabled(node) ? 'disabled' : ''}><span>${langIsEn() ? 'Re-crop 9' : '重新切 9 张'}</span></button>
     `;
     wrap.appendChild(scroll);
     wrap.appendChild(runRow);
@@ -9702,15 +10317,40 @@ function bindBatchPosterAgentControls(wrap, node){
             node.selectedPreset = normalizeBatchPosterPreset(presetSelect.value);
             if(normalizeBatchPosterPreset(node.selectedPreset) === 'random') node.selectedThemeId = null;
             refreshBatchPosterSpecificThemeSelect(wrap, node, batchPosterThemeCatalogCache);
+            syncBatchPosterThemeControls(wrap, node);
             scheduleSave();
         };
         presetSelect.onmousedown = e => e.stopPropagation();
+    }
+    wrap.querySelectorAll('.batch-poster-theme-segment').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.stopPropagation();
+            const next = normalizeBatchPosterThemeSource(btn.dataset.themeSource, node);
+            if(next === node.theme_source) return;
+            node.theme_source = next;
+            if(next === 'preset') node.custom_theme = normalizeBatchPosterCustomTheme(node.custom_theme);
+            else node.selectedThemeId = null;
+            syncBatchPosterThemeControls(wrap, node);
+            scheduleSave();
+        };
+    });
+    const customThemeInput = wrap.querySelector('.batch-poster-custom-theme');
+    if(customThemeInput){
+        customThemeInput.onmousedown = e => e.stopPropagation();
+        customThemeInput.onclick = e => e.stopPropagation();
+        customThemeInput.oninput = e => {
+            e.stopPropagation();
+            node.custom_theme = normalizeBatchPosterCustomTheme(customThemeInput.value);
+            scheduleSave();
+        };
     }
     const themeSelect = wrap.querySelector('.batch-poster-specific-theme');
     if(themeSelect){
         themeSelect.onchange = e => {
             e.stopPropagation();
             node.selectedThemeId = normalizeBatchPosterThemeId(themeSelect.value);
+            syncBatchPosterThemeControls(wrap, node);
             scheduleSave();
         };
         themeSelect.onmousedown = e => e.stopPropagation();
@@ -9744,8 +10384,18 @@ function bindBatchPosterAgentControls(wrap, node){
         pipelineSelect.onmousedown = e => e.stopPropagation();
     }
     syncBatchPosterPipelineUi(wrap, node);
+    const extractTitlesBtn = wrap.querySelector('.batch-poster-extract-titles-btn');
+    if(extractTitlesBtn){
+        extractTitlesBtn.onmousedown = e => e.stopPropagation();
+        extractTitlesBtn.onclick = e => {
+            e.stopPropagation();
+            e.preventDefault();
+            void prefetchBatchPosterTitleCopyForNode(node, {force:true});
+        };
+    }
     void ensureBatchPosterThemeCatalog().then(catalog => {
         refreshBatchPosterSpecificThemeSelect(wrap, node, catalog);
+        syncBatchPosterThemeControls(wrap, node);
     });
     const basePromptEl = wrap.querySelector('.batch-poster-base-prompt');
     if(basePromptEl){
@@ -9759,13 +10409,17 @@ function bindBatchPosterAgentControls(wrap, node){
     }
     bindReplicaAgentSizeControls(wrap, node, batchPosterAgentPosterRef(node)?.url || '');
     syncBatchPosterSelectedAspectRatio(node);
+    syncBatchPosterThemeControls(wrap, node);
     updateBatchPosterRunButton(node);
 }
 function renderBatchPosterAgentBody(node){
     normalizeBatchPosterAgentNode(node);
+    reconcileBatchPosterAgentRunState(node);
     if(!node.base_prompt) node.base_prompt = BATCH_POSTER_BASE_PROMPT;
     if(!node.selectedPreset) node.selectedPreset = 'random';
     if(node.selectedThemeId != null) node.selectedThemeId = normalizeBatchPosterThemeId(node.selectedThemeId);
+    node.custom_theme = normalizeBatchPosterCustomTheme(node.custom_theme);
+    node.theme_source = normalizeBatchPosterThemeSource(node.theme_source, node);
     const wrap = document.createElement('div');
     wrap.className = 'generator-body batch-poster-agent-body';
     const scroll = document.createElement('div');
@@ -9780,9 +10434,9 @@ function renderBatchPosterAgentBody(node){
                 <span class="batch-poster-field-label">Batch Count</span>
                 <input class="batch-poster-count setting-input" type="number" min="1" max="10" step="1" value="${Math.max(1, Math.min(10, Number(node.batch_count || 3)))}">
             </label>
-            ${batchPosterPresetSelectHtml(node)}
-            ${batchPosterSpecificThemeSelectHtml(node)}
+            ${batchPosterThemeSectionHtml(node)}
             ${batchPosterPipelineSelectHtml(node)}
+            ${batchPosterPlanBCopySectionHtml(node)}
             <label class="batch-poster-field">
                 <span class="batch-poster-field-label">${langIsEn() ? 'Text model' : '文本模型'}</span>
                 <select class="batch-poster-text-model setting-input">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
@@ -9803,7 +10457,8 @@ function renderBatchPosterAgentBody(node){
     `;
     const runRow = document.createElement('div');
     runRow.className = 'gen-run-row batch-poster-run-row';
-    runRow.innerHTML = `<button type="button" class="gen-btn batch-poster-run-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="layers" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Generating…' : '生成中…') : (langIsEn() ? 'Run Batch' : '一键批量生成')}</span></button>`;
+    const batchPosterBtn = agentPendingRunState(node.id, langIsEn() ? 'Run Batch' : '一键批量生成', langIsEn() ? 'Generating' : '生成中');
+    runRow.innerHTML = `<button type="button" class="gen-btn batch-poster-run-btn ${batchPosterBtn.runningCls}"><i data-lucide="layers" class="w-4 h-4"></i><span>${escapeHtml(batchPosterBtn.label)}</span></button>`;
     wrap.appendChild(scroll);
     wrap.appendChild(runRow);
     bindBatchPosterAgentControls(wrap, node);
@@ -9812,6 +10467,7 @@ function renderBatchPosterAgentBody(node){
         .map(src => ({...src, refs:imageRefsOnly(src.refs || [])}))
         .filter(src => src.refs?.length);
     renderImageInputList(wrap.querySelector('.batch-poster-input-list'), node, imageInputs, langIsEn() ? 'Connect a reference poster image' : '请连接参考海报图');
+    void prefetchBatchPosterTitleCopyForNode(node);
     return wrap;
 }
 function imageRepairAgentSourceImage(node, ctx=loopContext){
@@ -9948,7 +10604,8 @@ function renderReplicaAgentBody(node){
     const batchLabel = upstreamLoop && upstreamLoop.count > 1
         ? (langIsEn() ? `Run all ${upstreamLoop.count} rounds` : `批量复刻 ${upstreamLoop.count} 轮`)
         : (langIsEn() ? 'Run replica' : '开始复刻');
-    runRow.innerHTML = `<button type="button" class="gen-btn replica-run-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''} onclick="runReplicaAgentFromButton('${node.id}', event)"><i data-lucide="zap" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Running…' : '运行中…') : batchLabel}</span></button>${cascadeBtnHtml(node)}`;
+    const replicaBtn = agentPendingRunState(node.id, batchLabel, langIsEn() ? 'Running' : '运行中');
+    runRow.innerHTML = `<button type="button" class="gen-btn replica-run-btn ${replicaBtn.runningCls}" onclick="runReplicaAgentFromButton('${node.id}', event)"><i data-lucide="zap" class="w-4 h-4"></i><span>${escapeHtml(replicaBtn.label)}</span></button>${cascadeBtnHtml(node)}`;
     wrap.appendChild(scroll);
     wrap.appendChild(runRow);
     bindCascadeButtons(wrap, node.id);
@@ -10066,16 +10723,6 @@ async function runReplicaAgent(nodeId, opts={}){
             return runNodeCascade(nodeId);
         }
     }
-    if(node.running && !opts.cascade){
-        const hasPending = nodes.some(n => n.type === 'output' && (n._pending || []).some(p => p.run?.node?.id === nodeId));
-        if(!hasPending){
-            node.running = false;
-            if(node.runStatus === 'running') node.runStatus = 'idle';
-        } else {
-            setStatus(langIsEn() ? 'Replica Agent is already running…' : '复刻 Agent 正在运行中…');
-            return;
-        }
-    }
     const loopCtx = opts.loopContext !== undefined ? opts.loopContext : loopContext;
     const {background, characters} = replicaAgentRoleImages(node, loopCtx);
     if(!background?.url){
@@ -10088,7 +10735,6 @@ async function runReplicaAgent(nodeId, opts={}){
         return;
     }
     if(!opts.cascade){
-        node.running = true;
         node.runStatus = 'running';
         node.runError = '';
         refreshNodes([nodeId]);
@@ -10135,12 +10781,19 @@ async function runReplicaAgent(nodeId, opts={}){
         refreshRunNodes(node, out);
         scheduleSave();
         await saveCanvas();
-        const status = await pollReplicaAgentTask(data.task_id);
-        if(status !== 'completed') throw new Error(node.runError || (langIsEn() ? 'Replica Agent failed' : '复刻 Agent 失败'));
-        node.runStatus = 'done';
-        node.runError = '';
+        if(opts.cascade){
+            const status = await pollReplicaAgentTask(data.task_id);
+            if(status !== 'completed') throw new Error(node.runError || (langIsEn() ? 'Replica Agent failed' : '复刻 Agent 失败'));
+            node.runStatus = 'done';
+            node.runError = '';
+        } else {
+            syncAppendableNodeRunState(node);
+            void pollReplicaAgentTask(data.task_id);
+        }
     } catch(err) {
         if(!opts.cascade){
+            syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
+        } else {
             node.runStatus = 'failed';
             node.runError = err.message || String(err);
         }
@@ -10149,8 +10802,10 @@ async function runReplicaAgent(nodeId, opts={}){
         if(opts.cascade) throw err;
         alert(err.message || (langIsEn() ? 'Replica Agent failed' : '复刻 Agent 失败'));
     } finally {
-        if(!opts.cascade) node.running = false;
-        refreshRunNodes(node, out);
+        if(opts.cascade){
+            node.running = false;
+            refreshRunNodes(node, out);
+        }
         setStatus('Ready');
     }
 }
@@ -10339,9 +10994,14 @@ function renderGeneratorBody(node){
     const imageProviderModels = providerImageModels(node.apiProvider);
     if(!imageProviderModels.length) node.model = '';
     else if(!imageProviderModels.includes(resolveImageModel(node.model))) node.model = imageProviderModels[0] || '';
+    const perItemRefs = perItemGroupImageRefs(ordered, null);
+    const perItemHint = perItemRefs?.length >= 2
+        ? `<div class="image-batch-per-item-hint text-[10px] text-amber-400/90 mb-2">${escapeHtml(trf('canvas.imageBatchPerItemHint', {n: perItemRefs.length}))}</div>`
+        : '';
     wrap.innerHTML = `
         <div class="prompt-list mb-3"></div>
         <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">${tr('canvas.images')}</div>
+        ${perItemHint}
         <div class="input-list"></div>
         <div class="gen-settings">
             <div class="gen-settings-row gen-provider-row">
@@ -10447,7 +11107,10 @@ function renderGeneratorBody(node){
             </div>
         </div>
         <div class="gen-run-row">
-            ${hasUpstreamLoop(node.id) ? '' : `<button class="gen-btn ${node.running ? 'running' : ''}" ${node.running || isNodeDisabled(node) ? 'disabled' : ''}><i data-lucide="zap" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tr('canvas.apiGenerate')}</button>`}
+            ${hasUpstreamLoop(node.id) ? '' : (() => {
+                const genBtn = agentPendingRunState(node.id, tr('canvas.apiGenerate'), tr('canvas.generating'));
+                return `<button class="gen-btn ${genBtn.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''}><i data-lucide="zap" class="w-4 h-4"></i>${escapeHtml(genBtn.label)}</button>`;
+            })()}
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
@@ -10878,7 +11541,10 @@ function renderVideoBody(node){
             </div>
         </div>
         <div class="gen-run-row">
-            ${hasUpstreamLoop(node.id) ? '' : `<button class="gen-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="clapperboard" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tr('canvas.videoGenerate')}</button>`}
+            ${hasUpstreamLoop(node.id) ? '' : (() => {
+                const videoBtn = agentPendingRunState(node.id, tr('canvas.videoGenerate'), tr('canvas.generating'));
+                return `<button class="gen-btn ${videoBtn.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''}><i data-lucide="clapperboard" class="w-4 h-4"></i>${escapeHtml(videoBtn.label)}</button>`;
+            })()}
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
@@ -11129,7 +11795,10 @@ function renderComfyBody(node){
         <div class="comfy-controls">
             <div class="gen-settings comfy-settings"></div>
             <div class="gen-run-row">
-                <button class="comfy-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="zap" class="w-4 h-4"></i>${node.running ? tr('canvas.comfyRunning') : tr('canvas.comfyRun')}</button>
+                ${(() => {
+                    const comfyBtn = agentPendingRunState(node.id, tr('canvas.comfyRun'), tr('canvas.comfyRunning'));
+                    return `<button class="comfy-run ${comfyBtn.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''}><i data-lucide="zap" class="w-4 h-4"></i>${escapeHtml(comfyBtn.label)}</button>`;
+                })()}
                 ${cascadeBtnHtml(node)}
             </div>
             ${retryBarHtml(node)}
@@ -11638,7 +12307,10 @@ function renderRhBody(node){
         </div>
         <div class="rh-param-list"></div>
         <div class="gen-run-row">
-            <button class="gen-btn rh-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="workflow" class="w-4 h-4"></i>${node.running ? tr('canvas.rhRunning') : tr('canvas.rhRun')}</button>
+            ${(() => {
+                const rhBtn = agentPendingRunState(node.id, tr('canvas.rhRun'), tr('canvas.rhRunning'));
+                return `<button class="gen-btn rh-run ${rhBtn.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''}><i data-lucide="workflow" class="w-4 h-4"></i>${escapeHtml(rhBtn.label)}</button>`;
+            })()}
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
@@ -11918,7 +12590,7 @@ async function rhBuildNodeInfoList(node, media){
 }
 async function runRhNode(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || (node.running && !opts.cascade)) return;
+    if(!node || isNodeDisabled(node)) return;
     ensureRhNodeSelection(node);
     const mode = rhCurrentKind(node);
     node.rhRandomValues = {};
@@ -11940,8 +12612,9 @@ async function runRhNode(nodeId, opts={}){
     const run = runSnapshot(node, media.prompt || 'RunningHub', media.refs);
     run.taskLabel = 'RunningHub';
     if(out) out._pending = [...(out._pending || []), makePending(pendingId, run)];
-    if(!opts.cascade) node.running = true;
+    syncAppendableNodeRunState(node);
     refreshRunNodes(node, out);
+    const execute = async () => {
     try {
         const nodeInfoList = await rhBuildNodeInfoList(node, media);
         const workflowExtras = mode === 'workflow' ? await rhBuildWorkflowRequestExtras(node, media, nodeInfoList) : {};
@@ -11983,23 +12656,21 @@ async function runRhNode(nodeId, opts={}){
         appendOutputImages(out, outputs, media.refs[0], [meta]);
         mergeGeneratedOutputs(node, outputs, Boolean(opts.cascade));
         addGenerationLog({run, outputs, runMs:meta.runMs || 0});
-        node.runStatus = 'done';
-        node.runError = '';
+        syncAgentRunStatusAfterTask(node, {completed:agentPendingCount(node.id) === 0});
         refreshRunNodes(node, out);
         scheduleSave();
     } catch(err) {
         const meta = collectRunMeta(out, pendingId);
         addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:err.message || String(err)});
         if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
-        node.runStatus = 'failed';
-        node.runError = err.message || String(err);
+        syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
         refreshRunNodes(node, out);
         if(opts.cascade) throw err;
         alert(err.message || tr('canvas.rhFailed'));
-    } finally {
-        node.running = false;
-        refreshRunNodes(node, out);
     }
+    };
+    if(opts.cascade) await execute();
+    else void execute();
 }
 function renderComfySettings(container, node){
     const mode = node.mode || 'text';
@@ -12336,6 +13007,7 @@ function generatorSources(gen, ctx=loopContext){
         }
         if(n.type === 'llm' && (n.mode || 'node') === 'node' && n.outputText) return {id:n.id, type:'llm', label:(n.outputText || 'LLM').slice(0, 32), refs:[], prompt:n.outputText || ''};
         if(n.type === 'videoReverse' && n.outputText) return {id:n.id, type:'videoReverse', label:(n.outputText || '视频反推').slice(0, 32), refs:[], prompt:n.outputText || ''};
+        if(n.type === 'slotsLoopVideoAgent' && n.outputText) return {id:n.id, type:'slotsLoopVideoAgent', label:(n.outputText || 'Slots 循环视频').slice(0, 32), refs:[], prompt:n.outputText || ''};
         return null;
     }).flat().filter(Boolean);
 }
@@ -12401,6 +13073,7 @@ function refreshGeneratorInputViews(){
                 .filter(src => src.refs?.length);
             renderImageInputList(el.querySelector('.batch-poster-input-list'), gen, imageInputs, langIsEn() ? 'Connect a reference poster image' : '请连接参考海报图');
             bindReplicaAgentSizeControls(el.querySelector('.batch-poster-agent-body'), gen, batchPosterAgentPosterRef(gen)?.url || '');
+            void prefetchBatchPosterTitleCopyForNode(gen);
             return;
         }
         if(gen.type === 'nineGridAgent'){
@@ -12441,6 +13114,17 @@ function refreshLoopImageInputViews(){
         const hint = el.querySelector('.loop-image-hint');
         if(hint) hint.textContent = loopImageOutputHint(loop, {index:Math.max(1, Number(loop.loopStart) || 1)});
     });
+}
+const PER_ITEM_GROUP_IMAGE_TYPES = new Set(['batch-image', 'group-image']);
+
+function perItemGroupImageRefs(sources, loopCtx){
+    if(loopCtx) return null;
+    const imageSources = (sources || []).filter(s => s.refs?.length);
+    if(imageSources.length < 2) return null;
+    if(!imageSources.every(s => PER_ITEM_GROUP_IMAGE_TYPES.has(s.type))) return null;
+    const groupIds = new Set(imageSources.map(s => s.groupId).filter(Boolean));
+    if(groupIds.size !== 1) return null;
+    return imageSources.map(s => s.refs[0]).filter(ref => ref?.url);
 }
 async function buildGeneratorTaskPayload(gen, prompt, refs){
     const rawPrompt = prompt || 'Edit the reference images.';
@@ -12486,46 +13170,138 @@ async function buildGeneratorTaskPayload(gen, prompt, refs){
     }
     return payload;
 }
+async function runGeneratorSingle(gen, prompt, refs, opts={}){
+    const count = Math.max(1, Math.min(8, Number(gen.count || 1)));
+    const out = outputForNode(gen, 460);
+    const run = runSnapshot(gen, prompt || 'Edit the reference images.', refs);
+    const payload = await buildGeneratorTaskPayload(gen, prompt || 'Edit the reference images.', refs);
+    const taskInfos = await Promise.all(Array.from({length:count}, () => createCanvasImageTask(payload)));
+    const pendingIds = taskInfos.map(() => uid('p'));
+    if(out) out._pending = [
+        ...(out._pending || []),
+        ...taskInfos.map((task, index) => makePending(pendingIds[index], run, {
+            canvasTaskId:task.task_id,
+            canvasTaskType:'online-image',
+            appendGenerated:Boolean(opts.appendGenerated)
+        }))
+    ];
+    refreshRunNodes(gen, out);
+    scheduleSave();
+    await saveCanvas();
+    const pollAll = () => Promise.all(taskInfos.map(task => pollCanvasImageTask(task.task_id)));
+    if(opts.cascade){
+        const statuses = await pollAll();
+        if(statuses.includes('failed')) throw new Error(gen.runError || tr('canvas.generationFailed'));
+    } else {
+        syncAppendableNodeRunState(gen);
+        void pollAll();
+    }
+    return out;
+}
+async function runGeneratorBatchParallel(gen, prompt, perItemRefs, opts={}){
+    const out = outputForNode(gen, 460);
+    const promptText = prompt || 'Edit the reference images.';
+    const count = Math.max(1, Math.min(8, Number(gen.count || 1)));
+    const jobs = perItemRefs.flatMap(ref => Array.from({length:count}, () => imageRefsOnly([ref])));
+    const totalJobs = jobs.length;
+    if(opts.cascade){
+        gen.running = true;
+        gen.generatedOutputs = [];
+    }
+    gen._batchProgress = `0/${totalJobs}`;
+    refreshRunNodes(gen, out);
+    const submitted = await Promise.all(jobs.map(async refs => {
+        const run = runSnapshot(gen, promptText, refs);
+        const payload = await buildGeneratorTaskPayload(gen, promptText, refs);
+        const taskInfo = await createCanvasImageTask(payload);
+        return {run, taskInfo, pendingId:uid('p')};
+    }));
+    if(out) out._pending = [
+        ...(out._pending || []),
+        ...submitted.map(item => makePending(item.pendingId, item.run, {
+            canvasTaskId:item.taskInfo.task_id,
+            canvasTaskType:'online-image',
+            appendGenerated:true
+        }))
+    ];
+    refreshRunNodes(gen, out);
+    scheduleSave();
+    await saveCanvas();
+    let done = 0;
+    const pollAll = async () => {
+        const statuses = await Promise.all(submitted.map(item => pollCanvasImageTask(item.taskInfo.task_id).then(status => {
+            done += 1;
+            if(opts.cascade) gen._batchProgress = `${done}/${totalJobs}`;
+            refreshRunNodes(gen, out);
+            return status;
+        })));
+        if(statuses.includes('failed')) throw new Error(gen.runError || tr('canvas.generationFailed'));
+    };
+    if(opts.cascade) await pollAll();
+    else {
+        syncAppendableNodeRunState(gen);
+        void pollAll().finally(() => {
+            delete gen._batchProgress;
+            syncAppendableNodeRunState(gen);
+            refreshRunNodes(gen, out);
+        });
+    }
+    return out;
+}
 async function runGenerator(genId, opts={}){
     const gen = nodes.find(n => n.id === genId);
-    if(!gen || isNodeDisabled(gen) || (gen.running && !opts.cascade)) return;
+    if(!gen || isNodeDisabled(gen)) return;
     const loopCtx = opts.loopContext !== undefined ? opts.loopContext : loopContext;
     const sources = orderedSources(gen, generatorSources(gen, loopCtx));
     const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
     const refs = imageRefsOnly(sources.flatMap(s => s.refs || []));
     if(!prompt && !refs.length){ alert(tr('canvas.needPromptOrImage')); return; }
     if(isYouchuanRhModel(gen.model) && !prompt){ alert(tr('canvas.youchuanNeedPrompt')); return; }
-    const count = Math.max(1, Math.min(8, Number(gen.count || 1)));
-    let out = outputForNode(gen, 460);
-    const run = runSnapshot(gen, prompt || 'Edit the reference images.', refs);
-    const payload = await buildGeneratorTaskPayload(gen, prompt || 'Edit the reference images.', refs);
-    let pendingIds = [];
-    if(!opts.cascade){ gen.running = true; }
-    try {
-        const taskInfos = await Promise.all(Array.from({length:count}, () => createCanvasImageTask(payload)));
-        pendingIds = taskInfos.map(() => uid('p'));
-        if(out) out._pending = [
-            ...(out._pending || []),
-            ...taskInfos.map((task, index) => makePending(pendingIds[index], run, {
-                canvasTaskId:task.task_id,
-                canvasTaskType:'online-image',
-                appendGenerated:Boolean(opts.cascade)
-            }))
-        ];
-        refreshRunNodes(gen, out);
-        scheduleSave();
-        await saveCanvas();
-        const statuses = await Promise.all(taskInfos.map(task => pollCanvasImageTask(task.task_id)));
-        if(statuses.includes('failed')) throw new Error(gen.runError || tr('canvas.generationFailed'));
-    } catch(err) {
-        const remainingIds = pendingIds.filter(id => pendingById(out, id));
-        if(remainingIds.length){
-            const metas = collectRunMetas(out, remainingIds);
-            addGenerationLog({run, outputs:[], runMs:Math.max(...metas.map(m => m.runMs || 0), 0), error:err.message || String(err)});
-            if(out) out._pending = (out._pending||[]).filter(p => !remainingIds.includes(p.id));
+    const perItemRefs = perItemGroupImageRefs(sources, loopCtx);
+    if(perItemRefs?.length >= 2){
+        let out = outputForNode(gen, 460);
+        try {
+            out = await runGeneratorBatchParallel(gen, prompt, perItemRefs, opts);
+            if(opts.cascade){
+                gen.runStatus = 'done';
+                gen.runError = '';
+            }
+        } catch(err) {
+            const errText = humanizeCanvasGenerationError(err.message || String(err));
+            gen.runStatus = 'failed';
+            gen.runError = errText;
+            gen.running = false;
+            delete gen._batchProgress;
+            refreshRunNodes(gen, out);
+            scheduleSave();
+            if(opts.cascade) throw new Error(errText);
+            showErrorModal(`${errText}\n\n${tr('canvas.runFailedOutputUnchanged')}`, tr('canvas.apiFailed'));
+            return;
+        } finally {
+            if(opts.cascade){
+                gen.running = false;
+                delete gen._batchProgress;
+                refreshRunNodes(gen, out);
+            }
         }
+        return;
+    }
+    let out = outputForNode(gen, 460);
+    try {
+        await runGeneratorSingle(gen, prompt || 'Edit the reference images.', refs, {
+            appendGenerated:Boolean(opts.cascade),
+            cascade:Boolean(opts.cascade)
+        });
+        if(opts.cascade){
+            gen.runStatus = 'done';
+            gen.runError = '';
+            refreshRunNodes(gen, out);
+            scheduleSave();
+        }
+    } catch(err) {
         const errText = humanizeCanvasGenerationError(err.message || String(err));
-        gen.runStatus = 'failed'; gen.runError = errText;
+        gen.runStatus = 'failed';
+        gen.runError = errText;
         gen.running = false;
         refreshRunNodes(gen, out);
         scheduleSave();
@@ -12535,7 +13311,7 @@ async function runGenerator(genId, opts={}){
 }
 async function runGeneratorLegacy(genId, opts={}){
     const gen = nodes.find(n => n.id === genId);
-    if(!gen || (gen.running && !opts.cascade)) return;
+    if(!gen || isNodeDisabled(gen)) return;
     const loopCtx = opts.loopContext !== undefined ? opts.loopContext : loopContext;
     const sources = orderedSources(gen, generatorSources(gen, loopCtx));
     const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
@@ -12546,12 +13322,9 @@ async function runGeneratorLegacy(genId, opts={}){
     const pendingIds = Array.from({length:count}, () => uid('p'));
     const run = runSnapshot(gen, prompt || 'Edit the reference images.', refs);
     if(out) out._pending = [...(out._pending||[]), ...pendingIds.map(id => makePending(id, run))];
-    if(!opts.cascade){
-        gen.running = true;
-        refreshRunNodes(gen, out);
-        setTimeout(() => { gen.running = false; refreshRunNodes(gen, out); }, 2000);
-    }
-    else refreshRunNodes(gen, out);
+    syncAppendableNodeRunState(gen);
+    refreshRunNodes(gen, out);
+    const execute = async () => {
     try {
         const rawPrompt = prompt || 'Edit the reference images.';
         const payload = {
@@ -12578,22 +13351,25 @@ async function runGeneratorLegacy(genId, opts={}){
         appendOutputImages(out, images, refs[0], metas);
         mergeGeneratedOutputs(gen, images, Boolean(opts.cascade));
         addGenerationLog({run, outputs:images, runMs:Math.max(...metas.map(m => m.runMs || 0), 0)});
-        gen.runStatus = 'done'; gen.runError = '';
+        syncAgentRunStatusAfterTask(gen, {completed:agentPendingCount(gen.id) === 0});
         refreshRunNodes(gen, out);
         scheduleSave();
     } catch(err) {
         const metas = collectRunMetas(out, pendingIds);
         addGenerationLog({run, outputs:[], runMs:Math.max(...metas.map(m => m.runMs || 0), 0), error:err.message || String(err)});
         if(out) out._pending = (out._pending||[]).filter(p => !pendingIds.includes(p.id));
-        gen.runStatus = 'failed'; gen.runError = err.message || String(err);
+        syncAgentRunStatusAfterTask(gen, {failed:agentPendingCount(gen.id) === 0, error:err.message || String(err)});
         refreshRunNodes(gen, out);
         if(opts.cascade) throw err;
         showErrorModal(err.message || tr('canvas.generationFailed'), tr('canvas.apiFailed'));
     }
+    };
+    if(opts.cascade) await execute();
+    else void execute();
 }
 async function runVideoNode(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || (node.running && !opts.cascade)) return;
+    if(!node || isNodeDisabled(node)) return;
     const loopCtx = opts.loopContext !== undefined ? opts.loopContext : loopContext;
     const sources = orderedSources(node, generatorSources(node, loopCtx));
     const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
@@ -12607,8 +13383,9 @@ async function runVideoNode(nodeId, opts={}){
     const pendingId = uid('p');
     const run = runSnapshot(node, prompt, refs);
     if(out) out._pending = [...(out._pending || []), makePending(pendingId, run)];
-    if(!opts.cascade){ node.running = true; refreshRunNodes(node, out); }
-    else refreshRunNodes(node, out);
+    syncAppendableNodeRunState(node);
+    refreshRunNodes(node, out);
+    const execute = async () => {
     try {
         const result = await apiFetch('/api/canvas-video', {
             method:'POST',
@@ -12640,21 +13417,21 @@ async function runVideoNode(nodeId, opts={}){
         appendOutputImages(out, outputUrls, refs[0], [{...meta, kind:'video'}]);
         mergeGeneratedOutputs(node, outputUrls, Boolean(opts.cascade));
         addGenerationLog({run, outputs:outputUrls, runMs:meta.runMs || 0});
-        node.runStatus = 'done'; node.runError = '';
+        syncAgentRunStatusAfterTask(node, {completed:agentPendingCount(node.id) === 0});
         refreshRunNodes(node, out);
         scheduleSave();
     } catch(err) {
         const meta = collectRunMeta(out, pendingId);
         addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:err.message || String(err)});
         if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
-        node.runStatus = 'failed'; node.runError = err.message || String(err);
+        syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
         refreshRunNodes(node, out);
         if(opts.cascade) throw err;
         alert(err.message || tr('canvas.videoFailed'));
-    } finally {
-        node.running = false;
-        refreshRunNodes(node, out);
     }
+    };
+    if(opts.cascade) await execute();
+    else void execute();
 }
 async function uploadCanvasUrlToComfy(url){
     const blob = await fetch(url).then(r => {
@@ -13015,7 +13792,10 @@ function renderLTXDirectorBody(node){
         <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">${tr('canvas.ltxLinkedImages')} · ${imageInputs.length}</div>
         <div class="input-list mt-1"></div>
         <div class="gen-run-row">
-            <button class="comfy-run ltx-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="film" class="w-4 h-4"></i>${node.running ? tr('canvas.ltxRunning') : tr('canvas.ltxRun')}</button>
+            ${(() => {
+                const ltxBtn = agentPendingRunState(node.id, tr('canvas.ltxRun'), tr('canvas.ltxRunning'));
+                return `<button class="comfy-run ltx-run ${ltxBtn.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''}><i data-lucide="film" class="w-4 h-4"></i>${escapeHtml(ltxBtn.label)}</button>`;
+            })()}
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
@@ -13063,9 +13843,8 @@ function renderLTXDirectorBody(node){
 }
 async function runLTXDirectorNode(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || node.type !== 'ltxDirector') return;
+    if(!node || node.type !== 'ltxDirector' || isNodeDisabled(node)) return;
     clearStuckGeneratorRunning(node);
-    if(node.running && !opts.cascade) return;
     ltxFlushTimelineToNode(node);
     const loopCtx = opts.loopContext !== undefined ? opts.loopContext : loopContext;
     const sources = orderedSources(node, generatorSources(node, loopCtx));
@@ -13093,13 +13872,10 @@ async function runLTXDirectorNode(nodeId, opts={}){
     const run = runSnapshot(node, globalPrompt || segments.map(s => s.prompt).join(' | '), refs);
     run.taskLabel = tr('canvas.ltxDirector');
     if(out) out._pending = [...(out._pending || []), makePending(pendingId, run)];
-    if(!opts.cascade){
-        node.running = true;
-        refreshRunNodes(node, out);
-        setStatus(tr('canvas.ltxRunning'));
-    } else {
-        refreshRunNodes(node, out);
-    }
+    syncAppendableNodeRunState(node);
+    if(!opts.cascade) setStatus(tr('canvas.ltxRunning'));
+    refreshRunNodes(node, out);
+    const execute = async () => {
     try {
         const directorInputs = await ltxDirectorBuildTimelinePayload(node, globalPrompt);
         const params = {
@@ -13129,29 +13905,25 @@ async function runLTXDirectorNode(nodeId, opts={}){
         appendOutputImages(out, outputs, refs[0], [meta]);
         mergeGeneratedOutputs(node, outputs, Boolean(opts.cascade));
         addGenerationLog({run, outputs, runMs:meta.runMs || 0});
-        node.runStatus = 'done';
-        node.runError = '';
+        syncAgentRunStatusAfterTask(node, {completed:agentPendingCount(node.id) === 0});
         refreshRunNodes(node, out);
         scheduleSave();
     } catch(err) {
         const meta = collectRunMeta(out, pendingId);
         if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
         addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:err.message || String(err)});
-        node.runStatus = 'failed';
-        node.runError = err.message || String(err);
+        syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
         refreshRunNodes(node, out);
         if(opts.cascade) throw err;
         showErrorModal(err.message || tr('canvas.ltxFailed'), tr('canvas.ltxFailed'));
-    } finally {
-        if(!opts.cascade){
-            node.running = false;
-            refreshRunNodes(node, out);
-        }
     }
+    };
+    if(opts.cascade) await execute();
+    else void execute();
 }
 async function runComfyNode(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || (node.running && !opts.cascade)) return;
+    if(!node || isNodeDisabled(node)) return;
     const loopCtx = opts.loopContext !== undefined ? opts.loopContext : loopContext;
     const sources = orderedSources(node, generatorSources(node, loopCtx));
     const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
@@ -13171,12 +13943,9 @@ async function runComfyNode(nodeId, opts={}){
     const run = runSnapshot(node, prompt, refs);
     run.taskLabel = comfyRunLabel(node);
     if(out) out._pending = [...(out._pending||[]), makePending(pendingId, run)];
-    if(!opts.cascade){
-        node.running = true;
-        refreshRunNodes(node, out);
-        setTimeout(() => { node.running = false; refreshRunNodes(node, out); }, 2000);
-    }
-    else refreshRunNodes(node, out);
+    syncAppendableNodeRunState(node);
+    refreshRunNodes(node, out);
+    const execute = async () => {
     try {
         let images = [];
         if(mode === 'text'){
@@ -13306,18 +14075,21 @@ async function runComfyNode(nodeId, opts={}){
         appendOutputImages(out, images, refs[0], [meta]);
         mergeGeneratedOutputs(node, images, Boolean(opts.cascade));
         addGenerationLog({run, outputs:images, runMs:meta.runMs || 0});
-        node.runStatus = 'done'; node.runError = '';
+        syncAgentRunStatusAfterTask(node, {completed:agentPendingCount(node.id) === 0});
         refreshRunNodes(node, out);
         scheduleSave();
     } catch(err) {
         const meta = collectRunMeta(out, pendingId);
         addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:err.message || String(err)});
         if(out) out._pending = (out._pending||[]).filter(p => p.id !== pendingId);
-        node.runStatus = 'failed'; node.runError = err.message || String(err);
+        syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
         refreshRunNodes(node, out);
         if(opts.cascade) throw err;
         alert(err.message || actionFailed('canvas.comfyGenerate'));
     }
+    };
+    if(opts.cascade) await execute();
+    else void execute();
 }
 async function callCanvasLLM(node, message, messages=[], mediaOpts={}){
     const llmProv = resolveChatProviderId(node.llmProvider || 'comfly');
@@ -13535,7 +14307,7 @@ function computeConnectedWorkflowOrder(anchorId){
 }
 async function runCanvasGenerate(nodeId){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || isNodeDisabled(node) || node.running || cascadeRunningIds.has(nodeId)) return;
+    if(!node || isNodeDisabled(node) || cascadeRunningIds.has(nodeId)) return;
     const order = computeConnectedWorkflowOrder(nodeId);
     if(order.length > 1){
         cascadeRunningIds.add(nodeId);
@@ -14134,6 +14906,35 @@ function agentPendingCount(nodeId){
         return sum + (out._pending || []).filter(p => p.run?.node?.id === nodeId).length;
     }, 0);
 }
+function clearAgentOutputPending(nodeId){
+    if(!nodeId) return;
+    nodes.filter(n => n.type === 'output').forEach(out => {
+        out._pending = (out._pending || []).filter(p => p.run?.node?.id !== nodeId);
+    });
+}
+function agentPendingRunState(nodeId, defaultLabel, activeLabel){
+    const node = nodes.find(n => n.id === nodeId);
+    const pendingN = agentPendingCount(nodeId);
+    const batch = node?._batchProgress ? String(node._batchProgress) : '';
+    const runningCls = pendingN > 0 || Boolean(node?.running) ? 'running' : '';
+    let label = defaultLabel;
+    if(batch){
+        label = langIsEn() ? `Generating ${batch}…` : `生成中 ${batch}…`;
+    } else if(pendingN > 0){
+        const base = activeLabel || (langIsEn() ? 'Generating' : '生成中');
+        label = langIsEn() ? `${base} (${pendingN})…` : `${base} (${pendingN})…`;
+    } else if(node?.running){
+        label = activeLabel || (langIsEn() ? 'Generating…' : '生成中…');
+    }
+    return {runningCls, label, pendingN};
+}
+function syncAppendableNodeRunState(node){
+    if(!node) return;
+    syncAgentRunStatusAfterTask(node, {});
+}
+function reconcileBatchPosterAgentRunState(node){
+    syncBatchPosterNodeRunState(node);
+}
 function syncAgentRunStatusAfterTask(gen, {completed=false, failed=false, error=''}={}){
     if(!gen) return;
     const pending = agentPendingCount(gen.id);
@@ -14401,9 +15202,13 @@ function completeCanvasImageTask(taskId, result){
     const gen = nodes.find(n => n.id === meta.run?.node?.id);
     if(gen){
         mergeGeneratedOutputs(gen, images, Boolean(pending.appendGenerated));
-        gen.runStatus = 'done';
-        gen.runError = '';
-        gen.running = false;
+        const stillPending = agentPendingCount(gen.id);
+        gen.running = stillPending > 0;
+        if(stillPending > 0) gen.runStatus = 'running';
+        else {
+            gen.runStatus = 'done';
+            gen.runError = '';
+        }
     }
     addGenerationLog({run:meta.run, outputs:images, runMs:meta.runMs || 0});
     refreshRunNodes(gen, out);
@@ -15285,7 +16090,7 @@ function nodeBounds(ids){
     const y2 = Math.max(...rects.map(r => r.y + r.h));
     return {x:x1, y:y1, w:x2 - x1, h:y2 - y1};
 }
-const FLOW_NODE_ORDER = {image:0, prompt:1, group:2, promptGroup:2, loop:3, llm:4, generator:5, replicaAgent:5, imageRepairAgent:5, videoReverse:5, msgen:5, video:5, rh:5, comfy:5, ltxDirector:5, output:6, frameStack:6, imageBatch:6};
+const FLOW_NODE_ORDER = {image:0, prompt:1, group:2, promptGroup:2, loop:3, llm:4, generator:5, replicaAgent:5, imageRepairAgent:5, videoReverse:5, slotsLoopVideoAgent:5, msgen:5, video:5, rh:5, comfy:5, ltxDirector:5, output:6, frameStack:6, imageBatch:6};
 function moveNodeWithChildren(node, newX, newY){
     if(!node) return;
     const dx = newX - Number(node.x || 0);
@@ -15992,6 +16797,11 @@ function canConnect(fromId, toId){
         if(['image','group','output','frameStack','imageBatch'].includes(from.type)) return true;
         return CANVAS_MEDIA_OUTPUT_TYPES.includes(from.type);
     }
+    if(to.type === 'slotsLoopVideoAgent'){
+        if(['prompt','promptGroup','loop','llm'].includes(from.type)) return true;
+        if(['image','group','output','frameStack','imageBatch'].includes(from.type)) return true;
+        return CANVAS_MEDIA_OUTPUT_TYPES.includes(from.type);
+    }
     if(to.type === 'videoReverse') return ['image','prompt'].includes(from.type);
     if(to.type === 'frameStack'){
         if(from.type === 'image'){
@@ -16011,6 +16821,7 @@ function canConnect(fromId, toId){
     if(from.type === 'replicaAgent') return to.type === 'output';
     if(from.type === 'batchPosterAgent') return to.type === 'output';
     if(from.type === 'nineGridAgent') return to.type === 'output' || to.type === 'imageBatch';
+    if(from.type === 'slotsLoopVideoAgent') return to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm';
     if(from.type === 'videoReverse') return CANVAS_GENERATOR_TYPES.includes(to.type) || to.type === 'llm' || to.type === 'replicaAgent';
     if(CANVAS_GENERATOR_TYPES.includes(from.type)){
         if(to.type === 'output') return true;
@@ -17266,7 +18077,7 @@ async function mountInfiniteCanvasEngineInner(root) {
 
 function exposeCanvasGlobals() {
   const map = {
-    addImageNode, addPromptNode, addLoopNode, addLLMNode, addGeneratorNode, addReplicaAgentNode, addImageRepairAgentNode, addBatchPosterAgentNode, addNineGridAgentNode, addVideoReverseNode, addMsGenNode, addImageBatchNode, runReplicaAgentFromButton, runImageRepairAgentFromButton, runBatchPosterFromButton, runNineGridFromButton,
+    addImageNode, addPromptNode, addLoopNode, addLLMNode, addGeneratorNode, addReplicaAgentNode, addImageRepairAgentNode, addBatchPosterAgentNode, addNineGridAgentNode, addSlotsLoopVideoAgentNode, addVideoReverseNode, addMsGenNode, addImageBatchNode, runReplicaAgentFromButton, runImageRepairAgentFromButton, runBatchPosterFromButton, runNineGridFromButton, runSlotsLoopVideoFromButton,
     addVideoNode, addRhNode, addComfyNode, addLTXDirectorNode, addOutputNode, addPromptGroupNode, groupSelectedImages, createImageBatchFromSelection, createPromptGroupFromSelection, organizeSelectedNodes,
     toggleQuickToolbar, openCanvasLog, closeCanvasLog, closeOutputLightbox, menuAdd, closeImageEditor,
     undoEditDrawing, redoEditDrawing, clearEditDrawing, setBrushTool, setImageEditMode, setCropAspectLock,

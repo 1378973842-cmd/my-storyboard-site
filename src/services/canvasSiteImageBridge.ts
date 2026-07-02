@@ -2,6 +2,7 @@ import type { Express, Request, Response, RequestHandler } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { augmentImagePromptWithReferenceCostumeLock } from "../lib/nineGrid/nineGridCore.js";
 import {
+  getNineGridG2Path,
   getStoryboardImageEnv,
   isMidjourneyV81Model,
   isNiji7Model,
@@ -45,6 +46,8 @@ export type CanvasOnlineImagePayload = {
     sw?: number;
     sv?: number;
   };
+  /** 九宫格 Agent 生图任务：gpt-image-2 走官方渠道 */
+  nine_grid_agent?: boolean;
 };
 
 type CanvasImageTask = {
@@ -97,6 +100,7 @@ function canvasResolutionToImageSize(res?: string): "1K" | "2K" | "4K" {
 
 function canvasRatioToAspectRatio(payload: CanvasOnlineImagePayload): string {
   const key = String(payload.canvas_ratio || "square").trim();
+  if (/^\d+:\d+$/.test(key)) return key;
   if (key === "custom" && payload.canvas_custom_ratio) {
     const raw = String(payload.canvas_custom_ratio).trim();
     if (raw.includes(":")) return raw;
@@ -126,6 +130,40 @@ function canvasRatioToAspectRatio(payload: CanvasOnlineImagePayload): string {
     }
   }
   return CANVAS_RATIO_TO_ASPECT[key] || "1:1";
+}
+
+function gcdInt(a: number, b: number): number {
+  a = Math.abs(Math.round(a));
+  b = Math.abs(Math.round(b));
+  while (b) {
+    const t = b;
+    b = a % b;
+    a = t;
+  }
+  return a || 1;
+}
+
+function aspectRatioFromWxH(size: unknown): string | null {
+  const m = /^(\d+)\s*x\s*(\d+)$/i.exec(String(size || "").trim());
+  if (!m) return null;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  if (w <= 0 || h <= 0) return null;
+  const g = gcdInt(w, h);
+  return `${Math.round(w / g)}:${Math.round(h / g)}`;
+}
+
+/** gpt-image-2：优先用画布已算好的 WxH 推导比例，避免 resolution 档位覆盖 aspectRatio */
+function gpt2AspectRatioFromPayload(payload: CanvasOnlineImagePayload): string {
+  const fromWxH = aspectRatioFromWxH(payload.size);
+  if (fromWxH) return nearestG2AspectRatio(fromWxH);
+  return nearestG2AspectRatio(canvasRatioToAspectRatio(payload));
+}
+
+function gpt2ImageSizeFromPayload(payload: CanvasOnlineImagePayload): string {
+  const explicit = String(payload.size || "").trim();
+  if (/^\d+\s*x\s*\d+$/i.test(explicit)) return explicit;
+  return canvasResolutionToImageSize(payload.canvas_resolution);
 }
 
 function nearestG2AspectRatio(ratio: string): string {
@@ -166,8 +204,12 @@ export function mapCanvasToEditorRequest(
     : String(payload.prompt || "").trim() || "Edit the reference images.";
   const model = String(payload.model || "").trim();
   const images = refItems.map((r) => absoluteUrl(req, r.url)).filter(Boolean);
-  const image_size = canvasResolutionToImageSize(payload.canvas_resolution);
-  const aspect_ratio = canvasRatioToAspectRatio(payload);
+  const aspect_ratio = isGptImage2(model)
+    ? gpt2AspectRatioFromPayload(payload)
+    : canvasRatioToAspectRatio(payload);
+  const image_size = isGptImage2(model)
+    ? gpt2ImageSizeFromPayload(payload)
+    : canvasResolutionToImageSize(payload.canvas_resolution);
 
   if (isGptImage2(model)) {
     return {
@@ -177,7 +219,7 @@ export function mapCanvasToEditorRequest(
         images,
         model: "gpt-image-2",
         image_size,
-        aspect_ratio: nearestG2AspectRatio(aspect_ratio),
+        aspect_ratio,
       },
     };
   }
@@ -244,7 +286,9 @@ async function executeCanvasGeneration(
     ? augmentImagePromptWithReferenceCostumeLock(prompt, refItems)
     : prompt;
   const image_size = canvasResolutionToImageSize(payload.canvas_resolution);
-  const aspect_ratio = canvasRatioToAspectRatio(payload);
+  const aspect_ratio = isGptImage2(model)
+    ? gpt2AspectRatioFromPayload(payload)
+    : canvasRatioToAspectRatio(payload);
   const rhEnv = getStoryboardImageEnv();
 
   if (isNiji7Model(model)) {
@@ -306,14 +350,25 @@ async function executeCanvasGeneration(
     let upstreamUrl: string;
     if (rhEnv) {
       if (isGptImage2(model)) {
-        console.log("[canvas-image/runninghub-g2]", { resolution: image_size, aspect_ratio: nearestG2AspectRatio(aspect_ratio), quality: payload.quality, images: imageUrls.length });
+        const g2Path = payload.nine_grid_agent ? getNineGridG2Path() : undefined;
+        console.log("[canvas-image/runninghub-g2]", {
+          resolution: image_size,
+          aspect_ratio,
+          size: payload.size,
+          canvas_ratio: payload.canvas_ratio,
+          quality: payload.quality,
+          images: imageUrls.length,
+          nine_grid_agent: Boolean(payload.nine_grid_agent),
+          g2_path: g2Path || rhEnv.gptPath,
+        });
         upstreamUrl = await runStoryboardRunningHubG2Job({
           prompt: enrichedPrompt,
           images: imageUrls,
-          image_size,
-          aspect_ratio: nearestG2AspectRatio(aspect_ratio),
+          image_size: gpt2ImageSizeFromPayload(payload),
+          aspect_ratio,
           quality: payload.quality,
           projectRoot: deps.projectRoot,
+          pathOverride: g2Path,
         });
       } else {
         console.log("[canvas-image/runninghub]", { resolution: image_size, aspect_ratio, images: imageUrls.length });
@@ -337,6 +392,11 @@ async function executeCanvasGeneration(
       if (!upstreamUrl) throw new Error("接口未返回图片 URL");
       return { images: [upstreamUrl], url: upstreamUrl };
     }
+    console.log("[canvas-image] persist upstream", {
+      model,
+      nine_grid_agent: Boolean(payload.nine_grid_agent),
+      url: upstreamUrl.slice(0, 160),
+    });
     const localUrl = await deps.persistImage(upstreamUrl, { userId: req.authUser?.id });
     return { images: [localUrl], url: localUrl };
   }
