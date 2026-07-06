@@ -32,7 +32,11 @@ function seedCanvasRootMarkers(node: HTMLDivElement) {
   }
 }
 
-type Props = { rootRef: Ref<HTMLDivElement> };
+type Props = {
+  rootRef: Ref<HTMLDivElement>;
+  materialLibraryOpen?: boolean;
+  onMaterialLibraryOpenChange?: (open: boolean) => void;
+};
 
 type AgentFlyoutItem = {
   icon: string;
@@ -166,7 +170,11 @@ function ToolbarAgentFlyout() {
   );
 }
 
-export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({ rootRef }: Props) {
+export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
+  rootRef,
+  materialLibraryOpen = false,
+  onMaterialLibraryOpenChange,
+}: Props) {
   const mergedRef = useCallback(
     (node: HTMLDivElement | null) => {
       assignRootRef(rootRef, node);
@@ -176,7 +184,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({ rootRef }
   );
 
   return (
-    <div ref={mergedRef} className="infinite-canvas-root theme-dark">
+    <div ref={mergedRef} className={`infinite-canvas-root theme-dark${materialLibraryOpen ? ' material-library-open' : ''}`}>
       {/* #shell 禁止写 className，由 canvasEngine 独占 no-canvas / theme-dark */}
       <div id="shell">
               <div className="topbar editor-only">
@@ -214,56 +222,136 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({ rootRef }
                                   <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["createImageBatchFromSelection"]?.()} title="图片组" aria-label="图片组" data-i18n-title="canvas.imageBatchNode"><i data-lucide="images" className="w-4 h-4"></i><span data-i18n="canvas.imageBatchNode">图片组</span></button>
                                   <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["createPromptGroupFromSelection"]?.()} title="提示词组" aria-label="提示词组" data-i18n-title="canvas.promptGroupNode"><i data-lucide="layers" className="w-4 h-4"></i><span data-i18n="canvas.promptGroupNode">提示词组</span></button>
                               </div>
+                              <span className="toolbar-dock-sep" aria-hidden="true" />
+                              <div className="toolbar-group">
+                                  <button
+                                    type="button"
+                                    className={`tool-btn tool-btn-ghost tool-btn-icon-only${materialLibraryOpen ? ' is-active' : ''}`}
+                                    title="素材库"
+                                    aria-label="素材库"
+                                    aria-pressed={materialLibraryOpen}
+                                    onClick={() => onMaterialLibraryOpenChange?.(!materialLibraryOpen)}
+                                  >
+                                      <i data-lucide="library" className="w-4 h-4"></i>
+                                      <span data-i18n="canvas.materialLibrary">素材库</span>
+                                  </button>
+                              </div>
                           </div>
                       </div>
                   </div>
               </div>
       
               <div id="canvasGate" className="canvas-gate">
-                  <div className="gate-panel-ambient" aria-hidden="true" />
                   <div className="gate-panel">
-                      <div className="gate-head">
-                          <div className="gate-head-text">
-                              <button id="gateBackBtn" className="gate-back-link" type="button"><i data-lucide="arrow-left" className="w-3.5 h-3.5"></i><span data-i18n="canvas.backToList">返回画布列表</span></button>
-                              <div className="gate-title-row">
-                                  <div id="gateTitleText" className="gate-title">选择画布</div>
-                                  <span id="gateCountPill" className="gate-count-pill">0</span>
-                              </div>
-                              <div id="gateSubtitle" className="gate-subtitle" hidden></div>
+                      <div className="gate-head gate-head-trash">
+                          <button id="gateBackBtn" className="gate-back-link" type="button"><i data-lucide="arrow-left" className="w-3.5 h-3.5"></i><span data-i18n="canvas.backToList">返回画布列表</span></button>
+                          <div id="gateSubtitle" className="gate-subtitle" hidden></div>
+                      </div>
+
+                      <div className="gate-topbar">
+                          <div className="gate-scope-tabs" role="tablist" aria-label="画布范围">
+                              <button type="button" className="gate-scope-tab is-active" data-gate-scope="personal" role="tab" aria-selected="true">个人</button>
+                              <button type="button" className="gate-scope-tab" data-gate-scope="team" role="tab" aria-selected="false" disabled title="即将上线">团队项目</button>
                           </div>
-                          <div className="gate-head-actions">
-                              <button id="gateRefreshBtn" className="gate-icon-btn" type="button" title="刷新列表" aria-label="刷新列表" data-i18n-title="canvas.refresh">
+                          <div id="gateToolbar" className="gate-toolbar">
+                              <label className="gate-toolbar-search">
+                                  <i data-lucide="search" className="w-3.5 h-3.5"></i>
+                                  <input id="gateSearchInput" type="search" placeholder="搜索" autoComplete="off" />
+                              </label>
+                              <div className="gate-toolbar-filter-wrap">
+                                  <button id="gateFilterBtn" type="button" className="gate-toolbar-filter">
+                                      <span id="gateFilterLabel">显示全部</span>
+                                      <i data-lucide="chevron-down" className="w-3.5 h-3.5"></i>
+                                  </button>
+                                  <div id="gateFilterMenu" className="gate-filter-menu" hidden role="menu">
+                                      <div className="gate-filter-section">
+                                          <div className="gate-filter-section-label">筛选</div>
+                                          <button type="button" role="menuitemradio" className="is-active" data-gate-filter-type="all" aria-checked="true">
+                                              <span>显示全部</span>
+                                              <i data-lucide="check" className="gate-filter-check w-3.5 h-3.5" aria-hidden="true" />
+                                          </button>
+                                          <button type="button" role="menuitemradio" data-gate-filter-type="folders" aria-checked="false">
+                                              <span>仅文件夹</span>
+                                              <i data-lucide="check" className="gate-filter-check w-3.5 h-3.5" aria-hidden="true" />
+                                          </button>
+                                          <button type="button" role="menuitemradio" data-gate-filter-type="projects" aria-checked="false">
+                                              <span>仅项目</span>
+                                              <i data-lucide="check" className="gate-filter-check w-3.5 h-3.5" aria-hidden="true" />
+                                          </button>
+                                      </div>
+                                      <div className="gate-filter-divider" aria-hidden="true" />
+                                      <div className="gate-filter-section">
+                                          <div className="gate-filter-section-label">排序方式</div>
+                                          <button type="button" role="menuitemradio" className="is-active" data-gate-sort-by="updated" aria-checked="true">
+                                              <span>按最近修改</span>
+                                              <i data-lucide="check" className="gate-filter-check w-3.5 h-3.5" aria-hidden="true" />
+                                          </button>
+                                          <button type="button" role="menuitemradio" data-gate-sort-by="created" aria-checked="false">
+                                              <span>按创建日期</span>
+                                              <i data-lucide="check" className="gate-filter-check w-3.5 h-3.5" aria-hidden="true" />
+                                          </button>
+                                      </div>
+                                      <div className="gate-filter-divider" aria-hidden="true" />
+                                      <div className="gate-filter-section">
+                                          <div className="gate-filter-section-label">顺序</div>
+                                          <button type="button" role="menuitemradio" className="is-active" data-gate-sort-order="desc" aria-checked="true">
+                                              <span>最新优先</span>
+                                              <i data-lucide="check" className="gate-filter-check w-3.5 h-3.5" aria-hidden="true" />
+                                          </button>
+                                          <button type="button" role="menuitemradio" data-gate-sort-order="asc" aria-checked="false">
+                                              <span>最早优先</span>
+                                              <i data-lucide="check" className="gate-filter-check w-3.5 h-3.5" aria-hidden="true" />
+                                          </button>
+                                      </div>
+                                  </div>
+                              </div>
+                              <div className="gate-toolbar-view" role="group" aria-label="视图切换">
+                                  <button id="gateViewGridBtn" type="button" className="gate-toolbar-view-btn is-active" aria-pressed="true" title="网格视图" aria-label="网格视图">
+                                      <i data-lucide="layout-grid" className="w-3.5 h-3.5"></i>
+                                  </button>
+                                  <button id="gateViewListBtn" type="button" className="gate-toolbar-view-btn" aria-pressed="false" title="列表视图" aria-label="列表视图">
+                                      <i data-lucide="list" className="w-3.5 h-3.5"></i>
+                                  </button>
+                              </div>
+                              <button id="gateCreateCollectionBtn" className="gate-toolbar-icon-btn" type="button" title="新建合集" aria-label="新建合集">
+                                  <i data-lucide="folder-plus" className="w-4 h-4"></i>
+                              </button>
+                              <button id="gateCreateBtn" className="gate-toolbar-create-btn" type="button">
+                                  <i data-lucide="plus" className="w-4 h-4"></i>
+                                  <span>新建项目</span>
+                              </button>
+                              <button id="gateRefreshBtn" className="gate-toolbar-icon-btn gate-toolbar-ghost" type="button" title="刷新列表" aria-label="刷新列表" data-i18n-title="canvas.refresh" hidden>
                                   <i data-lucide="refresh-cw" className="w-4 h-4"></i>
                               </button>
-                              <button id="gateTrashBtn" className="gate-icon-btn gate-trash-entry" type="button" title="打开回收站" aria-label="打开回收站" data-i18n-title="canvas.openTrash">
+                              <button id="gateTrashBtn" className="gate-toolbar-icon-btn gate-toolbar-ghost gate-trash-entry" type="button" title="打开回收站" aria-label="打开回收站" data-i18n-title="canvas.openTrash" hidden>
                                   <i data-lucide="trash-2" className="w-4 h-4"></i>
                                   <span id="gateTrashCount" className="gate-trash-badge">0</span>
                               </button>
-                              <button id="gateCreateCollectionBtn" className="gate-icon-btn" type="button" title="新建合集" aria-label="新建合集">
-                                  <i data-lucide="folder-plus" className="w-4 h-4"></i>
-                              </button>
-                              <button id="gateCreateBtn" className="primary-btn" type="button"><i data-lucide="plus" className="w-4 h-4"></i><span data-i18n="canvas.newCanvas">新建画布</span></button>
-                              {/* 智能画布尚未接入本站，由 canvasEngine.refreshGateViewControls 保持 hidden */}
                               <button id="gateCreateSmartBtn" className="smart-create-btn" type="button" hidden><i data-lucide="sparkles" className="w-4 h-4"></i><span data-i18n="canvas.newSmartCanvas">新建智能画布</span></button>
                           </div>
                       </div>
-                      <div id="gateStatus" className="gate-status" data-i18n="canvas.loadingCanvases">正在加载画布列表...</div>
-                      <div className="gate-create-row">
-                          <input id="gateTitleInput" className="gate-name-input" type="text" maxLength={80} placeholder="新画布名称（可留空使用默认）" data-i18n-placeholder="canvas.newCanvasPlaceholder" />
-                          <button id="gateConfirmBtn" className="create-confirm" type="button" title="确定" aria-label="确定" data-i18n-title="common.confirm"><i data-lucide="check" className="w-4 h-4"></i></button>
-                          <button id="gateCancelBtn" className="create-cancel" type="button" title="取消" aria-label="取消" data-i18n-title="common.cancel"><i data-lucide="x" className="w-4 h-4"></i></button>
+
+                      <div id="gateStatus" className="gate-status" data-i18n="canvas.loadingCanvases" hidden>正在加载画布列表...</div>
+                      <div className="gate-create-row" hidden aria-hidden="true">
+                          <input id="gateTitleInput" className="gate-name-input" type="text" maxLength={80} placeholder="新画布名称（可留空使用默认）" data-i18n-placeholder="canvas.newCanvasPlaceholder" tabIndex={-1} />
+                          <button id="gateConfirmBtn" className="create-confirm" type="button" hidden tabIndex={-1} aria-hidden="true"><i data-lucide="check" className="w-4 h-4"></i></button>
+                          <button id="gateCancelBtn" className="create-cancel" type="button" hidden tabIndex={-1} aria-hidden="true"><i data-lucide="x" className="w-4 h-4"></i></button>
                       </div>
                       <div className="trash-note"><i data-lucide="info" className="w-3.5 h-3.5 inline-block align-text-bottom mr-1"></i><span data-i18n="canvas.trashNote">回收站中的画布会在 30 天后自动清理。</span></div>
                       <div id="gateLibraryRoot" className="gate-library">
-                          <div id="gateCollectionsRoot" className="gate-collections" />
+                          <div id="gateCollectionsRoot" className="gate-collections" hidden aria-hidden="true"></div>
                           <div id="gateUncategorizedSection" className="gate-canvas-section gate-uncategorized-section">
-                              <div className="gate-section-head">
-                                  <div className="gate-section-title-row">
-                                      <div className="gate-section-title">未分类</div>
-                                      <span id="gateUncategorizedCount" className="gate-count-pill">0</span>
+                              <div id="gateBoardShell" className="gate-board-shell">
+                                  <div id="gateListTableHead" className="gate-list-table-head" hidden aria-hidden="true">
+                                      <span className="gate-list-col gate-list-col-preview">预览</span>
+                                      <span className="gate-list-col gate-list-col-name">名称</span>
+                                      <span className="gate-list-col gate-list-col-type">类型</span>
+                                      <span className="gate-list-col gate-list-col-content">内容</span>
+                                      <span className="gate-list-col gate-list-col-created">创建时间</span>
+                                      <span className="gate-list-col gate-list-col-updated">最近更新</span>
                                   </div>
+                                  <div id="gateCanvasList" className="gate-list gate-board-grid"></div>
                               </div>
-                              <div id="gateCanvasList" className="gate-list"></div>
                           </div>
                       </div>
                   </div>

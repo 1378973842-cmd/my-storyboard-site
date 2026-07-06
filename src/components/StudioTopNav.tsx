@@ -1,18 +1,25 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
   Camera,
   Clapperboard,
   Grid3x3,
+  Home,
   ImageIcon,
   LogOut,
+  Pencil,
   Workflow,
   type LucideIcon,
 } from 'lucide-react';
 import { useShellNavigation } from '../shell/ShellNavigation';
 import { logoutSession } from '../lib/authSession';
 import { useAuthStore } from '../stores/authStore';
+import {
+  isInfiniteCanvasEditorOpen,
+  returnToCanvasManager,
+  updateCurrentCanvasTitle,
+} from '../lib/infiniteCanvas/canvasEngine.js';
 import { StudioBackgroundRevealControl } from './StudioBackgroundRevealControl';
 import { cn } from '../lib/utils';
 
@@ -36,9 +43,15 @@ type StudioTopNavProps = {
   hideFeatureNav?: boolean;
   /** 次级页：顶栏显示返回与标题 */
   subPage?: 'my-favorites' | 'gallery' | 'admin-users';
-  /** 画布编辑页：在品牌右侧挂载返回/标题条 */
-  showCanvasTopbarSlot?: boolean;
+  /** 画布页：Logo 下拉导航 */
+  showCanvasBrandMenu?: boolean;
 };
+
+const CANVAS_BRAND_MENU = [
+  { id: 'home', label: '返回主页', icon: Home },
+  { id: 'gate', label: '返回选择画布', icon: ArrowLeft },
+  { id: 'rename', label: '重命名', icon: Pencil },
+] as const;
 
 const SUB_PAGE_TITLES: Record<NonNullable<StudioTopNavProps['subPage']>, string> = {
   'my-favorites': '我的收藏',
@@ -46,8 +59,212 @@ const SUB_PAGE_TITLES: Record<NonNullable<StudioTopNavProps['subPage']>, string>
   'admin-users': '用户管理',
 };
 
-/** 画布引擎 topbar 挂载点（与 InfiniteCanvas 内 portal 对应） */
-export const CANVAS_TOPBAR_SLOT_ID = 'canvas-topbar-slot';
+function CanvasHeaderCluster({
+  onHome,
+  heroTone,
+  className,
+}: {
+  onHome: () => void;
+  heroTone?: boolean;
+  className?: string;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [meta, setMeta] = useState<{ title: string; time: string } | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const syncMeta = useCallback(() => {
+    if (!isInfiniteCanvasEditorOpen()) {
+      setMeta(null);
+      setEditing(false);
+      return;
+    }
+    const titleEl = document.getElementById('currentCanvasTitle');
+    const timeEl = document.getElementById('currentCanvasTime');
+    if (!titleEl || !timeEl) {
+      setMeta(null);
+      return;
+    }
+    setMeta(prev => {
+      const next = {
+        title: titleEl.textContent?.trim() || '未命名画布',
+        time: timeEl.textContent?.trim() || '--',
+      };
+      if (prev?.title === next.title && prev?.time === next.time) return prev;
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const syncEditor = () => setEditorOpen(isInfiniteCanvasEditorOpen());
+    syncEditor();
+    syncMeta();
+    const obs = new MutationObserver(() => {
+      syncEditor();
+      syncMeta();
+    });
+    obs.observe(document.body, {
+      attributes: true,
+      attributeFilter: ['data-infinite-canvas-editor', 'data-canvas-open'],
+    });
+    const titleEl = document.getElementById('currentCanvasTitle');
+    const timeEl = document.getElementById('currentCanvasTime');
+    if (titleEl) obs.observe(titleEl, { childList: true, characterData: true, subtree: true });
+    if (timeEl) obs.observe(timeEl, { childList: true, characterData: true, subtree: true });
+    window.addEventListener('canvas-board-bg-change', syncMeta);
+    return () => {
+      obs.disconnect();
+      window.removeEventListener('canvas-board-bg-change', syncMeta);
+    };
+  }, [syncMeta]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (menuRef.current?.contains(target) || btnRef.current?.contains(target)) return;
+      setMenuOpen(false);
+    };
+    document.addEventListener('click', onDoc);
+    return () => document.removeEventListener('click', onDoc);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!editing) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [editing]);
+
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+
+  const startRename = useCallback(() => {
+    closeMenu();
+    if (!meta) return;
+    setDraft(meta.title);
+    setEditing(true);
+  }, [closeMenu, meta]);
+
+  const cancelRename = useCallback(() => {
+    setEditing(false);
+    setDraft(meta?.title || '');
+  }, [meta?.title]);
+
+  const commitRename = useCallback(async () => {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === meta?.title) {
+      cancelRename();
+      return;
+    }
+    setEditing(false);
+    await updateCurrentCanvasTitle(trimmed);
+    syncMeta();
+  }, [cancelRename, draft, meta?.title, syncMeta]);
+
+  const runAction = useCallback(async (id: (typeof CANVAS_BRAND_MENU)[number]['id']) => {
+    if (id === 'rename') {
+      startRename();
+      return;
+    }
+    closeMenu();
+    if (id === 'home') {
+      onHome();
+      return;
+    }
+    if (id === 'gate') {
+      await returnToCanvasManager();
+    }
+  }, [closeMenu, onHome, startRename]);
+
+  const items = CANVAS_BRAND_MENU.filter(item => item.id === 'home' || editorOpen);
+
+  return (
+    <div className={cn('studio-canvas-header-cluster', className)}>
+      <div className="studio-canvas-header-row">
+        <button
+          ref={btnRef}
+          type="button"
+          onClick={e => {
+            e.stopPropagation();
+            setMenuOpen(prev => !prev);
+          }}
+          className="studio-canvas-header-logo group flex shrink-0 min-w-0 cursor-pointer"
+          aria-label="LHZ's Studio 导航"
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+        >
+          <span
+            className={cn(
+              'cover-nav-brand transition-colors duration-150',
+              heroTone ? 'cover-nav-brand-hero' : 'text-on-surface',
+              menuOpen && 'text-[#ffb866]',
+            )}
+          >
+            LHZ&apos;s Studio
+          </span>
+        </button>
+
+        {meta ? (
+          <div
+            className={cn('studio-canvas-meta', editing && 'is-editing')}
+            aria-label={`当前画布：${meta.title}`}
+          >
+            {editing ? (
+              <input
+                ref={inputRef}
+                type="text"
+                maxLength={80}
+                value={draft}
+                className="studio-canvas-meta-input"
+                onChange={e => setDraft(e.target.value)}
+                onBlur={() => void commitRename()}
+                onKeyDown={e => {
+                  e.stopPropagation();
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void commitRename();
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelRename();
+                  }
+                }}
+                onMouseDown={e => e.stopPropagation()}
+                onClick={e => e.stopPropagation()}
+              />
+            ) : (
+              <div className="studio-canvas-meta-title">{meta.title}</div>
+            )}
+            <div className="studio-canvas-meta-time">{meta.time}</div>
+          </div>
+        ) : null}
+      </div>
+
+      {menuOpen && (
+        <div ref={menuRef} className="studio-brand-menu studio-brand-menu-below" role="menu">
+          {items.map(item => (
+            <button
+              key={item.id}
+              type="button"
+              role="menuitem"
+              className="studio-brand-menu-item"
+              onClick={e => {
+                e.stopPropagation();
+                void runAction(item.id);
+              }}
+            >
+              <item.icon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function NavBrand({
   onHome,
@@ -165,7 +382,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
   onHome,
   hideFeatureNav = false,
   subPage,
-  showCanvasTopbarSlot = false,
+  showCanvasBrandMenu = false,
 }) => {
   const {
     screen,
@@ -218,18 +435,17 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
         className,
       )}
     >
-      {showCanvasTopbarSlot ? (
-        <div
+      {showCanvasBrandMenu ? (
+        <CanvasHeaderCluster
+          onHome={handleHome}
+          heroTone={isOverlayNav}
           className={cn(
-            'pointer-events-auto z-[2] flex min-w-0 items-center gap-3',
+            'pointer-events-auto z-[2]',
             isOverlayNav
-              ? 'absolute left-6 top-5 md:left-10 md:top-7 lg:left-14 max-w-[min(560px,calc(100vw-2rem))]'
+              ? 'absolute left-3 top-3 md:left-5 md:top-3.5 max-w-[min(560px,calc(100vw-1.5rem))]'
               : 'shrink-0',
           )}
-        >
-          <NavBrand onHome={handleHome} heroTone={isOverlayNav} />
-          <div id={CANVAS_TOPBAR_SLOT_ID} className="min-w-0 flex-1" />
-        </div>
+        />
       ) : (
         <NavBrand
           onHome={handleHome}

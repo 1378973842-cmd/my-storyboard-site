@@ -216,6 +216,13 @@ let gateCollectionModalConfirmEl, gateCollectionModalCancelEl;
 let gateCollectionBrowseModalEl, gateCollectionBrowseTitleEl, gateCollectionBrowseCountEl;
 let gateCollectionBrowseListEl, gateCollectionBrowseCloseEl;
 let gateTitleInput, gateConfirmBtn, gateCancelBtn, backToManagerBtn, currentCanvasTitle, currentCanvasTime;
+let gateSearchInput, gateFilterBtn, gateFilterMenu, gateFilterLabel, gateViewGridBtn, gateViewListBtn;
+let gateBoardShell, gateListTableHead;
+let gateSearchQuery = '';
+let gateFilterType = 'all';
+let gateSortBy = 'updated';
+let gateSortOrder = 'desc';
+let gateViewMode = 'grid';
 let workflowTemplateModal, workflowTemplateList, workflowTemplateBtn;
 let outputLightbox, outputPreview, outputLightboxImg, outputCompareContainer, outputCompareResult;
 let outputCompareOriginal, outputCompareOriginalWrap, outputCompareSlider, outputResolution;
@@ -366,6 +373,14 @@ function bindDomElements(root) {
   gateCollectionBrowseCountEl = g('gateCollectionBrowseCount');
   gateCollectionBrowseListEl = g('gateCollectionBrowseList');
   gateCollectionBrowseCloseEl = g('gateCollectionBrowseClose');
+  gateSearchInput = g('gateSearchInput');
+  gateFilterBtn = g('gateFilterBtn');
+  gateFilterMenu = g('gateFilterMenu');
+  gateFilterLabel = g('gateFilterLabel');
+  gateViewGridBtn = g('gateViewGridBtn');
+  gateViewListBtn = g('gateViewListBtn');
+  gateBoardShell = g('gateBoardShell');
+  gateListTableHead = g('gateListTableHead');
   gateTitleInput = g('gateTitleInput');
   gateConfirmBtn = g('gateConfirmBtn');
   gateCancelBtn = g('gateCancelBtn');
@@ -1819,6 +1834,47 @@ function formatCanvasTime(value){
     if(Number.isNaN(date.getTime())) return '--';
     return date.toLocaleString(window.StudioI18n?.lang() === 'en' ? 'en-US' : 'zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
 }
+function formatCanvasCreatedLabel(value){
+    if(!value) return '--';
+    const raw = Number(value);
+    const time = raw < 10000000000 ? raw * 1000 : raw;
+    const date = new Date(time);
+    if(Number.isNaN(date.getTime())) return '--';
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mm = String(date.getMinutes()).padStart(2, '0');
+    return `${y}-${m}-${d} ${hh}:${mm}`;
+}
+function formatCanvasEditedLabel(value){
+    if(!value) return langIsEn() ? 'Edited --' : '编辑于 --';
+    const raw = Number(value);
+    const time = raw < 10000000000 ? raw * 1000 : raw;
+    const date = new Date(time);
+    if(Number.isNaN(date.getTime())) return langIsEn() ? 'Edited --' : '编辑于 --';
+    const diff = Date.now() - date.getTime();
+    if(diff < 0) return langIsEn() ? 'Edited just now' : '编辑于 刚刚';
+    const sec = Math.floor(diff / 1000);
+    if(langIsEn()){
+        if(sec < 60) return 'Edited just now';
+        const min = Math.floor(sec / 60);
+        if(min < 60) return `Edited ${min} min ago`;
+        const hr = Math.floor(min / 60);
+        if(hr < 24) return `Edited ${hr} hr ago`;
+        const day = Math.floor(hr / 24);
+        if(day < 30) return `Edited ${day} d ago`;
+        return `Edited ${formatCanvasTime(value)}`;
+    }
+    if(sec < 60) return '编辑于 几秒前';
+    const min = Math.floor(sec / 60);
+    if(min < 60) return `编辑于 ${min} 分钟前`;
+    const hr = Math.floor(min / 60);
+    if(hr < 24) return `编辑于 ${hr} 小时前`;
+    const day = Math.floor(hr / 24);
+    if(day < 30) return `编辑于 ${day} 天前`;
+    return `编辑于 ${formatCanvasTime(value)}`;
+}
 function setStatus(text){
     const saveEl = domGet('saveState');
     if(saveEl) saveEl.textContent = text;
@@ -1878,6 +1934,7 @@ function refreshGateViewControls(){
     // 智能画布尚未接入本站，隐藏入口避免与经典「新建画布」混用、也避免有时看见有时没有
     if(gateCreateSmartBtn) gateCreateSmartBtn.hidden = true;
     if(gateCreateCollectionBtn) gateCreateCollectionBtn.hidden = trashMode;
+    syncGateToolbarUi();
 }
 function notifySmartCanvasUnavailable(){
     const msg = langIsEn()
@@ -1934,15 +1991,16 @@ function setCreateMode(active, kind='classic'){
     if(!active && gateSubtitle) gateSubtitle.style.color = '';
     setStatus(active ? tr('canvas.enterCanvasName') : (canvases.length ? tr('canvas.chooseFirst') : tr('canvas.noCanvasCreateFirst')));
     if(active) {
-        gateTitleInput.placeholder = createCanvasKind === 'smart'
-            ? (tr('canvas.newSmartCanvasPlaceholder') || tr('canvas.newCanvasPlaceholder'))
-            : tr('canvas.newCanvasPlaceholder');
-        gateTitleInput.focus();
-        gateTitleInput.select();
-    } else {
+        if(gateTitleInput){
+            gateTitleInput.placeholder = createCanvasKind === 'smart'
+                ? (tr('canvas.newSmartCanvasPlaceholder') || tr('canvas.newCanvasPlaceholder'))
+                : tr('canvas.newCanvasPlaceholder');
+        }
+    } else if(gateTitleInput) {
         gateTitleInput.value = '';
         gateTitleInput.placeholder = tr('canvas.newCanvasPlaceholder');
     }
+    renderCanvasList();
     refreshIcons();
 }
 function screenToWorld(clientX, clientY){
@@ -2797,6 +2855,126 @@ async function setTrashMode(active){
     else await loadCanvasList(false);
     refreshIcons();
 }
+function getGateCreateTitleInput(){
+    return document.getElementById('gateCreateCardInput') || gateTitleInput;
+}
+function filterGateCanvasItems(items){
+    const q = gateSearchQuery.trim().toLowerCase();
+    if(!q) return items;
+    return items.filter(item => String(item?.title || '').toLowerCase().includes(q));
+}
+function syncGateListTableHead(){
+    if(!gateListTableHead) return;
+    const en = langIsEn();
+    const labels = en
+        ? ['Preview', 'Name', 'Type', 'Content', 'Created', 'Updated']
+        : ['预览', '名称', '类型', '内容', '创建时间', '最近更新'];
+    gateListTableHead.querySelectorAll('.gate-list-col').forEach((el, i) => {
+        if(labels[i]) el.textContent = labels[i];
+    });
+}
+function applyGateListViewClass(list){
+    if(!list) return;
+    const isList = gateViewMode === 'list';
+    list.classList.toggle('is-list-view', isList);
+    if(gateBoardShell) gateBoardShell.classList.toggle('is-list-view', isList);
+    if(gateListTableHead){
+        gateListTableHead.hidden = !isList;
+        gateListTableHead.setAttribute('aria-hidden', isList ? 'false' : 'true');
+    }
+}
+function gateFilterTypeLabel(type){
+    if(langIsEn()){
+        if(type === 'folders') return 'Folders only';
+        if(type === 'projects') return 'Projects only';
+        return 'Show all';
+    }
+    if(type === 'folders') return '仅文件夹';
+    if(type === 'projects') return '仅项目';
+    return '显示全部';
+}
+function syncGateFilterMenuUi(){
+    if(!gateFilterMenu) return;
+    gateFilterMenu.querySelectorAll('[data-gate-filter-type]').forEach(btn => {
+        const active = btn.getAttribute('data-gate-filter-type') === gateFilterType;
+        btn.classList.toggle('is-active', active);
+        btn.setAttribute('aria-checked', active ? 'true' : 'false');
+    });
+    gateFilterMenu.querySelectorAll('[data-gate-sort-by]').forEach(btn => {
+        const active = btn.getAttribute('data-gate-sort-by') === gateSortBy;
+        btn.classList.toggle('is-active', active);
+        btn.setAttribute('aria-checked', active ? 'true' : 'false');
+    });
+    gateFilterMenu.querySelectorAll('[data-gate-sort-order]').forEach(btn => {
+        const active = btn.getAttribute('data-gate-sort-order') === gateSortOrder;
+        btn.classList.toggle('is-active', active);
+        btn.setAttribute('aria-checked', active ? 'true' : 'false');
+    });
+}
+function syncGateToolbarUi(){
+    if(gateFilterLabel){
+        gateFilterLabel.textContent = trashMode ? '回收站' : gateFilterTypeLabel(gateFilterType);
+    }
+    if(gateViewGridBtn){
+        gateViewGridBtn.classList.toggle('is-active', gateViewMode === 'grid');
+        gateViewGridBtn.setAttribute('aria-pressed', gateViewMode === 'grid' ? 'true' : 'false');
+    }
+    if(gateViewListBtn){
+        gateViewListBtn.classList.toggle('is-active', gateViewMode === 'list');
+        gateViewListBtn.setAttribute('aria-pressed', gateViewMode === 'list' ? 'true' : 'false');
+    }
+    if(gateFilterMenu) gateFilterMenu.hidden = true;
+    syncGateListTableHead();
+    syncGateFilterMenuUi();
+}
+function closeGateFilterMenu(){
+    if(gateFilterMenu) gateFilterMenu.hidden = true;
+}
+function buildCreateCanvasCardElement(){
+    const el = document.createElement('div');
+    el.className = `canvas-item canvas-create-card${creatingCanvas ? ' is-creating' : ''}`;
+    el.id = 'gateCreateCard';
+    if(creatingCanvas){
+        const draft = gateTitleInput?.value || '';
+        el.innerHTML = `
+            <div class="canvas-create-card-shell is-editing">
+                <span class="canvas-create-card-plus"><i data-lucide="plus" class="w-5 h-5"></i></span>
+                <span class="canvas-create-card-label">新建项目</span>
+                <input id="gateCreateCardInput" class="canvas-create-card-input gate-name-input" type="text" maxlength="80" placeholder="${escapeAttr(tr('canvas.newCanvasPlaceholder'))}" value="${escapeAttr(draft)}" />
+                <div class="canvas-create-card-actions">
+                    <button type="button" class="canvas-create-card-submit" aria-label="${escapeAttr(tr('common.confirm'))}"><i data-lucide="check" class="w-4 h-4"></i></button>
+                    <button type="button" class="canvas-create-card-cancel" aria-label="${escapeAttr(tr('common.cancel'))}"><i data-lucide="x" class="w-4 h-4"></i></button>
+                </div>
+            </div>`;
+        const input = el.querySelector('#gateCreateCardInput');
+        const submit = el.querySelector('.canvas-create-card-submit');
+        const cancel = el.querySelector('.canvas-create-card-cancel');
+        submit?.addEventListener('click', (e) => { e.stopPropagation(); void createCanvas(); });
+        cancel?.addEventListener('click', (e) => { e.stopPropagation(); setCreateMode(false); });
+        input?.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if(e.key === 'Enter'){ e.preventDefault(); void createCanvas(); }
+            if(e.key === 'Escape'){ e.preventDefault(); setCreateMode(false); }
+        });
+        if(gateTitleInput && input) input.addEventListener('input', () => { gateTitleInput.value = input.value; });
+        requestAnimationFrame(() => { input?.focus(); input?.select(); });
+    } else {
+        el.innerHTML = `
+            <button type="button" class="canvas-create-card-shell">
+                <span class="canvas-create-card-plus"><i data-lucide="plus" class="w-5 h-5"></i></span>
+                <span class="canvas-create-card-label">新建项目</span>
+            </button>`;
+        el.querySelector('button')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setCreateMode(true);
+        });
+    }
+    return el;
+}
+function appendCreateCanvasCard(list){
+    if(trashMode || !list || gateViewMode === 'list') return;
+    list.appendChild(buildCreateCanvasCardElement());
+}
 function canvasDeleteConfirmMessage(title, mode){
     const name = escapeHtml(title || tr('canvas.untitled'));
     if(mode === 'purge') return trf('canvas.purgeConfirmNamed', { name });
@@ -2816,8 +2994,9 @@ function buildCanvasItemElement(item, { collectionId = '' } = {}){
     const isDeletePending = pendingDeleteCanvasId === item.id || pendingPurgeCanvasId === item.id;
     const previewUrl = String(item.preview_url || item.previewUrl || '').trim();
     const hasPreview = previewUrl && !isVideoUrl(previewUrl) && !isAudioUrl(previewUrl);
-    const createdLabel = formatCanvasTime(item.created_at);
-    const editedLabel = formatCanvasTime(item.updated_at || item.created_at);
+    const createdLabel = formatCanvasCreatedLabel(item.created_at);
+    const editedLabel = formatCanvasEditedLabel(item.updated_at || item.created_at);
+    const typeLabel = langIsEn() ? 'Project' : '项目';
     row.className = `canvas-item ${isSmartCanvas ? 'smart-canvas' : ''} ${canvas?.id === item.id ? 'active' : ''} ${isDeletePending ? 'is-delete-pending' : ''}`;
     row.dataset.canvasId = item.id;
     if(collectionId) row.dataset.collectionId = collectionId;
@@ -2825,17 +3004,18 @@ function buildCanvasItemElement(item, { collectionId = '' } = {}){
             <div class="canvas-open" role="button" tabindex="${trashMode ? '-1' : '0'}">
                 <div class="canvas-card-preview${hasPreview ? ' has-preview' : ''}">
                     <div class="canvas-card-preview-bg" aria-hidden="true">${hasPreview ? `<img class="canvas-card-preview-img" src="${escapeAttr(previewUrl)}" alt="" loading="lazy" draggable="false">` : ''}</div>
-                    ${!trashMode ? `<span class="canvas-card-edited-time">${editedLabel}</span>` : ''}
                     <span class="canvas-preview-mark" role="button" tabindex="0" title="${trashMode ? tr('canvas.deletedCanvas') : tr('canvas.changeIcon')}">${renderCanvasIcon(isSmartCanvas && /[^\x00-\x7F]/.test(item.icon || '') ? 'sparkles' : item.icon, 18)}</span>
                     ${isSmartCanvas ? `<span class="canvas-kind-chip">${tr('canvas.smartCanvasShort')}</span>` : ''}
                 </div>
-                <div class="canvas-card-body">
+                <div class="canvas-card-foot">
                     <div class="canvas-card-title">${escapeHtml(item.title)}</div>
-                    <div class="canvas-card-meta">
-                        <span class="canvas-card-meta-dot"></span>
-                        <div class="canvas-card-time">${trashMode ? `${tr('canvas.deletedAt')} ${formatCanvasTime(item.deleted_at)}` : createdLabel}</div>
-                    </div>
+                    <div class="canvas-card-edited">${trashMode ? `${tr('canvas.deletedAt')} ${formatCanvasTime(item.deleted_at)}` : editedLabel}</div>
                 </div>
+            </div>
+            <div class="gate-list-row-meta">
+                <span class="gate-list-cell-type">${typeLabel}</span>
+                <span class="gate-list-cell-content">—</span>
+                <span class="gate-list-cell-created">${createdLabel}</span>
             </div>
             ${trashMode ? (pendingPurgeCanvasId === item.id ? `
                 <div class="canvas-delete-confirm">
@@ -2907,18 +3087,38 @@ function buildCanvasItemElement(item, { collectionId = '' } = {}){
     if(purgeBtn) purgeBtn.onclick = e => requestPurgeCanvas(item.id, e);
     return row;
 }
+function gateEntitySortTime(entity, sortBy){
+    const field = sortBy === 'created' ? 'created_at' : 'updated_at';
+    const raw = Number(entity?.[field] || entity?.created_at || 0);
+    return raw < 10000000000 ? raw * 1000 : raw;
+}
+function sortGateEntitiesForList(list, sortBy, sortOrder){
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    return [...list].sort((a, b) => (gateEntitySortTime(a, sortBy) - gateEntitySortTime(b, sortBy)) * dir);
+}
 function renderCanvasListInto(list){
     if(!list) return;
     refreshGateViewControls();
-    const items = trashMode ? deletedCanvases : canvases;
+    applyGateListViewClass(list);
+    let items = trashMode ? deletedCanvases : canvases;
+    if(!trashMode){
+        const inCol = new Set();
+        canvasCollections.forEach(col => (col.canvas_ids || []).forEach(id => inCol.add(id)));
+        items = canvases.filter(c => !inCol.has(c.id));
+        items = sortGateEntitiesForList(items, gateSortBy, gateSortOrder);
+    }
+    items = filterGateCanvasItems(items);
     list.innerHTML = '';
+    if(!trashMode) appendCreateCanvasCard(list);
     if(!items.length){
-        const empty = document.createElement('div');
-        empty.className = 'gate-list-empty';
-        empty.innerHTML = trashMode
-            ? `<div class="gate-list-empty-icon"><i data-lucide="trash-2" class="w-6 h-6"></i></div>${tr('canvas.trashEmpty')}`
-            : `<div class="gate-list-empty-icon"><i data-lucide="layout-grid" class="w-6 h-6"></i></div>${tr('canvas.noCanvas')}<br>${tr('canvas.startWithNewCanvas')}`;
-        list.appendChild(empty);
+        if(trashMode || gateSearchQuery.trim()){
+            const empty = document.createElement('div');
+            empty.className = 'gate-list-empty gate-list-empty-compact';
+            empty.textContent = gateSearchQuery.trim()
+                ? (langIsEn() ? 'No matching canvases' : '没有匹配的项目')
+                : (trashMode ? tr('canvas.trashEmpty') : (langIsEn() ? 'No items here' : '暂无项目'));
+            list.appendChild(empty);
+        }
         refreshIcons(list);
         return;
     }
@@ -2936,6 +3136,16 @@ function bindGateCollectionsIntegration(){
         getCollections: () => canvasCollections,
         setCollections: (next) => { canvasCollections = Array.isArray(next) ? next : []; },
         loadCanvasList,
+        filterGateCanvasItems,
+        appendCreateCanvasCard,
+        applyGateListViewClass,
+        getGateFilterType: () => gateFilterType,
+        getGateSortBy: () => gateSortBy,
+        getGateSortOrder: () => gateSortOrder,
+        getGateSearchQuery: () => gateSearchQuery,
+        formatCanvasEditedLabel,
+        formatCanvasCreatedLabel,
+        langIsEn,
         renderCanvasList,
         renderCanvasListInto,
         buildCanvasItemElement,
@@ -2965,7 +3175,7 @@ async function createCanvas(){
     if(createCanvasInFlight) return;
     createCanvasInFlight = true;
     if(!creatingCanvas) setCreateMode(true, createCanvasKind);
-    const customTitle = gateTitleInput?.value?.trim?.() || '';
+    const customTitle = getGateCreateTitleInput()?.value?.trim?.() || '';
     const isSmart = createCanvasKind === 'smart';
     const titleBase = isSmart ? tr('canvas.newSmartCanvas') : tr('canvas.newCanvas');
     const title = customTitle || `${titleBase} ${new Date().toLocaleTimeString(window.StudioI18n?.lang() === 'en' ? 'en-US' : 'zh-CN', {hour:'2-digit', minute:'2-digit'})}`;
@@ -3417,6 +3627,24 @@ async function returnToCanvasManager(){
     setCreateMode(false);
     refreshOpenCollectionBrowseIfOpen();
 }
+export async function renameCurrentCanvas(){
+    if(!canvas?.id) return;
+    const current = canvas.title || tr('canvas.untitled');
+    const next = window.prompt(tr('canvas.rename'), current);
+    if(next === null) return;
+    const trimmed = String(next).trim();
+    if(!trimmed || trimmed === current) return;
+    await setCanvasTitle(canvas.id, trimmed);
+}
+export async function updateCurrentCanvasTitle(title){
+    if(!canvas?.id) return false;
+    const trimmed = String(title || '').trim();
+    if(!trimmed) return false;
+    const current = canvas.title || tr('canvas.untitled');
+    if(trimmed === current) return true;
+    await setCanvasTitle(canvas.id, trimmed);
+    return true;
+}
 function requestDeleteCanvas(id, event){
     event?.preventDefault();
     event?.stopPropagation();
@@ -3570,9 +3798,68 @@ if(!wireCanvasUiEvents._collectionsWired){
 bindClick(gateCreateBtn, () => setCreateMode(true));
 bindClick(gateCreateCollectionBtn, () => openCreateCollectionModal());
 bindClick(gateCreateSmartBtn, () => createSmartCanvas());
-bindClick(gateBackBtn, () => setTrashMode(false));
+bindClick(gateBackBtn, () => { gateFilterType = 'all'; setTrashMode(false); });
 bindClick(gateTrashBtn, () => setTrashMode(true));
 bindClick(gateRefreshBtn, () => trashMode ? loadTrashList() : loadCanvasList(false));
+if(gateSearchInput){
+    on(gateSearchInput, 'input', () => {
+        gateSearchQuery = gateSearchInput.value || '';
+        renderCanvasList();
+    });
+}
+if(gateFilterBtn && gateFilterMenu){
+    bindClick(gateFilterBtn, (e) => {
+        e.stopPropagation();
+        gateFilterMenu.hidden = !gateFilterMenu.hidden;
+        if(!gateFilterMenu.hidden){
+            syncGateFilterMenuUi();
+            refreshIcons(gateFilterMenu);
+        }
+    });
+    gateFilterMenu.querySelectorAll('[data-gate-filter-type]').forEach(btn => {
+        bindClick(btn, () => {
+            if(trashMode) setTrashMode(false);
+            gateFilterType = btn.getAttribute('data-gate-filter-type') || 'all';
+            syncGateToolbarUi();
+            renderCanvasList();
+        });
+    });
+    gateFilterMenu.querySelectorAll('[data-gate-sort-by]').forEach(btn => {
+        bindClick(btn, () => {
+            if(trashMode) setTrashMode(false);
+            gateSortBy = btn.getAttribute('data-gate-sort-by') === 'created' ? 'created' : 'updated';
+            syncGateToolbarUi();
+            renderCanvasList();
+        });
+    });
+    gateFilterMenu.querySelectorAll('[data-gate-sort-order]').forEach(btn => {
+        bindClick(btn, () => {
+            if(trashMode) setTrashMode(false);
+            gateSortOrder = btn.getAttribute('data-gate-sort-order') === 'asc' ? 'asc' : 'desc';
+            syncGateToolbarUi();
+            renderCanvasList();
+        });
+    });
+    on(document, 'click', (e) => {
+        if(gateFilterMenu.hidden) return;
+        if(gateFilterBtn.contains(e.target) || gateFilterMenu.contains(e.target)) return;
+        closeGateFilterMenu();
+    });
+}
+if(gateViewGridBtn){
+    bindClick(gateViewGridBtn, () => {
+        gateViewMode = 'grid';
+        syncGateToolbarUi();
+        renderCanvasList();
+    });
+}
+if(gateViewListBtn){
+    bindClick(gateViewListBtn, () => {
+        gateViewMode = 'list';
+        syncGateToolbarUi();
+        renderCanvasList();
+    });
+}
 bindClick(workflowTemplateBtn, () => openWorkflowTemplateModal());
 bindClick(gateConfirmBtn, () => { void createCanvas(); });
 bindClick(gateCancelBtn, () => setCreateMode(false));
@@ -4412,6 +4699,232 @@ function isImageStackNode(node){
 }
 const GROUP_DROP_SNAP_PADDING = 16;
 const GROUP_DROP_HEAD_INSET = 48;
+const GROUP_CHILD_GAP = 12;
+const GROUP_DROP_OVERLAP_RATIO = 0.3;
+const GROUP_RESIZE_HANDLE_INSET = 32;
+const GROUP_DEFAULT_W = 380;
+const GROUP_DEFAULT_H_IMAGE_BATCH = 300;
+const GROUP_DEFAULT_H_PROMPT_GROUP = 380;
+const GROUP_PANEL_HEAD_IMAGE_BATCH = 156;
+const GROUP_PANEL_HEAD_PROMPT_GROUP = 228;
+function groupPanelHeadInset(group){
+    if(!group) return GROUP_DROP_HEAD_INSET;
+    const fallback = group.type === 'imageBatch'
+        ? GROUP_PANEL_HEAD_IMAGE_BATCH
+        : group.type === 'promptGroup'
+            ? GROUP_PANEL_HEAD_PROMPT_GROUP
+            : GROUP_DROP_HEAD_INSET;
+    const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(group.id)}"]`);
+    if(!el) return fallback;
+    const headH = el.querySelector('.node-head')?.offsetHeight || 42;
+    const chrome = el.querySelector('.group-panel-chrome');
+    if(chrome){
+        const chromeH = chrome.offsetHeight || 0;
+        if(chromeH > 0) return Math.max(fallback, headH + chromeH + 8);
+    }
+    return fallback;
+}
+function isImageBatchMember(group, child){
+    if(!group || group.type !== 'imageBatch' || !child || child.type !== 'image') return false;
+    if(!Array.isArray(group.items) || !group.items.includes(child.id)) return false;
+    return isCenterInGroupRect(nodeRect(child), nodeRect(group));
+}
+function groupMemberChildren(group){
+    if(!group || !['group','imageBatch','promptGroup'].includes(group.type)) return [];
+    const childType = group.type === 'promptGroup' ? 'prompt' : 'image';
+    return (group.items || [])
+        .map(id => nodes.find(n => n.id === id))
+        .filter(n => {
+            if(!n || n.type !== childType) return false;
+            if(group.type === 'promptGroup') return isPromptGroupMember(group, n);
+            if(group.type === 'imageBatch') return isImageBatchMember(group, n);
+            return isCenterInGroupRect(nodeRect(n), nodeRect(group));
+        });
+}
+function groupUsesResizeHandleInset(group){
+    return Boolean(group && ['group','imageBatch','promptGroup'].includes(group.type));
+}
+function groupInnerRect(group){
+    const gr = nodeRect(group);
+    const pad = GROUP_DROP_SNAP_PADDING;
+    const head = groupPanelHeadInset(group);
+    const handleInset = groupUsesResizeHandleInset(group) ? GROUP_RESIZE_HANDLE_INSET : 0;
+    return {
+        x: gr.x + pad,
+        y: gr.y + head,
+        w: Math.max(48, gr.w - pad * 2 - handleInset),
+        h: Math.max(120, gr.h - head - pad - handleInset),
+        pad,
+        head,
+        handleInset,
+    };
+}
+function isPointInGroupRect(point, group){
+    if(!point || !group) return false;
+    const gr = nodeRect(group);
+    return point.x >= gr.x && point.x <= gr.x + gr.w
+        && point.y >= gr.y && point.y <= gr.y + gr.h;
+}
+function isPointInGroupInnerZone(point, group){
+    if(!point || !group) return false;
+    const inner = groupInnerRect(group);
+    return point.x >= inner.x && point.x <= inner.x + inner.w
+        && point.y >= inner.y && point.y <= inner.y + inner.h;
+}
+function isChildInGroupInnerZone(child, group){
+    if(!child || !group) return false;
+    const cr = nodeRect(child);
+    const inner = groupInnerRect(group);
+    if(cr.cx >= inner.x && cr.cx <= inner.x + inner.w && cr.cy >= inner.y && cr.cy <= inner.y + inner.h) return true;
+    const overlapX = Math.max(0, Math.min(cr.x + cr.w, inner.x + inner.w) - Math.max(cr.x, inner.x));
+    const overlapY = Math.max(0, Math.min(cr.y + cr.h, inner.y + inner.h) - Math.max(cr.y, inner.y));
+    const overlapArea = overlapX * overlapY;
+    const childArea = Math.max(1, cr.w * cr.h);
+    return overlapArea / childArea >= GROUP_DROP_OVERLAP_RATIO;
+}
+function isChildDropTargetForGroup(group, child, point=null){
+    if(!group || !child) return false;
+    if(point && isPointInGroupRect(point, group)) return true;
+    if(isCenterInGroupRect(nodeRect(child), nodeRect(group))) return true;
+    return isChildInGroupInnerZone(child, group);
+}
+function findGroupForChild(child, groupType, point=null){
+    const groups = nodes.filter(n => n.type === groupType);
+    if(!groups.length || !child) return null;
+    if(groupType === 'imageBatch' || groupType === 'promptGroup'){
+        const pickSmallest = list => list.sort((a, b) => (a.w * a.h) - (b.w * b.h))[0] || null;
+        return pickSmallest(groups.filter(g => isChildDropTargetForGroup(g, child, point)));
+    }
+    const cr = nodeRect(child);
+    return groups.find(g => isCenterInGroupRect(cr, nodeRect(g))) || null;
+}
+function layoutMetricsForChild(child){
+    const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(child.id)}"]`);
+    const size = defaultNodeSize(child.type);
+    const w = Math.max(1, child.w || el?.offsetWidth || size.w || 260);
+    let h = child.h || el?.offsetHeight || size.h || 0;
+    if(!h || h < 1){
+        if(child.type === 'prompt') h = 204;
+        else if(child.type === 'image') h = 148;
+        else h = 160;
+    }
+    return { w, h: Math.max(1, Math.round(h)) };
+}
+function groupItemsForLayout(group, opts={}){
+    if(!group) return [];
+    const childType = group.type === 'promptGroup' ? 'prompt' : 'image';
+    if(opts.layoutAllItems){
+        return (group.items || [])
+            .map(id => nodes.find(n => n.id === id))
+            .filter(n => n?.type === childType);
+    }
+    return groupMemberChildren(group);
+}
+function groupGridMetrics(group, children){
+    const metrics = children.map(c => layoutMetricsForChild(c));
+    if(group.type === 'promptGroup'){
+        return {
+            childW: Math.max(...metrics.map(m => m.w), 260),
+            childH: Math.max(...metrics.map(m => m.h), 180),
+        };
+    }
+    return {
+        childW: Math.max(...metrics.map(m => m.w), 180),
+        childH: Math.max(...metrics.map(m => m.h), 120),
+    };
+}
+function layoutGroupChildren(group, opts={}){
+    if(!group || !['group','imageBatch','promptGroup'].includes(group.type)) return false;
+    const children = groupItemsForLayout(group, opts);
+    if(!children.length) return false;
+    const resizeMode = opts.resizeGroup;
+    const inner = groupInnerRect(group);
+    const gap = GROUP_CHILD_GAP;
+    const minGroup = defaultNodeSize(group.type);
+    const tailInset = (inner.handleInset || 0) + inner.pad;
+    const { childW, childH } = groupGridMetrics(group, children);
+    const idealCols = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(children.length))));
+    const cols = (resizeMode === true || resizeMode === 'auto')
+        ? Math.min(children.length, idealCols)
+        : Math.max(1, Math.min(children.length, Math.floor((inner.w + gap) / (childW + gap))));
+    const rows = Math.ceil(children.length / cols);
+    const gridW = cols * childW + Math.max(0, cols - 1) * gap;
+    const gridH = rows * childH + Math.max(0, rows - 1) * gap;
+    const offsetX = inner.x + Math.max(0, (inner.w - gridW) / 2);
+    const rowStartY = inner.y;
+    children.forEach((child, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        child.x = Math.round(offsetX + col * (childW + gap));
+        child.y = Math.round(rowStartY + row * (childH + gap));
+    });
+    const needW = gridW + inner.pad + tailInset;
+    const needH = gridH + inner.head + tailInset;
+    const fitH = Math.max(minGroup.h || 220, Math.round(needH));
+    if(resizeMode === true || resizeMode === 'auto'){
+        group.w = Math.max(minGroup.w || 260, Math.round(needW));
+        group.h = fitH;
+    } else if(resizeMode === false){
+        group.h = fitH;
+    }
+    if(opts.updateDom !== false){
+        children.forEach(child => {
+            const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(child.id)}"]`);
+            if(el){
+                el.style.left = `${child.x}px`;
+                el.style.top = `${child.y}px`;
+            }
+        });
+        const groupEl = nodesEl.querySelector(`.node[data-id="${CSS.escape(group.id)}"]`);
+        if(groupEl && group.w && group.h){
+            groupEl.classList.add('sized');
+            groupEl.style.width = `${group.w}px`;
+            groupEl.style.height = `${group.h}px`;
+        }
+    }
+    return true;
+}
+function organizeGroupChildren(groupId){
+    if(!ensureCanvas()) return;
+    const group = nodes.find(n => n.id === groupId);
+    if(!group || !['group','imageBatch','promptGroup'].includes(group.type)) return;
+    pushUndo();
+    layoutGroupChildren(group, { resizeGroup: false, layoutAllItems: true, updateDom: true });
+    scheduleLinkGeometryRefresh(new Set([group.id, ...(group.items || [])]));
+    if(minimapState) updateMinimapNodePositions();
+    scheduleSave();
+}
+function bindGroupTidyButton(body, group){
+    const btn = body.querySelector('.group-tidy-btn');
+    if(!btn) return;
+    btn.onmousedown = e => e.stopPropagation();
+    btn.onclick = e => {
+        e.stopPropagation();
+        organizeGroupChildren(group.id);
+    };
+}
+function reflowGroupsForMovedChildren(movedNodes, resizeGroup='auto'){
+    const groupsToLayout = new Set();
+    GROUP_MEMBERSHIP_PAIRS.forEach(({ childType, groupType }) => {
+        (movedNodes || []).filter(n => n?.type === childType).forEach(child => {
+            const containing = findGroupByCenter(child, groupType);
+            if(containing) groupsToLayout.add(containing.id);
+        });
+    });
+    nodes.filter(n => n.type === 'imageBatch' || n.type === 'promptGroup' || n.type === 'group').forEach(g => {
+        if((g.items || []).some(id => (movedNodes || []).some(m => m.id === id))) groupsToLayout.add(g.id);
+    });
+    groupsToLayout.forEach(id => {
+        const g = nodes.find(n => n.id === id);
+        if(g) layoutGroupChildren(g, { resizeGroup, layoutAllItems: true, updateDom: true });
+    });
+    if(groupsToLayout.size){
+        scheduleLinkGeometryRefresh(new Set([...groupsToLayout].flatMap(id => {
+            const g = nodes.find(n => n.id === id);
+            return g ? [g.id, ...(g.items || [])] : [id];
+        })));
+    }
+}
 function imageBatchChildImages(batch){
     return (batch?.items || []).map(id => nodes.find(n => n.id === id)).filter(n => isNodeEnabled(n) && n?.type === 'image' && n?.url && mediaKindForNode(n) === 'image');
 }
@@ -4432,11 +4945,11 @@ function createImageBatchChild(batch, url, name, index){
 }
 function addImageBatchNode(point){
     const p = point || defaultPoint(380, 0);
-    return addNode({id:uid('ibatch'), type:'imageBatch', x:p.x, y:p.y, w:300, h:220, items:[]});
+    return addNode({id:uid('ibatch'), type:'imageBatch', x:p.x, y:p.y, w:GROUP_DEFAULT_W, h:GROUP_DEFAULT_H_IMAGE_BATCH, items:[]});
 }
 function addPromptGroupNode(point){
     const p = point || defaultPoint(40, 0);
-    return addNode({id:uid('pg'), type:'promptGroup', x:p.x, y:p.y, w:300, h:220, items:[], prefixPrompt:''});
+    return addNode({id:uid('pg'), type:'promptGroup', x:p.x, y:p.y, w:GROUP_DEFAULT_W, h:GROUP_DEFAULT_H_PROMPT_GROUP, items:[], prefixPrompt:''});
 }
 function migrateImageBatchNodes(){
     let changed = false;
@@ -4483,7 +4996,9 @@ async function uploadImagesToImageBatch(batchId, files){
     pushUndo();
     const base = imageBatchChildImages(batch).length;
     uploaded.forEach((file, i) => createImageBatchChild(batch, file.url, file.name, base + i));
+    layoutGroupChildren(batch, { resizeGroup: 'auto', layoutAllItems: true, updateDom: true });
     refreshNodes([batch.id]);
+    scheduleLinkGeometryRefresh(new Set([batch.id, ...(batch.items || [])]));
     scheduleSave();
 }
 function bindImageBatchUpload(body, batch){
@@ -5263,25 +5778,13 @@ function layoutUploadedMediaNodes(created, base){
         node.y = base.y + Math.floor(i / cols) * gapY;
     });
 }
-function createGroupForUploadedNodes(created, point){
-    const targets = [...(created || [])].filter(n => n?.type === 'image');
+function createImageBatchForUploadedNodes(created, point){
+    const targets = [...(created || [])].filter(n => n?.type === 'image' && n?.url && mediaKindForNode(n) === 'image');
     if(targets.length < 2) return null;
-    render();
-    const box = nodeBounds(targets.map(n => n.id));
-    const fallback = point || defaultPoint(0, 0);
-    const group = {
-        id:uid('grp'),
-        type:'group',
-        x:Number.isFinite(box.x) ? box.x - 24 : fallback.x - 24,
-        y:Number.isFinite(box.y) ? box.y - 58 : fallback.y - 58,
-        w:Number.isFinite(box.w) ? box.w + 48 : 600,
-        h:Number.isFinite(box.h) ? box.h + 90 : 420,
-        items:targets.map(n => n.id)
-    };
-    nodes.push(group);
+    const batch = buildImageBatchFromImages(targets, point);
     selected.clear();
-    selected.add(group.id);
-    return group;
+    selected.add(batch.id);
+    return batch;
 }
 async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
     if(!ensureCanvas()) return;
@@ -5309,11 +5812,16 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
         nodes.push(node);
         created.push(node);
     });
-    if(opts.group && created.length > 1){
-        layoutUploadedMediaNodes(created, base);
-        created.group = createGroupForUploadedNodes(created, base);
+    if(opts.group){
+        const imageNodes = created.filter(n => n?.type === 'image' && n?.url && mediaKindForNode(n) === 'image');
+        if(imageNodes.length > 1){
+            created.batch = createImageBatchForUploadedNodes(created, base);
+        }
     }
     render();
+    if(created.batch?.id){
+        relayoutGroupsWithMeasuredChrome([created.batch.id], 'auto');
+    }
     scheduleSave();
     return created;
 }
@@ -5643,6 +6151,32 @@ function clearImageNodeDropState(e, highlightEl){
     dropOverlay.classList.remove('active');
 }
 async function handleImageNodeDropEvent(e, nodeId, highlightEl){
+    const batch = nodes.find(g => g.type === 'imageBatch' && (g.items || []).includes(nodeId));
+    if(batch){
+        if(isActiveOutputImageDrag(e.dataTransfer)){
+            clearImageNodeDropState(e, highlightEl);
+            const url = resolveOutputDragUrl(e.dataTransfer);
+            if(!url) return;
+            pushUndo();
+            createImageBatchChild(batch, url, outputImageName(url));
+            layoutGroupChildren(batch, { resizeGroup: 'auto', layoutAllItems: true, updateDom: true });
+            refreshNodes([batch.id]);
+            scheduleLinkGeometryRefresh(new Set([batch.id, ...(batch.items || [])]));
+            scheduleSave();
+            return;
+        }
+        const payload = await resolveImageDropPayload(e.dataTransfer);
+        clearImageNodeDropState(e, highlightEl);
+        if(payload.type === 'files' && payload.files?.length){
+            try {
+                await uploadImagesToImageBatch(batch.id, payload.files);
+            } catch(err) {
+                setStatus('Ready');
+                showErrorModal(err?.message || (langIsEn() ? 'Image import failed' : '导入图片失败'), langIsEn() ? 'Image import failed' : '导入图片失败');
+            }
+            return;
+        }
+    }
     if(isActiveOutputImageDrag(e.dataTransfer)){
         clearImageNodeDropState(e, highlightEl);
         setImageNodeFromOutput(nodeId, resolveOutputDragUrl(e.dataTransfer));
@@ -5669,19 +6203,19 @@ async function fillImageNode(nodeId, files, opts={}){
         const outgoing = connections.filter(c => c.from === source?.id).map(c => c.to);
         const incoming = connections.filter(c => c.to === source?.id).map(c => c.from);
         const created = await uploadImageGroup(imgs, point);
-        const group = created?.group;
+        const batch = created?.batch;
         if(source && created?.length > 1){
             nodes = nodes.filter(n => n.id !== source.id);
             connections = connections.filter(c => c.from !== source.id && c.to !== source.id);
-            if(group){
+            if(batch){
                 outgoing.forEach(toId => {
-                    if(canConnect(group.id, toId) && !connections.some(c => c.from === group.id && c.to === toId)){
-                        connections.push({id:uid('c'), from:group.id, to:toId});
+                    if(canConnect(batch.id, toId) && !connections.some(c => c.from === batch.id && c.to === toId)){
+                        connections.push({id:uid('c'), from:batch.id, to:toId});
                     }
                 });
                 incoming.forEach(fromId => {
-                    if(canConnect(fromId, group.id) && !connections.some(c => c.from === fromId && c.to === group.id)){
-                        connections.push({id:uid('c'), from:fromId, to:group.id});
+                    if(canConnect(fromId, batch.id) && !connections.some(c => c.from === fromId && c.to === batch.id)){
+                        connections.push({id:uid('c'), from:fromId, to:batch.id});
                     }
                 });
             }
@@ -7179,10 +7713,13 @@ function renderNode(node){
             : `<div class="prompt-group-child-empty">${tr('canvas.promptGroupDropPrompts')}</div>`;
         body.innerHTML = `
             <div class="prompt-group-body">
-                <div class="prompt-group-meta">${activeCount}/${listed.length} ${tr('canvas.promptCount')} ${tr('canvas.grouped')}${hasPrefix ? ` · ${tr('canvas.promptGroupPrefix')}` : ''}</div>
-                <div class="prompt-group-children">${childRows}</div>
-                <div class="prompt-group-prefix-label">${tr('canvas.promptGroupPrefix')}</div>
-                <textarea class="prompt-group-prefix" placeholder="${escapeAttr(tr('canvas.promptGroupPrefixPlaceholder'))}">${escapeHtml(node.prefixPrompt || '')}</textarea>
+                <div class="group-panel-chrome">
+                    <div class="prompt-group-meta">${activeCount}/${listed.length} ${tr('canvas.promptCount')} ${tr('canvas.grouped')}${hasPrefix ? ` · ${tr('canvas.promptGroupPrefix')}` : ''}</div>
+                    <button type="button" class="secondary-btn group-tidy-btn" title="${escapeAttr(tr('canvas.organizeGroupChildrenHint'))}"><i data-lucide="layout-grid" class="w-3.5 h-3.5"></i><span>${escapeHtml(tr('canvas.organizeGroupChildren'))}</span></button>
+                    <div class="prompt-group-children">${childRows}</div>
+                    <div class="prompt-group-prefix-label">${tr('canvas.promptGroupPrefix')}</div>
+                    <textarea class="prompt-group-prefix" placeholder="${escapeAttr(tr('canvas.promptGroupPrefixPlaceholder'))}">${escapeHtml(node.prefixPrompt || '')}</textarea>
+                </div>
             </div>
         `;
         body.querySelectorAll('[data-pg-toggle]').forEach(btn => {
@@ -7212,6 +7749,7 @@ function renderNode(node){
                 refreshGeneratorInputViews();
             };
         }
+        bindGroupTidyButton(body, node);
     }
     if(node.type === 'llm') body.appendChild(renderLLMBody(node));
     if(node.type === 'generator') body.appendChild(renderGeneratorBody(node));
@@ -7259,12 +7797,18 @@ function renderNode(node){
             : tr('canvas.groupEmpty');
         body.innerHTML = `
             <div class="image-batch-body">
-                <div class="image-batch-meta text-[11px] text-gray-400">${text}</div>
-                <button type="button" class="secondary-btn image-batch-upload-btn"><i data-lucide="image-plus" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Upload' : '上传图片'}</span></button>
-                <div class="image-batch-hint text-[10px] text-gray-500">${escapeHtml(tr('canvas.imageBatchConnectHint'))}</div>
+                <div class="group-panel-chrome">
+                    <div class="image-batch-meta text-[11px] text-gray-400">${text}</div>
+                    <div class="image-batch-actions">
+                        <button type="button" class="secondary-btn image-batch-upload-btn"><i data-lucide="image-plus" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Upload' : '上传图片'}</span></button>
+                        <button type="button" class="secondary-btn group-tidy-btn" title="${escapeAttr(tr('canvas.organizeGroupChildrenHint'))}"><i data-lucide="layout-grid" class="w-3.5 h-3.5"></i><span>${escapeHtml(tr('canvas.organizeGroupChildren'))}</span></button>
+                    </div>
+                    <div class="image-batch-hint text-[10px] text-gray-500">${escapeHtml(tr('canvas.imageBatchConnectHint'))}</div>
+                </div>
             </div>
         `;
         bindImageBatchUpload(body, node);
+        bindGroupTidyButton(body, node);
     }
     el.appendChild(body);
     if(node.type === 'promptGroup') bindPromptGroupOutputDrop(node, el);
@@ -7576,7 +8120,8 @@ function defaultNodeSize(type){
     if(type === 'ltxDirector') return {w:1000, h:800};
     if(type === 'output') return {w:460, h:0};
     if(type === 'frameStack') return {w:460, h:0};
-    if(type === 'imageBatch') return {w:300, h:220};
+    if(type === 'imageBatch') return {w:GROUP_DEFAULT_W, h:GROUP_DEFAULT_H_IMAGE_BATCH};
+    if(type === 'promptGroup') return {w:GROUP_DEFAULT_W, h:GROUP_DEFAULT_H_PROMPT_GROUP};
     return {w:260, h:0};
 }
 function loopCount(node){
@@ -15482,7 +16027,7 @@ function createPromptFromOutputInGroup(group, point, promptText){
     const gr = nodeRect(group);
     const pad = GROUP_DROP_SNAP_PADDING;
     const nx = Math.max(gr.x + pad, Math.min(point.x - 120, gr.x + gr.w - 260));
-    const ny = Math.max(gr.y + GROUP_DROP_HEAD_INSET, Math.min(point.y - 40, gr.y + gr.h - 140));
+    const ny = Math.max(gr.y + groupPanelHeadInset(group), Math.min(point.y - 40, gr.y + gr.h - 140));
     const child = addNode({
         id:uid('prompt'),
         type:'prompt',
@@ -15495,8 +16040,9 @@ function createPromptFromOutputInGroup(group, point, promptText){
         group.items.push(child.id);
         syncPromptGroupDownstreamLoops(group);
     }
-    snapNodeIntoGroup(child, group);
     updateGroupMembership([child]);
+    layoutGroupChildren(group, { resizeGroup: 'auto', layoutAllItems: true, updateDom: true });
+    scheduleLinkGeometryRefresh(new Set([group.id, child.id]));
     return child;
 }
 function findPromptGroupAtScreen(clientX, clientY){
@@ -16001,27 +16547,28 @@ function imageStackGeneratorSources(n){
         };
     }).filter(Boolean);
 }
-function buildImageBatchFromImages(images){
-    const box = nodeBounds(images.map(n => n.id));
-    const batch = addImageBatchNode({x:box.x - 24, y:box.y - 58});
-    batch.w = box.w + 48;
-    batch.h = box.h + 90;
+function buildImageBatchFromImages(images, anchor){
+    const p = anchor || defaultPoint(0, 0);
+    const batch = addImageBatchNode({x:p.x - 24, y:p.y - 58});
     batch.items = images.map(img => img.id);
-    images.forEach(img => {
-        img.x = batch.x + GROUP_DROP_SNAP_PADDING + (img.x - box.x);
-        img.y = batch.y + GROUP_DROP_HEAD_INSET + (img.y - box.y);
-    });
     handoffExistingInputsToGroup(batch, images);
+    layoutGroupChildren(batch, { resizeGroup: true, layoutAllItems: true, updateDom: true });
     return batch;
 }
 function buildPromptGroupFromPrompts(prompts, yOffset=0){
     const box = nodeBounds(prompts.map(n => n.id));
     const promptGroup = addPromptGroupNode({x:box.x - 24, y:box.y - 58 + yOffset});
-    promptGroup.w = box.w + 48;
-    promptGroup.h = box.h + 90;
     promptGroup.items = prompts.map(n => n.id);
     handoffExistingInputsToGroup(promptGroup, prompts);
+    layoutGroupChildren(promptGroup, { resizeGroup: true, layoutAllItems: true, updateDom: true });
     return promptGroup;
+}
+function relayoutGroupsWithMeasuredChrome(groupIds, resizeGroup='auto'){
+    (groupIds || []).forEach(id => {
+        const g = nodes.find(n => n.id === id);
+        if(!g || !['group','imageBatch','promptGroup'].includes(g.type)) return;
+        layoutGroupChildren(g, { resizeGroup, layoutAllItems: true, updateDom: true });
+    });
 }
 function finalizeGroupSelection(created){
     selected.clear();
@@ -16029,6 +16576,7 @@ function finalizeGroupSelection(created){
     syncGeneratorInputs();
     refreshGeneratorInputViews();
     render();
+    relayoutGroupsWithMeasuredChrome(created, 'auto');
     scheduleSave();
 }
 function mergeSelectedImagesToBatch(){
@@ -16520,6 +17068,7 @@ function startNodeDrag(e, node){
 function onNodeDrag(e){
     if(!dragNode) return;
     lastBoardInteractionAt = Date.now();
+    lastMouseBoard = screenToWorld(e.clientX, e.clientY);
     const dx = (e.clientX - dragNode.sx) / viewport.scale;
     const dy = (e.clientY - dragNode.sy) / viewport.scale;
     dragNode.node.x = dragNode.ox + dx;
@@ -16539,7 +17088,7 @@ function onNodeDrag(e){
         }
     });
     const movingIds = new Set([dragNode.node.id, ...(dragNode.children || []).map(c => c.node.id)]);
-    updateGroupDropHighlights([dragNode.node, ...(dragNode.children || []).map(c => c.node)]);
+    updateGroupDropHighlights([dragNode.node, ...(dragNode.children || []).map(c => c.node)], lastMouseBoard);
     scheduleLinkGeometryRefresh(movingIds);
     scheduleMinimapRender({ positionsOnly: true });
 }
@@ -16570,17 +17119,24 @@ function onNodeResize(e){
     const nextW = Math.max(Math.min(min.w, 220), resizeNode.sw + (e.clientX - resizeNode.sx) / viewport.scale);
     const nextH = Math.max(96, resizeNode.sh + (e.clientY - resizeNode.sy) / viewport.scale);
     resizeNode.node.w = Math.round(nextW);
-    resizeNode.node.h = Math.round(nextH);
+    const autoFitGroupHeight = resizeNode.node.type === 'imageBatch' || resizeNode.node.type === 'promptGroup' || resizeNode.node.type === 'group';
+    if(!autoFitGroupHeight) resizeNode.node.h = Math.round(nextH);
     const el = nodesEl.querySelector(`.node[data-id="${resizeNode.node.id}"]`);
     if(el){
         el.classList.add('sized');
         el.style.width = `${resizeNode.node.w}px`;
-        el.style.height = `${resizeNode.node.h}px`;
+        if(!autoFitGroupHeight) el.style.height = `${resizeNode.node.h}px`;
         if(resizeNode.node.type === 'output' || resizeNode.node.type === 'frameStack'){
             syncOutputNodeThumbVars(el, resizeNode.node);
         }
+        if(resizeNode.node.type === 'imageBatch' || resizeNode.node.type === 'promptGroup' || resizeNode.node.type === 'group'){
+            layoutGroupChildren(resizeNode.node, { resizeGroup: false, layoutAllItems: true, updateDom: true });
+        }
     }
-    scheduleLinkGeometryRefresh([resizeNode.node.id]);
+    const resizeChildIds = (resizeNode.node.type === 'imageBatch' || resizeNode.node.type === 'promptGroup' || resizeNode.node.type === 'group')
+        ? [resizeNode.node.id, ...(resizeNode.node.items || [])]
+        : [resizeNode.node.id];
+    scheduleLinkGeometryRefresh(new Set(resizeChildIds));
     scheduleMinimapRender({ positionsOnly: true });
 }
 function ensureLiveCanvasDom(){
@@ -16852,6 +17408,7 @@ function endDrag(event=null){
     const resizeMoved = resizeState && pointerMovedEnough(resizeState.sx, resizeState.sy, event);
     let deferredMembership = null;
     if(nodeState && nodeDragMoved){
+        if(event) lastMouseBoard = screenToWorld(event.clientX, event.clientY);
         const moved = [nodeState.node, ...(nodeState.children || []).map(c => c.node)].filter(Boolean);
         const draggedGroup = moved.some(n => n.type === 'group' || n.type === 'promptGroup' || n.type === 'imageBatch');
         if(!draggedGroup) deferredMembership = moved;
@@ -16886,7 +17443,7 @@ function endDrag(event=null){
             if(minimapState) updateMinimapNodePositions();
             else scheduleMinimapRender({ positionsOnly: true });
             if(deferredMembership){
-                const snapped = snapNodesToGroups(deferredMembership);
+                const snapped = snapNodesToGroups(deferredMembership, lastMouseBoard);
                 if(snapped){
                     scheduleLinkGeometryRefresh(new Set(deferredMembership.map(n => n.id)));
                     if(minimapState) updateMinimapNodePositions();
@@ -16946,13 +17503,12 @@ function isCenterInGroupRect(childRect, groupRect){
         && childRect.cy >= groupRect.y && childRect.cy <= groupRect.y + groupRect.h;
 }
 function findGroupByCenter(child, groupType){
-    const cr = nodeRect(child);
-    return nodes.filter(n => n.type === groupType).find(g => isCenterInGroupRect(cr, nodeRect(g))) || null;
+    return findGroupForChild(child, groupType, null);
 }
-function findContainingGroupForChild(child){
+function findContainingGroupForChild(child, point=null){
     for(const {childType, groupType} of GROUP_MEMBERSHIP_PAIRS){
         if(child.type !== childType) continue;
-        const group = findGroupByCenter(child, groupType);
+        const group = findGroupForChild(child, groupType, point);
         if(group) return group;
     }
     return null;
@@ -16963,14 +17519,14 @@ function clearGroupDropHighlights(){
     });
     groupDropHighlightIds = new Set();
 }
-function updateGroupDropHighlights(movingNodes){
+function updateGroupDropHighlights(movingNodes, point=null){
     if(movingNodes.some(n => n?.type === 'group' || n?.type === 'promptGroup' || n?.type === 'imageBatch')){
         clearGroupDropHighlights();
         return;
     }
     const nextIds = new Set();
     movingNodes.forEach(node => {
-        const group = findContainingGroupForChild(node);
+        const group = findContainingGroupForChild(node, point);
         if(group) nextIds.add(group.id);
     });
     groupDropHighlightIds.forEach(id => {
@@ -16988,16 +17544,21 @@ function updateGroupDropHighlights(movingNodes){
 function snapNodeIntoGroup(node, group){
     const cr = nodeRect(node);
     const gr = nodeRect(group);
-    if(!isCenterInGroupRect(cr, gr)) return false;
+    const inZone = (group.type === 'imageBatch' || group.type === 'promptGroup')
+        ? isChildDropTargetForGroup(group, node, null)
+        : isCenterInGroupRect(cr, gr);
+    if(!inZone) return false;
     const pad = GROUP_DROP_SNAP_PADDING;
+    const headInset = groupPanelHeadInset(group);
+    const handleInset = groupUsesResizeHandleInset(group) ? GROUP_RESIZE_HANDLE_INSET : 0;
     const minX = gr.x + pad;
-    const minY = gr.y + GROUP_DROP_HEAD_INSET;
-    const maxX = gr.x + gr.w - cr.w - pad;
-    const maxY = gr.y + gr.h - cr.h - pad;
+    const minY = gr.y + headInset;
+    const maxX = gr.x + gr.w - cr.w - pad - handleInset;
+    const maxY = gr.y + gr.h - cr.h - pad - handleInset;
     let nx = node.x;
     let ny = node.y;
     if(cr.w <= gr.w - pad * 2) nx = Math.max(minX, Math.min(maxX, node.x));
-    if(cr.h <= gr.h - GROUP_DROP_HEAD_INSET - pad) ny = Math.max(minY, Math.min(maxY, node.y));
+    if(cr.h <= gr.h - headInset - pad) ny = Math.max(minY, Math.min(maxY, node.y));
     if(nx === node.x && ny === node.y) return false;
     node.x = nx;
     node.y = ny;
@@ -17008,11 +17569,11 @@ function snapNodeIntoGroup(node, group){
     }
     return true;
 }
-function snapNodesToGroups(movingNodes){
+function snapNodesToGroups(movingNodes, point=null){
     if(movingNodes.some(n => n?.type === 'group' || n?.type === 'promptGroup' || n?.type === 'imageBatch')) return false;
     let snapped = false;
     movingNodes.forEach(node => {
-        const group = findContainingGroupForChild(node);
+        const group = findContainingGroupForChild(node, point);
         if(group && snapNodeIntoGroup(node, group)) snapped = true;
     });
     return snapped;
@@ -17052,7 +17613,7 @@ function updateGroupMembership(movedNodes){
         const children = movedNodes.filter(n => n?.type === childType);
         if(!children.length || !groups.length) return;
         children.forEach(child => {
-            const containing = findGroupByCenter(child, groupType);
+            const containing = findGroupForChild(child, groupType, lastMouseBoard);
             groups.forEach(g => {
                 if(g === containing) return;
                 const idx = (g.items || []).indexOf(child.id);
@@ -17073,12 +17634,21 @@ function updateGroupMembership(movedNodes){
         nodes.filter(n => n.type === 'promptGroup').forEach(g => {
             if(prunePromptGroupItems(g)) syncPromptGroupDownstreamLoops(g);
         });
+        reflowGroupsForMovedChildren(movedNodes, 'auto');
         syncGeneratorInputs();
         refreshGeneratorInputViews();
         syncLinkDomToConnections();
         renderSelectionHub();
-        const batchIds = nodes.filter(n => n.type === 'imageBatch').map(n => n.id);
-        if(batchIds.length) refreshNodes(batchIds);
+        const panelGroupIds = nodes.filter(n => n.type === 'imageBatch' || n.type === 'promptGroup').map(n => n.id);
+        if(panelGroupIds.length) refreshNodes(panelGroupIds);
+        relayoutGroupsWithMeasuredChrome(panelGroupIds, 'auto');
+        requestAnimationFrame(() => {
+            relayoutGroupsWithMeasuredChrome(panelGroupIds, 'auto');
+            scheduleLinkGeometryRefresh(new Set(panelGroupIds.flatMap(id => {
+                const g = nodes.find(n => n.id === id);
+                return g ? [g.id, ...(g.items || [])] : [id];
+            })));
+        });
     }
 }
 
@@ -17666,6 +18236,10 @@ on(board, 'dragover', e => {
         dropOverlay.classList.remove('active', 'output-copy-drag');
         return;
     }
+    if(e.target.closest?.('.imageBatch-node, .promptGroup-node, .group-node')){
+        dropOverlay.classList.remove('active', 'output-copy-drag');
+        return;
+    }
     if(isCanvasInputDrag(e.dataTransfer)){
         dropOverlay.classList.remove('active');
         return;
@@ -18099,6 +18673,7 @@ export function isInfiniteCanvasEditorOpen() {
 }
 
 export {
+  returnToCanvasManager,
   setImageEditMode,
   setCropAspectLock,
   setBrushTool,

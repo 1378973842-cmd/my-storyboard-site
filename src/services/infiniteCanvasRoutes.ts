@@ -30,6 +30,19 @@ import {
   saveUserWorkflowTemplate,
 } from "./canvasWorkflowTemplates.js";
 import {
+  addAssetItem,
+  addAssetItemFromBuffer,
+  createAssetCategory,
+  deleteAssetCategory,
+  deleteAssetItem,
+  duplicateAssetCategory,
+  getAssetLibrary,
+  initAssetLibraryStore,
+  moveAssetItem,
+  renameAssetCategory,
+  renameAssetItem,
+} from "./assetLibraryStore.js";
+import {
   addCanvasToCollection,
   createCanvasCollection,
   deleteCanvasCollection,
@@ -85,9 +98,10 @@ export function registerInfiniteCanvasRoutes(
   initInfiniteCanvasStore(projectRoot);
   initCanvasWorkflowTemplatesStore(projectRoot);
   initCanvasCollectionsStore(projectRoot);
+  initAssetLibraryStore(projectRoot);
   const gate = deps?.requireGate ?? requireSiteGate;
   console.log(
-    "[infinite-canvas] routes ready: /api/canvases, /api/canvas-collections, /api/canvas-workflow-templates, /api/config (login required)"
+    "[infinite-canvas] routes ready: /api/canvases, /api/canvas-collections, /api/asset-library, /api/canvas-workflow-templates, /api/config (login required)"
   );
   const uploadsDir = path.join(projectRoot, "public", "uploads", "canvas");
   mkdirSync(uploadsDir, { recursive: true });
@@ -247,6 +261,108 @@ export function registerInfiniteCanvasRoutes(
       res.json({ collection });
     } catch (err) {
       canvasError(res, err, "移出合集失败");
+    }
+  });
+
+  app.get("/api/asset-library", gate, (req, res) => {
+    try {
+      res.json({ library: getAssetLibrary(canvasAccessCtx(req)) });
+    } catch (err) {
+      canvasError(res, err, "加载素材库失败");
+    }
+  });
+
+  app.post("/api/asset-library/categories", gate, (req, res) => {
+    try {
+      const body = req.body || {};
+      res.json(createAssetCategory(String(body.name || "新建文件夹"), canvasAccessCtx(req)));
+    } catch (err) {
+      canvasError(res, err, "创建文件夹失败");
+    }
+  });
+
+  app.patch("/api/asset-library/categories/:id", gate, (req, res) => {
+    try {
+      const body = req.body || {};
+      res.json(renameAssetCategory(req.params.id, String(body.name || ""), canvasAccessCtx(req)));
+    } catch (err) {
+      canvasError(res, err, "重命名文件夹失败");
+    }
+  });
+
+  app.delete("/api/asset-library/categories/:id", gate, (req, res) => {
+    try {
+      res.json(deleteAssetCategory(req.params.id, canvasAccessCtx(req)));
+    } catch (err) {
+      canvasError(res, err, "删除文件夹失败");
+    }
+  });
+
+  app.post("/api/asset-library/categories/:id/duplicate", gate, (req, res) => {
+    try {
+      res.json(duplicateAssetCategory(req.params.id, canvasAccessCtx(req)));
+    } catch (err) {
+      canvasError(res, err, "复制文件夹失败");
+    }
+  });
+
+  app.post("/api/asset-library/items", gate, (req, res) => {
+    try {
+      const body = req.body || {};
+      res.json(
+        addAssetItem(
+          {
+            category_id: String(body.category_id || ""),
+            url: String(body.url || ""),
+            name: body.name ? String(body.name) : undefined,
+          },
+          canvasAccessCtx(req)
+        )
+      );
+    } catch (err) {
+      canvasError(res, err, "添加素材失败");
+    }
+  });
+
+  app.post("/api/asset-library/upload", gate, upload.single("file"), (req, res) => {
+    try {
+      const file = req.file;
+      if (!file?.buffer?.length) return res.status(400).json({ error: "缺少文件" });
+      const categoryId = String(req.body?.category_id || "");
+      res.json(
+        addAssetItemFromBuffer(
+          {
+            category_id: categoryId,
+            buffer: file.buffer,
+            filename: file.originalname,
+            mime: file.mimetype,
+          },
+          canvasAccessCtx(req)
+        )
+      );
+    } catch (err) {
+      canvasError(res, err, "上传素材失败");
+    }
+  });
+
+  app.patch("/api/asset-library/items/:id", gate, (req, res) => {
+    try {
+      const body = req.body || {};
+      if (body.category_id) {
+        res.json(moveAssetItem(req.params.id, String(body.category_id), canvasAccessCtx(req)));
+        return;
+      }
+      res.json(renameAssetItem(req.params.id, String(body.name || ""), canvasAccessCtx(req)));
+    } catch (err) {
+      canvasError(res, err, "更新素材失败");
+    }
+  });
+
+  app.delete("/api/asset-library/items/:id", gate, (req, res) => {
+    try {
+      res.json(deleteAssetItem(req.params.id, canvasAccessCtx(req)));
+    } catch (err) {
+      canvasError(res, err, "删除素材失败");
     }
   });
 

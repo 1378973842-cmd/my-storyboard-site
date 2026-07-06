@@ -16,6 +16,9 @@ export function resetCanvasViewportZoom(): void;
 export function refreshInfiniteCanvasLayout(): void;
 export function syncCanvasTopbarDom(): void;
 export function setCanvasBoardBackground(color: string): void;
+export function returnToCanvasManager(): Promise<void>;
+export function renameCurrentCanvas(): Promise<void>;
+export function updateCurrentCanvasTitle(title: string): Promise<boolean>;
 
 export function setImageEditMode(mode: string, userTouched?: boolean): void;
 export function setCropAspectLock(lock: string): void;

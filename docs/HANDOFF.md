@@ -1,17 +1,16 @@
 # 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  1. **画布合集（选择页分类）**（本地未 push）：按账号隔离存储于 `data/canvas-collections/{userId}.json`。
+  1. **选择画布页排布**（本次）：顶栏左「个人 / 团队项目」Tab + 右工具栏（搜索、筛选、视图、新建合集、新建项目）；统一网格顺序为 **新建项目 → 合集 → 项目**；卡片底部显示「编辑于 X 分钟前」；合集卡片叠层预览 + 毛玻璃底栏（含项目数）。
+  2. **画布合集（选择页分类）**（本地未 push）：按账号隔离存储于 `data/canvas-collections/{userId}.json`。
      - 右键画布：创建合集 / 加入已有合集 / 从合集移出
-     - 拖拽：拖到合集标题加入；拖到另一张画布上创建双画布合集
+     - 拖拽：拖到合集卡片加入；拖到另一张画布上创建双画布合集
      - 合集标题右键：重命名 / 删除（确认 UI，不删画布）
-     - 展开收起、未分类区、顶部「新建合集」按钮
      - 画布进回收站或永久删除时自动从合集中剔除
-  2. **收藏定位**（本地未 push）：收藏页右键 → 回到画布对应节点并高亮。
-  3. 生产已部署 `7c998a6`（owner 隔离 + persistOwned 修复）。
-- **验证状态**：`npx esbuild server.ts` 通过；`node init.mjs` 仍因 `ComfyTV-main/` 历史 tsc 报错失败（与本次无关）。
+  3. **收藏定位**（本地未 push）：收藏页右键 → 回到画布对应节点并高亮。
+  4. 生产已部署 `7c998a6`（owner 隔离 + persistOwned 修复）。
+- **验证状态**：`node init.mjs` 通过（lint + build）。
 - **明日焦点**：
-  1. 本地手动测合集：创建、拖拽、右键、删除合集、回收站模式
-  2. commit + push `deploy`，服务器：`git fetch && reset --hard origin/deploy && npm run build:prod && pm2 restart gemini-deploy`
-  3. 备份时纳入 `data/canvas-collections/`
+  1. 浏览器 Ctrl+F5 目视确认选择画布页与参考图一致
+  2. commit + push `deploy`
 - **Blockers**：无。

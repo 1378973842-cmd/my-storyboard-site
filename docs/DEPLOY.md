@@ -220,18 +220,87 @@ pm2 logs gemini-deploy --lines 30
 
 ## 四、日常更新（保留线上已有数据）
 
+> **2G 内存 ECS（当前 8.163.127.198）推荐流程：** 本地 build + scp 产物；**不要在服务器跑 `npm run build:prod`**（易 OOM、SSH 卡死）。  
+> **切勿 `scp -r dist`**：`dist/uploads/` 是本地开发机落盘的图片（约 8GB+），与线上 `public/uploads/` 无关，传了会极慢且污染线上。
+
+### 4.1 推荐流程（本地 build + 只传代码产物）
+
+**第 1 步 — 本地推送代码**
+
+```powershell
+cd "D:\刘恒志\代码\gemini-deploy"
+git push origin deploy
+npm run build:prod
+```
+
+**第 2 步 — 服务器拉代码（SSH）**
+
 ```bash
 cd /var/www/my-storyboard-site
 git fetch origin deploy
 git reset --hard origin/deploy
+npm ci
+npm rebuild better-sqlite3
+```
 
+**第 3 步 — 本地上传 build 产物（PowerShell，分 3 条；每条输完密码等结束）**
+
+```powershell
+cd "D:\刘恒志\代码\gemini-deploy"
+
+# 只传 JS/CSS/canvas 脚本，不传 uploads
+scp -r dist/assets dist/canvas root@8.163.127.198:/var/www/my-storyboard-site/dist/
+
+# 首页 + dist 根目录静态资源（png/glb 等）
+scp dist/index.html dist/*.png dist/*.glb root@8.163.127.198:/var/www/my-storyboard-site/dist/
+
+# 服务端 bundle
+scp -r dist-server root@8.163.127.198:/var/www/my-storyboard-site/
+```
+
+**禁止上传：**
+
+| 路径 | 原因 |
+|------|------|
+| `dist/uploads/` | 本地 AI 落盘图，与线上数据无关，体积巨大 |
+| `public/uploads/` | 线上自有上传，勿覆盖 |
+| `projects.db`、`data/` | 线上业务数据 |
+
+若误传了 `dist/uploads/`，SSH 里删除即可（不影响 `public/uploads/`）：
+
+```bash
+rm -rf /var/www/my-storyboard-site/dist/uploads
+```
+
+**第 4 步 — 服务器重启 PM2（SSH）**
+
+```bash
+cd /var/www/my-storyboard-site
+ls dist/index.html dist/assets dist/canvas dist-server/server.mjs
+pm2 restart gemini-deploy --update-env
+pm2 save
+pm2 list
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000
+```
+
+浏览器打开 http://8.163.127.198:3000 ，**Ctrl+Shift+R** 强刷。
+
+**ECS 整机重启后：** `pm2 list` 为空时改用 `pm2 start ecosystem.config.cjs --env production`（不是 `restart`），再 `pm2 save`。
+
+### 4.2 备选：在服务器 build（仅 4G+ 内存或已加 swap）
+
+```bash
+cd /var/www/my-storyboard-site
+git fetch origin deploy
+git reset --hard origin/deploy
 npm ci
 npm rebuild better-sqlite3
 npm run build:prod
-
 pm2 restart gemini-deploy --update-env
 pm2 save
 ```
+
+2G 无 swap 时见第六节「build 被 Killed / SSH 无响应」。
 
 **不要**在更新时删除 `projects.db`、`data/`、`public/uploads/`，除非故意清空线上。
 
@@ -268,13 +337,23 @@ nano /var/www/my-storyboard-site/.env
 pm2 restart gemini-deploy --update-env
 ```
 
-### `npm run build:prod` 被 Killed（2G 内存）
+### `npm run build:prod` 被 Killed / SSH 无响应（2G 内存）
+
+**现象：** 服务器 build 卡在 `transforming … three-mesh-bvh`；SSH 空白无输出、或 `Connection closed` / `banner exchange timeout`；网站 3000 超时。
+
+**原因：** 2G 内存无 swap，Vite 生产 build 占满内存，sshd 无法响应。
+
+**推荐修复（不必 VNC）：** 阿里云控制台或 App **重启实例** → 恢复 SSH 后按 **第四节 4.1** 本地 build + scp，**不要在服务器再 build**。
+
+**若必须在服务器 build：** 先加 swap 再 build：
 
 ```bash
 fallocate -l 2G /swapfile && chmod 600 /swapfile
 mkswap /swapfile && swapon /swapfile
 npm run build:prod
 ```
+
+仍建议长期改用 **4.1 本地 build + scp**。
 
 ### 启动即退出：登录配置（SESSION_SECRET / ADMIN）
 
@@ -423,9 +502,10 @@ pm2 restart gemini-deploy
 ## 八、站长备忘
 
 - 本地与线上**两套数据**，部署时不拷贝本地图片/画布。
+- **`scp -r dist` 会带上 `dist/uploads/`（本地图，8GB+）— 禁止。** 只 scp `dist/assets`、`dist/canvas`、`dist/index.html`、`dist/*.png`、`dist/*.glb`、`dist-server`（见 **4.1**）。
 - `.env` **只存在于服务器**，Git 不同步。
-- 40G 系统盘够起步；图片主要在 `public/uploads/` 增长。
-- ECS 控制台「重启实例」后若 502，执行 `pm2 start` + `pm2 save`。
+- 40G 系统盘够起步；图片主要在 **`public/uploads/`**（线上）增长，不在 `dist/uploads/`。
+- ECS 控制台「重启实例」后若 502 或 `pm2 list` 为空，执行 `pm2 start ecosystem.config.cjs --env production` + `pm2 save`。
 - `git add .` 前确认不含 `ComfyTV-main/`（`git reset ComfyTV-main`）。
 
 ---
@@ -460,10 +540,18 @@ PORT=3000
 
 ---
 
-## 十、首次上线检查清单（2026-06-26）
+## 十、日常更新检查清单（2026-07-02）
+
+- [ ] 本地 `git push origin deploy` + `npm run build:prod` 成功
+- [ ] 服务器 `git reset --hard origin/deploy` + `npm ci` + `npm rebuild better-sqlite3`
+- [ ] 本地 scp **仅** `dist/assets`、`dist/canvas`、`dist/index.html`、`dist/*.png`、`dist/*.glb`、`dist-server`（**未** scp `dist/uploads`）
+- [ ] `pm2 restart gemini-deploy --update-env`（重启后若进程为空则 `pm2 start`）+ `pm2 save`
+- [ ] `curl 127.0.0.1:3000` 返回 200；浏览器强刷可登录
+
+## 十一、首次上线检查清单（2026-06-26）
 
 - [ ] 本地 `git push origin deploy` 成功
-- [ ] 服务器 `git reset --hard origin/deploy` + `npm run build:prod`
+- [ ] 服务器 `git reset --hard origin/deploy`；build 见 **4.1**（2G 机器本地 build + scp）或 **4.2**（大内存服务器 build）
 - [ ] `scp` 本地 `.env` 到服务器；删除 `ACCESS_CODE`；设 `PORT=3000`
 - [ ] 服务器 `.env` 含 `SESSION_SECRET`（≥32 位）、`ADMIN_EMAIL`、`ADMIN_PASSWORD`（≥8 位）
 - [ ] 大陆 ECS：`APIMART_API_BASE=https://api.apib.ai` 且 `APIMART_DNS_FIX=0`

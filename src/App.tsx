@@ -651,7 +651,7 @@ export default function App() {
         variant="overlay"
         hideFeatureNav={!showCoverPage}
         subPage={subPage}
-        showCanvasTopbarSlot={showInfiniteCanvasPage && !showCoverPage}
+        showCanvasBrandMenu={showInfiniteCanvasPage && !showCoverPage}
         onHome={showInfiniteCanvasPage && !showCoverPage ? handleCanvasExitHome : undefined}
       />
       <MyFavoritesPage shellActive={showMyFavoritesPage} />

@@ -23,3 +23,5 @@ data/canvas-workflow-templates/*
 !data/canvas-workflow-templates/.gitkeep
 data/canvas-collections/*
 !data/canvas-collections/.gitkeep
+data/asset-library/*
+!data/asset-library/.gitkeep

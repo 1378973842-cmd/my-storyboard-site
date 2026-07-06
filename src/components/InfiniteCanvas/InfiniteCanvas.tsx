@@ -8,32 +8,9 @@ import {
   mountInfiniteCanvasEngine,
   refreshInfiniteCanvasLayout,
   setInfiniteCanvasShellSuspended,
-  syncCanvasTopbarDom,
 } from '../../lib/infiniteCanvas/canvasEngine.js';
-import { CANVAS_TOPBAR_SLOT_ID } from '../StudioTopNav';
 import { CanvasLeftDock } from './CanvasBoardColorPicker';
-
-function dockCanvasTopbar(root: HTMLDivElement | null): (() => void) | undefined {
-  if (!root) return undefined;
-  const slot = document.getElementById(CANVAS_TOPBAR_SLOT_ID);
-  const topbar = root.querySelector('.topbar.editor-only');
-  const shell = root.querySelector('#shell');
-  if (!(topbar instanceof HTMLElement) || !(shell instanceof HTMLElement) || !slot) return undefined;
-
-  const placeholder = document.createComment('canvas-topbar-placeholder');
-  shell.insertBefore(placeholder, topbar);
-  slot.appendChild(topbar);
-  topbar.classList.add('canvas-topbar-docked');
-  syncCanvasTopbarDom();
-
-  return () => {
-    topbar.classList.remove('canvas-topbar-docked');
-    if (placeholder.parentNode === shell) {
-      shell.insertBefore(topbar, placeholder);
-      placeholder.remove();
-    }
-  };
-}
+import { CanvasMaterialLibrary } from './CanvasMaterialLibrary';
 
 function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -102,8 +79,8 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
   shellActive?: boolean;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const [materialLibraryOpen, setMaterialLibraryOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const undockTopbarRef = useRef<(() => void) | null>(null);
   /** 避免 boot 回调闭包读到过期的 shellActive=false，把已打开的 canvas 再次挂起 */
   const shellActiveRef = useRef(shellActive);
   shellActiveRef.current = shellActive;
@@ -115,21 +92,13 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
     }
     setInfiniteCanvasShellSuspended(!active);
     if (active) {
-      syncCanvasTopbarDom();
       refreshInfiniteCanvasLayout();
     }
   }, []);
 
-  const syncTopbarDock = useCallback((root: HTMLDivElement | null) => {
-    undockTopbarRef.current?.();
-    undockTopbarRef.current = null;
-    if (root && shellActive) {
-      undockTopbarRef.current = dockCanvasTopbar(root) ?? null;
-    }
-  }, [shellActive]);
-
   useLayoutEffect(() => {
     if (!shellActive) {
+      setMaterialLibraryOpen(false);
       applyShellActiveState(false);
       return;
     }
@@ -152,14 +121,6 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
       setInfiniteCanvasShellSuspended(true);
     };
   }, []);
-
-  useLayoutEffect(() => {
-    syncTopbarDock(rootRef.current);
-    return () => {
-      undockTopbarRef.current?.();
-      undockTopbarRef.current = null;
-    };
-  }, [syncTopbarDock]);
 
   useLayoutEffect(() => {
     if (!shellActive) return;
@@ -196,7 +157,6 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
   const assignRootRef = useCallback((node: HTMLDivElement | null) => {
     rootRef.current = node;
     if (!node) {
-      syncTopbarDock(null);
       if (activeRoot && isInfiniteCanvasEngineMountedOn(activeRoot)) {
         disposeInfiniteCanvasEngine({ preserveEditor: true });
       }
@@ -210,7 +170,6 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
     }
 
     node.dataset.shellActive = shellActiveRef.current ? '1' : '0';
-    syncTopbarDock(node);
 
     void bootEngineOnRoot(node)
       .then(() => {
@@ -220,7 +179,7 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
       .catch((err) => {
         setError(err instanceof Error ? err.message : '画布初始化失败');
       });
-  }, [applyShellActiveState, syncTopbarDock]);
+  }, [applyShellActiveState]);
 
   if (error) {
     return (
@@ -232,8 +191,18 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
 
   return (
     <div className="infinite-canvas-host relative h-full w-full min-h-0 bg-transparent">
-      <InfiniteCanvasShell rootRef={assignRootRef} />
+      <InfiniteCanvasShell
+        rootRef={assignRootRef}
+        materialLibraryOpen={materialLibraryOpen}
+        onMaterialLibraryOpenChange={setMaterialLibraryOpen}
+      />
       <CanvasLeftDock active={shellActive} />
+      <CanvasMaterialLibrary
+        rootRef={rootRef}
+        open={materialLibraryOpen}
+        onOpenChange={setMaterialLibraryOpen}
+        active={shellActive}
+      />
     </div>
   );
 });

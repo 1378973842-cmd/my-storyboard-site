@@ -88,20 +88,33 @@ function isPreviewableCanvas(item) {
 }
 
 function buildCollectionPreviewHtml(items) {
-  const previews = items.filter(isPreviewableCanvas).slice(0, 4);
-  if (!previews.length) {
-    return `
-      <div class="gate-collection-preview-empty" aria-hidden="true">
-        <i data-lucide="folder" class="w-7 h-7"></i>
-      </div>`;
-  }
-  const cells = previews
-    .map(
-      (item) =>
-        `<div class="gate-collection-preview-cell"><img src="${escapeAttr(item.preview_url || item.previewUrl)}" alt="" loading="lazy" draggable="false"></div>`
-    )
-    .join('');
-  return `<div class="gate-collection-preview-grid gate-collection-preview-grid-${Math.min(previews.length, 4)}" aria-hidden="true">${cells}</div>`;
+  const previews = items.filter(isPreviewableCanvas).slice(0, 3);
+  const fileMark = '<span class="gate-collection-file-mark" aria-hidden="true"><i data-lucide="link-2" class="w-3 h-3"></i></span>';
+  const slots = [0, 1, 2].map((index) => {
+    const item = previews[index];
+    const img = item
+      ? `<img src="${escapeAttr(item.preview_url || item.previewUrl)}" alt="" loading="lazy" draggable="false">`
+      : '';
+    return `<div class="gate-collection-file gate-collection-file-${index + 1}">${fileMark}${img}</div>`;
+  });
+  return `<div class="gate-collection-stack" aria-hidden="true">${slots.join('')}</div>`;
+}
+
+function filterGateCollections(collections) {
+  const q = String(h().getGateSearchQuery?.() || '').trim().toLowerCase();
+  if (!q) return collections;
+  return collections.filter((col) => String(col?.name || '').toLowerCase().includes(q));
+}
+
+function gateEntitySortTime(entity, sortBy) {
+  const field = sortBy === 'created' ? 'created_at' : 'updated_at';
+  const raw = Number(entity?.[field] || entity?.created_at || 0);
+  return raw < 10000000000 ? raw * 1000 : raw;
+}
+
+function sortGateEntities(list, sortBy, sortOrder) {
+  const dir = sortOrder === 'asc' ? 1 : -1;
+  return [...list].sort((a, b) => (gateEntitySortTime(a, sortBy) - gateEntitySortTime(b, sortBy)) * dir);
 }
 
 async function refreshCollectionsAndList() {
@@ -475,27 +488,44 @@ function bindCanvasDrag(row, canvasId) {
   });
 }
 
-function renderCollectionSection(root, collection) {
+function buildCollectionCardElement(collection) {
   const items = collectionCanvasItems(collection);
-  const section = document.createElement('section');
-  section.className = 'gate-collection';
-  section.dataset.collectionId = collection.id;
-  const countLabel = `${items.length} 张画布`;
-  section.innerHTML = `
-    <div class="gate-collection-head canvas-item gate-collection-card" data-collection-id="${collection.id}" role="button" tabindex="0" aria-label="打开合集 ${h().escapeHtml(collection.name)}">
+  const row = document.createElement('div');
+  row.className = 'canvas-item gate-collection-item';
+  row.dataset.collectionId = collection.id;
+  const countLabel = h().langIsEn?.() ? `${items.length} projects` : `${items.length} 个项目`;
+  const typeLabel = h().langIsEn?.() ? 'Folder' : '文件夹';
+  const createdLabel = h().formatCanvasCreatedLabel
+    ? h().formatCanvasCreatedLabel(collection.created_at)
+    : '--';
+  const editedLabel = h().formatCanvasEditedLabel
+    ? h().formatCanvasEditedLabel(collection.updated_at || collection.created_at)
+    : '编辑于 --';
+  row.innerHTML = `
+    <div class="gate-collection-head gate-collection-card" data-collection-id="${collection.id}" role="button" tabindex="0" aria-label="打开合集 ${h().escapeHtml(collection.name)}">
       <div class="gate-collection-card-shell">
         <div class="canvas-card-preview gate-collection-preview">
           ${buildCollectionPreviewHtml(items)}
-          <span class="gate-collection-folder-mark" aria-hidden="true">
-            <i data-lucide="folder" class="w-4 h-4"></i>
-          </span>
           <span class="gate-collection-drop-hint">拖到此处加入</span>
-        </div>
-        <div class="canvas-card-body gate-collection-card-body">
-          <div class="gate-collection-name">${h().escapeHtml(collection.name)}</div>
-          <div class="gate-collection-count">${countLabel}</div>
+          <div class="gate-collection-folder-pocket">
+            <div class="gate-collection-folder-glass" aria-hidden="true"></div>
+            <div class="gate-collection-foot">
+              <div class="canvas-card-title gate-collection-name">${h().escapeHtml(collection.name)}</div>
+              <div class="gate-collection-foot-meta">
+                <span class="canvas-card-edited">${editedLabel}</span>
+                <span class="gate-collection-count">${countLabel}</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
+    </div>
+    <div class="gate-list-row-meta">
+      <span class="gate-list-cell-name">${h().escapeHtml(collection.name)}</span>
+      <span class="gate-list-cell-type">${typeLabel}</span>
+      <span class="gate-list-cell-content">${countLabel}</span>
+      <span class="gate-list-cell-created">${createdLabel}</span>
+      <span class="gate-list-cell-updated">${editedLabel}</span>
     </div>
     ${pendingDeleteCollectionId === collection.id ? `
       <div class="gate-collection-delete-confirm">
@@ -508,7 +538,7 @@ function renderCollectionSection(root, collection) {
         </div>
       </div>` : ''}
   `;
-  const head = section.querySelector('.gate-collection-head');
+  const head = row.querySelector('.gate-collection-head');
   head?.addEventListener('click', (e) => {
     if (e.target.closest('.gate-collection-delete-confirm')) return;
     if (gateDragState?.canvasId) return;
@@ -522,7 +552,7 @@ function renderCollectionSection(root, collection) {
   });
   head?.addEventListener('contextmenu', (e) => openCollectionHeaderContextMenu(e, collection.id));
   bindCollectionDropTarget(head, collection.id);
-  section.querySelector('.gate-collection-delete-yes')?.addEventListener('click', async (e) => {
+  row.querySelector('.gate-collection-delete-yes')?.addEventListener('click', async (e) => {
     e.stopPropagation();
     try {
       await apiDeleteCollection(collection.id);
@@ -535,12 +565,12 @@ function renderCollectionSection(root, collection) {
       h().showErrorModal(err instanceof Error ? err.message : String(err), '删除合集');
     }
   });
-  section.querySelector('.gate-collection-delete-no')?.addEventListener('click', (e) => {
+  row.querySelector('.gate-collection-delete-no')?.addEventListener('click', (e) => {
     e.stopPropagation();
     pendingDeleteCollectionId = null;
     h().renderCanvasList();
   });
-  root.appendChild(section);
+  return row;
 }
 
 export function openCreateCollectionModal(canvasIds = []) {
@@ -549,44 +579,60 @@ export function openCreateCollectionModal(canvasIds = []) {
 
 export function renderGateLibrary() {
   const { gateCollectionsRoot, gateCanvasList, gateUncategorizedSection } = h();
-  if (!gateCollectionsRoot || !gateCanvasList) return;
+  if (!gateCanvasList) return;
   h().refreshGateViewControls();
+  const filterType = h().getGateFilterType?.() || 'all';
+  const sortBy = h().getGateSortBy?.() || 'updated';
+  const sortOrder = h().getGateSortOrder?.() || 'desc';
   const collections = h().getCollections();
   const allCanvases = h().getCanvases();
-  gateCollectionsRoot.innerHTML = '';
-  collections.forEach((col) => renderCollectionSection(gateCollectionsRoot, col));
-
-  if (gateUncategorizedSection) {
-    const sectionHead = gateUncategorizedSection.querySelector('.gate-section-head');
-    if (sectionHead) sectionHead.hidden = collections.length === 0;
-    gateUncategorizedSection.hidden = false;
-  }
+  if (gateCollectionsRoot) gateCollectionsRoot.innerHTML = '';
+  if (gateUncategorizedSection) gateUncategorizedSection.hidden = false;
 
   gateCanvasList.innerHTML = '';
-  const uncategorized = collections.length ? uncategorizedCanvases() : allCanvases;
+  h().applyGateListViewClass?.(gateCanvasList);
+  h().appendCreateCanvasCard?.(gateCanvasList);
 
-  if (!uncategorized.length && !allCanvases.length) {
-    const empty = document.createElement('div');
-    empty.className = 'gate-list-empty';
-    empty.innerHTML = `<div class="gate-list-empty-icon"><i data-lucide="layout-grid" class="w-6 h-6"></i></div>${h().tr('canvas.noCanvas')}<br>${h().tr('canvas.startWithNewCanvas')}`;
-    gateCanvasList.appendChild(empty);
-    h().refreshIcons(gateCanvasList);
-    return;
+  const inCol = new Set();
+  collections.forEach((col) => (col.canvas_ids || []).forEach((id) => inCol.add(id)));
+
+  let collectionCards = sortGateEntities(filterGateCollections(collections), sortBy, sortOrder);
+  let items = allCanvases.filter((c) => !inCol.has(c.id));
+  items = h().filterGateCanvasItems ? h().filterGateCanvasItems(items) : items;
+  items = sortGateEntities(items, sortBy, sortOrder);
+
+  const appendProjectRow = (item) => {
+    const row = h().buildCanvasItemElement(item, { collectionId: '' });
+    bindCanvasDrag(row, item.id);
+    row.addEventListener('contextmenu', (e) => openCanvasContextMenu(e, item.id, ''));
+    gateCanvasList.appendChild(row);
+  };
+
+  if (filterType === 'all') {
+    const entries = [
+      ...collectionCards.map((data) => ({ kind: 'collection', data, t: gateEntitySortTime(data, sortBy) })),
+      ...items.map((data) => ({ kind: 'project', data, t: gateEntitySortTime(data, sortBy) })),
+    ].sort((a, b) => (sortOrder === 'asc' ? a.t - b.t : b.t - a.t));
+    entries.forEach((entry) => {
+      if (entry.kind === 'collection') gateCanvasList.appendChild(buildCollectionCardElement(entry.data));
+      else appendProjectRow(entry.data);
+    });
+  } else if (filterType === 'folders') {
+    collectionCards.forEach((col) => {
+      gateCanvasList.appendChild(buildCollectionCardElement(col));
+    });
+  } else {
+    items.forEach((item) => appendProjectRow(item));
   }
-  if (!uncategorized.length) {
+
+  const cardCount = gateCanvasList.querySelectorAll('.canvas-item').length;
+  if (!cardCount && (h().getGateSearchQuery?.() || '').trim()) {
     const empty = document.createElement('div');
     empty.className = 'gate-list-empty gate-list-empty-compact';
-    empty.textContent = collections.length ? '全部画布已收入合集' : '暂无未分类画布';
+    empty.textContent = '没有匹配的项目';
     gateCanvasList.appendChild(empty);
-  } else {
-    uncategorized.forEach((item) => {
-      const row = h().buildCanvasItemElement(item, { collectionId: '' });
-      bindCanvasDrag(row, item.id);
-      row.addEventListener('contextmenu', (e) => openCanvasContextMenu(e, item.id, ''));
-      gateCanvasList.appendChild(row);
-    });
   }
-  h().refreshIcons(gateCollectionsRoot);
+
   h().refreshIcons(gateCanvasList);
 }
 

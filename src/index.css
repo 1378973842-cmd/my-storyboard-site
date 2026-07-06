@@ -689,6 +689,134 @@ html[data-theme="light"] body {
       0 0 28px rgba(0, 0, 0, 0.55);
   }
 
+  .studio-brand-menu {
+    position: absolute;
+    top: calc(100% + 10px);
+    left: 0;
+    z-index: 80;
+    min-width: 168px;
+    padding: 6px;
+    border-radius: 16px;
+    background: rgba(22, 22, 22, 0.96);
+    outline: 0.5px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 18px 48px -20px rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(24px);
+  }
+
+  .studio-canvas-header-cluster {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+    min-width: 0;
+  }
+
+  .studio-canvas-header-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .studio-canvas-header-logo {
+    flex-shrink: 0;
+  }
+
+  .studio-brand-menu.studio-brand-menu-below {
+    position: static;
+    top: auto;
+    left: auto;
+    margin-top: 8px;
+    min-width: 176px;
+    z-index: 80;
+  }
+
+  .studio-canvas-meta {
+    flex-shrink: 1;
+  }
+
+  .studio-canvas-meta.is-editing {
+    outline-color: rgba(255, 184, 102, 0.28);
+    box-shadow:
+      0 20px 48px -32px rgba(0, 0, 0, 0.55),
+      0 0 0 1px rgba(255, 184, 102, 0.16),
+      inset 0 1px 0 rgba(255, 184, 102, 0.08);
+  }
+
+  .studio-canvas-meta-input {
+    width: 100%;
+    min-width: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: #e5e2e1;
+    font-family: "Noto Serif", serif;
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    outline: none;
+  }
+
+  .studio-canvas-meta-input::selection {
+    background: rgba(255, 184, 102, 0.28);
+  }
+
+  .studio-brand-menu-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 0 10px;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    color: #e5e2e1;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.16s ease;
+  }
+
+  .studio-brand-menu-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .studio-canvas-meta {
+    min-width: 0;
+    max-width: min(300px, 44vw);
+    padding: 5px 12px 5px 10px;
+    border-radius: 12px;
+    background: rgba(18, 16, 14, 0.82);
+    outline: 0.5px solid rgba(255, 184, 102, 0.14);
+    box-shadow:
+      0 20px 48px -32px rgba(0, 0, 0, 0.55),
+      inset 0 1px 0 rgba(255, 184, 102, 0.08);
+    backdrop-filter: blur(40px) saturate(175%);
+    -webkit-backdrop-filter: blur(40px) saturate(175%);
+  }
+
+  .studio-canvas-meta-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #e5e2e1;
+    font-family: "Noto Serif", serif;
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+  }
+
+  .studio-canvas-meta-time {
+    color: rgba(229, 226, 225, 0.62);
+    font-family: "Manrope", sans-serif;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
   .cover-nav-text-link {
     font-family:
       -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", var(--font-body),
@@ -1715,7 +1843,41 @@ html[data-theme="dark"] [data-cover-page][data-studio-page].studio-page-shell {
   background: transparent !important;
 }
 
-/* 画布页：返回条已挂到顶栏品牌右侧；Gate 留出导航空间 */
+/* 选择画布（gate）：纯黑底、去掉封面图与 gate 面板壳，顶栏+网格平铺 */
+[data-cover-page].canvas-page:has(.shell.no-canvas) {
+  background-color: #0e0e0e;
+  --studio-page-bg-image: none;
+}
+
+[data-cover-page].canvas-page:has(.shell.no-canvas) .studio-page-bg,
+[data-cover-page].canvas-page:has(.shell.no-canvas) .studio-page-scrim,
+[data-cover-page].canvas-page:has(.shell.no-canvas) .studio-page-glow {
+  display: none;
+}
+
+[data-cover-page].canvas-page:has(.shell.no-canvas) .infinite-canvas-root .canvas-gate {
+  padding: 5.25rem clamp(4rem, 12vw, 10rem) 2.5rem !important;
+  align-items: flex-start !important;
+  justify-content: flex-start !important;
+  background: transparent !important;
+}
+
+[data-cover-page].canvas-page:has(.shell.no-canvas) .infinite-canvas-root .gate-panel {
+  margin-top: 0;
+  margin-inline: auto;
+  contain: none;
+  transform: none !important;
+  width: 100%;
+  max-width: min(1440px, 100%);
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+/* 画布页：返回条已挂到顶栏品牌右侧；Gate 留出导航空间（旧居中面板，已被 gate 平铺规则覆盖） */
 [data-cover-page].canvas-page .infinite-canvas-root .canvas-gate {
   padding: 5rem 1.5rem 2.5rem;
   align-items: center;
@@ -1748,6 +1910,12 @@ html[data-theme="light"] [data-cover-page].canvas-page .infinite-canvas-root.the
   -webkit-backdrop-filter: blur(20px) saturate(1.06);
 }
 
+[data-cover-page].canvas-page:has(.shell.no-canvas) .infinite-canvas-root .gate-panel {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 @media (min-width: 768px) {
   .canvas-page-intro {
     top: 5.75rem;
@@ -1759,8 +1927,16 @@ html[data-theme="light"] [data-cover-page].canvas-page .infinite-canvas-root.the
     padding: 5.5rem 2rem 3rem;
   }
 
+  [data-cover-page].canvas-page:has(.shell.no-canvas) .infinite-canvas-root .canvas-gate {
+    padding: 5.5rem clamp(4.5rem, 12vw, 10rem) 2.75rem !important;
+  }
+
   [data-cover-page].canvas-page .infinite-canvas-root .gate-panel {
     transform: translateY(clamp(1.25rem, 5vh, 3rem));
+  }
+
+  [data-cover-page].canvas-page:has(.shell.no-canvas) .infinite-canvas-root .gate-panel {
+    transform: none !important;
   }
 }
 
