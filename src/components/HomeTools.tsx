@@ -137,6 +137,7 @@ export const HomeTools: React.FC<HomeToolsProps> = ({
                 initial={{ opacity: 0, y: 28 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
+                whileTap={{ scale: 0.97 }}
                 transition={{ ...spring, delay: index * 0.06 }}
                 animate={{
                   scale: isHovered ? 1.07 : isDimmed ? 0.96 : 1,

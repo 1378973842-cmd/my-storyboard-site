@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LayoutTemplate, ListTodo, X } from 'lucide-react';
+import { LayoutTemplate, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import {
   getCanvasBoardBackground,
@@ -25,7 +25,6 @@ const DOCK_ICON = 'h-[15px] w-[15px]';
 
 const canvasWin = window as unknown as {
   openWorkflowTemplateModal?: () => void;
-  openCanvasLog?: () => void;
 };
 
 function DockTooltip({ label, show }: { label: string; show: boolean }) {
@@ -361,10 +360,6 @@ export const CanvasLeftDock = memo(function CanvasLeftDock({
 
         <DockIconButton label="工作流模板" onClick={() => canvasWin.openWorkflowTemplateModal?.()}>
           <LayoutTemplate className={DOCK_ICON} strokeWidth={1.25} />
-        </DockIconButton>
-
-        <DockIconButton label="日志" onClick={() => canvasWin.openCanvasLog?.()}>
-          <ListTodo className={DOCK_ICON} strokeWidth={1.25} />
         </DockIconButton>
 
         <span className="canvas-left-dock-sep" aria-hidden />

@@ -76,33 +76,34 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
         ) : items.length === 0 ? (
           <p className="mt-16 text-center text-sm text-[#e5e2e1]/50">还没有同事分享作品。</p>
         ) : (
-          <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 lg:gap-8">
             {items.map((item) => (
               <motion.article
                 key={item.id}
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
+                whileHover={{ y: -4 }}
                 transition={spring}
-                className="overflow-hidden rounded-[1.5rem] bg-[#131313]/80 outline outline-[0.5px] outline-[#45464d]/20"
+                className="overflow-hidden rounded-[1.5rem] bg-[#131313]/80 outline outline-[0.5px] outline-[#45464d]/20 transition-shadow duration-300 hover:shadow-[0_48px_96px_-56px_rgba(0,0,0,0.6)]"
               >
                 <button
                   type="button"
-                  className="group relative block aspect-[4/3] w-full cursor-zoom-in bg-[#1c1b1b] text-left"
+                  className="group relative block aspect-[4/3] w-full cursor-zoom-in overflow-hidden bg-[#1c1b1b] text-left"
                   onClick={() => setPreviewUrl(item.preview_path || item.thumbnail_path)}
                   aria-label="放大查看图片"
                 >
                   <img
                     src={item.thumbnail_path}
                     alt=""
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
                     loading="lazy"
                     draggable={false}
                   />
+                  <span className="absolute left-3 top-3 rounded-full bg-black/45 px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-[#f5f0eb] backdrop-blur-md">
+                    {item.owner_name || '同事'}
+                  </span>
                 </button>
                 <div className="space-y-3 p-5">
-                  <p className="text-xs uppercase tracking-[0.14em] text-[#ffb866]/75">
-                    {item.owner_name || '同事'}
-                  </p>
                   <CopyablePromptText text={item.prompt} lineClamp={5} />
                   <p className="text-xs uppercase tracking-[0.12em] text-[#e5e2e1]/45">
                     {item.model || '未知模型'}

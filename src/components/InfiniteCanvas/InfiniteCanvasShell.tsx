@@ -1,6 +1,9 @@
 /** Auto-generated from canvas.html — re-run scripts/html-to-jsx-shell.mjs */
-import { memo, useCallback, useEffect, useRef, useState, type Ref } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type Ref } from 'react';
 import { createPortal } from 'react-dom';
+import { motion } from 'framer-motion';
+
+const dockSpring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 import {
   applyImageEdit,
   clearEditDrawing,
@@ -38,25 +41,77 @@ type Props = {
   onMaterialLibraryOpenChange?: (open: boolean) => void;
 };
 
-type AgentFlyoutItem = {
+type FlyoutItem = {
   icon: string;
   label: string;
   action: () => void;
 };
 
-const AGENT_FLYOUT_ITEMS: AgentFlyoutItem[] = [
-  { icon: 'bot', label: '复刻 Agent', action: () => canvasWin['addReplicaAgentNode']?.() },
-  { icon: 'wand-sparkles', label: '修图 Agent', action: () => canvasWin['addImageRepairAgentNode']?.() },
-  { icon: 'layout-grid', label: 'Poster Agent', action: () => canvasWin['addBatchPosterAgentNode']?.() },
-  { icon: 'grid-3x3', label: '九宫格 Agent', action: () => canvasWin['addNineGridAgentNode']?.() },
-  { icon: 'repeat-2', label: 'Slots 循环视频 Agent', action: () => canvasWin['addSlotsLoopVideoAgentNode']?.() },
+type FlyoutGroup = {
+  heading?: string;
+  items: FlyoutItem[];
+};
+
+const AGENT_FLYOUT_GROUPS: FlyoutGroup[] = [
+  {
+    heading: 'Agent',
+    items: [
+      { icon: 'bot', label: '复刻 Agent', action: () => canvasWin['addReplicaAgentNode']?.() },
+      { icon: 'wand-sparkles', label: '修图 Agent', action: () => canvasWin['addImageRepairAgentNode']?.() },
+      { icon: 'layout-grid', label: 'Poster Agent', action: () => canvasWin['addBatchPosterAgentNode']?.() },
+      { icon: 'grid-3x3', label: '九宫格 Agent', action: () => canvasWin['addNineGridAgentNode']?.() },
+      { icon: 'repeat-2', label: 'Slots 循环视频 Agent', action: () => canvasWin['addSlotsLoopVideoAgentNode']?.() },
+    ],
+  },
 ];
 
-function ToolbarAgentFlyout() {
+const NODE_FLYOUT_GROUPS: FlyoutGroup[] = [
+  {
+    heading: '基础',
+    items: [
+      { icon: 'image-plus', label: '图片', action: () => canvasWin['addImageNode']?.() },
+      { icon: 'text-cursor-input', label: '提示词', action: () => canvasWin['addPromptNode']?.() },
+      { icon: 'repeat-2', label: '循环', action: () => canvasWin['addLoopNode']?.() },
+    ],
+  },
+  {
+    heading: '生成',
+    items: [
+      { icon: 'message-square-text', label: 'LLM', action: () => canvasWin['addLLMNode']?.() },
+      { icon: 'wand-sparkles', label: '图片生成', action: () => canvasWin['addGeneratorNode']?.() },
+      { icon: 'scan-search', label: '反推', action: () => canvasWin['addVideoReverseNode']?.() },
+    ],
+  },
+  {
+    heading: '整理',
+    items: [
+      { icon: 'circle-dot', label: 'Output', action: () => canvasWin['addOutputNode']?.() },
+      { icon: 'images', label: '图片组', action: () => canvasWin['createImageBatchFromSelection']?.() },
+      { icon: 'layers', label: '提示词组', action: () => canvasWin['createPromptGroupFromSelection']?.() },
+    ],
+  },
+];
+
+function ToolbarFlyout({
+  triggerIcon,
+  triggerLabel,
+  triggerClassName,
+  ariaLabel,
+  menuClassName,
+  groups,
+}: {
+  triggerIcon: string;
+  triggerLabel: string;
+  triggerClassName?: string;
+  ariaLabel: string;
+  menuClassName?: string;
+  groups: FlyoutGroup[];
+}) {
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const closeTimerRef = useRef<number | null>(null);
   const [open, setOpen] = useState(false);
-  const [menuPos, setMenuPos] = useState({ left: 0, bottom: 0 });
+  const [menuPos, setMenuPos] = useState({ left: 0, top: 0 });
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -68,11 +123,21 @@ function ToolbarAgentFlyout() {
     const el = triggerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    setMenuPos({
-      left: rect.left + rect.width / 2,
-      bottom: window.innerHeight - rect.top + 8,
-    });
+    setMenuPos({ left: rect.right + 10, top: rect.top });
   }, []);
+
+  // Once the menu has actually rendered we know its real height — nudge it
+  // back on screen if the sidebar trigger sits too close to the bottom edge.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const el = menuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const maxTop = window.innerHeight - rect.height - 12;
+    if (rect.top > maxTop) {
+      setMenuPos((prev) => ({ ...prev, top: Math.max(12, maxTop) }));
+    }
+  }, [open, groups]);
 
   const refreshFlyoutIcons = useCallback(() => {
     const lucide = (window as unknown as { lucide?: { createIcons?: () => void } }).lucide;
@@ -86,8 +151,7 @@ function ToolbarAgentFlyout() {
     }
     syncMenuPos();
     setOpen(true);
-    queueMicrotask(refreshFlyoutIcons);
-  }, [refreshFlyoutIcons, syncMenuPos]);
+  }, [syncMenuPos]);
 
   const scheduleClose = useCallback(() => {
     closeTimerRef.current = window.setTimeout(() => setOpen(false), 140);
@@ -104,38 +168,50 @@ function ToolbarAgentFlyout() {
     };
   }, [open, syncMenuPos]);
 
+  // Icons must be rendered *after* the portal menu actually commits to the DOM —
+  // refreshing at click/hover time races React's render and can leave icons blank
+  // until something re-triggers it (e.g. moving the mouse onto the menu).
+  useEffect(() => {
+    if (open) refreshFlyoutIcons();
+  }, [open, refreshFlyoutIcons]);
+
   useEffect(() => () => {
     if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
   }, []);
 
   const menu = open && portalRoot ? createPortal(
     <div
-      className="toolbar-flyout-menu toolbar-flyout-menu-portal toolbar-flyout-menu-agents is-open"
+      ref={menuRef}
+      className={`toolbar-flyout-menu toolbar-flyout-menu-portal${menuClassName ? ` ${menuClassName}` : ''} is-open`}
       role="menu"
-      aria-label="Agent nodes"
-      style={{ left: `${menuPos.left}px`, bottom: `${menuPos.bottom}px` }}
+      aria-label={ariaLabel}
+      style={{ left: `${menuPos.left}px`, top: `${menuPos.top}px` }}
       onMouseEnter={openMenu}
       onMouseLeave={scheduleClose}
     >
-      <div className="toolbar-flyout-heading">Agent</div>
-      <div className="toolbar-flyout-grid">
-        {AGENT_FLYOUT_ITEMS.map((item) => (
-          <button
-            key={item.label}
-            type="button"
-            className="toolbar-flyout-item toolbar-flyout-item-grid"
-            role="menuitem"
-            title={item.label}
-            onClick={() => {
-              setOpen(false);
-              item.action();
-            }}
-          >
-            <i data-lucide={item.icon} className="w-4 h-4"></i>
-            <span>{item.label}</span>
-          </button>
-        ))}
-      </div>
+      {groups.map((group, gi) => (
+        <div key={group.heading ?? gi} className="toolbar-flyout-section">
+          {group.heading ? <div className="toolbar-flyout-heading">{group.heading}</div> : null}
+          <div className="toolbar-flyout-list">
+            {group.items.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                className="toolbar-flyout-item"
+                role="menuitem"
+                title={item.label}
+                onClick={() => {
+                  setOpen(false);
+                  item.action();
+                }}
+              >
+                <i data-lucide={item.icon} className="w-4 h-4"></i>
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>,
     portalRoot,
   ) : null;
@@ -150,23 +226,47 @@ function ToolbarAgentFlyout() {
         <button
           ref={triggerRef}
           type="button"
-          className="tool-btn tool-btn-ghost tool-btn-icon-only toolbar-flyout-trigger"
-          title="Agent"
-          aria-label="Agent"
+          className={`tool-btn tool-btn-ghost tool-btn-icon-only toolbar-flyout-trigger${triggerClassName ? ` ${triggerClassName}` : ''}`}
+          title={triggerLabel}
+          aria-label={triggerLabel}
           aria-haspopup="menu"
           aria-expanded={open}
           onClick={() => {
             syncMenuPos();
             setOpen((value) => !value);
-            queueMicrotask(refreshFlyoutIcons);
           }}
         >
-          <i data-lucide="bot" className="w-4 h-4"></i>
-          <span>Agent</span>
+          <i data-lucide={triggerIcon} className="w-4 h-4"></i>
+          <span>{triggerLabel}</span>
         </button>
       </div>
       {menu}
     </>
+  );
+}
+
+function ToolbarAgentFlyout() {
+  return (
+    <ToolbarFlyout
+      triggerIcon="bot"
+      triggerLabel="Agent"
+      ariaLabel="Agent nodes"
+      menuClassName="toolbar-flyout-menu-agents"
+      groups={AGENT_FLYOUT_GROUPS}
+    />
+  );
+}
+
+function ToolbarNodeFlyout() {
+  return (
+    <ToolbarFlyout
+      triggerIcon="plus"
+      triggerLabel="节点"
+      triggerClassName="toolbar-flyout-trigger-primary"
+      ariaLabel="添加节点"
+      menuClassName="toolbar-flyout-menu-nodes"
+      groups={NODE_FLYOUT_GROUPS}
+    />
   );
 }
 
@@ -200,46 +300,38 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                   </div>
               </div>
 
-              <div className="bottombar editor-only">
-                  <div id="quickToolbar" className="panel canvas-bottombar toolbar">
-                      <div className="canvas-bottombar-body">
-                          <div className="toolbar-dock">
-                              <div className="toolbar-group">
-                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["addImageNode"]?.()} title="图片" aria-label="图片"><i data-lucide="image-plus" className="w-4 h-4"></i><span data-i18n="canvas.image">图片</span></button>
-                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["addPromptNode"]?.()} title="提示词" aria-label="提示词"><i data-lucide="text-cursor-input" className="w-4 h-4"></i><span data-i18n="canvas.prompt">提示词</span></button>
-                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["addLoopNode"]?.()} title="循环" aria-label="循环"><i data-lucide="repeat-2" className="w-4 h-4"></i><span data-i18n="canvas.loop">循环</span></button>
-                              </div>
-                              <span className="toolbar-dock-sep" aria-hidden="true" />
-                              <div className="toolbar-group">
-                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["addLLMNode"]?.()} title="LLM" aria-label="LLM"><i data-lucide="message-square-text" className="w-4 h-4"></i><span>LLM</span></button>
-                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["addGeneratorNode"]?.()} title="图片生成" aria-label="图片生成"><i data-lucide="wand-sparkles" className="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
-                                  <ToolbarAgentFlyout />
-                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["addVideoReverseNode"]?.()} title="视频反推" aria-label="视频反推"><i data-lucide="scan-search" className="w-4 h-4"></i><span>反推</span></button>
-                              </div>
-                              <span className="toolbar-dock-sep" aria-hidden="true" />
-                              <div className="toolbar-group">
-                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["addOutputNode"]?.()} title="Output" aria-label="Output"><i data-lucide="circle-dot" className="w-4 h-4"></i><span>Output</span></button>
-                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["createImageBatchFromSelection"]?.()} title="图片组" aria-label="图片组" data-i18n-title="canvas.imageBatchNode"><i data-lucide="images" className="w-4 h-4"></i><span data-i18n="canvas.imageBatchNode">图片组</span></button>
-                                  <button className="tool-btn tool-btn-ghost tool-btn-icon-only" onClick={() => canvasWin["createPromptGroupFromSelection"]?.()} title="提示词组" aria-label="提示词组" data-i18n-title="canvas.promptGroupNode"><i data-lucide="layers" className="w-4 h-4"></i><span data-i18n="canvas.promptGroupNode">提示词组</span></button>
-                              </div>
-                              <span className="toolbar-dock-sep" aria-hidden="true" />
-                              <div className="toolbar-group">
-                                  <button
-                                    type="button"
-                                    className={`tool-btn tool-btn-ghost tool-btn-icon-only${materialLibraryOpen ? ' is-active' : ''}`}
-                                    title="素材库"
-                                    aria-label="素材库"
-                                    aria-pressed={materialLibraryOpen}
-                                    onClick={() => onMaterialLibraryOpenChange?.(!materialLibraryOpen)}
-                                  >
-                                      <i data-lucide="library" className="w-4 h-4"></i>
-                                      <span data-i18n="canvas.materialLibrary">素材库</span>
-                                  </button>
-                              </div>
-                          </div>
-                      </div>
-                  </div>
-              </div>
+              <motion.div
+                id="quickToolbar"
+                className="canvas-side-dock bottombar panel editor-only"
+                animate={{ x: materialLibraryOpen ? -16 : 0, y: '-50%', opacity: materialLibraryOpen ? 0 : 1 }}
+                transition={dockSpring}
+                style={{ pointerEvents: materialLibraryOpen ? 'none' : 'auto' }}
+              >
+                  <ToolbarNodeFlyout />
+                  <ToolbarAgentFlyout />
+                  <button
+                    type="button"
+                    className={`tool-btn tool-btn-ghost tool-btn-icon-only${materialLibraryOpen ? ' is-active' : ''}`}
+                    title="素材库"
+                    aria-label="素材库"
+                    aria-pressed={materialLibraryOpen}
+                    onClick={() => onMaterialLibraryOpenChange?.(!materialLibraryOpen)}
+                  >
+                      <i data-lucide="library" className="w-4 h-4"></i>
+                      <span data-i18n="canvas.materialLibrary">素材库</span>
+                  </button>
+                  <span className="canvas-side-dock-sep" aria-hidden="true" />
+                  <button
+                    type="button"
+                    className="tool-btn tool-btn-ghost tool-btn-icon-only"
+                    title="历史记录"
+                    aria-label="历史记录"
+                    onClick={() => canvasWin["openCanvasLog"]?.()}
+                  >
+                      <i data-lucide="history" className="w-4 h-4"></i>
+                      <span>历史记录</span>
+                  </button>
+              </motion.div>
       
               <div id="canvasGate" className="canvas-gate">
                   <div className="gate-panel">

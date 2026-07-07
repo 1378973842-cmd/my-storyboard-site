@@ -1,0 +1,38 @@
+---
+description: Quick reference for ponytail modes and sub-skills. Use when user asks how to use ponytail or says ponytail-help.
+globs:
+alwaysApply: false
+---
+
+# Ponytail Help
+
+Display this reference card when invoked. One-shot, do NOT change mode or persist anything.
+
+## Levels (ask in chat)
+
+| Level | Trigger | What change |
+|-------|---------|-------------|
+| **Lite** | "ponytail lite" | Build what's asked, name the lazier alternative in one line. |
+| **Full** | default | The ladder enforced: YAGNI → stdlib → native → one line → minimum. |
+| **Ultra** | "ponytail ultra" | YAGNI extremist. Deletion before addition. Challenges requirements before building. |
+
+## Cursor rules (this project)
+
+| Rule | When to use |
+|------|-------------|
+| **ponytail** | Always on — lazy senior dev mode |
+| **ponytail-review** | Review current diff for over-engineering |
+| **ponytail-audit** | Whole-repo over-engineering audit |
+| **ponytail-debt** | Harvest `ponytail:` comments into a ledger |
+| **ponytail-gain** | Benchmark impact scoreboard |
+| **ponytail-help** | This card |
+
+In Cursor, mention the rule name or describe the task (e.g. "用 ponytail-review 看看这次改动有没有过度设计").
+
+## Deactivate
+
+Say "stop ponytail" or "normal mode" to relax the always-on rule for the session.
+
+## More
+
+Full docs: https://github.com/DietrichGebert/ponytail

@@ -42,7 +42,7 @@ type StudioTopNavProps = {
   /** 功能页隐藏分镜/画布/九宫格等栏目，仅保留品牌返回 */
   hideFeatureNav?: boolean;
   /** 次级页：顶栏显示返回与标题 */
-  subPage?: 'my-favorites' | 'gallery' | 'admin-users';
+  subPage?: 'my-favorites' | 'gallery' | 'admin-users' | 'admin-rh-workflows';
   /** 画布页：Logo 下拉导航 */
   showCanvasBrandMenu?: boolean;
 };
@@ -57,6 +57,7 @@ const SUB_PAGE_TITLES: Record<NonNullable<StudioTopNavProps['subPage']>, string>
   'my-favorites': '我的收藏',
   gallery: '公共画廊',
   'admin-users': '用户管理',
+  'admin-rh-workflows': 'RunningHub 工作流',
 };
 
 function CanvasHeaderCluster({
@@ -395,6 +396,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
     openMyFavorites,
     openGallery,
     openAdminUsers,
+    openAdminRhWorkflows,
     goBack,
   } = useShellNavigation();
   const user = useAuthStore((s) => s.user);
@@ -564,6 +566,15 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
                 className="hidden rounded-full px-3 py-2 text-[12px] text-[#e5e2e1]/60 transition-colors hover:bg-[#1c1b1b]/70 hover:text-[#e5e2e1] md:inline-flex"
               >
                 用户管理
+              </button>
+            ) : null}
+            {isAdmin ? (
+              <button
+                type="button"
+                onClick={openAdminRhWorkflows}
+                className="hidden rounded-full px-3 py-2 text-[12px] text-[#e5e2e1]/60 transition-colors hover:bg-[#1c1b1b]/70 hover:text-[#e5e2e1] md:inline-flex"
+              >
+                RH 工作流
               </button>
             ) : null}
 

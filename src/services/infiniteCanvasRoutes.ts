@@ -54,6 +54,11 @@ import {
 } from "./canvasCollectionsStore.js";
 import { requireSiteGate } from "./siteAccessGate.js";
 import { recordFileOwnership } from "./canvasGenerations.js";
+import {
+  listRunningHubAppsForConfig,
+  listRunningHubWorkflowsForConfig,
+  registerRunningHubWorkflowRoutes,
+} from "./runningHubWorkflows.js";
 import type Database from "better-sqlite3";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 80 * 1024 * 1024 } });
@@ -409,6 +414,7 @@ export function registerInfiniteCanvasRoutes(
   registerCanvasLlmRoutes(app, projectRoot, gate);
   registerCanvasBatchPosterRoutes(app, projectRoot, gate);
   registerCanvasSlotsLoopVideoRoutes(app, projectRoot, gate);
+  registerRunningHubWorkflowRoutes(app, { projectRoot, requireGate: gate });
 
   if (deps?.persistImage) {
     registerCanvasReplicaAgentRoutes(app, { projectRoot, persistImage: deps.persistImage, requireGate: gate });
@@ -459,6 +465,10 @@ export function registerInfiniteCanvasRoutes(
           name: "RunningHub",
           label: "RunningHub",
           image_models: imageModels,
+          has_key: Boolean((process.env.RUNNINGHUB_API_KEY || process.env.STORYBOARD_IMAGE_API_KEY || "").trim()),
+          has_wallet_key: Boolean((process.env.RUNNINGHUB_WALLET_API_KEY || "").trim()),
+          rh_apps: listRunningHubAppsForConfig(),
+          rh_workflows: listRunningHubWorkflowsForConfig(),
         },
       ],
       has_api_key: Boolean(

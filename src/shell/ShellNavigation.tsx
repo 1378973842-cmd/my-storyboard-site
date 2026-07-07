@@ -19,11 +19,12 @@ export type ShellScreen =
   | 'infinite-canvas'
   | 'my-favorites'
   | 'gallery'
-  | 'admin-users';
+  | 'admin-users'
+  | 'admin-rh-workflows';
 
-type SubScreen = 'my-favorites' | 'gallery' | 'admin-users';
+type SubScreen = 'my-favorites' | 'gallery' | 'admin-users' | 'admin-rh-workflows';
 
-const SUB_SCREENS = new Set<ShellScreen>(['my-favorites', 'gallery', 'admin-users']);
+const SUB_SCREENS = new Set<ShellScreen>(['my-favorites', 'gallery', 'admin-users', 'admin-rh-workflows']);
 
 function isSubScreen(screen: ShellScreen): screen is SubScreen {
   return SUB_SCREENS.has(screen);
@@ -48,6 +49,7 @@ const VALID_SCREENS = new Set<ShellScreen>([
   'my-favorites',
   'gallery',
   'admin-users',
+  'admin-rh-workflows',
 ]);
 
 function readSnap(): Snap | null {
@@ -96,6 +98,7 @@ type ShellNavigationValue = {
   openMyFavorites: () => void;
   openGallery: () => void;
   openAdminUsers: () => void;
+  openAdminRhWorkflows: () => void;
   goBack: () => void;
   warmInfiniteCanvas: () => void;
 };
@@ -173,6 +176,7 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
   const openMyFavorites = useCallback(() => openSubPage('my-favorites'), [openSubPage]);
   const openGallery = useCallback(() => openSubPage('gallery'), [openSubPage]);
   const openAdminUsers = useCallback(() => openSubPage('admin-users'), [openSubPage]);
+  const openAdminRhWorkflows = useCallback(() => openSubPage('admin-rh-workflows'), [openSubPage]);
   const goBack = useCallback(() => {
     setScreen(returnToRef.current);
   }, []);
@@ -197,6 +201,7 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
       openMyFavorites,
       openGallery,
       openAdminUsers,
+      openAdminRhWorkflows,
       goBack,
       warmInfiniteCanvas,
     }),
@@ -216,6 +221,7 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
       openMyFavorites,
       openGallery,
       openAdminUsers,
+      openAdminRhWorkflows,
       goBack,
       warmInfiniteCanvas,
     ],

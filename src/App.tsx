@@ -45,6 +45,7 @@ import { InfiniteCanvasPage } from './pages/InfiniteCanvasPage';
 import { MyFavoritesPage } from './pages/MyFavoritesPage';
 import { GalleryPage } from './pages/GalleryPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
+import { AdminRunningHubWorkflowsPage } from './pages/AdminRunningHubWorkflowsPage';
 import { ZoomableLightboxImage } from './components/ZoomableLightboxImage';
 import { GlobalNoticeCenter } from './components/GlobalNoticeCenter';
 import { Folder, Save } from 'lucide-react';
@@ -56,7 +57,6 @@ import { resolveStudioNavActive } from './shell/resolveStudioNavActive';
 import { StudioHeroShell } from './components/StudioHeroShell';
 import { StudioConvergePiece } from './components/motion/StudioConverge';
 import { CoverPageTransition } from './components/motion/CoverPageTransition';
-import { isInfiniteCanvasEditorOpen } from './lib/infiniteCanvas/canvasEngine.js';
 
 const ReferenceItem = ({ 
   asset, 
@@ -287,13 +287,16 @@ export default function App() {
   const showMyFavoritesPage = screen === 'my-favorites';
   const showGalleryPage = screen === 'gallery';
   const showAdminUsersPage = screen === 'admin-users';
+  const showAdminRhWorkflowsPage = screen === 'admin-rh-workflows';
   const subPage = showMyFavoritesPage
     ? 'my-favorites'
     : showGalleryPage
       ? 'gallery'
       : showAdminUsersPage
         ? 'admin-users'
-        : undefined;
+        : showAdminRhWorkflowsPage
+          ? 'admin-rh-workflows'
+          : undefined;
 
   /** 回到首页时确保画布层不挡滚轮（z-index + body 标记） */
   useEffect(() => {
@@ -344,9 +347,6 @@ export default function App() {
   const studioTransitionKeys = useStudioCoverEnterKeys(screen);
 
   const handleCanvasExitHome = () => {
-    if (isInfiniteCanvasEditorOpen() && !window.confirm('确定退出无限画布并返回网站首页？')) {
-      return;
-    }
     openCover();
   };
 
@@ -657,6 +657,7 @@ export default function App() {
       <MyFavoritesPage shellActive={showMyFavoritesPage} />
       <GalleryPage shellActive={showGalleryPage} />
       <AdminUsersPage shellActive={showAdminUsersPage} />
+      <AdminRunningHubWorkflowsPage shellActive={showAdminRhWorkflowsPage} />
       {/* Keep editor mounted after first open (cover / main studio), so draft persists */}
       {(showImageEditorPage || imageEditorKeepAlive) && (
         <StudioHeroShell active={showImageEditorPage && !showCoverPage}>

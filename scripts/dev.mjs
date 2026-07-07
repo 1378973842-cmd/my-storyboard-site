@@ -15,7 +15,12 @@ let restartTimer = null;
 let serverStarted = false;
 let starting = false;
 
-/** 等待旧进程退出，避免 Windows 上 SIGTERM 后端口仍占用导致新路由永远起不来 */
+/**
+ * 等待旧进程退出，避免端口仍占用导致新路由永远起不来。
+ * Windows 上 spawn 用了 shell:true，proc 实际是 cmd.exe 外壳；对它 kill('SIGTERM') 只会
+ * 杀掉外壳本身并立刻触发 'exit'，真正的 node.exe（.dev-server.mjs）会变成孤儿进程继续占用端口。
+ * 所以 Windows 必须直接按 pid 做进程树 taskkill，不能指望 SIGTERM 传导。
+ */
 function stopNode() {
   return new Promise((resolve) => {
     if (!child) return resolve();
@@ -29,7 +34,15 @@ function stopNode() {
       resolve();
     };
     proc.once('exit', done);
-    proc.kill('SIGTERM');
+    if (process.platform === 'win32') {
+      try {
+        spawn('taskkill', ['/PID', String(pid), '/F', '/T'], { shell: true, stdio: 'ignore' });
+      } catch (_) {
+        /* ignore */
+      }
+    } else {
+      proc.kill('SIGTERM');
+    }
     setTimeout(() => {
       if (!settled && pid) {
         try {

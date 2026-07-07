@@ -191,8 +191,9 @@ export const MyFavoritesPage = memo(function MyFavoritesPage({
                 key={item.id}
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
+                whileHover={{ y: -4 }}
                 transition={spring}
-                className="overflow-hidden rounded-[1.5rem] bg-[#131313]/80 outline outline-[0.5px] outline-[#45464d]/20"
+                className="overflow-hidden rounded-[1.5rem] bg-[#131313]/80 outline outline-[0.5px] outline-[#45464d]/20 transition-shadow duration-300 hover:shadow-[0_48px_96px_-56px_rgba(0,0,0,0.6)]"
               >
                 <button
                   type="button"

@@ -156,6 +156,68 @@ function on(target, type, handler, opts) {
   target.addEventListener(type, handler, opts);
   disposers.push(() => target.removeEventListener(type, handler, opts));
 }
+
+// ---- Custom tooltip: replaces native `title` popups (system-styled, delayed, unthemed)
+// with a themed one, by transiently stealing the `title` attribute during hover.
+// ponytail: desktop-hover only, no touch/long-press handling — acceptable ceiling for a creative-tool canvas.
+let tooltipEl = null;
+let tooltipTimer = null;
+let tooltipTarget = null;
+function hideCustomTooltip(){
+  clearTimeout(tooltipTimer);
+  tooltipTimer = null;
+  tooltipTarget = null;
+  if(tooltipEl){ tooltipEl.remove(); tooltipEl = null; }
+}
+function positionCustomTooltip(target){
+  if(!tooltipEl) return;
+  const r = target.getBoundingClientRect();
+  const tw = tooltipEl.offsetWidth;
+  const th = tooltipEl.offsetHeight;
+  const left = Math.max(8, Math.min(r.left + r.width / 2 - tw / 2, window.innerWidth - tw - 8));
+  let top = r.top - th - 8;
+  let flipped = false;
+  if(top < 8){ top = r.bottom + 8; flipped = true; }
+  tooltipEl.style.left = `${left}px`;
+  tooltipEl.style.top = `${top}px`;
+  tooltipEl.classList.toggle('is-flipped', flipped);
+}
+function watchTooltipTarget(){
+  if(!tooltipTarget) return;
+  if(!tooltipTarget.isConnected){ hideCustomTooltip(); return; }
+  requestAnimationFrame(watchTooltipTarget);
+}
+function showCustomTooltip(target, text){
+  clearTimeout(tooltipTimer);
+  tooltipTimer = setTimeout(() => {
+    tooltipEl = document.createElement('div');
+    tooltipEl.className = 'canvas-custom-tooltip';
+    tooltipEl.textContent = text;
+    document.body.appendChild(tooltipEl);
+    positionCustomTooltip(target);
+    requestAnimationFrame(() => { tooltipEl?.classList.add('is-visible'); watchTooltipTarget(); });
+  }, 420);
+}
+function wireCustomTooltips(root){
+  on(root, 'pointerover', e => {
+    const target = e.target?.closest?.('[title]');
+    if(!target || !root.contains(target) || target === tooltipTarget) return;
+    const text = target.getAttribute('title');
+    if(!text) return;
+    hideCustomTooltip();
+    tooltipTarget = target;
+    target.dataset.tooltipStash = text;
+    target.removeAttribute('title');
+    showCustomTooltip(target, text);
+  });
+  on(root, 'pointerout', e => {
+    const target = e.target?.closest?.('[data-tooltip-stash]');
+    if(!target || (e.relatedTarget && target.contains(e.relatedTarget))) return;
+    target.setAttribute('title', target.dataset.tooltipStash);
+    delete target.dataset.tooltipStash;
+    hideCustomTooltip();
+  });
+}
 function refreshIcons(scope){
     if(!window.lucide?.createIcons) return;
     if(scope instanceof Element) lucide.createIcons({ root: scope });
@@ -3200,8 +3262,8 @@ async function createCanvas(){
                     : '画布 API 未生效（返回了网页）。请停止 npm run dev，结束占用 3005 端口的旧进程后重新启动。'
             );
         }
-        if(!res.ok) throw new Error(tr('canvas.createFailed'));
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok) throw new Error(data.detail || data.error || tr('canvas.createFailed'));
         if(isSmart){
             setCreateMode(false);
             await loadCanvasList(false);
@@ -3890,6 +3952,8 @@ function addNode(node){
     nodes.push(node);
     render();
     scheduleSave();
+    const freshEl = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
+    if(freshEl) freshEl.classList.add('node-just-added');
     return node;
 }
 function defaultPoint(dx=0, dy=0){
@@ -7546,6 +7610,13 @@ function destroyLTXEditor(node){
 function isNodeDragSurface(target){
     return !isNodeControl(target) && !target.closest('.port, .resize-handle, .output-img-wrap');
 }
+const NODE_TYPE_ICON = {
+    image:'image', prompt:'type', loop:'repeat', promptGroup:'layers', group:'folder',
+    imageBatch:'images', frameStack:'images', llm:'brain', replicaAgent:'copy',
+    imageRepairAgent:'wrench', batchPosterAgent:'layout-grid', nineGridAgent:'grid-3x3',
+    slotsLoopVideoAgent:'clapperboard', videoReverse:'rewind', comfy:'workflow',
+    ltxDirector:'film', rh:'cloud', msgen:'sparkles', video:'video', output:'layout-grid'
+};
 function renderNode(node){
     normalizeApiNodeLayout(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
@@ -7591,7 +7662,8 @@ function renderNode(node){
         ? `<span class="node-disabled-badge" title="${escapeAttr(tr('canvas.nodeDisableHint'))}">${escapeHtml(tr('canvas.nodeDisabled'))}</span>`
         : '';
     const promptGroupHeadToggle = node.type === 'promptGroup' ? promptGroupHeadToggleHtml(node) : '';
-    el.innerHTML = `<div class="node-head"><span class="node-title">${displayTitle}</span><div style="display:flex;align-items:center;gap:8px">${promptGroupHeadToggle}${disabledBadge}${statusHtml}<button type="button" class="node-delete-btn text-gray-300 hover:text-red-500" aria-label="${escapeAttr(tr('common.delete'))}"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
+    const headIcon = NODE_TYPE_ICON[node.type] || 'zap';
+    el.innerHTML = `<div class="node-head"><span class="node-head-icon"><i data-lucide="${headIcon}" class="w-3 h-3"></i></span><span class="node-title">${displayTitle}</span><div style="display:flex;align-items:center;gap:8px;margin-left:auto">${promptGroupHeadToggle}${disabledBadge}${statusHtml}<button type="button" class="node-delete-btn text-gray-300 hover:text-red-500" aria-label="${escapeAttr(tr('common.delete'))}"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
     const deleteBtn = el.querySelector('.node-delete-btn');
     if(deleteBtn){
         deleteBtn.onmousedown = e => e.stopPropagation();
@@ -18590,6 +18662,7 @@ function attachEngineToRoot(root){
   applyViewport();
   wireCanvasUiEvents();
   wireBoardEvents();
+  wireCustomTooltips(root);
   exposeCanvasGlobals();
   restoreEditorSurface();
   mountedEngineRoot = root;
@@ -18623,6 +18696,7 @@ async function mountInfiniteCanvasEngineInner(root) {
   applyViewport();
   wireCanvasUiEvents();
   wireBoardEvents();
+  wireCustomTooltips(root);
   exposeCanvasGlobals();
 
   await loadConfig();
@@ -18708,6 +18782,7 @@ export function setInfiniteCanvasShellSuspended(suspended) {
 }
 
 export function disposeInfiniteCanvasEngine({ preserveEditor = false } = {}) {
+  hideCustomTooltip();
   clearBoardPanListeners();
   pendingNodeDrag = null;
   endDrag();

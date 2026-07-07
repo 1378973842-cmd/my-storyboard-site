@@ -25,6 +25,10 @@
   --color-on-surface: #e5e2e1;
 }
 
+::selection { background: rgba(255, 184, 102, 0.28); color: inherit; }
+html[data-theme="light"] ::selection { background: rgba(183, 113, 0, 0.22); }
+:where(button):not(:disabled):active { filter: brightness(0.9); transform: scale(0.98); }
+
 /* 夜间：与 @theme 一致，显式标记便于 color-scheme */
 html[data-theme="dark"] {
   color-scheme: dark;

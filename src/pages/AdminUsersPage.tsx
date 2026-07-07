@@ -157,30 +157,39 @@ export const AdminUsersPage = memo(function AdminUsersPage({ shellActive }: { sh
           className="mt-10 space-y-4 rounded-[1.5rem] bg-[#131313]/80 p-6 outline outline-[0.5px] outline-[#45464d]/20"
         >
           <h2 className="text-sm font-medium text-[#ffb866]/90">创建同事账号</h2>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="同事邮箱"
-            required
-            className="w-full rounded-2xl bg-[#1c1b1b]/85 px-4 py-3 text-sm outline-none focus:shadow-[0_0_0_3px_rgba(255,184,102,0.18)]"
-          />
-          <input
-            type="text"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="显示名称（可选）"
-            className="w-full rounded-2xl bg-[#1c1b1b]/85 px-4 py-3 text-sm outline-none focus:shadow-[0_0_0_3px_rgba(255,184,102,0.18)]"
-          />
-          <input
-            type="text"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="初始密码（至少 8 位）"
-            required
-            minLength={8}
-            className="w-full rounded-2xl bg-[#1c1b1b]/85 px-4 py-3 text-sm outline-none focus:shadow-[0_0_0_3px_rgba(255,184,102,0.18)]"
-          />
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.12em] text-[#e5e2e1]/45">同事邮箱</span>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="name@company.com"
+              required
+              className="w-full rounded-2xl bg-[#1c1b1b]/85 px-4 py-3 text-sm outline-none focus:shadow-[0_0_0_3px_rgba(255,184,102,0.18)]"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.12em] text-[#e5e2e1]/45">显示名称</span>
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="可选，默认使用邮箱前缀"
+              className="w-full rounded-2xl bg-[#1c1b1b]/85 px-4 py-3 text-sm outline-none focus:shadow-[0_0_0_3px_rgba(255,184,102,0.18)]"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-xs uppercase tracking-[0.12em] text-[#e5e2e1]/45">初始密码</span>
+            <input
+              type="text"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="至少 8 位"
+              required
+              minLength={8}
+              className="w-full rounded-2xl bg-[#1c1b1b]/85 px-4 py-3 text-sm outline-none focus:shadow-[0_0_0_3px_rgba(255,184,102,0.18)]"
+            />
+          </label>
           <button
             type="submit"
             disabled={submitting}
@@ -205,22 +214,53 @@ export const AdminUsersPage = memo(function AdminUsersPage({ shellActive }: { sh
             <div className="flex justify-center py-10 text-[#e5e2e1]/50">
               <Loader2 className="h-7 w-7 animate-spin" />
             </div>
+          ) : users.length === 0 ? (
+            <p className="py-10 text-center text-sm text-[#e5e2e1]/50">
+              还没有其他团队成员，创建第一个账号吧。
+            </p>
           ) : (
             <ul className="space-y-3">
               {users.map((user) => (
                 <li
                   key={user.id}
-                  className="rounded-2xl bg-[#131313]/70 px-4 py-3 outline outline-[0.5px] outline-[#45464d]/15"
+                  className={cn(
+                    'rounded-2xl bg-[#131313]/70 px-4 py-3 outline outline-[0.5px] outline-[#45464d]/15 transition-colors duration-200 hover:bg-[#171716]',
+                    user.disabled && 'opacity-55'
+                  )}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm text-[#e5e2e1]">{user.display_name}</p>
-                      <p className="text-xs text-[#e5e2e1]/50">{user.email}</p>
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={cn(
+                          'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-medium uppercase',
+                          user.role === 'admin'
+                            ? 'bg-[#ffb866]/20 text-[#ffb866]'
+                            : 'bg-[#1c1b1b] text-[#e5e2e1]/60'
+                        )}
+                      >
+                        {(user.display_name || user.email || '?').slice(0, 1)}
+                      </span>
+                      <div>
+                        <p className="text-sm text-[#e5e2e1]">{user.display_name}</p>
+                        <p className="text-xs text-[#e5e2e1]/50">{user.email}</p>
+                      </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[11px] uppercase tracking-[0.12em] text-[#e5e2e1]/40">
+                      <span
+                        className={cn(
+                          'rounded-full px-2.5 py-1 text-[11px] uppercase tracking-[0.12em]',
+                          user.role === 'admin'
+                            ? 'bg-[#ffb866]/15 text-[#ffb866]'
+                            : 'bg-[#1c1b1b] text-[#e5e2e1]/45'
+                        )}
+                      >
                         {user.role === 'admin' ? '管理员' : '成员'}
                       </span>
+                      {user.disabled ? (
+                        <span className="rounded-full bg-red-400/10 px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] text-red-300/80">
+                          已停用
+                        </span>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => (resetUserId === user.id ? cancelReset() : openReset(user))}

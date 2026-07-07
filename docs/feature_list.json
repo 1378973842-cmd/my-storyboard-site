@@ -25,6 +25,30 @@
         { "desc": "scripts/daily-log.mjs、npm run log:daily / hooks:install", "status": "done" },
         { "desc": "PM Agent / .cursorrules 收尾流程接入每日同步", "status": "done" }
       ]
+    },
+    {
+      "id": "F004",
+      "name": "RunningHub 自定义工作流/AI应用功能迁移（Python → Node/TS + 新管理页）",
+      "tasks": [
+        { "desc": "后端：6 个运行时接口 + RunningHub 客户端封装 + API Key 回退", "status": "done" },
+        { "desc": "后端：工作流/应用配置存储 + 5 个 CRUD/fetch 接口 + /api/config 合并", "status": "done" },
+        { "desc": "前端：admin-rh-workflows 导航接入 + 列表视图 + 粘贴添加 + 保存/删除", "status": "done" },
+        { "desc": "前端：DAG 节点图（拓扑分层自动布局 + SVG 贝塞尔连线 + 缩放平移）", "status": "done" },
+        { "desc": "前端：悬浮字段编辑器（TEXT/NUMBER/BOOLEAN/SELECT/IMAGE/VIDEO/AUDIO）", "status": "done" },
+        { "desc": "前端：实时测试运行面板（提交 + 2.5s 轮询 + 内嵌输出展示）", "status": "done" },
+        { "desc": "视觉细节打磨（暗色电影感规范）+ node init.mjs 全流程验证", "status": "done" }
+      ]
+    },
+    {
+      "id": "F005",
+      "name": "画布与 RunningHub 编辑器体验修复（用户反馈第二轮）",
+      "tasks": [
+        { "desc": "画布：去掉退出确认弹窗（logo→返回主页直接返回）", "status": "done" },
+        { "desc": "画布：修复 side-dock 被 framer-motion transform 覆盖导致的垂直居中失效", "status": "done" },
+        { "desc": "RunningHub 编辑器：加宽布局（max-w-6xl→1680px，左栏 380→420px，参数列表转响应式网格）", "status": "done" },
+        { "desc": "RunningHub 字段含义：从 apiCallDemo 原始 nodeInfoList.description 提取真实中文含义作为 label；STRING 归一到 TEXT", "status": "done" },
+        { "desc": "RunningHub 测试面板：字段卡片支持指针拖拽自定义排序（碰撞检测 + framer-motion layout 磁吸动画），顺序写入 field.order 随保存持久化", "status": "done" }
+      ]
     }
   ]
 }

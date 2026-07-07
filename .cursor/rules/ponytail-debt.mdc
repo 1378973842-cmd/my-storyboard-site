@@ -1,0 +1,31 @@
+---
+description: Harvest ponytail: shortcut comments into a debt ledger. Use when user asks about deferred shortcuts or says ponytail-debt.
+globs:
+alwaysApply: false
+---
+
+# Ponytail Debt
+
+Every deliberate ponytail shortcut is marked with a `ponytail:` comment naming its ceiling and upgrade path. Collect them into one ledger so deferrals don't become permanent.
+
+## Scan
+
+Grep the repo for comment markers, skipping `node_modules`, `.git`, and build output:
+
+`grep -rnE '(#|//) ?ponytail:' .`
+
+Each hit is one ledger row.
+
+## Output
+
+One row per marker, grouped by file:
+
+`path:L42 — ceiling: … upgrade: …`
+
+Flag `no-trigger` when a comment names no upgrade path or trigger.
+
+End with `N markers, M with no trigger.` Nothing found: `No ponytail: debt. Clean ledger.`
+
+## Boundaries
+
+Reads and reports only, changes nothing. To persist, ask and write the ledger to a file (e.g. `PONYTAIL-DEBT.md`). One-shot.
