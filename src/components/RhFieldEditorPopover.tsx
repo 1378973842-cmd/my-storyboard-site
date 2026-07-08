@@ -78,6 +78,17 @@ export function RhFieldEditorPopover({
             </select>
           </label>
 
+          <label className="block">
+            <span className="mb-1.5 block text-[11px] uppercase tracking-[0.1em] text-[#e5e2e1]/45">参数说明（提示语）</span>
+            <textarea
+              rows={2}
+              value={field.note}
+              placeholder="写清楚这个参数是干什么的，测试面板和画布节点里都会显示"
+              onChange={(e) => onChange({ note: e.target.value })}
+              className="w-full resize-none rounded-xl bg-[#131313]/80 px-3 py-2 text-sm outline-none focus:shadow-[0_0_0_3px_rgba(255,184,102,0.18)]"
+            />
+          </label>
+
           <button
             type="button"
             onClick={() => onChange({ sourceFromUpstream: !field.sourceFromUpstream })}

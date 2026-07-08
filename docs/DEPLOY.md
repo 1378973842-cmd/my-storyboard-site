@@ -81,6 +81,41 @@ git push origin deploy
 
 ---
 
+## 二点六、SSH 密钥免密部署（推荐，Agent 可自动部署）
+
+本机生成密钥（仅需一次）：
+
+```powershell
+ssh-keygen -t ed25519 -f "$env:USERPROFILE\.ssh\id_ed25519" -N '""' -C "lhz-gemini-deploy"
+```
+
+**最后一次**用密码把公钥和 RunningHub 变量写入服务器（密钥勿提交 Git）：
+
+```powershell
+cd "D:\刘恒志\代码\gemini-deploy"
+$env:DEPLOY_SSH_PASS = '你的服务器密码'
+$env:RUNNINGHUB_API_KEY = '你的 RunningHub Key'
+node scripts/setup-ssh-and-env.mjs
+```
+
+成功后本机可免密：
+
+```powershell
+ssh root@8.163.127.198
+```
+
+日常部署（无需密码）：
+
+```powershell
+git push origin deploy
+npm run build:prod
+node scripts/deploy-remote-once.mjs
+```
+
+`deploy-remote-once.mjs` 会优先读 `~/.ssh/id_ed25519`；仅在没有密钥时才回退 `DEPLOY_SSH_PASS`。
+
+---
+
 ## 二点五、服务器 `.env` 配置（首次上线 / 损坏恢复）
 
 `.env` **只存在于服务器**，Git 不会同步。推荐流程：
@@ -116,7 +151,13 @@ ADMIN_PASSWORD=至少8位强密码
 APIMART_API_BASE="https://api.apib.ai"
 APIMART_API_KEY="sk-……"
 APIMART_DNS_FIX="0"
+
+# RunningHub 工作流 / AI 应用
+RUNNINGHUB_API_KEY="你的-runninghub-api-key"
+RUNNINGHUB_API_BASE="https://www.runninghub.cn"
 ```
+
+也可用 `node scripts/setup-ssh-and-env.mjs` 自动写入（见 **二点六**）。
 
 自检：
 
@@ -130,6 +171,7 @@ grep -E '^(PORT|SESSION_SECRET|ADMIN_EMAIL|APIMART_API_BASE|APIMART_API_KEY)=' .
 | `SESSION_SECRET` / `ADMIN_*` | 开发可缺省或用弱默认值 | **必填**；勿用 `admin123456` |
 | `APIMART_API_BASE` | 可用默认 `api.apimart.ai` | **大陆 ECS 建议 `https://api.apib.ai`** |
 | `PORT` | 可能是 `3005` | **固定 `3000`**（与安全组一致） |
+| `RUNNINGHUB_API_KEY` | 本地 `.env` | 线上必填才能用 RH 工作流测试 |
 | `ACCESS_CODE` | 已废弃 | **删除**；勿再配置 |
 
 **不要**在服务器 `.env` 写 `NODE_ENV=development`（PM2 已是 `production`）。

@@ -158,6 +158,7 @@ export function RhLivePreviewPanel({
   optionalImageMode,
   onOptionalImageModeChange,
   onReorderFields,
+  onFieldNoteChange,
 }: {
   mode: 'app' | 'workflow';
   refId: string;
@@ -168,6 +169,8 @@ export function RhLivePreviewPanel({
   onOptionalImageModeChange?: (mode: string) => void;
   /** 测试面板里拖拽卡片调整顺序后，把完整字段数组（已重新赋值 order）回传给上层，随「保存」一并持久化。 */
   onReorderFields?: (fields: RhField[]) => void;
+  /** 卡片下方「参数说明」直接可编辑，随「保存」一并持久化到 field.note（测试面板与画布 RH 节点共用同一份说明）。 */
+  onFieldNoteChange?: (fieldId: string, note: string) => void;
 }) {
   const [params, setParams] = useState<Record<string, PreviewParam>>({});
   const [running, setRunning] = useState(false);
@@ -638,7 +641,18 @@ export function RhLivePreviewPanel({
                   <GripVertical className="h-3.5 w-3.5" />
                 </button>
                 {inner}
-                {meaning ? <p className="mt-1.5 truncate text-[10px] leading-relaxed text-[#e5e2e1]/35">{meaning}</p> : null}
+                {onFieldNoteChange ? (
+                  <input
+                    type="text"
+                    defaultValue={meaning}
+                    placeholder="写一句参数说明，画布节点里也会显示…"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onBlur={(e) => onFieldNoteChange(field.id, e.target.value.trim())}
+                    className="mt-1.5 w-full truncate bg-transparent text-[10px] leading-relaxed text-[#e5e2e1]/40 outline-none placeholder:text-[#e5e2e1]/25 focus:text-[#ffb866]/80"
+                  />
+                ) : meaning ? (
+                  <p className="mt-1.5 truncate text-[10px] leading-relaxed text-[#e5e2e1]/35">{meaning}</p>
+                ) : null}
               </motion.div>
             );
           })

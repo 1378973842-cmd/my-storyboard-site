@@ -70,6 +70,16 @@ async function readJson(res: Response): Promise<any> {
   }
 }
 
+/** 通知画布等其他标签页里已打开的 canvasEngine.js 立即重新拉取 /api/config（含最新 fields/note），
+ * 对齐旧版 canvas_source/static/js/api-settings.js 的广播逻辑，避免画布长时间停留时看到过期配置。 */
+function broadcastRhConfigChanged() {
+  try {
+    new BroadcastChannel('studio-api').postMessage({ type: 'workflows-changed' });
+  } catch {
+    /* 不支持 BroadcastChannel 的旧浏览器忽略 */
+  }
+}
+
 export const AdminRunningHubWorkflowsPage = memo(function AdminRunningHubWorkflowsPage({
   shellActive,
 }: {
@@ -132,6 +142,7 @@ export const AdminRunningHubWorkflowsPage = memo(function AdminRunningHubWorkflo
       const data = await readJson(res);
       if (!res.ok || data.success === false) throw new Error(data.error || '添加失败');
       setPasteValue('');
+      broadcastRhConfigChanged();
       await loadLists();
       openEditor(parsed.type, parsed.id);
     } catch (e) {
@@ -246,6 +257,7 @@ export const AdminRunningHubWorkflowsPage = memo(function AdminRunningHubWorkflo
       window.setTimeout(() => {
         setEditor((prev) => (prev?.saveOkUntil ? ({ ...prev, saveOkUntil: 0 } as EditorState) : prev));
       }, 2600);
+      broadcastRhConfigChanged();
       await loadLists();
     } catch (e) {
       const msg = e instanceof Error ? e.message : '保存失败';
@@ -263,6 +275,7 @@ export const AdminRunningHubWorkflowsPage = memo(function AdminRunningHubWorkflo
       const data = await readJson(res);
       if (!res.ok || data.success === false) throw new Error(data.error || '删除失败');
       if (editor && editor.kind === kind && editor.id === id) closeEditor();
+      broadcastRhConfigChanged();
       await loadLists();
     } catch (e) {
       setError(e instanceof Error ? e.message : '删除失败');
@@ -381,6 +394,7 @@ export const AdminRunningHubWorkflowsPage = memo(function AdminRunningHubWorkflo
                 onSave={() => void handleSave()}
                 onToggleField={toggleFieldEnabled}
                 onReorderFields={reorderFields}
+                onFieldNoteChange={(fieldId, note) => updateField(fieldId, { note })}
                 onOpenFieldEditor={(fieldId, rect) => {
                   setPopoverFieldId(fieldId);
                   setPopoverAnchorRect(rect);
@@ -486,6 +500,7 @@ function RhEditorOverlay({
   onSave,
   onToggleField,
   onReorderFields,
+  onFieldNoteChange,
   onOpenFieldEditor,
   onTitleChange,
   onDescriptionChange,
@@ -501,6 +516,7 @@ function RhEditorOverlay({
   onSave: () => void;
   onToggleField: (fieldId: string) => void;
   onReorderFields: (fields: RhField[]) => void;
+  onFieldNoteChange: (fieldId: string, note: string) => void;
   onOpenFieldEditor: (fieldId: string, rect: DOMRect) => void;
   onTitleChange: (title: string) => void;
   onDescriptionChange: (description: string) => void;
@@ -609,6 +625,7 @@ function RhEditorOverlay({
                   optionalImageMode={isWorkflow ? (editor.config as RhWorkflowConfig).optionalImageMode : undefined}
                   onOptionalImageModeChange={onOptionalImageModeChange}
                   onReorderFields={onReorderFields}
+                  onFieldNoteChange={onFieldNoteChange}
                 />
               </div>
 

@@ -13,6 +13,8 @@ export function getCanvasBoardBackground(): string;
 export function getCanvasViewportScale(): number;
 export function subscribeCanvasViewportScale(listener: (scale: number) => void): () => void;
 export function resetCanvasViewportZoom(): void;
+export function zoomCanvasViewport(factor: number): void;
+export function fitCanvasViewportAll(): void;
 export function refreshInfiniteCanvasLayout(): void;
 export function syncCanvasTopbarDom(): void;
 export function setCanvasBoardBackground(color: string): void;

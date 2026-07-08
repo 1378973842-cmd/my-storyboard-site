@@ -1,13 +1,15 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LayoutTemplate, X } from 'lucide-react';
+import { LayoutTemplate, Maximize2, Minus, Plus, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import {
+  fitCanvasViewportAll,
   getCanvasBoardBackground,
   isInfiniteCanvasEditorOpen,
   resetCanvasViewportZoom,
   setCanvasBoardBackground,
   subscribeCanvasViewportScale,
+  zoomCanvasViewport,
 } from '../../lib/infiniteCanvas/canvasEngine.js';
 import {
   BOARD_BG_PRESETS,
@@ -364,6 +366,10 @@ export const CanvasLeftDock = memo(function CanvasLeftDock({
 
         <span className="canvas-left-dock-sep" aria-hidden />
 
+        <DockIconButton label="缩小画布" onClick={() => zoomCanvasViewport(1 / 1.12)}>
+          <Minus className={DOCK_ICON} strokeWidth={1.5} />
+        </DockIconButton>
+
         <button
           type="button"
           className="canvas-left-dock-zoom"
@@ -373,6 +379,14 @@ export const CanvasLeftDock = memo(function CanvasLeftDock({
         >
           {zoomPct}%
         </button>
+
+        <DockIconButton label="放大画布" onClick={() => zoomCanvasViewport(1.12)}>
+          <Plus className={DOCK_ICON} strokeWidth={1.5} />
+        </DockIconButton>
+
+        <DockIconButton label="适配全部节点" onClick={() => fitCanvasViewportAll()}>
+          <Maximize2 className={DOCK_ICON} strokeWidth={1.25} />
+        </DockIconButton>
       </div>
     </div>
   );

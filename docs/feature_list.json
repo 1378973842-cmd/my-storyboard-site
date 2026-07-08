@@ -40,6 +40,25 @@
       ]
     },
     {
+      "id": "F006",
+      "name": "画布+主页 UI 升级路线（详细任务书见 docs/UI_ROADMAP.md，按其顺序与验收标准施工）",
+      "tasks": [
+        { "id": "A1", "desc": "画布浅色主题消灭 1px 实线（节点/表单区约 100 处，改幽灵 outline/色调差）", "status": "done", "priority": 1 },
+        { "id": "A2", "desc": "画布模态层暗色化补齐（model-panel/image-edit/lightbox/log/error）", "status": "done", "priority": 2 },
+        { "id": "B2", "desc": "selectionHub 死代码清理（Shell DOM + engine 函数 + CSS）", "status": "done", "priority": 3 },
+        { "id": "A3", "desc": "画布圆角 token 收敛 + selection/focus 残留橙色改琥珀", "status": "done", "priority": 4 },
+        { "id": "B1", "desc": "失败反馈统一：单节点失败去 alert()，复用 retry-bar + failed 徽章", "status": "done", "priority": 5 },
+        { "id": "B4", "desc": "缩放控件补全：+/-/fit-all 按钮", "status": "done", "priority": 6 },
+        { "id": "B3", "desc": "运行中链路连线流动动画（仅 running 链路，reduced-motion 关闭）", "status": "done", "priority": 7 },
+        { "id": "D1", "desc": "主页工具区非对称 bento 布局（桌面 grid，移动端保持横滑）", "status": "done", "priority": 8 },
+        { "id": "D2", "desc": "主页导航滚动变形（>50vh 变玻璃 pill）", "status": "done", "priority": 9 },
+        { "id": "D3", "desc": "点击工具卡汇聚过渡（复用 StudioConverge，勿破坏画布 instantExit）", "status": "todo", "priority": 10 },
+        { "id": "C1", "desc": "generator/rh 节点增量刷新（仿 refreshOutputNodeContent，保 textarea 焦点）", "status": "todo", "priority": 11 },
+        { "id": "C2", "desc": "画布视口裁剪（visibility:hidden，非 display:none）", "status": "todo", "priority": 12 },
+        { "id": "D4", "desc": "Hero 视频背景（导演暂缓；素材下载+ffmpeg 压缩后填 COVER_HERO_VIDEO）", "status": "todo", "priority": 13 }
+      ]
+    },
+    {
       "id": "F005",
       "name": "画布与 RunningHub 编辑器体验修复（用户反馈第二轮）",
       "tasks": [
@@ -47,7 +66,9 @@
         { "desc": "画布：修复 side-dock 被 framer-motion transform 覆盖导致的垂直居中失效", "status": "done" },
         { "desc": "RunningHub 编辑器：加宽布局（max-w-6xl→1680px，左栏 380→420px，参数列表转响应式网格）", "status": "done" },
         { "desc": "RunningHub 字段含义：从 apiCallDemo 原始 nodeInfoList.description 提取真实中文含义作为 label；STRING 归一到 TEXT", "status": "done" },
-        { "desc": "RunningHub 测试面板：字段卡片支持指针拖拽自定义排序（碰撞检测 + framer-motion layout 磁吸动画），顺序写入 field.order 随保存持久化", "status": "done" }
+        { "desc": "RunningHub 测试面板：字段卡片支持指针拖拽自定义排序（碰撞检测 + framer-motion layout 磁吸动画），顺序写入 field.order 随保存持久化", "status": "done" },
+        { "desc": "RunningHub 字段编辑器新增「参数说明」文本框（写入 field.note，自定义工作流字段无描述时可手填），测试面板与画布 RH 节点参数/提示词卡片下方均展示该说明", "status": "done" },
+        { "desc": "修复 RunningHub 管理页保存/新增/删除后未广播 BroadcastChannel('studio-api')，导致常驻后台的画布 canvasEngine 拿着过期配置（含 note）不刷新的问题", "status": "done" }
       ]
     }
   ]

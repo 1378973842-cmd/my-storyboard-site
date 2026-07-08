@@ -401,6 +401,22 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
   } = useShellNavigation();
   const user = useAuthStore((s) => s.user);
   const isAdmin = useAuthStore((s) => s.isAdmin());
+  const [coverNavGlass, setCoverNavGlass] = useState(false);
+
+  useEffect(() => {
+    if (variant !== 'overlay' || active !== 'cover') {
+      setCoverNavGlass(false);
+      return;
+    }
+    const scroller = document.querySelector('[data-cover-scroll-root]');
+    if (!scroller) return;
+    const onScroll = () => {
+      setCoverNavGlass(scroller.scrollTop > window.innerHeight * 0.5);
+    };
+    onScroll();
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+    return () => scroller.removeEventListener('scroll', onScroll);
+  }, [variant, active]);
 
   const navItems: NavItem[] = [
     { id: 'storyboard', label: '分镜', icon: Clapperboard, onClick: openStudio },
@@ -486,9 +502,12 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
       {!hideFeatureNav ? (
       <nav
         className={cn(
-          'pointer-events-auto flex w-full items-center',
+          'pointer-events-auto flex w-full items-center transition-[background,box-shadow,outline-color,padding] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
           isOverlayNav
-            ? 'justify-end gap-2 px-6 pt-5 md:gap-3 md:px-10 md:pt-7 lg:px-14'
+            ? cn(
+                'justify-end gap-2 px-6 pt-5 md:gap-3 md:px-10 md:pt-7 lg:px-14',
+                coverNavGlass && 'cover-glass-nav cover-hero-nav-pill !px-4 !py-2 md:!px-5 md:!pt-2.5 md:!pb-2.5',
+              )
             : 'justify-end gap-2 md:gap-3 flex-1 min-w-0',
         )}
         aria-label="LHZ's Studio navigation"

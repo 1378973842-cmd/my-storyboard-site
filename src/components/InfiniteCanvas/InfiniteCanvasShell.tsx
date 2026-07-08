@@ -1,7 +1,7 @@
 /** Auto-generated from canvas.html — re-run scripts/html-to-jsx-shell.mjs */
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type Ref } from 'react';
 import { createPortal } from 'react-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const dockSpring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 import {
@@ -92,6 +92,134 @@ const NODE_FLYOUT_GROUPS: FlyoutGroup[] = [
   },
 ];
 
+type ShortcutRow = { label: string; keys: string[] };
+type ShortcutGroup = { title: string; rows: ShortcutRow[] };
+
+// 与 canvasEngine.js 中实际绑定的交互保持一致，不臆造未实现的快捷键
+const SHORTCUT_GROUPS: ShortcutGroup[] = [
+  {
+    title: '编辑',
+    rows: [
+      { label: '成组选中图片', keys: ['Ctrl', 'G'] },
+      { label: '复制节点', keys: ['Ctrl', 'C'] },
+      { label: '粘贴节点', keys: ['Ctrl', 'V'] },
+      { label: '启用 / 禁用节点', keys: ['Ctrl', 'B'] },
+      { label: '撤销', keys: ['Ctrl', 'Z'] },
+      { label: '删除选中 / 连线', keys: ['Delete'] },
+      { label: '拖动节点时创建副本', keys: ['Alt', '拖动节点'] },
+    ],
+  },
+  {
+    title: '选择与连线',
+    rows: [
+      { label: '多选节点', keys: ['Ctrl', '点击节点'] },
+      { label: '框选节点', keys: ['Ctrl', '拖动空白处'] },
+      { label: '剪断连线', keys: ['Shift', '划过连线'] },
+      { label: '拉出新连线', keys: ['拖动端口圆点'] },
+    ],
+  },
+  {
+    title: '缩放',
+    rows: [
+      { label: '放大 / 缩小画布', keys: ['鼠标滚轮'] },
+      { label: '放大 / 缩小画布', keys: ['触控板双指滑动'] },
+    ],
+  },
+  {
+    title: '移动画布',
+    rows: [
+      { label: '平移画布', keys: ['拖动空白处'] },
+      { label: '平移画布', keys: ['Space', '拖动'] },
+      { label: '平移画布', keys: ['鼠标中键拖动'] },
+      { label: '快速定位视图', keys: ['拖动小地图'] },
+    ],
+  },
+  {
+    title: '其他',
+    rows: [
+      { label: '取消拉线 / 关闭弹窗', keys: ['Esc'] },
+      { label: '大图预览上一张 / 下一张', keys: ['←', '→'] },
+    ],
+  },
+];
+
+function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const root = document.querySelector('.infinite-canvas-root');
+    setPortalRoot(root instanceof HTMLElement ? root : null);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    const lucide = (window as unknown as { lucide?: { createIcons?: () => void } }).lucide;
+    lucide?.createIcons?.();
+  }, [open]);
+
+  if (!portalRoot) return null;
+
+  return createPortal(
+    <AnimatePresence>
+      {open ? (
+        <div
+          className="shortcuts-modal-backdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) onClose();
+          }}
+        >
+          <motion.div
+            className="shortcuts-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="快捷键"
+            initial={{ opacity: 0, y: 16, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1, transition: dockSpring }}
+            exit={{ opacity: 0, y: 8, scale: 0.98, transition: { duration: 0.14, ease: [0.4, 0, 1, 1] } }}
+          >
+            <div className="shortcuts-modal-head">
+              <span>快捷键</span>
+              <button type="button" className="shortcuts-modal-close" aria-label="关闭" onClick={onClose}>
+                <i data-lucide="x" className="w-4 h-4"></i>
+              </button>
+            </div>
+            <div className="shortcuts-columns">
+              {SHORTCUT_GROUPS.map((group) => (
+                <div key={group.title} className="shortcuts-group">
+                  <div className="shortcuts-group-title">{group.title}</div>
+                  {group.rows.map((row, ri) => (
+                    <div key={`${row.label}-${ri}`} className="shortcuts-row">
+                      <span className="shortcuts-row-label">{row.label}</span>
+                      <span className="shortcuts-keys">
+                        {row.keys.map((k, ki) => (
+                          <span key={ki} className="shortcut-key-group">
+                            {ki > 0 ? <span className="shortcut-plus">+</span> : null}
+                            <span className="shortcut-key">{k}</span>
+                          </span>
+                        ))}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        </div>
+      ) : null}
+    </AnimatePresence>,
+    portalRoot,
+  );
+}
+
 function ToolbarFlyout({
   triggerIcon,
   triggerLabel,
@@ -99,6 +227,7 @@ function ToolbarFlyout({
   ariaLabel,
   menuClassName,
   groups,
+  showTooltip = true,
 }: {
   triggerIcon: string;
   triggerLabel: string;
@@ -106,6 +235,7 @@ function ToolbarFlyout({
   ariaLabel: string;
   menuClassName?: string;
   groups: FlyoutGroup[];
+  showTooltip?: boolean;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -227,7 +357,7 @@ function ToolbarFlyout({
           ref={triggerRef}
           type="button"
           className={`tool-btn tool-btn-ghost tool-btn-icon-only toolbar-flyout-trigger${triggerClassName ? ` ${triggerClassName}` : ''}`}
-          title={triggerLabel}
+          title={showTooltip ? triggerLabel : undefined}
           aria-label={triggerLabel}
           aria-haspopup="menu"
           aria-expanded={open}
@@ -253,6 +383,7 @@ function ToolbarAgentFlyout() {
       ariaLabel="Agent nodes"
       menuClassName="toolbar-flyout-menu-agents"
       groups={AGENT_FLYOUT_GROUPS}
+      showTooltip={false}
     />
   );
 }
@@ -266,6 +397,7 @@ function ToolbarNodeFlyout() {
       ariaLabel="添加节点"
       menuClassName="toolbar-flyout-menu-nodes"
       groups={NODE_FLYOUT_GROUPS}
+      showTooltip={false}
     />
   );
 }
@@ -275,6 +407,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
   materialLibraryOpen = false,
   onMaterialLibraryOpenChange,
 }: Props) {
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const mergedRef = useCallback(
     (node: HTMLDivElement | null) => {
       assignRootRef(rootRef, node);
@@ -331,7 +464,19 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                       <i data-lucide="history" className="w-4 h-4"></i>
                       <span>历史记录</span>
                   </button>
+                  <button
+                    type="button"
+                    className={`tool-btn tool-btn-ghost tool-btn-icon-only${shortcutsOpen ? ' is-active' : ''}`}
+                    title="快捷键"
+                    aria-label="快捷键"
+                    aria-pressed={shortcutsOpen}
+                    onClick={() => setShortcutsOpen((value) => !value)}
+                  >
+                      <i data-lucide="keyboard" className="w-4 h-4"></i>
+                      <span>快捷键</span>
+                  </button>
               </motion.div>
+              <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       
               <div id="canvasGate" className="canvas-gate">
                   <div className="gate-panel">
@@ -483,7 +628,6 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                       <span data-i18n="canvas.outputDragHint">拖离节点后再松手，即可复制到画布</span>
                   </div>
                   <div id="selectionBox" className="selection-box"></div>
-                  <div id="selectionHub" className="selection-hub"></div>
                   <div id="createMenu" className="create-menu">
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('image')}><i data-lucide="image-plus" className="w-4 h-4"></i><span data-i18n="canvas.imageCard">图片卡片</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('imageBatch')}><i data-lucide="images" className="w-4 h-4"></i><span data-i18n="canvas.imageBatchNode">图片组</span></button>
