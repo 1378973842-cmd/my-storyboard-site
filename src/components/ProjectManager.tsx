@@ -299,33 +299,33 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        className="bg-surface-container border border-white/10 w-full max-w-5xl rounded-[40px] overflow-hidden shadow-[0_0_100px_rgba(0,0,0,0.8)] flex flex-col max-h-[90vh] relative z-10"
+        className="bg-surface-container-low/95 outline outline-[0.5px] outline-white/10 w-full max-w-5xl rounded-[40px] overflow-hidden shadow-[0_40px_100px_-40px_rgba(0,0,0,0.75)] flex flex-col max-h-[90vh] relative z-10 backdrop-blur-[28px]"
       >
         {/* Header */}
-        <div className="p-10 border-b border-white/5 flex items-center justify-between bg-surface-container-low/30 relative">
+        <div className="p-10 bg-surface-container-low/30 relative flex items-center justify-between">
           <div className="flex items-center gap-6">
-            <div className="w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center border border-primary/20 relative group">
+            <div className="w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center outline outline-[0.5px] outline-primary/25 relative group">
               <div className="absolute inset-0 bg-primary/20 blur-xl opacity-0 group-hover:opacity-100 transition-opacity" />
               <Database className="w-7 h-7 text-primary relative z-10" />
             </div>
             <div>
               <h2 className="text-2xl font-headline italic text-on-surface tracking-tight">Project_Archive</h2>
               <div className="flex items-center gap-2 mt-1">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <p className="text-[10px] font-label tracking-[0.3em] text-slate-500 uppercase">System_Status: Operational</p>
+                <div className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-[0_0_12px_rgba(255,184,102,0.45)]" />
+                <p className="text-[10px] font-label tracking-[0.3em] text-on-surface/45 uppercase">System_Status: Operational</p>
               </div>
             </div>
           </div>
           
           <div className="flex items-center gap-4">
             <div className="relative group">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 group-focus-within:text-primary transition-colors" />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface/40 group-focus-within:text-primary transition-colors" />
               <input 
                 type="text"
                 placeholder="SEARCH_ARCHIVE..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-surface-container-lowest border border-white/5 rounded-full pl-11 pr-6 py-2.5 text-[10px] font-mono tracking-widest focus:outline-none focus:border-primary/30 w-64 transition-all"
+                className="bg-surface-container-lowest outline outline-[0.5px] outline-white/10 rounded-full pl-11 pr-6 py-2.5 text-[10px] font-mono tracking-widest focus:outline-none focus:outline focus:outline-[0.5px] focus:outline-primary/35 w-64 transition-all text-on-surface"
               />
             </div>
             <button 
@@ -344,18 +344,18 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
 
         <div className="flex-1 overflow-hidden flex">
           {/* Left: Current Project Info */}
-          <div className="w-80 border-r border-white/5 p-10 space-y-10 bg-surface-container-lowest/20">
+          <div className="w-80 p-10 space-y-10 bg-surface-container-lowest/30 outline outline-[0.5px] outline-white/[0.06] -outline-offset-[-1px]">
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <Activity className="w-3.5 h-3.5 text-primary" />
                 <label className="text-[10px] font-label tracking-[0.3em] text-primary uppercase">Active_Session</label>
               </div>
               <div className="space-y-2">
-                <span className="text-[8px] font-label tracking-widest text-slate-600 ml-1 uppercase">Project_Title</span>
+                <span className="text-[8px] font-label tracking-widest text-on-surface/35 ml-1 uppercase">Project_Title</span>
                 <input 
                   value={projectTitle}
                   onChange={(e) => setProjectTitle(e.target.value)}
-                  className="w-full bg-surface-container-lowest border border-white/5 rounded-2xl px-5 py-4 text-xs font-mono focus:outline-none focus:border-primary/30 transition-all shadow-inner"
+                  className="w-full bg-surface-container-lowest outline outline-[0.5px] outline-white/10 rounded-2xl px-5 py-4 text-xs font-mono focus:outline-none focus:outline focus:outline-[0.5px] focus:outline-primary/35 transition-all shadow-inner text-on-surface"
                   placeholder="Untitled_Project..."
                 />
               </div>
@@ -368,8 +368,8 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
                 className={cn(
                   "w-full flex items-center justify-center gap-3 py-5 rounded-2xl text-[10px] font-label tracking-[0.2em] uppercase transition-all cursor-pointer shadow-lg",
                   saveStatus === 'success' 
-                    ? "bg-emerald-500 text-white" 
-                    : "bg-primary text-on-primary-fixed hover:bg-primary/90 hover:scale-[1.02] active:scale-[0.98]"
+                    ? "bg-gradient-to-br from-primary to-on-primary-container text-on-primary-fixed" 
+                    : "bg-gradient-to-br from-primary to-on-primary-container text-on-primary-fixed hover:brightness-105 hover:scale-[1.02] active:scale-[0.98]"
                 )}
               >
                 {isSaving ? (
@@ -391,7 +391,7 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
               </button>
             </div>
 
-            <div className="pt-10 border-t border-white/5 space-y-6">
+            <div className="pt-10 space-y-6">
               <div className="flex items-center gap-2">
                 <Box className="w-3.5 h-3.5 text-slate-500" />
                 <h4 className="text-[10px] font-label tracking-[0.3em] text-slate-500 uppercase">Session_Metrics</h4>
@@ -435,7 +435,7 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
                 <span className="text-[11px] font-label tracking-[0.4em] uppercase animate-pulse">Syncing_Archive_Stream...</span>
               </div>
             ) : filteredProjects.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-32 text-slate-600 border border-dashed border-white/5 rounded-[40px] bg-white/[0.01]">
+              <div className="flex flex-col items-center justify-center py-32 text-on-surface/35 outline outline-1 outline-dashed outline-white/10 rounded-[40px] bg-white/[0.01]">
                 <FileText className="w-16 h-16 opacity-5 mb-6" />
                 <span className="text-[11px] font-label tracking-[0.3em] uppercase opacity-40">No_Records_Detected</span>
                 <p className="text-[9px] mt-3 opacity-20 uppercase tracking-[0.2em]">Initialize a new sequence to populate archive</p>
@@ -451,10 +451,10 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
                       transition={{ delay: idx * 0.05 }}
                       onClick={() => handleLoad(p.id)}
                       className={cn(
-                        "group flex items-center justify-between p-7 rounded-[32px] border transition-all cursor-pointer relative overflow-hidden",
+                        "group flex items-center justify-between p-7 rounded-[32px] outline outline-[0.5px] transition-all cursor-pointer relative overflow-hidden",
                         currentProjectId === p.id 
-                          ? "bg-primary/5 border-primary/30 shadow-[0_0_30px_rgba(255,184,102,0.1)]" 
-                          : "bg-surface-container-lowest/50 border-white/5 hover:border-primary/30 hover:bg-white/[0.03] hover:shadow-xl"
+                          ? "bg-primary/5 outline-primary/30 shadow-[0_0_30px_rgba(255,184,102,0.1)]" 
+                          : "bg-surface-container-lowest/50 outline-white/10 hover:outline-primary/30 hover:bg-white/[0.03] hover:shadow-xl"
                       )}
                     >
                       {/* Hover Glow Effect */}
@@ -505,7 +505,7 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
 
                       {currentProjectId === p.id && (
                         <div className="absolute top-0 right-0 p-3">
-                          <div className="px-3 py-1.5 bg-primary/20 text-primary text-[9px] font-label tracking-[0.3em] rounded-bl-2xl border-l border-b border-primary/30 backdrop-blur-md">
+                          <div className="px-3 py-1.5 bg-primary/20 text-primary text-[9px] font-label tracking-[0.3em] rounded-bl-2xl outline outline-[0.5px] outline-primary/30 backdrop-blur-md">
                             ACTIVE_SESSION
                           </div>
                         </div>

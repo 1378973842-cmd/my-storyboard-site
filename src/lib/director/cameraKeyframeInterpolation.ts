@@ -1,5 +1,15 @@
 import { Euler, Quaternion } from 'three';
-import type { CameraKeyframe, ObjectKeyframe, Vec3Tuple } from '../../store/useDirectorSceneStore';
+import type {
+  CameraKeyframe,
+  ObjectKeyframe,
+  Vec3Tuple,
+} from '../../store/useDirectorSceneStore';
+import type { ProportionMap } from './boneProportions';
+import {
+  applyKeyframeEase,
+  DEFAULT_BEZIER,
+  type KeyframeEase,
+} from './keyframeEasing';
 
 export type CameraSample = {
   position: Vec3Tuple;
@@ -11,6 +21,8 @@ export type ObjectSample = {
   position: Vec3Tuple;
   rotation: Vec3Tuple;
   scale: Vec3Tuple;
+  boneRotations?: Record<string, Vec3Tuple>;
+  proportions?: ProportionMap;
 };
 
 const _eulerA = new Euler();
@@ -38,11 +50,50 @@ function slerpRotation(a: Vec3Tuple, b: Vec3Tuple, t: number): Vec3Tuple {
   return [_eulerOut.x, _eulerOut.y, _eulerOut.z];
 }
 
-function sampleBetweenFrames<T extends { frame: number }>(
+function lerpBoneMaps(
+  a: Record<string, Vec3Tuple> | undefined,
+  b: Record<string, Vec3Tuple> | undefined,
+  t: number,
+): Record<string, Vec3Tuple> | undefined {
+  if (!a && !b) return undefined;
+  const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  const out: Record<string, Vec3Tuple> = {};
+  for (const key of keys) {
+    const va = a?.[key] ?? b?.[key] ?? [0, 0, 0];
+    const vb = b?.[key] ?? a?.[key] ?? [0, 0, 0];
+    out[key] = slerpRotation(va, vb, t);
+  }
+  return out;
+}
+
+function lerpProportions(
+  a: ProportionMap | undefined,
+  b: ProportionMap | undefined,
+  t: number,
+): ProportionMap | undefined {
+  if (!a && !b) return undefined;
+  const left = a ?? b!;
+  const right = b ?? a!;
+  const out = { ...left };
+  for (const key of Object.keys(right) as (keyof ProportionMap)[]) {
+    const av = Number(left[key] ?? right[key] ?? 1);
+    const bv = Number(right[key] ?? left[key] ?? 1);
+    (out as Record<string, number>)[key] = av + (bv - av) * t;
+  }
+  return out;
+}
+
+type EaseCarrier = {
+  frame: number;
+  ease?: KeyframeEase;
+  easeBezier?: [number, number, number, number];
+};
+
+function sampleBetweenFrames<T extends EaseCarrier>(
   keyframes: T[],
   frame: number,
-  blend: (a: T, b: T, t: number) => Omit<T, 'id' | 'frame'>,
-): Omit<T, 'id' | 'frame'> | null {
+  blend: (a: T, b: T, t: number) => Omit<T, 'id' | 'frame' | 'ease' | 'easeBezier'>,
+): Omit<T, 'id' | 'frame' | 'ease' | 'easeBezier'> | null {
   if (keyframes.length === 0) return null;
 
   const sorted = [...keyframes].sort((a, b) => a.frame - b.frame);
@@ -61,14 +112,19 @@ function sampleBetweenFrames<T extends { frame: number }>(
     const b = sorted[i + 1]!;
     if (frame < a.frame || frame > b.frame) continue;
     const span = b.frame - a.frame;
-    const t = span <= 0 ? 0 : (frame - a.frame) / span;
-    return blend(a, b, t);
+    const rawT = span <= 0 ? 0 : (frame - a.frame) / span;
+    const eased = applyKeyframeEase(
+      rawT,
+      a.ease ?? 'linear',
+      a.easeBezier ?? DEFAULT_BEZIER,
+    );
+    return blend(a, b, eased);
   }
 
   return blend(last, last, 0);
 }
 
-/** 按帧号在关键帧之间插值（position/fov 线性，rotation 球面插值） */
+/** 按帧号在关键帧之间插值（支持段缓动；rotation 球面插值） */
 export function sampleCameraAtFrame(keyframes: CameraKeyframe[], frame: number): CameraSample | null {
   const sample = sampleBetweenFrames(keyframes, frame, (a, b, t) => ({
     position: lerp3(a.position, b.position, t),
@@ -78,12 +134,14 @@ export function sampleCameraAtFrame(keyframes: CameraKeyframe[], frame: number):
   return sample;
 }
 
-/** 物体/人偶关键帧插值（position/scale 线性，rotation 球面插值） */
+/** 物体/人偶关键帧插值（含可选骨骼姿势；rotation 球面插值） */
 export function sampleObjectAtFrame(keyframes: ObjectKeyframe[], frame: number): ObjectSample | null {
   const sample = sampleBetweenFrames(keyframes, frame, (a, b, t) => ({
     position: lerp3(a.position, b.position, t),
     rotation: slerpRotation(a.rotation, b.rotation, t),
     scale: lerp3(a.scale, b.scale, t),
+    boneRotations: lerpBoneMaps(a.boneRotations, b.boneRotations, t),
+    proportions: lerpProportions(a.proportions, b.proportions, t),
   }));
   return sample;
 }

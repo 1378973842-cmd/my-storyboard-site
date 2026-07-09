@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from 'lucide-react';
+import { Diamond, Plus, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useDirectorSceneStore } from '../../store/useDirectorSceneStore';
 
@@ -9,9 +9,14 @@ export function DirectorPoseLibrary() {
   const savePoseFromObject = useDirectorSceneStore((s) => s.savePoseFromObject);
   const applyPose = useDirectorSceneStore((s) => s.applyPose);
   const deletePose = useDirectorSceneStore((s) => s.deletePose);
+  const addObjectKeyframe = useDirectorSceneStore((s) => s.addObjectKeyframe);
+  const timelineIsPlaying = useDirectorSceneStore((s) => s.timelineIsPlaying);
+  const timelineIsRecording = useDirectorSceneStore((s) => s.timelineIsRecording);
+  const currentFrame = useDirectorSceneStore((s) => s.timelineCurrentFrame);
 
   const selected = objects.find((o) => o.id === selectedId);
   const canPose = selected?.type === 'character';
+  const timelineLocked = timelineIsPlaying || timelineIsRecording;
 
   return (
     <div className="space-y-2 pb-4">
@@ -29,6 +34,21 @@ export function DirectorPoseLibrary() {
         >
           <Plus className="w-3.5 h-3.5" />
           保存姿势
+        </button>
+        <button
+          type="button"
+          disabled={!canPose || timelineLocked}
+          onClick={() => selectedId && addObjectKeyframe(selectedId)}
+          className={cn(
+            'flex-1 flex items-center justify-center gap-1 rounded-full py-2 text-[10px] font-label',
+            canPose && !timelineLocked
+              ? 'bg-primary/20 text-primary hover:bg-primary/30'
+              : 'bg-white/5 text-on-surface/35 cursor-not-allowed',
+          )}
+          title={`在帧 ${Math.round(currentFrame)} 记录当前姿势关键帧`}
+        >
+          <Diamond className="w-3.5 h-3.5" />
+          姿势关键帧
         </button>
       </div>
       {savedPoses.length === 0 ? (
@@ -60,6 +80,9 @@ export function DirectorPoseLibrary() {
           ))}
         </ul>
       )}
+      <p className="font-body text-[9px] text-on-surface/40 px-1 leading-relaxed">
+        姿势关键帧会写入时间轴：播放时在关键帧间插值骨骼与比例。
+      </p>
     </div>
   );
 }

@@ -370,6 +370,7 @@ function toListItem(doc: WorkflowTemplateRecord) {
     created_at: doc.created_at || 0,
     updated_at: doc.updated_at || 0,
     node_count: Array.isArray(doc.nodes) ? doc.nodes.length : 0,
+    connection_count: Array.isArray(doc.connections) ? doc.connections.length : 0,
   };
 }
 

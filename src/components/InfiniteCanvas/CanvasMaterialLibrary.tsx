@@ -14,7 +14,7 @@ import {
   Star,
   Trash2,
 } from 'lucide-react';
-import { isInfiniteCanvasEditorOpen } from '../../lib/infiniteCanvas/canvasEngine.js';
+import { isInfiniteCanvasEditorOpen, placeImageUrlOnCanvas } from '../../lib/infiniteCanvas/canvasEngine.js';
 import {
   addAssetItem,
   createAssetCategory,
@@ -418,20 +418,33 @@ export const CanvasMaterialLibrary = memo(function CanvasMaterialLibrary({
                                 key={item.id}
                                 className="canvas-material-library-item"
                                 draggable
+                                role="button"
+                                tabIndex={0}
+                                title="点击放入画布，或拖到画布"
                                 onDragStart={e => {
                                   e.dataTransfer.effectAllowed = 'copy';
                                   e.dataTransfer.setData('text/plain', item.url);
                                   e.dataTransfer.setData('text/uri-list', item.url);
+                                }}
+                                onClick={() => {
+                                  if (!isInfiniteCanvasEditorOpen()) return;
+                                  placeImageUrlOnCanvas(item.url, item.name || 'image');
+                                }}
+                                onKeyDown={e => {
+                                  if (e.key !== 'Enter' && e.key !== ' ') return;
+                                  e.preventDefault();
+                                  if (!isInfiniteCanvasEditorOpen()) return;
+                                  placeImageUrlOnCanvas(item.url, item.name || 'image');
                                 }}
                               >
                                 <img src={item.url} alt="" loading="lazy" draggable={false} />
                                 <div className="canvas-material-library-item-meta">
                                   <span title={item.name}>{item.name}</span>
                                   <div className="canvas-material-library-item-actions">
-                                    <button type="button" aria-label="重命名" onClick={() => void handleRenameItem(item.id, item.name)}>
+                                    <button type="button" aria-label="重命名" onClick={e => { e.stopPropagation(); void handleRenameItem(item.id, item.name); }}>
                                       <Pencil className="h-3 w-3" />
                                     </button>
-                                    <button type="button" aria-label="删除" onClick={() => void handleDeleteItem(item.id, item.name)}>
+                                    <button type="button" aria-label="删除" onClick={e => { e.stopPropagation(); void handleDeleteItem(item.id, item.name); }}>
                                       <Trash2 className="h-3 w-3" />
                                     </button>
                                   </div>

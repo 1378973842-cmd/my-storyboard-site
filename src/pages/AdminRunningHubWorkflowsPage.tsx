@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useAuthStore } from '../stores/authStore';
 import { useStore } from '../store/useStore';
 import { RhWorkflowGraph } from '../components/RhWorkflowGraph';
 import { RhFieldEditorPopover } from '../components/RhFieldEditorPopover';
@@ -85,6 +86,7 @@ export const AdminRunningHubWorkflowsPage = memo(function AdminRunningHubWorkflo
 }: {
   shellActive: boolean;
 }) {
+  const isAdmin = useAuthStore((s) => s.isAdmin());
   const [workflows, setWorkflows] = useState<RhWorkflowSummary[]>([]);
   const [apps, setApps] = useState<RhAppSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -316,6 +318,19 @@ export const AdminRunningHubWorkflowsPage = memo(function AdminRunningHubWorkflo
   );
 
   if (!shellActive) return null;
+
+  if (!isAdmin) {
+    return (
+      <div className="fixed inset-0 z-[62] flex min-h-[100dvh] items-center justify-center bg-[#0e0e0e] px-6 text-center text-[#e5e2e1]">
+        <div className="max-w-md space-y-3">
+          <p className="font-serif text-xl tracking-[-0.02em]">需要管理员权限</p>
+          <p className="text-sm leading-relaxed text-[#e5e2e1]/60">
+            RunningHub 工作流配置仅管理员可编辑。请联系管理员添加工作流，或在画布中使用已配置好的 RH 节点。
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[62] min-h-[100dvh] overflow-y-auto overscroll-y-auto bg-[#0e0e0e] text-[#e5e2e1] custom-scrollbar">

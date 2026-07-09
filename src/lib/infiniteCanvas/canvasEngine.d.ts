@@ -33,3 +33,4 @@ export function applyImageEdit(): void;
 export function closeImageEditor(): void;
 export function resetCropBox(): void;
 export function resetImageEditZoom(): void;
+export function placeImageUrlOnCanvas(url: string, name?: string): unknown;

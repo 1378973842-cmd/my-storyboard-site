@@ -17,6 +17,13 @@ import type { BoneRotationsMap } from '../lib/director/skeleton';
 import { buildSceneDataPatch } from '../lib/director/buildSceneDataPatch';
 import { sampleCameraAtFrame, sampleObjectAtFrame } from '../lib/director/cameraKeyframeInterpolation';
 import { normalizeSceneCamera } from '../lib/director/cameraShake';
+import type { KeyframeEase } from '../lib/director/keyframeEasing';
+import { DEFAULT_BEZIER } from '../lib/director/keyframeEasing';
+import {
+  bakeSplineToKeyframes,
+  createSplineFromPreset,
+  type DollySplinePoint,
+} from '../lib/director/dollySpline';
 import type { SceneData } from '../types';
 
 
@@ -123,6 +130,12 @@ export interface CameraKeyframe {
 
   fov: number;
 
+  /** 离开本关键帧走向下一关键帧时的缓动 */
+  ease?: KeyframeEase;
+
+  /** ease === 'bezier' 时的 cubic-bezier 控制点 */
+  easeBezier?: [number, number, number, number];
+
 }
 
 
@@ -139,6 +152,16 @@ export interface ObjectKeyframe {
 
   scale: Vec3Tuple;
 
+  ease?: KeyframeEase;
+
+  easeBezier?: [number, number, number, number];
+
+  /** 人偶姿势关键帧：骨骼欧拉角（弧度） */
+  boneRotations?: Record<string, Vec3Tuple>;
+
+  /** 人偶比例（与姿势一并插值） */
+  proportions?: ProportionMap;
+
 }
 
 
@@ -148,6 +171,9 @@ export const TIMELINE_FPS = 24;
 export const TIMELINE_DURATION_SEC = 5;
 
 export const TIMELINE_TOTAL_FRAMES = TIMELINE_FPS * TIMELINE_DURATION_SEC;
+
+/** 时长预设（秒） */
+export const TIMELINE_DURATION_PRESETS = [5, 10, 15] as const;
 
 
 
@@ -166,6 +192,10 @@ export type DirectorSceneSnapshot = {
   cameraKeyframes?: Record<string, CameraKeyframe[]>;
 
   objectKeyframes?: Record<string, ObjectKeyframe[]>;
+
+  timelineTotalFrames?: number;
+
+  timelineFps?: number;
 
 };
 
@@ -268,6 +298,18 @@ type DirectorSceneState = DirectorSceneSnapshot & {
 
   objectKeyframes: Record<string, ObjectKeyframe[]>;
 
+  /** 从分镜导入时关联的镜头号（用于运镜回写） */
+  linkedStoryboardShot: string | null;
+
+  linkedDirectorNotes: string;
+
+  /** 可编辑运镜样条（世界坐标控制点） */
+  dollySplinePoints: DollySplinePoint[];
+
+  dollySplineEditing: boolean;
+
+  selectedSplinePointId: string | null;
+
   setTimelineCurrentFrame: (frame: number) => void;
 
   setTimelinePlaying: (playing: boolean) => void;
@@ -283,6 +325,26 @@ type DirectorSceneState = DirectorSceneSnapshot & {
   removeCameraKeyframe: (cameraId: string, keyframeId: string) => void;
 
   removeObjectKeyframe: (objectId: string, keyframeId: string) => void;
+
+  updateCameraKeyframeEase: (
+    cameraId: string,
+    keyframeId: string,
+    ease: KeyframeEase,
+    easeBezier?: [number, number, number, number],
+  ) => void;
+
+  updateObjectKeyframeEase: (
+    objectId: string,
+    keyframeId: string,
+    ease: KeyframeEase,
+    easeBezier?: [number, number, number, number],
+  ) => void;
+
+  moveCameraKeyframe: (cameraId: string, keyframeId: string, frame: number) => void;
+
+  moveObjectKeyframe: (objectId: string, keyframeId: string, frame: number) => void;
+
+  setTimelineDurationSec: (seconds: number) => void;
 
   applyTimelineFrame: (frame: number) => void;
 
@@ -357,6 +419,39 @@ type DirectorSceneState = DirectorSceneSnapshot & {
   addCustomModel: (modelUrl: string, fileName: string) => void;
 
   addImagePlane: (imageUrl: string, fileName: string) => void;
+
+  /** 从分镜导入参考图平面（可选附带导演备注到名称） */
+  importStoryboardShot: (payload: {
+    imageUrl: string;
+    shotNumber?: string;
+    summary?: string;
+    directorNotes?: string;
+  }) => void;
+
+  clearLinkedStoryboard: () => void;
+
+  /** 将运镜路径预设 Bake 到选中相机关键帧（并进入可编辑样条） */
+  bakeDollyPathOnCamera: (
+    cameraId: string,
+    preset: 'orbit' | 'pushIn' | 'craneUp',
+  ) => void;
+
+  beginSplineEditFromPreset: (
+    cameraId: string,
+    preset: 'orbit' | 'pushIn' | 'craneUp',
+  ) => void;
+
+  setDollySplineEditing: (editing: boolean) => void;
+
+  selectSplinePoint: (id: string | null) => void;
+
+  updateSplinePointPosition: (id: string, position: Vec3Tuple) => void;
+
+  addSplinePointAfter: (afterId: string | null) => void;
+
+  removeSplinePoint: (id: string) => void;
+
+  bakeEditableSplineToCamera: (cameraId: string) => void;
 
   addCamera: () => void;
 
@@ -583,6 +678,16 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
 
   objectKeyframes: {},
 
+  linkedStoryboardShot: null,
+
+  linkedDirectorNotes: '',
+
+  dollySplinePoints: [],
+
+  dollySplineEditing: false,
+
+  selectedSplinePointId: null,
+
 
 
   setTimelineCurrentFrame: (frame) =>
@@ -615,6 +720,7 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
       position: [...cam.position] as Vec3Tuple,
       rotation: [...cam.rotation] as Vec3Tuple,
       fov: cam.fov,
+      ease: 'easeInOut',
     };
     const existing = state.cameraKeyframes[cameraId] ?? [];
     const filtered = existing.filter((k) => k.frame !== frame);
@@ -637,6 +743,13 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
       position: [...obj.position] as Vec3Tuple,
       rotation: [...obj.rotation] as Vec3Tuple,
       scale: [...obj.scale] as Vec3Tuple,
+      ease: 'easeInOut',
+      ...(obj.type === 'character'
+        ? {
+            boneRotations: structuredClone(obj.boneRotations),
+            proportions: { ...obj.proportions },
+          }
+        : {}),
     };
     const existing = state.objectKeyframes[objectId] ?? [];
     const filtered = existing.filter((k) => k.frame !== frame);
@@ -672,6 +785,103 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
       };
     }),
 
+  updateCameraKeyframeEase: (cameraId, keyframeId, ease, easeBezier) =>
+    withHistory(set, (state) => {
+      const list = state.cameraKeyframes[cameraId];
+      if (!list?.length) return {};
+      return {
+        cameraKeyframes: {
+          ...state.cameraKeyframes,
+          [cameraId]: list.map((k) =>
+            k.id === keyframeId
+              ? {
+                  ...k,
+                  ease,
+                  easeBezier: ease === 'bezier' ? (easeBezier ?? DEFAULT_BEZIER) : undefined,
+                }
+              : k,
+          ),
+        },
+      };
+    }),
+
+  updateObjectKeyframeEase: (objectId, keyframeId, ease, easeBezier) =>
+    withHistory(set, (state) => {
+      const list = state.objectKeyframes[objectId];
+      if (!list?.length) return {};
+      return {
+        objectKeyframes: {
+          ...state.objectKeyframes,
+          [objectId]: list.map((k) =>
+            k.id === keyframeId
+              ? {
+                  ...k,
+                  ease,
+                  easeBezier: ease === 'bezier' ? (easeBezier ?? DEFAULT_BEZIER) : undefined,
+                }
+              : k,
+          ),
+        },
+      };
+    }),
+
+  moveCameraKeyframe: (cameraId, keyframeId, frame) =>
+    withHistory(set, (state) => {
+      const list = state.cameraKeyframes[cameraId];
+      if (!list?.length) return {};
+      const target = Math.max(0, Math.min(state.timelineTotalFrames, Math.round(frame)));
+      const occupied = new Set(list.filter((k) => k.id !== keyframeId).map((k) => k.frame));
+      let nextFrame = target;
+      while (occupied.has(nextFrame) && nextFrame < state.timelineTotalFrames) nextFrame += 1;
+      if (occupied.has(nextFrame)) {
+        nextFrame = target;
+        while (occupied.has(nextFrame) && nextFrame > 0) nextFrame -= 1;
+      }
+      if (occupied.has(nextFrame)) return {};
+      return {
+        cameraKeyframes: {
+          ...state.cameraKeyframes,
+          [cameraId]: list
+            .map((k) => (k.id === keyframeId ? { ...k, frame: nextFrame } : k))
+            .sort((a, b) => a.frame - b.frame),
+        },
+      };
+    }),
+
+  moveObjectKeyframe: (objectId, keyframeId, frame) =>
+    withHistory(set, (state) => {
+      const list = state.objectKeyframes[objectId];
+      if (!list?.length) return {};
+      const target = Math.max(0, Math.min(state.timelineTotalFrames, Math.round(frame)));
+      const occupied = new Set(list.filter((k) => k.id !== keyframeId).map((k) => k.frame));
+      let nextFrame = target;
+      while (occupied.has(nextFrame) && nextFrame < state.timelineTotalFrames) nextFrame += 1;
+      if (occupied.has(nextFrame)) {
+        nextFrame = target;
+        while (occupied.has(nextFrame) && nextFrame > 0) nextFrame -= 1;
+      }
+      if (occupied.has(nextFrame)) return {};
+      return {
+        objectKeyframes: {
+          ...state.objectKeyframes,
+          [objectId]: list
+            .map((k) => (k.id === keyframeId ? { ...k, frame: nextFrame } : k))
+            .sort((a, b) => a.frame - b.frame),
+        },
+      };
+    }),
+
+  setTimelineDurationSec: (seconds) => {
+    const sec = Math.max(1, Math.min(60, Math.round(seconds)));
+    const fps = get().timelineFps || TIMELINE_FPS;
+    const total = sec * fps;
+    set((state) => ({
+      timelineTotalFrames: total,
+      timelineCurrentFrame: Math.min(state.timelineCurrentFrame, total),
+      timelineIsPlaying: false,
+    }));
+  },
+
   applyTimelineFrame: (frame) =>
     set((state) => {
       let camerasChanged = false;
@@ -700,6 +910,10 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
           position: sample.position,
           rotation: sample.rotation,
           scale: sample.scale,
+          ...(sample.boneRotations
+            ? { boneRotations: sample.boneRotations }
+            : {}),
+          ...(sample.proportions ? { proportions: sample.proportions } : {}),
         };
       });
       if (!camerasChanged && !objectsChanged) return state;
@@ -806,7 +1020,14 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
 
 
 
-  getProjectSnapshot: () => takeSnapshot(get()),
+  getProjectSnapshot: () => {
+    const snap = takeSnapshot(get());
+    return {
+      ...snap,
+      timelineTotalFrames: get().timelineTotalFrames,
+      timelineFps: get().timelineFps,
+    };
+  },
 
 
 
@@ -827,6 +1048,10 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
       cameraKeyframes: snap.cameraKeyframes ?? {},
 
       objectKeyframes: snap.objectKeyframes ?? {},
+
+      timelineTotalFrames: snap.timelineTotalFrames ?? TIMELINE_TOTAL_FRAMES,
+
+      timelineFps: snap.timelineFps ?? TIMELINE_FPS,
 
       selectedId: null,
 
@@ -1029,6 +1254,136 @@ export const useDirectorSceneStore = create<DirectorSceneState>()((set, get) => 
 
       return { objects: [...state.objects, next], selectedId: next.id, selectedCameraId: null };
 
+    }),
+
+  importStoryboardShot: ({ imageUrl, shotNumber, summary, directorNotes }) =>
+    withHistory(set, (state) => {
+      const i = state.objects.length;
+      const labelParts = [
+        shotNumber ? `分镜 ${shotNumber}` : null,
+        summary?.trim() || null,
+      ].filter(Boolean);
+      const name =
+        labelParts.join(' · ') ||
+        (directorNotes?.trim().slice(0, 24) || `分镜参考 ${i + 1}`);
+      const next: SceneObject = {
+        id: uuidv4(),
+        type: 'image',
+        name,
+        position: [(i % 5) - 2, 1.2, Math.floor(i / 5) * 2],
+        rotation: [0, 0, 0],
+        scale: [2.4, 2.4, 2.4],
+        imageUrl,
+        color: '#ffffff',
+        boneRotations: {},
+        proportions: { ...DEFAULT_PROPORTIONS },
+        visible: true,
+        locked: false,
+      };
+      queueMicrotask(() => window.dispatchEvent(new CustomEvent('director-frame-view')));
+      return {
+        objects: [...state.objects, next],
+        selectedId: next.id,
+        selectedCameraId: null,
+        linkedStoryboardShot: shotNumber ?? state.linkedStoryboardShot,
+        linkedDirectorNotes: directorNotes?.trim() || state.linkedDirectorNotes,
+      };
+    }),
+
+  clearLinkedStoryboard: () =>
+    set({ linkedStoryboardShot: null, linkedDirectorNotes: '' }),
+
+  bakeDollyPathOnCamera: (cameraId, preset) =>
+    withHistory(set, (state) => {
+      const cam = state.cameras.find((c) => c.id === cameraId);
+      if (!cam) return {};
+      const points = createSplineFromPreset(preset, cam.position, cam.rotation, 5);
+      const baked = bakeSplineToKeyframes({
+        points,
+        totalFrames: state.timelineTotalFrames,
+        fov: cam.fov,
+        startRotation: cam.rotation,
+      });
+      return {
+        dollySplinePoints: points,
+        dollySplineEditing: true,
+        selectedSplinePointId: points[0]?.id ?? null,
+        cameraKeyframes: {
+          ...state.cameraKeyframes,
+          [cameraId]: baked,
+        },
+        timelineCurrentFrame: 0,
+        timelineIsPlaying: false,
+      };
+    }),
+
+  beginSplineEditFromPreset: (cameraId, preset) => {
+    get().bakeDollyPathOnCamera(cameraId, preset);
+  },
+
+  setDollySplineEditing: (editing) =>
+    set({
+      dollySplineEditing: editing,
+      selectedSplinePointId: editing ? get().selectedSplinePointId : null,
+    }),
+
+  selectSplinePoint: (id) => set({ selectedSplinePointId: id, selectedId: null, selectedCameraId: null }),
+
+  updateSplinePointPosition: (id, position) =>
+    set((state) => ({
+      dollySplinePoints: state.dollySplinePoints.map((p) =>
+        p.id === id ? { ...p, position: [...position] as Vec3Tuple } : p,
+      ),
+    })),
+
+  addSplinePointAfter: (afterId) =>
+    withHistory(set, (state) => {
+      const pts = state.dollySplinePoints;
+      if (pts.length === 0) return {};
+      const idx = afterId ? pts.findIndex((p) => p.id === afterId) : pts.length - 1;
+      const i = idx < 0 ? pts.length - 1 : idx;
+      const a = pts[i]!;
+      const b = pts[Math.min(pts.length - 1, i + 1)]!;
+      const mid: Vec3Tuple = [
+        (a.position[0] + b.position[0]) / 2,
+        (a.position[1] + b.position[1]) / 2,
+        (a.position[2] + b.position[2]) / 2,
+      ];
+      const next: DollySplinePoint = { id: uuidv4(), position: mid };
+      const list = [...pts];
+      list.splice(i + 1, 0, next);
+      return { dollySplinePoints: list, selectedSplinePointId: next.id };
+    }),
+
+  removeSplinePoint: (id) =>
+    withHistory(set, (state) => {
+      if (state.dollySplinePoints.length <= 2) return {};
+      const list = state.dollySplinePoints.filter((p) => p.id !== id);
+      return {
+        dollySplinePoints: list,
+        selectedSplinePointId:
+          state.selectedSplinePointId === id ? list[0]?.id ?? null : state.selectedSplinePointId,
+      };
+    }),
+
+  bakeEditableSplineToCamera: (cameraId) =>
+    withHistory(set, (state) => {
+      const cam = state.cameras.find((c) => c.id === cameraId);
+      if (!cam || state.dollySplinePoints.length < 2) return {};
+      const baked = bakeSplineToKeyframes({
+        points: state.dollySplinePoints,
+        totalFrames: state.timelineTotalFrames,
+        fov: cam.fov,
+        startRotation: cam.rotation,
+      });
+      return {
+        cameraKeyframes: {
+          ...state.cameraKeyframes,
+          [cameraId]: baked,
+        },
+        timelineCurrentFrame: 0,
+        timelineIsPlaying: false,
+      };
     }),
 
 

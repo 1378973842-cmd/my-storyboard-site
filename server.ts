@@ -33,10 +33,15 @@ import {
 import {
   bootstrapAdminUser,
   createRequireAuth,
+  createRequireAdmin,
   initUserAuthSchema,
   registerUserAuthRoutes,
   validateAuthForDeploy,
 } from "./src/services/userAuth.js";
+import {
+  initStudioAnnouncementsSchema,
+  registerStudioAnnouncementRoutes,
+} from "./src/services/studioAnnouncements.js";
 import {
   initCanvasGenerationsSchema,
   registerCanvasGenerationsRoutes,
@@ -631,6 +636,7 @@ async function startServer() {
   }
 
   initUserAuthSchema(db);
+  initStudioAnnouncementsSchema(db);
   bootstrapAdminUser(db);
   const adminBootstrap = db.prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY created_at ASC LIMIT 1").get() as
     | { id: string }
@@ -641,6 +647,7 @@ async function startServer() {
   }
   initCanvasGenerationsSchema(db);
   const requireAuth = createRequireAuth(db);
+  const requireAdmin = createRequireAdmin(db);
 
   const canAccessProject = (
     row: { user_id?: string | null } | undefined,
@@ -670,11 +677,13 @@ async function startServer() {
   registerInfiniteCanvasRoutes(app, projectRoot, {
     persistImage: persistImageWithOwner,
     requireGate: requireAuth,
+    requireAdmin,
     db,
   });
   mkdirSync(path.join(projectRoot, "data", "canvases"), { recursive: true });
 
-  registerUserAuthRoutes(app, db);
+  registerUserAuthRoutes(app, db, projectRoot);
+  registerStudioAnnouncementRoutes(app, db, requireAuth, requireAdmin);
   registerCanvasGenerationsRoutes(app, db, projectRoot);
 
   // Project Management Routes
@@ -990,6 +999,71 @@ ${pixarInstruction}
       res.json(parsedJSON);
     } catch (error) {
       console.error("Script generation error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "服务器内部错误" });
+    }
+  });
+
+  // 导演台：自然语言 → SceneData JSON
+  app.post("/api/director-scene", requireAuth, async (req, res) => {
+    const { instruction, snapshot, textModel } = req.body || {};
+    const promptText = String(instruction || "").trim();
+    if (!promptText) {
+      return res.status(400).json({ error: "请提供 instruction" });
+    }
+
+    const resolvedTextModel = resolveStoryboardTextModel(textModel);
+    const { apiBase, apiKey } = getStoryboardTextEnv(resolvedTextModel);
+    if (!apiBase || !apiKey) {
+      return res.status(400).json({ error: textLlmConfigError(resolvedTextModel) });
+    }
+
+    const systemInstruction =
+      readPromptFile("prompts/director_scene_system_prompt.txt", projectRoot) ||
+      "你是 3D 场景导演。只输出 SceneData JSON：camera.position/rotation/fov 与 characters[].id/position/rotation/posePreset。";
+
+    try {
+      const response = await postTextLlm(
+        resolvedTextModel,
+        apiBase,
+        apiKey,
+        augmentChatCompletionsBody(resolvedTextModel, {
+          model: resolvedTextModel,
+          messages: [
+            { role: "system", content: systemInstruction },
+            {
+              role: "user",
+              content: `当前场景快照：\n${JSON.stringify(snapshot || {}, null, 2)}\n\n导演指令：${promptText}\n\n请只输出 SceneData JSON。`,
+            },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.4,
+        }),
+      );
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        throw new Error(`API 错误: ${response.status} ${errText.slice(0, 200)}`);
+      }
+
+      const rawJson = await response.text();
+      const data = parseTextLlmResponseBody(rawJson);
+      const content = extractTextLlmMessageContent(resolvedTextModel, data);
+      let sceneData: unknown = null;
+      try {
+        sceneData = JSON.parse(content);
+      } catch {
+        const start = content.indexOf("{");
+        const end = content.lastIndexOf("}");
+        if (start >= 0 && end > start) {
+          sceneData = JSON.parse(content.slice(start, end + 1));
+        }
+      }
+      if (!sceneData || typeof sceneData !== "object") {
+        return res.status(500).json({ error: "模型输出无法解析为 JSON", raw: content.slice(0, 500) });
+      }
+      res.json({ sceneData });
+    } catch (error) {
+      console.error("director-scene error:", error);
       res.status(500).json({ error: error instanceof Error ? error.message : "服务器内部错误" });
     }
   });

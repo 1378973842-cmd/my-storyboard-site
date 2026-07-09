@@ -19,6 +19,7 @@ import {
 } from '../../store/useDirectorSceneStore';
 import { DirectorSceneEnvironment } from './DirectorSceneContent';
 import { DirectorCameraGizmo } from './DirectorCameraGizmo';
+import { DirectorDollySplineEditor } from './DirectorDollySplineEditor';
 import { SceneObjectRenderer } from './SceneObjectRenderer';
 import { SceneViewFraming } from './SceneViewFraming';
 import type { TransformAxis } from '../../store/useDirectorSceneStore';
@@ -295,6 +296,7 @@ export function DirectorWorkbenchScene({ orbitRef, transformMode, onTransformDra
       <SceneViewFraming orbitRef={orbitRef} />
       <DirectorEditorViewListener orbitRef={orbitRef} />
       <DirectorViewLock orbitRef={orbitRef} />
+      <DirectorDollySplineEditor onTransformDragging={onTransformDragging} />
 
       <OrbitControls
         ref={orbitRef}

@@ -350,13 +350,70 @@ pm2 save
 
 ## 五、备份（线上有数据后）
 
+### 5.1 阿里云快照（整机灾难恢复）
+
+| 项 | 建议 |
+|----|------|
+| 基准快照 | 大改 / 动 `.env` 前手动打一份 |
+| 自动策略 | 如 `studio-daily`，每天凌晨，保留 7–14 天，关联**系统盘** |
+| 恢复 | 控制台快照 → 回滚云盘（整盘回滚，慎用） |
+
+与域名备案无关，可随时开通。
+
+### 5.2 业务数据备份（精细恢复，推荐）
+
+本机一条命令（复用 SSH 密钥，与部署相同）：
+
+```powershell
+npm run backup:remote
+```
+
+拉回本机硬盘（默认 `%USERPROFILE%\lhz-studio-backups\`）：
+
+```powershell
+npm run backup:remote -- --pull
+```
+
+**部署前先备份**：
+
+```powershell
+npm run build:prod
+npm run deploy:safe
+```
+
+`deploy:safe` = 先 `backup-remote` 再 `deploy-remote-once`。
+
+打包路径（服务器 `${DEPLOY_REMOTE_DIR}` 下）：
+
+| 路径 | 内容 |
+|------|------|
+| `projects.db` | 分镜、生图元数据 |
+| `data/` | 画布 JSON、工作流模板 |
+| `public/uploads/` | 上传与 AI 落盘 |
+| `.env` | 线上密钥（勿提交 Git） |
+
+远端保留最近 **14** 份（`/root/studio-backups/studio-YYYYMMDD-HHMMSS.tar.gz`），更旧自动删。
+
+可选环境变量：`BACKUP_LOCAL_DIR`、`BACKUP_KEEP`、`BACKUP_PULL=1`。
+
+### 5.3 手动 SSH 备份（无脚本时）
+
 ```bash
 cd /var/www/my-storyboard-site
 tar czf ~/backup-$(date +%Y%m%d).tar.gz \
   projects.db data/ public/uploads/ .env
 ```
 
-建议同步到 OSS 或本机硬盘；ECS 系统盘可开自动快照。
+### 5.4 恢复单个文件（不回滚整盘）
+
+```bash
+# 服务器上
+cd /var/www/my-storyboard-site
+tar xzf /root/studio-backups/studio-YYYYMMDD-HHMMSS.tar.gz
+pm2 restart gemini-deploy --update-env
+```
+
+只恢复 `projects.db` 时：`tar xzf … projects.db`（先停 PM2 或备份当前 db 再覆盖）。
 
 ---
 

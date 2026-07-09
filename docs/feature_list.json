@@ -40,10 +40,41 @@
       ]
     },
     {
+      "id": "F007",
+      "name": "顶栏头像菜单 + 站内公告铃铛",
+      "tasks": [
+        { "desc": "后端：公告表 + 已读表 + 列表/发布/标记已读 API", "status": "done" },
+        { "desc": "前端：StudioAnnouncementsBell 铃铛（未读红点、已读变暗、admin 发布）", "status": "done" },
+        { "desc": "前端：StudioUserMenu 头像下拉（徽章、admin 入口、退出）", "status": "done" },
+        { "desc": "StudioTopNav 接入铃铛与头像，移除旧 admin/退出按钮", "status": "done" },
+        { "desc": "自助改资料：PATCH /api/auth/profile + POST /api/auth/avatar + 头像菜单编辑 UI", "status": "done" }
+      ]
+    },
+    {
+      "id": "F008",
+      "name": "导演工作台升级（卡点 → 缓动 → 分镜互通 → dollycurve 借鉴）",
+      "tasks": [
+        { "id": "DW1", "desc": "时间轴关键帧点击跳转 + 右键/Delete 删除 + 选中态", "status": "done", "priority": 1 },
+        { "id": "DW2", "desc": "时间轴可调时长预设 5/10/15s", "status": "done", "priority": 2 },
+        { "id": "DW3", "desc": "localStorage 自动草稿保存/恢复", "status": "done", "priority": 3 },
+        { "id": "DW4", "desc": "挂载 DirectorSceneOverlay 场景树（显隐/锁定/删除）", "status": "done", "priority": 4 },
+        { "id": "DW5", "desc": "关键帧段缓动（linear/ease*/bezier）+ 插值改造", "status": "done", "priority": 5 },
+        { "id": "DW6", "desc": "分镜卡「在导演台打开」导入 imagePlane", "status": "done", "priority": 6 },
+        { "id": "DW7", "desc": "运镜路径预设 Bake（环绕/推进/升摇，借鉴 dollycurve 思路不整库接入）", "status": "done", "priority": 7 },
+        { "id": "DW8", "desc": "关键帧拖动改帧号 + 贝塞尔手柄可视化编辑", "status": "done", "priority": 8 },
+        { "id": "DW9", "desc": "运镜 WebM 回写分镜 camera_move_url + 分镜卡预览", "status": "done", "priority": 9 },
+        { "id": "DW10", "desc": "导入分镜时显示导演备注侧栏", "status": "done", "priority": 10 },
+        { "id": "DW11", "desc": "3D 可编辑运镜样条（控制点拖拽 + Bake）", "status": "done", "priority": 11 },
+        { "id": "DW12", "desc": "自然语言调机位 UI + /api/director-scene（含 camera.rotation）", "status": "done", "priority": 12 },
+        { "id": "DW13", "desc": "人偶姿势关键帧（骨骼+比例随时间轴插值）", "status": "done", "priority": 13 }
+      ]
+    },
+    {
       "id": "F006",
       "name": "画布+主页 UI 升级路线（详细任务书见 docs/UI_ROADMAP.md，按其顺序与验收标准施工）",
       "tasks": [
         { "id": "A1", "desc": "画布浅色主题消灭 1px 实线（节点/表单区约 100 处，改幽灵 outline/色调差）", "status": "done", "priority": 1 },
+        { "id": "A2b", "desc": "生成日志 + 工作流模板模态 Tier A（搜索/筛选、行内保存·删除·清空确认、报错展开复制）", "status": "done", "priority": 2 },
         { "id": "A2", "desc": "画布模态层暗色化补齐（model-panel/image-edit/lightbox/log/error）", "status": "done", "priority": 2 },
         { "id": "B2", "desc": "selectionHub 死代码清理（Shell DOM + engine 函数 + CSS）", "status": "done", "priority": 3 },
         { "id": "A3", "desc": "画布圆角 token 收敛 + selection/focus 残留橙色改琥珀", "status": "done", "priority": 4 },
@@ -52,9 +83,17 @@
         { "id": "B3", "desc": "运行中链路连线流动动画（仅 running 链路，reduced-motion 关闭）", "status": "done", "priority": 7 },
         { "id": "D1", "desc": "主页工具区非对称 bento 布局（桌面 grid，移动端保持横滑）", "status": "done", "priority": 8 },
         { "id": "D2", "desc": "主页导航滚动变形（>50vh 变玻璃 pill）", "status": "done", "priority": 9 },
-        { "id": "D3", "desc": "点击工具卡汇聚过渡（复用 StudioConverge，勿破坏画布 instantExit）", "status": "todo", "priority": 10 },
-        { "id": "C1", "desc": "generator/rh 节点增量刷新（仿 refreshOutputNodeContent，保 textarea 焦点）", "status": "todo", "priority": 11 },
-        { "id": "C2", "desc": "画布视口裁剪（visibility:hidden，非 display:none）", "status": "todo", "priority": 12 },
+        { "id": "D3", "desc": "点击工具卡汇聚过渡（复用 StudioConverge，勿破坏画布 instantExit）", "status": "done", "priority": 10 },
+        { "id": "C1", "desc": "generator/rh 节点增量刷新（仿 refreshOutputNodeContent，保 textarea 焦点）", "status": "done", "priority": 11 },
+        { "id": "C2", "desc": "画布视口裁剪（visibility:hidden，非 display:none）", "status": "done", "priority": 12 },
+        { "id": "C3", "desc": "画布重做 Redo（Ctrl+Shift+Z / Ctrl+Y）", "status": "done", "priority": 14 },
+        { "id": "C4", "desc": "画布内搜索节点（Ctrl+K）", "status": "done", "priority": 15 },
+        { "id": "C5", "desc": "自动排布选中快捷键（Ctrl+L）", "status": "done", "priority": 16 },
+        { "id": "C6", "desc": "跨画布历史生成浏览并放入当前板", "status": "done", "priority": 17 },
+        { "id": "C7", "desc": "批量导出本板全部 Output（zip）", "status": "done", "priority": 18 },
+        { "id": "C8", "desc": "工作流 JSON 导出/导入", "status": "done", "priority": 19 },
+        { "id": "C9", "desc": "素材库点击放置到画布", "status": "done", "priority": 20 },
+        { "id": "C10", "desc": "画布校验/下载类 alert 改 softAlert 状态栏", "status": "done", "priority": 21 },
         { "id": "D4", "desc": "Hero 视频背景（导演暂缓；素材下载+ffmpeg 压缩后填 COVER_HERO_VIDEO）", "status": "todo", "priority": 13 }
       ]
     },

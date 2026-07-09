@@ -153,13 +153,13 @@ export const MyFavoritesPage = memo(function MyFavoritesPage({
     <div className="fixed inset-0 z-[62] min-h-[100dvh] overflow-y-auto overscroll-y-auto bg-[#0e0e0e] text-[#e5e2e1] custom-scrollbar">
       <main className="mx-auto max-w-6xl px-6 pb-10 pt-[5.5rem] md:px-10 md:pt-24">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
-          <h1
-            className="font-serif text-3xl tracking-[-0.02em] text-[#e5e2e1]"
-            style={{ fontFamily: '"Noto Serif", ui-serif, Georgia, serif' }}
-          >
+          <span className="font-label text-[10px] font-semibold uppercase tracking-[0.28em] text-primary/80">
+            Library
+          </span>
+          <h1 className="mt-3 font-headline text-3xl tracking-[-0.02em] text-on-surface md:text-[2.15rem]">
             我的收藏
           </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[#e5e2e1]/65">
+          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-on-surface/65">
             在画布 Output 图片右上角点星标收藏。点击图片可放大查看；右键图片可回到画布中的原始位置；满意的作品可分享到公共画廊。
           </p>
         </motion.div>
@@ -181,11 +181,14 @@ export const MyFavoritesPage = memo(function MyFavoritesPage({
             <Loader2 className="h-8 w-8 animate-spin" aria-hidden />
           </div>
         ) : items.length === 0 ? (
-          <p className="mt-16 text-center text-sm text-[#e5e2e1]/50">
-            还没有收藏。在无限画布生成图片后，点右上角星标即可收藏到这里。
-          </p>
+          <div className="mt-16 flex flex-col items-center justify-center rounded-[2rem] bg-surface-container-low/40 px-6 py-20 text-center outline outline-[0.5px] outline-white/10">
+            <p className="font-headline text-lg tracking-tight text-on-surface/80">还没有收藏</p>
+            <p className="mt-3 max-w-md text-sm leading-relaxed text-on-surface/50">
+              在无限画布生成图片后，点右上角星标即可收藏到这里。
+            </p>
+          </div>
         ) : (
-          <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 lg:gap-8">
             {items.map((item) => (
               <motion.article
                 key={item.id}

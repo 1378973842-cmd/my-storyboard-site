@@ -41,11 +41,15 @@ export function parseSceneDataPayload(raw: unknown): SceneData | null {
       if (!isVec3(cam.position)) return null;
       camera.position = cam.position;
     }
+    if (cam.rotation !== undefined) {
+      if (!isVec3(cam.rotation)) return null;
+      camera.rotation = cam.rotation;
+    }
     if (cam.fov !== undefined) {
       if (typeof cam.fov !== 'number' || !Number.isFinite(cam.fov)) return null;
       camera.fov = cam.fov;
     }
-    if (camera.position || camera.fov !== undefined) out.camera = camera;
+    if (camera.position || camera.rotation || camera.fov !== undefined) out.camera = camera;
   }
 
   if (obj.characters !== undefined) {

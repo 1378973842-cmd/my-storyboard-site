@@ -2,19 +2,15 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
-  Camera,
-  Clapperboard,
-  Grid3x3,
   Home,
-  ImageIcon,
-  LogOut,
   Pencil,
   Workflow,
   type LucideIcon,
 } from 'lucide-react';
 import { useShellNavigation } from '../shell/ShellNavigation';
-import { logoutSession } from '../lib/authSession';
 import { useAuthStore } from '../stores/authStore';
+import { StudioAnnouncementsBell } from './StudioAnnouncementsBell';
+import { StudioUserMenu } from './StudioUserMenu';
 import {
   isInfiniteCanvasEditorOpen,
   returnToCanvasManager,
@@ -331,12 +327,10 @@ function NavAction({
   item,
   active,
   compact = false,
-  heroTone = false,
 }: {
   item: NavItem;
   active: StudioNavId;
   compact?: boolean;
-  heroTone?: boolean;
 }) {
   const Icon = item.icon;
   const isActive = active === item.id;
@@ -345,30 +339,24 @@ function NavAction({
     <motion.button
       type="button"
       onClick={item.onClick}
-      whileHover={heroTone || isActive ? undefined : { y: -1 }}
+      whileHover={isActive ? undefined : { y: -1 }}
       whileTap={{ scale: 0.98 }}
-      transition={heroTone ? { duration: 0.12 } : spring}
+      transition={spring}
       title={item.label}
       aria-current={isActive ? 'page' : undefined}
       aria-label={compact ? item.label : undefined}
       className={cn(
         'group relative flex items-center justify-center gap-2 rounded-full cursor-pointer',
         compact ? 'h-9 w-9 md:h-10 md:w-10' : 'px-3.5 py-2',
-        heroTone
-          ? isActive
-            ? 'cover-nav-icon-btn cover-nav-icon-btn-active'
-            : 'cover-nav-icon-btn cover-nav-icon-btn-muted'
-          : [
-              'transition-all duration-150',
-              isActive
-                ? 'bg-surface-container-high/80 text-on-surface shadow-[0_18px_36px_-28px_rgba(0,0,0,0.55)]'
-                : 'text-on-surface/52 hover:text-on-surface hover:bg-surface-container-high/45',
-            ],
+        // 嵌入式与封面共用玻璃胶囊，避免进分镜后「换皮」
+        isActive
+          ? 'cover-nav-icon-btn cover-nav-icon-btn-active'
+          : 'cover-nav-icon-btn cover-nav-icon-btn-muted opacity-70 hover:opacity-100',
       )}
     >
       <Icon className={cn('shrink-0', compact ? 'w-4 h-4' : 'w-3.5 h-3.5')} strokeWidth={1.75} />
       {!compact && (
-        <span className="font-medium text-[12px] md:text-[13px] tracking-[0.02em] whitespace-nowrap">
+        <span className="font-label text-[12px] md:text-[13px] tracking-[0.04em] whitespace-nowrap">
           {item.label}
         </span>
       )}
@@ -388,10 +376,6 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
   const {
     screen,
     openCover,
-    openStudio,
-    openImageEditor,
-    openNineGrid,
-    openDirectorWorkbench,
     openInfiniteCanvas,
     openMyFavorites,
     openGallery,
@@ -418,12 +402,9 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
     return () => scroller.removeEventListener('scroll', onScroll);
   }, [variant, active]);
 
+  // 产品收缩：主入口只推画布；分镜/九宫格/修图/导演台路由暂留，顶栏不再露出
   const navItems: NavItem[] = [
-    { id: 'storyboard', label: '分镜', icon: Clapperboard, onClick: openStudio },
     { id: 'canvas', label: '画布', icon: Workflow, onClick: openInfiniteCanvas },
-    { id: 'grid', label: '九宫格', icon: Grid3x3, onClick: openNineGrid },
-    { id: 'editor', label: '修图', icon: ImageIcon, onClick: openImageEditor },
-    { id: 'director', label: '导演', icon: Camera, onClick: openDirectorWorkbench },
   ];
 
   const handleHome = () => {
@@ -528,20 +509,20 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
               isCoverHomeNav ? (
                 <NavTextLink key={item.id} item={item} active={active} heroTone />
               ) : (
-                <NavAction key={item.id} item={item} active={active} heroTone={isOverlayNav} />
+                <NavAction key={item.id} item={item} active={active} />
               ),
             )}
           </div>
 
           <div
             className={cn(
-              'flex min-w-0 items-center',
+              'flex min-w-0 flex-1 items-center',
               isCoverHomeNav ? 'gap-5 md:gap-6 lg:gap-7' : 'gap-1.5 overflow-x-auto custom-scrollbar',
             )}
           >
             <div className={cn('flex items-center', isCoverHomeNav ? 'lg:hidden gap-3' : 'md:hidden gap-1.5')}>
               {navItems.map((item) => (
-                <NavAction key={item.id} item={item} active={active} compact heroTone={isOverlayNav} />
+                <NavAction key={item.id} item={item} active={active} compact />
               ))}
             </div>
 
@@ -552,10 +533,10 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
                 </a>
                 <button
                   type="button"
-                  onClick={openStudio}
+                  onClick={openInfiniteCanvas}
                   className="cover-nav-auth-pill hidden md:inline-flex items-center px-5 py-2 text-[13px] font-medium cursor-pointer"
                 >
-                  进入 Studio
+                  进入画布
                 </button>
               </>
             ) : null}
@@ -567,52 +548,37 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
             <button
               type="button"
               onClick={openMyFavorites}
-              className="hidden rounded-full px-3 py-2 text-[12px] text-[#e5e2e1]/60 transition-colors hover:bg-[#1c1b1b]/70 hover:text-[#e5e2e1] md:inline-flex"
+              className={cn(
+                'cover-nav-icon-btn cover-nav-icon-btn-muted hidden h-9 items-center rounded-full px-3.5 text-[12px] font-label tracking-[0.04em] md:inline-flex',
+                subPage === 'my-favorites' && 'cover-nav-icon-btn-active',
+              )}
             >
               我的收藏
             </button>
             <button
               type="button"
               onClick={openGallery}
-              className="hidden rounded-full px-3 py-2 text-[12px] text-[#e5e2e1]/60 transition-colors hover:bg-[#1c1b1b]/70 hover:text-[#e5e2e1] md:inline-flex"
+              className={cn(
+                'cover-nav-icon-btn cover-nav-icon-btn-muted hidden h-9 items-center rounded-full px-3.5 text-[12px] font-label tracking-[0.04em] md:inline-flex',
+                subPage === 'gallery' && 'cover-nav-icon-btn-active',
+              )}
             >
               公共画廊
             </button>
-            {isAdmin ? (
-              <button
-                type="button"
-                onClick={openAdminUsers}
-                className="hidden rounded-full px-3 py-2 text-[12px] text-[#e5e2e1]/60 transition-colors hover:bg-[#1c1b1b]/70 hover:text-[#e5e2e1] md:inline-flex"
-              >
-                用户管理
-              </button>
-            ) : null}
-            {isAdmin ? (
-              <button
-                type="button"
-                onClick={openAdminRhWorkflows}
-                className="hidden rounded-full px-3 py-2 text-[12px] text-[#e5e2e1]/60 transition-colors hover:bg-[#1c1b1b]/70 hover:text-[#e5e2e1] md:inline-flex"
-              >
-                RH 工作流
-              </button>
-            ) : null}
-
-            {user ? (
-              <div className="hidden items-center gap-2 md:flex">
-                <span className="max-w-[140px] truncate text-[11px] uppercase tracking-[0.08em] text-[#e5e2e1]/45">
-                  {user.display_name || user.email}
-                </span>
-                <button
-                  type="button"
-                  title="退出登录"
-                  onClick={() => void logoutSession().then(() => window.location.reload())}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[#e5e2e1]/50 transition-colors hover:bg-[#1c1b1b]/70 hover:text-[#e5e2e1]"
-                >
-                  <LogOut className="h-4 w-4" aria-hidden />
-                </button>
-              </div>
-            ) : null}
           </div>
+
+          {user ? (
+            <div className="hidden shrink-0 items-center gap-1.5 md:flex">
+              <StudioAnnouncementsBell isAdmin={isAdmin} heroTone={isOverlayNav} />
+              <StudioUserMenu
+                user={user}
+                isAdmin={isAdmin}
+                heroTone={isOverlayNav}
+                onAdminUsers={openAdminUsers}
+                onAdminRhWorkflows={openAdminRhWorkflows}
+              />
+            </div>
+          ) : null}
         </div>
       </nav>
       ) : null}

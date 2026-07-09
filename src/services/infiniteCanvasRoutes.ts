@@ -92,6 +92,8 @@ export type InfiniteCanvasRouteDeps = {
   persistImage: (url: string, meta?: PersistImageMeta) => Promise<string>;
   /** 与生图/LLM 共用的登录 Cookie 校验；缺省 requireSiteGate（仅独立画布服务） */
   requireGate?: RequestHandler;
+  /** RH 工作流/应用配置管理：仅管理员 */
+  requireAdmin?: RequestHandler;
   db?: InstanceType<typeof Database>;
 };
 
@@ -414,7 +416,11 @@ export function registerInfiniteCanvasRoutes(
   registerCanvasLlmRoutes(app, projectRoot, gate);
   registerCanvasBatchPosterRoutes(app, projectRoot, gate);
   registerCanvasSlotsLoopVideoRoutes(app, projectRoot, gate);
-  registerRunningHubWorkflowRoutes(app, { projectRoot, requireGate: gate });
+  registerRunningHubWorkflowRoutes(app, {
+    projectRoot,
+    requireGate: gate,
+    requireAdmin: deps?.requireAdmin,
+  });
 
   if (deps?.persistImage) {
     registerCanvasReplicaAgentRoutes(app, { projectRoot, persistImage: deps.persistImage, requireGate: gate });

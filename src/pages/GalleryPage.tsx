@@ -52,13 +52,13 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
     <div className="fixed inset-0 z-[62] min-h-[100dvh] overflow-y-auto overscroll-y-auto bg-[#0e0e0e] text-[#e5e2e1] custom-scrollbar">
       <main className="mx-auto max-w-6xl px-6 pb-10 pt-[5.5rem] md:px-10 md:pt-24">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
-          <h1
-            className="font-serif text-3xl tracking-[-0.02em] text-[#e5e2e1]"
-            style={{ fontFamily: '"Noto Serif", ui-serif, Georgia, serif' }}
-          >
+          <span className="font-label text-[10px] font-semibold uppercase tracking-[0.28em] text-primary/80">
+            Gallery
+          </span>
+          <h1 className="mt-3 font-headline text-3xl tracking-[-0.02em] text-on-surface md:text-[2.15rem]">
             公共画廊
           </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[#e5e2e1]/65">
+          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-on-surface/65">
             同事主动分享的优秀案例。点击图片可放大查看，学习 Prompt 与模型参数，激发创作灵感。
           </p>
         </motion.div>
@@ -74,7 +74,12 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
             <Loader2 className="h-8 w-8 animate-spin" aria-hidden />
           </div>
         ) : items.length === 0 ? (
-          <p className="mt-16 text-center text-sm text-[#e5e2e1]/50">还没有同事分享作品。</p>
+          <div className="mt-16 flex flex-col items-center justify-center rounded-[2rem] bg-surface-container-low/40 px-6 py-20 text-center outline outline-[0.5px] outline-white/10">
+            <p className="font-headline text-lg tracking-tight text-on-surface/80">画廊还是空的</p>
+            <p className="mt-3 max-w-md text-sm leading-relaxed text-on-surface/50">
+              还没有同事分享作品。在「我的收藏」里把满意的成片分享到这里。
+            </p>
+          </div>
         ) : (
           <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 lg:gap-8">
             {items.map((item) => (

@@ -14,6 +14,8 @@ interface ConfirmationModalProps {
   variant?: 'danger' | 'warning' | 'info';
 }
 
+const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
+
 export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
   isOpen,
   title,
@@ -40,28 +42,29 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="relative w-full max-w-md bg-[#1a1f2e] border border-white/10 rounded-3xl shadow-2xl overflow-hidden z-10"
+            transition={spring}
+            className="relative z-10 w-full max-w-md overflow-hidden rounded-3xl bg-surface-container-low/95 shadow-[0_40px_80px_-40px_rgba(0,0,0,0.7)] outline outline-[0.5px] outline-white/10 backdrop-blur-[28px]"
             data-theme-preserve="dark"
           >
             <div className="p-6">
               <div className="flex items-start gap-4">
                 <div className={cn(
                   "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0",
-                  variant === 'danger' ? "bg-red-500/10 text-red-500" : 
-                  variant === 'warning' ? "bg-amber-500/10 text-amber-500" : 
-                  "bg-blue-500/10 text-blue-500"
+                  variant === 'danger' ? "bg-red-500/10 text-red-400" : 
+                  variant === 'warning' ? "bg-primary/10 text-primary" : 
+                  "bg-secondary/10 text-secondary"
                 )}>
                   <AlertCircle className="w-6 h-6" />
                 </div>
                 
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-lg font-bold text-white mb-2">{title}</h3>
-                  <p className="text-sm text-slate-400 leading-relaxed">{message}</p>
+                  <h3 className="mb-2 font-headline text-lg font-bold tracking-tight text-on-surface">{title}</h3>
+                  <p className="text-sm leading-relaxed text-on-surface/65">{message}</p>
                 </div>
                 
                 <button 
                   onClick={onCancel}
-                  className="p-2 hover:bg-white/5 rounded-full text-slate-500 transition-colors"
+                  className="rounded-full p-2 text-on-surface/40 transition-colors hover:bg-white/5 hover:text-on-surface"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -70,17 +73,17 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
               <div className="mt-8 flex gap-3">
                 <button
                   onClick={onCancel}
-                  className="flex-1 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-sm font-bold transition-all"
+                  className="flex-1 rounded-full bg-white/[0.06] px-4 py-3 text-sm font-bold text-on-surface/80 outline outline-[0.5px] outline-white/10 transition-all hover:bg-white/10"
                 >
                   {cancelLabel}
                 </button>
                 <button
                   onClick={onConfirm}
                   className={cn(
-                    "flex-1 px-4 py-3 rounded-xl text-sm font-bold transition-all shadow-lg",
-                    variant === 'danger' ? "bg-red-500 hover:bg-red-600 text-white shadow-red-500/20" :
-                    variant === 'warning' ? "bg-amber-500 hover:bg-amber-600 text-black shadow-amber-500/20" :
-                    "bg-blue-500 hover:bg-blue-600 text-white shadow-blue-500/20"
+                    "flex-1 rounded-full px-4 py-3 text-sm font-bold transition-all shadow-[0_18px_40px_-24px_rgba(0,0,0,0.55)]",
+                    variant === 'danger'
+                      ? "bg-red-500/90 text-on-surface hover:bg-red-500"
+                      : "bg-gradient-to-br from-primary to-on-primary-container text-on-primary-fixed hover:brightness-105"
                   )}
                 >
                   {confirmLabel}

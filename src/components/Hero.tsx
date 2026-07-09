@@ -160,7 +160,7 @@ export const Hero: React.FC = () => {
             transition={{ ...spring, delay: 0.24 }}
             className="cover-hero-tagline text-xl md:text-2xl font-medium tracking-[-0.02em]"
           >
-            为分镜叙事而生。
+            为画面编排而生。
           </motion.p>
 
           <motion.p
@@ -169,7 +169,7 @@ export const Hero: React.FC = () => {
             transition={{ ...spring, delay: 0.3 }}
             className="cover-hero-body text-[15px] md:text-[17px] leading-[1.7] max-w-[520px]"
           >
-            从剧本拆解到批量生图，从九宫格预览到节点画布编排——在同一间 Studio 里，把故事变成画面。
+            在无限画布里串联提示词与生图节点，把灵感编排成可复用的工作流——同一间 Studio，专注创作。
           </motion.p>
 
           <motion.div
@@ -179,7 +179,7 @@ export const Hero: React.FC = () => {
             className="pt-2"
           >
             <a href="#tools" className="cover-hero-cta-pill text-[14px] font-medium tracking-[-0.01em]">
-              浏览全部工具
+              进入工作台
               <span aria-hidden className="cover-hero-cta-arrow">↓</span>
             </a>
           </motion.div>

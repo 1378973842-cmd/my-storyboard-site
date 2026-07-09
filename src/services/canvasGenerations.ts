@@ -314,6 +314,9 @@ export function canAccessUploadPath(
   if (!p) return false;
   if (!userId) return false;
 
+  // 团队成员头像：任一已登录用户可读
+  if (p.startsWith("/uploads/avatars/")) return true;
+
   const owner = db
     .prepare("SELECT user_id FROM file_ownership WHERE relative_path = ?")
     .get(p) as { user_id: string } | undefined;
@@ -409,6 +412,36 @@ export function registerCanvasGenerationsRoutes(
       res.json({ items: rows.map((row) => parseGenerationRow(row, projectRoot)) });
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : "加载收藏失败" });
+    }
+  });
+
+  /** 跨画布历史生成浏览（含未收藏的落盘记录） */
+  app.get("/api/canvas-generations", requireAuth, (req, res) => {
+    try {
+      const userId = req.authUser!.id;
+      const q = String(req.query.q || "").trim().slice(0, 120).toLowerCase();
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 80));
+      const rows = db
+        .prepare(
+          `SELECT id, user_id, thumbnail_path, prompt, model, params_json, canvas_id, node_id,
+                  favorited_at, shared_at, created_at
+           FROM canvas_generations
+           WHERE user_id = ?
+           ORDER BY created_at DESC
+           LIMIT 500`
+        )
+        .all(userId) as CanvasGenerationRow[];
+      const items = rows
+        .map((row) => parseGenerationRow(row, projectRoot))
+        .filter((item) => {
+          if (!q) return true;
+          const hay = `${item.prompt} ${item.model} ${item.canvas_id}`.toLowerCase();
+          return hay.includes(q);
+        })
+        .slice(0, limit);
+      res.json({ items });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "加载历史生成失败" });
     }
   });
 

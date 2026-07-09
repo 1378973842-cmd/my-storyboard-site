@@ -32,6 +32,7 @@ import { Storyboard, ImageSize, AspectRatio } from '../types';
 import { SIZES, RATIOS, STORYBOARD_TEXT_MODEL } from '../constants';
 import { cn, uniqueRefItemId } from '../lib/utils';
 import { useStore } from '../store/useStore';
+import { useShellNavigation } from '../shell/ShellNavigation';
 import { ConfirmationModal } from './ConfirmationModal';
 import { parseApiResponse } from '../lib/http';
 import { useRefThumbPreview } from '../hooks/useRefThumbPreview';
@@ -57,6 +58,7 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
     context,
     selectedStyle
   } = useStore();
+  const { openDirectorWithStoryboardShot } = useShellNavigation();
   const [error, setError] = useState<string | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -482,7 +484,7 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                 type="button"
                 onClick={handleGenerateImage}
                 disabled={shot.is_loading_image}
-                className="flex items-center gap-2 px-4 py-2 rounded-full glass-panel border border-white/10 text-[9px] font-label tracking-widest text-on-surface hover:bg-white/10 hover:border-primary/30 transition-all cursor-pointer group/btn"
+                className="flex items-center gap-2 px-4 py-2 rounded-full glass-panel outline outline-[0.5px] outline-white/10 text-[9px] font-label tracking-widest text-on-surface hover:bg-white/10 hover:outline-primary/30 transition-all cursor-pointer group/btn"
               >
                 <RefreshCw className={cn("w-3.5 h-3.5 group-hover/btn:text-primary transition-colors", shot.is_loading_image && "animate-spin")} />
                 {shot.is_loading_image ? 'GENERATING...' : 'GENERATE'}
@@ -516,6 +518,24 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                 title="下载图片"
               >
                 <Download className="w-5 h-5" />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!shot.image_url) return;
+                  openDirectorWithStoryboardShot({
+                    imageUrl: shot.image_url,
+                    shotNumber: shot.shot_number,
+                    summary: shot.summary,
+                    directorNotes: shot.director_notes,
+                  });
+                  addNotice('已打开导演台并导入本镜参考图');
+                }}
+                className="w-10 h-10 rounded-full glass-panel ghost-border flex items-center justify-center text-on-surface hover:text-primary transition-all cursor-pointer"
+                title="在导演台打开"
+              >
+                <Camera className="w-5 h-5" />
               </button>
               <button 
                 onClick={(e) => handleOpenPreview(e, shot.image_url!)}
@@ -626,7 +646,7 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                     上传图片（从左到右图1、图2…；谁参考谁、改哪张，写在提示词里）
                   </div>
                   <div
-                    className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] min-h-[132px] p-2"
+                    className="rounded-xl outline outline-1 outline-dashed outline-white/15 bg-white/[0.02] min-h-[132px] p-2"
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={async (e) => {
                       e.preventDefault();
@@ -669,7 +689,7 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                       <button
                         data-ref-preview-ignore
                         onClick={() => editTargetInputRef.current?.click()}
-                        className="shrink-0 w-24 h-24 rounded-xl border border-dashed border-white/20 bg-white/[0.03] hover:bg-white/[0.06] text-slate-300 hover:text-primary transition-colors flex flex-col items-center justify-center gap-1 cursor-pointer"
+                        className="shrink-0 w-24 h-24 rounded-xl outline outline-1 outline-dashed outline-white/25 bg-white/[0.03] hover:bg-white/[0.06] text-on-surface/70 hover:text-primary transition-colors flex flex-col items-center justify-center gap-1 cursor-pointer"
                         title="上传图片"
                       >
                         <Plus className="w-4 h-4" />
@@ -703,7 +723,7 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                   <select
                     value={editImageSize}
                     onChange={(e) => setEditImageSize(e.target.value as ImageSize)}
-                    className="bg-surface-container-high text-white text-[10px] font-mono rounded-md px-2.5 py-1.5 border border-white/10 focus:outline-none focus:border-primary/40"
+                    className="bg-surface-container-high text-on-surface text-[10px] font-mono rounded-md px-2.5 py-1.5 outline outline-[0.5px] outline-white/10 focus:outline-none focus:outline focus:outline-[0.5px] focus:outline-primary/40"
                   >
                     {SIZES.map((s) => (
                       <option key={s} value={s}>
@@ -714,7 +734,7 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                   <select
                     value={editAspectRatio}
                     onChange={(e) => setEditAspectRatio(e.target.value as AspectRatio)}
-                    className="bg-surface-container-high text-white text-[10px] font-mono rounded-md px-2.5 py-1.5 border border-white/10 focus:outline-none focus:border-primary/40"
+                    className="bg-surface-container-high text-on-surface text-[10px] font-mono rounded-md px-2.5 py-1.5 outline outline-[0.5px] outline-white/10 focus:outline-none focus:outline focus:outline-[0.5px] focus:outline-primary/40"
                   >
                     {RATIOS.map((r) => (
                       <option key={r} value={r}>
@@ -746,6 +766,18 @@ export const StoryboardCard: React.FC<Props> = ({ shot }) => {
                 {shot.director_notes || 'No notes available for this shot.'}
               </p>
             </div>
+
+            {shot.camera_move_url && (
+              <div className="p-4 bg-surface-container-low rounded-[0.8rem] space-y-2">
+                <h3 className="text-[9px] font-label tracking-[0.2em] text-slate-300 uppercase">Camera Move</h3>
+                <video
+                  src={shot.camera_move_url}
+                  controls
+                  playsInline
+                  className="w-full max-h-40 rounded-lg bg-black/40"
+                />
+              </div>
+            )}
 
             {/* Prompts */}
             <div className="p-4 flex-1 flex flex-col gap-4 bg-surface-container-low rounded-[0.8rem]">

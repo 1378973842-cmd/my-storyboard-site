@@ -14,6 +14,10 @@ import { DirectorTopToolbar } from '../components/director-workbench/DirectorTop
 
 import { DirectorTimeline } from '../components/director-workbench/DirectorTimeline';
 import { DirectorCameraPiPFloat } from '../components/director-workbench/DirectorCameraPiP';
+import { DirectorSceneOverlay } from '../components/director-workbench/DirectorSceneOverlay';
+import { DirectorShotNotesPanel } from '../components/director-workbench/DirectorShotNotesPanel';
+import { DirectorNlPanel } from '../components/director-workbench/DirectorNlPanel';
+import { useDirectorAutosave } from '../hooks/useDirectorAutosave';
 
 import {
 
@@ -47,9 +51,13 @@ type Props = {
 
 export function DirectorWorkbenchPage({ enterKey = 0 }: Props) {
 
+  useDirectorAutosave();
+
   const [transformMode, setTransformMode] = useState<TransformMode>('translate');
 
   const [inspectorDismissed, setInspectorDismissed] = useState(false);
+
+  const [nlOpen, setNlOpen] = useState(true);
 
   const isTransformDraggingRef = useRef(false);
 
@@ -176,7 +184,6 @@ export function DirectorWorkbenchPage({ enterKey = 0 }: Props) {
                   <div className="absolute inset-0 overflow-hidden">
 
                     <Canvas
-
                       className="!absolute inset-0 w-full h-full"
 
                       camera={{ position: [4.5, 2.8, 4.5], fov: 45, near: 0.1, far: 200 }}
@@ -223,7 +230,19 @@ export function DirectorWorkbenchPage({ enterKey = 0 }: Props) {
 
                   </div>
 
-
+                  <DirectorSceneOverlay />
+                  <DirectorShotNotesPanel />
+                  {nlOpen ? (
+                    <DirectorNlPanel onClose={() => setNlOpen(false)} />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setNlOpen(true)}
+                      className="absolute bottom-4 right-4 z-20 rounded-full px-3 py-1.5 text-[11px] font-medium cover-hero-cta"
+                    >
+                      口语调机位
+                    </button>
+                  )}
 
                   {isCharacter && inspectorDismissed && (
                     <DirectorInspectorReopenButton onReopen={() => setInspectorDismissed(false)} />

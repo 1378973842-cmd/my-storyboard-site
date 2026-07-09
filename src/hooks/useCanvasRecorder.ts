@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { useDirectorSceneStore } from '../store/useDirectorSceneStore';
+import { useStore } from '../store/useStore';
 
 export const DIRECTOR_TIMELINE_RECORD_END = 'director-timeline-record-end';
 
@@ -27,7 +28,7 @@ function downloadBlob(blob: Blob, filename: string) {
   link.href = url;
   link.download = filename;
   link.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 function waitAnimationFrames(count: number): Promise<void> {
@@ -42,7 +43,16 @@ function waitAnimationFrames(count: number): Promise<void> {
   });
 }
 
-/** 录制主 WebGL 画布：锁定选中相机视角 → 播放时间轴 → 导出 WebM */
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/** 录制主 WebGL 画布：锁定选中相机视角 → 播放时间轴 → 导出 WebM（可回写分镜） */
 export function useCanvasRecorder(canvasRef: RefObject<HTMLCanvasElement | null>) {
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -124,6 +134,7 @@ export function useCanvasRecorder(canvasRef: RefObject<HTMLCanvasElement | null>
     const mimeType = pickRecorderMimeType();
     const stream = canvas.captureStream(fps);
     chunksRef.current = [];
+    const linkedShot = state.linkedStoryboardShot;
 
     const recorder = new MediaRecorder(stream, {
       mimeType,
@@ -145,8 +156,27 @@ export function useCanvasRecorder(canvasRef: RefObject<HTMLCanvasElement | null>
       stream.getTracks().forEach((track) => track.stop());
       const blob = new Blob(chunksRef.current, { type: mimeType.split(';')[0] || 'video/webm' });
       const ext = mimeType.includes('webm') ? 'webm' : 'mp4';
-      downloadBlob(blob, `camera_movement.${ext}`);
-      restoreSavedState();
+      const filename = linkedShot
+        ? `camera_move_shot_${linkedShot}.${ext}`
+        : `camera_movement.${ext}`;
+      downloadBlob(blob, filename);
+
+      void (async () => {
+        try {
+          if (linkedShot) {
+            const dataUrl = await blobToDataUrl(blob);
+            useStore.getState().updateStoryboard(linkedShot, { camera_move_url: dataUrl });
+            useStore.getState().addNotice(`运镜已回写分镜 ${linkedShot}，并已下载 ${filename}`);
+          } else {
+            useStore.getState().addNotice(`运镜已下载：${filename}`);
+          }
+        } catch (e) {
+          console.warn('[director] writeback failed', e);
+          useStore.getState().addNotice(`运镜已下载：${filename}（回写分镜失败）`);
+        } finally {
+          restoreSavedState();
+        }
+      })();
     };
 
     recorder.start(200);

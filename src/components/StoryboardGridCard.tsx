@@ -1,9 +1,10 @@
 import React from 'react';
 import { Storyboard } from '../types';
 import { cn } from '../lib/utils';
-import { Download, Image as ImageIcon, Maximize2, Sparkles, Trash2 } from 'lucide-react';
+import { Download, Image as ImageIcon, Maximize2, Sparkles, Trash2, Camera } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useStore } from '../store/useStore';
+import { useShellNavigation } from '../shell/ShellNavigation';
 import { ConfirmationModal } from './ConfirmationModal';
 
 interface StoryboardGridCardProps {
@@ -25,7 +26,8 @@ const getShotType = (notes: string) => {
 };
 
 export const StoryboardGridCard: React.FC<StoryboardGridCardProps> = ({ shot, onClick }) => {
-  const { removeStoryboard } = useStore();
+  const { removeStoryboard, addNotice } = useStore();
+  const { openDirectorWithStoryboardShot } = useShellNavigation();
   const [isDeleteModalOpen, setIsDeleteModalOpen] = React.useState(false);
   const shotType = getShotType(shot.director_notes);
 
@@ -95,7 +97,7 @@ export const StoryboardGridCard: React.FC<StoryboardGridCardProps> = ({ shot, on
         <div className="absolute top-4 left-4 right-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             {shot.image_url && (
-              <div className="bg-blue-500/20 backdrop-blur-xl text-blue-400 text-[8px] font-black px-2 py-1 rounded-lg border border-blue-500/20 uppercase tracking-widest flex items-center gap-1">
+              <div className="bg-primary/15 backdrop-blur-xl text-primary text-[8px] font-label font-semibold px-2 py-1 rounded-lg outline outline-[0.5px] outline-primary/25 uppercase tracking-widest flex items-center gap-1">
                 <Sparkles className="w-2.5 h-2.5" />
                 Rendered
               </div>
@@ -109,6 +111,25 @@ export const StoryboardGridCard: React.FC<StoryboardGridCardProps> = ({ shot, on
                 title="下载图片"
               >
                 <Download className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {shot.image_url && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openDirectorWithStoryboardShot({
+                    imageUrl: shot.image_url!,
+                    shotNumber: shot.shot_number,
+                    summary: shot.summary,
+                    directorNotes: shot.director_notes,
+                  });
+                  addNotice('已打开导演台并导入本镜参考图');
+                }}
+                className="bg-black/60 backdrop-blur-xl text-[var(--cover-fg-warm)] hover:text-primary p-1.5 rounded-lg outline outline-[0.5px] outline-white/10 transition-all opacity-0 group-hover:opacity-100"
+                title="在导演台打开"
+              >
+                <Camera className="w-3.5 h-3.5" />
               </button>
             )}
             <button 

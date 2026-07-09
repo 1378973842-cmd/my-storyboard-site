@@ -1,11 +1,13 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { motion, useMotionValue, useSpring } from 'motion/react';
-import { ArrowUpRight, Camera, Clapperboard, Grid3x3, ImageIcon, Workflow } from 'lucide-react';
+import { ArrowUpRight, Workflow } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { StudioToolHeroId } from '../shell/studioToolHero';
 import { useShellNavigation } from '../shell/ShellNavigation';
+import { ToolConvergeOverlay } from './motion/ToolConvergeOverlay';
 
 const spring = { type: 'spring' as const, stiffness: 320, damping: 28 };
+const convergeExit = { duration: 0.38, ease: [0.22, 1, 0.36, 1] as const };
 
 type ToolItem = {
   id: StudioToolHeroId;
@@ -24,15 +26,21 @@ function ToolCard({
   index,
   isHovered,
   isDimmed,
+  isConverging,
+  convergeLocked,
   onEnter,
   onLeave,
+  onConvergeClick,
 }: {
   tool: ToolItem;
   index: number;
   isHovered: boolean;
   isDimmed: boolean;
+  isConverging: boolean;
+  convergeLocked: boolean;
   onEnter: () => void;
   onLeave: () => void;
+  onConvergeClick: (el: HTMLButtonElement) => void;
 }) {
   const Icon = tool.icon;
   const disabled = !tool.onClick;
@@ -58,8 +66,11 @@ function ToolCard({
   return (
     <motion.button
       type="button"
-      disabled={disabled}
-      onClick={tool.onClick}
+      disabled={disabled || convergeLocked}
+      onClick={(e) => {
+        if (disabled || convergeLocked) return;
+        onConvergeClick(e.currentTarget);
+      }}
       onMouseEnter={onEnter}
       onMouseLeave={() => {
         onLeave();
@@ -71,25 +82,35 @@ function ToolCard({
       initial={{ opacity: 0, y: 28 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
-      whileTap={{ scale: 0.97 }}
-      transition={{ ...spring, delay: index * 0.06 }}
-      animate={{
-        scale: isHovered ? 1.07 : isDimmed ? 0.96 : 1,
-        y: isHovered ? -14 : 0,
-      }}
+      whileTap={convergeLocked ? undefined : { scale: 0.97 }}
+      transition={
+        isConverging
+          ? convergeExit
+          : { ...spring, delay: index * 0.06 }
+      }
+      animate={
+        isConverging
+          ? { scale: 1.12, opacity: 0, y: 0 }
+          : {
+              scale: isHovered ? 1.07 : isDimmed ? 0.96 : 1,
+              y: isHovered ? -14 : 0,
+              opacity: convergeLocked && !isConverging ? 0.35 : 1,
+            }
+      }
       style={{
-        zIndex: isHovered ? 30 : tool.featured ? 10 : 1,
-        rotateX: smoothRotateX,
-        rotateY: smoothRotateY,
+        zIndex: isConverging ? 40 : isHovered ? 30 : tool.featured ? 10 : 1,
+        rotateX: isConverging ? 0 : smoothRotateX,
+        rotateY: isConverging ? 0 : smoothRotateY,
         transformPerspective: 900,
       }}
       data-tool-id={tool.id}
       className={cn(
         'group relative shrink-0 text-left rounded-[1.5rem] p-5 md:p-6 cursor-pointer disabled:opacity-40 disabled:pointer-events-none overflow-hidden',
-        'w-[172px] sm:w-[196px] md:w-[216px] lg:w-full lg:min-w-0',
-        tool.featured ? 'min-h-[300px] md:min-h-[320px] lg:min-h-0' : 'min-h-[300px] md:min-h-[320px] lg:min-h-0',
+        'w-[min(100%,420px)] sm:w-[min(100%,460px)] lg:w-full lg:max-w-[520px] lg:min-w-0',
+        'min-h-[280px] md:min-h-[300px] lg:min-h-[320px]',
         'cover-tool-card-bento',
         tool.featured && 'cover-tool-card-bento-featured',
+        isConverging && 'pointer-events-none',
       )}
     >
       <div className="absolute inset-0 cover-tool-card-shine pointer-events-none" />
@@ -129,14 +150,20 @@ interface HomeToolsProps {
 }
 
 export const HomeTools: React.FC<HomeToolsProps> = ({
-  onStart,
-  onOpenImageEditor,
-  onOpenNineGrid,
-  onOpenDirectorWorkbench,
   onOpenInfiniteCanvas,
 }) => {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [convergingId, setConvergingId] = useState<string | null>(null);
+  const [convergeRect, setConvergeRect] = useState<DOMRect | null>(null);
+  const convergeTimerRef = useRef<number | null>(null);
   const { warmInfiniteCanvas } = useShellNavigation();
+
+  const clearConvergeTimer = useCallback(() => {
+    if (convergeTimerRef.current != null) {
+      window.clearTimeout(convergeTimerRef.current);
+      convergeTimerRef.current = null;
+    }
+  }, []);
 
   const prefetchCanvasAssets = useCallback(() => {
     warmInfiniteCanvas();
@@ -145,52 +172,47 @@ export const HomeTools: React.FC<HomeToolsProps> = ({
     });
   }, [warmInfiniteCanvas]);
 
+  const beginToolConverge = useCallback(
+    (tool: ToolItem, el: HTMLButtonElement) => {
+      if (!tool.onClick || convergingId) return;
+
+      const reduceMotion =
+        typeof window !== 'undefined' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      if (reduceMotion) {
+        tool.onClick();
+        return;
+      }
+
+      clearConvergeTimer();
+      setHoveredId(null);
+      setConvergingId(tool.id);
+      setConvergeRect(el.getBoundingClientRect());
+
+      convergeTimerRef.current = window.setTimeout(() => {
+        tool.onClick?.();
+        setConvergingId(null);
+        setConvergeRect(null);
+        convergeTimerRef.current = null;
+      }, 380);
+    },
+    [clearConvergeTimer, convergingId],
+  );
+
+  React.useEffect(() => () => clearConvergeTimer(), [clearConvergeTimer]);
+
+  // 产品收缩：主页只露出无限画布；分镜/九宫格/修图/导演台路由暂留、入口隐藏
   const tools: ToolItem[] = [
     {
       id: 'canvas',
       index: '01',
       title: '无限画布',
-      description: '节点串联提示词与 API 生图，编排复杂流程。',
+      description: '节点串联提示词与 API 生图，编排复杂流程——Studio 的主工作台。',
       tag: 'Canvas',
       icon: Workflow,
       onClick: onOpenInfiniteCanvas,
-    },
-    {
-      id: 'grid',
-      index: '02',
-      title: '九宫格',
-      description: '九帧连贯分镜，快速建立镜头序列整体感。',
-      tag: 'Nine Grid',
-      icon: Grid3x3,
-      onClick: onOpenNineGrid,
-    },
-    {
-      id: 'studio',
-      index: '03',
-      title: '分镜工作台',
-      description: '剧本拆解、批量生图——故事可视化的核心入口。',
-      tag: 'Storyboard',
-      icon: Clapperboard,
-      onClick: onStart,
       featured: true,
-    },
-    {
-      id: 'editor',
-      index: '04',
-      title: '图片编辑',
-      description: '独立精修与局部重绘，随时打磨画面细节。',
-      tag: 'Edit',
-      icon: ImageIcon,
-      onClick: onOpenImageEditor,
-    },
-    {
-      id: 'director',
-      index: '05',
-      title: '导演台',
-      description: '三维场景摆位与机位预演，辅助镜头设计。',
-      tag: 'Director',
-      icon: Camera,
-      onClick: onOpenDirectorWorkbench,
     },
   ];
 
@@ -199,6 +221,7 @@ export const HomeTools: React.FC<HomeToolsProps> = ({
       id="tools"
       className="cover-tools-section relative scroll-mt-0 min-h-[100dvh] pb-24 md:pb-32 px-4 md:px-8 lg:px-12 flex flex-col justify-center"
     >
+      <ToolConvergeOverlay rect={convergeRect} />
       <div className="cover-tools-glow pointer-events-none absolute inset-0" aria-hidden />
       <div className="cover-noise pointer-events-none absolute inset-0 z-0" aria-hidden />
 
@@ -221,11 +244,15 @@ export const HomeTools: React.FC<HomeToolsProps> = ({
               index={index}
               isHovered={hoveredId === tool.id}
               isDimmed={hoveredId !== null && hoveredId !== tool.id}
+              isConverging={convergingId === tool.id}
+              convergeLocked={convergingId !== null}
               onEnter={() => {
+                if (convergingId) return;
                 setHoveredId(tool.id);
                 if (tool.id === 'canvas') prefetchCanvasAssets();
               }}
               onLeave={() => setHoveredId(null)}
+              onConvergeClick={(el) => beginToolConverge(tool, el)}
             />
           ))}
         </div>

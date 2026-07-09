@@ -4,6 +4,7 @@ export type AuthUser = {
   id: string;
   email: string;
   display_name: string;
+  avatar_url: string | null;
   role: 'admin' | 'user';
 };
 

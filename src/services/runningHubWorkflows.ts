@@ -54,6 +54,8 @@ export type RunningHubWorkflowDeps = {
   projectRoot: string;
   /** 与生图/画布共用的登录 Cookie 校验中间件；缺省不校验（仅独立画布服务） */
   requireGate?: RequestHandler;
+  /** RH 配置增删改与列表：仅管理员（画布读单条工作流仍用 requireGate） */
+  requireAdmin?: RequestHandler;
 };
 
 function httpError(status: number, message: string): Error & { status: number } {
@@ -501,6 +503,7 @@ function sendError(res: import("express").Response, err: unknown, fallback: stri
 export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubWorkflowDeps) {
   initRunningHubWorkflowsStore(deps.projectRoot);
   const mw: RequestHandler[] = deps.requireGate ? [deps.requireGate] : [];
+  const adminMw: RequestHandler[] = deps.requireAdmin ? [...mw, deps.requireAdmin] : mw;
   console.log("[runninghub-workflows] routes ready: /api/runninghub/* (submit/query/upload-asset/workflows/apps)");
 
   // ---- 运行时：AI 应用一键跑 ----
@@ -568,6 +571,8 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
       if (body.workflow) {
         payload.workflow = typeof body.workflow === "object" ? JSON.stringify(body.workflow) : String(body.workflow);
       }
+      const instanceType = String(body.instanceType || "").trim();
+      if (instanceType) payload.instanceType = instanceType;
       const resp = await fetch(rhUrl("/task/openapi/create"), {
         method: "POST",
         headers: rhHeaders(true, useWallet),
@@ -661,8 +666,8 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
     }
   });
 
-  // ---- 配置管理：工作流 ----
-  app.get("/api/runninghub/workflows", ...mw, (_req, res) => {
+  // ---- 配置管理：工作流（列表/写 admin；单条 GET 供画布 ensureRunningHubWorkflow） ----
+  app.get("/api/runninghub/workflows", ...adminMw, (_req, res) => {
     const store = loadWorkflowStore();
     const items = Object.values(store)
       .filter((cfg): cfg is RhWorkflowConfig => Boolean(cfg && typeof cfg === "object"))
@@ -689,7 +694,7 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
     }
   });
 
-  app.post("/api/runninghub/workflows/fetch", ...mw, async (req: Request, res) => {
+  app.post("/api/runninghub/workflows/fetch", ...adminMw, async (req: Request, res) => {
     try {
       const body = req.body || {};
       const workflowId = String(body.workflowId || "").trim();
@@ -712,7 +717,7 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
     }
   });
 
-  app.put("/api/runninghub/workflows/:id", ...mw, (req, res) => {
+  app.put("/api/runninghub/workflows/:id", ...adminMw, (req, res) => {
     try {
       const key = String(req.params.id || "").trim();
       if (!key) throw httpError(400, "workflowId 必填");
@@ -739,7 +744,7 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
     }
   });
 
-  app.delete("/api/runninghub/workflows/:id", ...mw, (req, res) => {
+  app.delete("/api/runninghub/workflows/:id", ...adminMw, (req, res) => {
     try {
       const key = String(req.params.id || "").trim();
       if (!key) throw httpError(400, "workflowId 必填");
@@ -754,7 +759,7 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
   });
 
   // ---- 配置管理：AI 应用（字段由前端从 app-info 原始返回派生后整份提交保存） ----
-  app.get("/api/runninghub/apps", ...mw, (_req, res) => {
+  app.get("/api/runninghub/apps", ...adminMw, (_req, res) => {
     const store = loadAppStore();
     const items = Object.values(store)
       .filter((cfg): cfg is RhAppConfig => Boolean(cfg && typeof cfg === "object"))
@@ -769,7 +774,7 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
     res.json({ apps: items });
   });
 
-  app.get("/api/runninghub/apps/:id", ...mw, (req, res) => {
+  app.get("/api/runninghub/apps/:id", ...adminMw, (req, res) => {
     try {
       const key = String(req.params.id || "").trim();
       if (!key) throw httpError(400, "webappId 必填");
@@ -781,7 +786,7 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
     }
   });
 
-  app.put("/api/runninghub/apps/:id", ...mw, (req, res) => {
+  app.put("/api/runninghub/apps/:id", ...adminMw, (req, res) => {
     try {
       const key = String(req.params.id || "").trim();
       if (!key) throw httpError(400, "webappId 必填");
@@ -804,7 +809,7 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
     }
   });
 
-  app.delete("/api/runninghub/apps/:id", ...mw, (req, res) => {
+  app.delete("/api/runninghub/apps/:id", ...adminMw, (req, res) => {
     try {
       const key = String(req.params.id || "").trim();
       if (!key) throw httpError(400, "webappId 必填");

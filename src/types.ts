@@ -32,6 +32,8 @@ export interface Storyboard {
   movement?: string;
   character?: string;
   mood?: string;
+  /** 导演台导出的运镜参考视频（blob/data URL） */
+  camera_move_url?: string;
 }
 
 export interface GenerationResponse {
@@ -136,6 +138,7 @@ export type SceneVec3 = [number, number, number];
 export interface SceneData {
   camera?: {
     position?: SceneVec3;
+    rotation?: SceneVec3;
     fov?: number;
   };
   characters?: SceneDataCharacter[];

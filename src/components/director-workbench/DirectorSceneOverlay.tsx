@@ -1,4 +1,5 @@
-import { Camera, Eye, EyeOff, Grid3x3, Layers, Lock, LockOpen, Trash2, User } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Camera, Eye, EyeOff, Grid3x3, Layers, Lock, LockOpen, Trash2, User, Image as ImageIcon, Box } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useDirectorSceneStore } from '../../store/useDirectorSceneStore';
 
@@ -14,7 +15,7 @@ function SceneRow({
   onRemove,
 }: {
   label: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   isActive: boolean;
   visible: boolean;
   locked: boolean;
@@ -96,12 +97,20 @@ export function DirectorSceneOverlay() {
       <div className="space-y-2 max-h-[280px] overflow-y-auto custom-scrollbar">
         {objects.length > 0 && (
           <div>
-            <p className="cover-section-label mb-1 px-1 text-[10px]">小人</p>
+            <p className="cover-section-label mb-1 px-1 text-[10px]">物体</p>
             {objects.map((obj, i) => (
               <SceneRow
                 key={obj.id}
-                label={obj.name || `小人 #${i + 1}`}
-                icon={<User className="w-3 h-3 text-primary shrink-0" />}
+                label={obj.name || `物体 #${i + 1}`}
+                icon={
+                  obj.type === 'image' ? (
+                    <ImageIcon className="w-3 h-3 text-primary shrink-0" />
+                  ) : obj.type === 'customModel' ? (
+                    <Box className="w-3 h-3 text-primary shrink-0" />
+                  ) : (
+                    <User className="w-3 h-3 text-primary shrink-0" />
+                  )
+                }
                 isActive={selectedId === obj.id}
                 visible={obj.visible}
                 locked={obj.locked}

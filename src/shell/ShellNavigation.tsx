@@ -94,6 +94,13 @@ type ShellNavigationValue = {
   openImageEditor: () => void;
   openNineGrid: () => void;
   openDirectorWorkbench: () => void;
+  /** 打开导演台并把分镜图导入为参考平面 */
+  openDirectorWithStoryboardShot: (payload: {
+    imageUrl: string;
+    shotNumber?: string;
+    summary?: string;
+    directorNotes?: string;
+  }) => void;
   openInfiniteCanvas: () => void;
   openMyFavorites: () => void;
   openGallery: () => void;
@@ -169,6 +176,24 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
     setDirectorWorkbenchKeepAlive(true);
     setScreen('director');
   }, []);
+  const openDirectorWithStoryboardShot = useCallback(
+    (payload: {
+      imageUrl: string;
+      shotNumber?: string;
+      summary?: string;
+      directorNotes?: string;
+    }) => {
+      setDirectorWorkbenchKeepAlive(true);
+      setScreen('director');
+      // 等导演台挂载后再写入场景
+      queueMicrotask(() => {
+        void import('../store/useDirectorSceneStore').then(({ useDirectorSceneStore }) => {
+          useDirectorSceneStore.getState().importStoryboardShot(payload);
+        });
+      });
+    },
+    [],
+  );
   const openInfiniteCanvas = useCallback(() => {
     setInfiniteCanvasKeepAlive(true);
     setScreen('infinite-canvas');
@@ -197,6 +222,7 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
       openImageEditor,
       openNineGrid,
       openDirectorWorkbench,
+      openDirectorWithStoryboardShot,
       openInfiniteCanvas,
       openMyFavorites,
       openGallery,
@@ -217,6 +243,7 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
       openImageEditor,
       openNineGrid,
       openDirectorWorkbench,
+      openDirectorWithStoryboardShot,
       openInfiniteCanvas,
       openMyFavorites,
       openGallery,

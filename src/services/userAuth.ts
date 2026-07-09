@@ -4,10 +4,14 @@ import {
   scryptSync,
   timingSafeEqual,
 } from "crypto";
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "fs";
+import path from "path";
 import type { Express, NextFunction, Request, Response } from "express";
 import type Database from "better-sqlite3";
+import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
 import { parseCookieHeader } from "./siteAccessGate.js";
+import { recordFileOwnership } from "./canvasGenerations.js";
 
 export const AUTH_COOKIE_NAME = "sb_session_v1";
 
@@ -17,6 +21,7 @@ export type AuthUser = {
   id: string;
   email: string;
   display_name: string;
+  avatar_url: string | null;
   role: UserRole;
 };
 
@@ -24,11 +29,26 @@ type UserRow = {
   id: string;
   email: string;
   display_name: string;
+  avatar_url?: string | null;
   password_hash: string;
   role: UserRole;
   disabled: number;
   created_at: string;
 };
+
+const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: AVATAR_MAX_BYTES },
+  fileFilter: (_req, file, cb) => {
+    const mime = (file.mimetype || "").toLowerCase();
+    if (["image/jpeg", "image/png", "image/webp", "image/gif"].includes(mime)) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error("仅支持 JPG / PNG / WebP / GIF"));
+  },
+});
 
 const AUTH_WINDOW_MS = Math.max(
   60_000,
@@ -178,8 +198,52 @@ function rowToAuthUser(row: UserRow): AuthUser {
     id: row.id,
     email: row.email,
     display_name: row.display_name || row.email,
+    avatar_url: row.avatar_url ? String(row.avatar_url) : null,
     role: row.role === "admin" ? "admin" : "user",
   };
+}
+
+function avatarExtFromMime(mime: string): string {
+  const map: Record<string, string> = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+  };
+  return map[mime] || ".jpg";
+}
+
+function removeLocalUpload(projectRoot: string, webPath: string | null | undefined): void {
+  const rel = String(webPath || "")
+    .replace(/^\/uploads\//, "")
+    .replace(/\\/g, "/");
+  if (!rel || rel.includes("..")) return;
+  const abs = path.join(projectRoot, "public", "uploads", rel);
+  const root = path.join(projectRoot, "public", "uploads");
+  if (!abs.startsWith(root) || !existsSync(abs)) return;
+  try {
+    unlinkSync(abs);
+  } catch {
+    /* ignore */
+  }
+}
+
+function saveUserAvatarFile(
+  db: InstanceType<typeof Database>,
+  projectRoot: string,
+  userId: string,
+  buffer: Buffer,
+  mime: string
+): string {
+  const ext = avatarExtFromMime(mime);
+  const safeId = userId.replace(/[^a-zA-Z0-9_-]/g, "");
+  const filename = `${safeId}${ext}`;
+  const dir = path.join(projectRoot, "public", "uploads", "avatars");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, filename), buffer);
+  const url = `/uploads/avatars/${filename}`;
+  recordFileOwnership(db, url, userId);
+  return url;
 }
 
 export function validateAuthForDeploy(): void {
@@ -219,6 +283,11 @@ export function initUserAuthSchema(db: InstanceType<typeof Database>): void {
     );
     CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
   `);
+  try {
+    db.prepare("ALTER TABLE users ADD COLUMN avatar_url TEXT").run();
+  } catch {
+    /* column exists */
+  }
 }
 
 export function bootstrapAdminUser(db: InstanceType<typeof Database>): void {
@@ -294,7 +363,11 @@ export function createRequireAdmin(db: InstanceType<typeof Database>) {
   };
 }
 
-export function registerUserAuthRoutes(app: Express, db: InstanceType<typeof Database>): void {
+export function registerUserAuthRoutes(
+  app: Express,
+  db: InstanceType<typeof Database>,
+  projectRoot: string
+): void {
   app.get("/api/auth/status", (req, res) => {
     const user = attachAuthUser(db, req);
     if (!user) {
@@ -326,6 +399,54 @@ export function registerUserAuthRoutes(app: Express, db: InstanceType<typeof Dat
   app.post("/api/auth/logout", (req, res) => {
     res.setHeader("Set-Cookie", buildClearSessionCookie(req));
     return res.json({ ok: true });
+  });
+
+  const requireAuth = createRequireAuth(db);
+
+  app.patch("/api/auth/profile", requireAuth, (req, res) => {
+    const displayName = String(req.body?.display_name ?? req.body?.displayName ?? "").trim();
+    if (!displayName) return res.status(400).json({ error: "名字不能为空" });
+    if (displayName.length > 80) return res.status(400).json({ error: "名字过长（最多 80 字）" });
+
+    db.prepare("UPDATE users SET display_name = ? WHERE id = ?").run(displayName, req.authUser!.id);
+    const row = findUserById(db, req.authUser!.id);
+    if (!row) return res.status(404).json({ error: "用户不存在" });
+    return res.json({ ok: true, user: rowToAuthUser(row) });
+  });
+
+  app.post("/api/auth/avatar", requireAuth, (req, res) => {
+    avatarUpload.single("avatar")(req, res, (err) => {
+      if (err) {
+        const message = err instanceof Error ? err.message : "上传头像失败";
+        return res.status(400).json({ error: message });
+      }
+
+      try {
+        const file = req.file;
+        if (!file?.buffer?.length) {
+          return res.status(400).json({ error: "请选择头像图片" });
+        }
+
+        const userId = req.authUser!.id;
+        const row = findUserById(db, userId);
+        if (!row) return res.status(404).json({ error: "用户不存在" });
+
+        const mime = (file.mimetype || "image/jpeg").toLowerCase();
+        const nextUrl = saveUserAvatarFile(db, projectRoot, userId, file.buffer, mime);
+        db.prepare("UPDATE users SET avatar_url = ? WHERE id = ?").run(nextUrl, userId);
+
+        if (row.avatar_url && row.avatar_url !== nextUrl) {
+          removeLocalUpload(projectRoot, row.avatar_url);
+        }
+
+        const updated = findUserById(db, userId);
+        if (!updated) return res.status(404).json({ error: "用户不存在" });
+        return res.json({ ok: true, user: rowToAuthUser(updated) });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "上传头像失败";
+        return res.status(400).json({ error: message });
+      }
+    });
   });
 
   const requireAdmin = createRequireAdmin(db);

@@ -56,12 +56,13 @@ export function buildSceneDataPatch(
   if (data.camera) {
     const targetId = state.selectedCameraId ?? state.cameras[0]?.id;
     if (targetId) {
-      const { position, fov } = data.camera;
+      const { position, rotation, fov } = data.camera;
       result.cameras = state.cameras.map((cam) => {
         if (cam.id !== targetId) return cam;
         return {
           ...cam,
           ...(position ? { position: mergeVec3(cam.position, position) } : {}),
+          ...(rotation ? { rotation: mergeVec3(cam.rotation, rotation) } : {}),
           ...(fov !== undefined ? { fov: Math.min(120, Math.max(15, fov)) } : {}),
         };
       });
