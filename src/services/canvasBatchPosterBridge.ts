@@ -1399,7 +1399,7 @@ export async function brainstormBatchPosterThemesOnServer(body: BatchPosterBrain
 }
 
 export function registerCanvasBatchPosterRoutes(app: Express, projectRoot: string, gate?: RequestHandler) {
-  app.get("/api/canvas/batch-poster-theme-catalog", (_req, res) => {
+  app.get("/api/canvas/batch-poster-theme-catalog", ...(gate ? [gate] : []), (_req, res) => {
     return res.json(getBatchPosterThemeCatalog());
   });
   app.post("/api/canvas/batch-poster-brainstorm", ...(gate ? [gate] : []), async (req, res) => {

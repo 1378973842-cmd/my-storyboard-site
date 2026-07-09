@@ -2654,8 +2654,17 @@ function refreshOutputTimer(){
 }
 function serializableCanvasNode(node){
     const copy = {...(node || {})};
+    // 运行时字段禁止落盘，否则重开会出现假「运行中」/编辑态残留
     delete copy._ltxEditor;
     delete copy.running;
+    delete copy._batchPosterRuns;
+    delete copy._batchPosterTitlePrefetchBusy;
+    delete copy._batchProgress;
+    delete copy.batchProgress;
+    delete copy.cellEditing;
+    delete copy._cascadeFailed;
+    delete copy._cascadeIdx;
+    delete copy._agentStopRequested;
     return copy;
 }
 function serializableCanvasNodes(list=nodes){
@@ -10795,16 +10804,24 @@ async function executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPending
     const posterRef = ctx.posterRef;
     const count = ctx.count;
     try {
+        if(node._agentStopRequested) throw new Error(langIsEn() ? 'Stopped' : '已停止');
         const themes = await brainstormBatchPosterThemes(count, node, ctx.brainstorm);
+        if(node._agentStopRequested) throw new Error(langIsEn() ? 'Stopped' : '已停止');
         let planBTitleCopy = null;
         if(ctx.planBReferenceCopy){
             planBTitleCopy = await resolveBatchPosterPlanBTitleCopy(posterRef, node);
         }
+        if(node._agentStopRequested) throw new Error(langIsEn() ? 'Stopped' : '已停止');
         removeBatchPosterRunPending(out, runToken, llmPendingIds);
         updateBatchPosterRunProgress(node, runToken, {phase:'image', current:0, total:count});
         const slots = themes.map(entry => ({...entry, status:'pending', lastError:''}));
         const onProgress = patch => updateBatchPosterRunProgress(node, runToken, patch);
         const generateBatchPosterSlot = async (slot, round) => {
+            if(node._agentStopRequested){
+                slot.status = 'failed';
+                slot.lastError = langIsEn() ? 'Stopped' : '已停止';
+                return 'failed';
+            }
             try {
                 const retryAttempt = batchPosterModerationRetryAttempt(slot.lastError, round);
                 const result = ctx.planB
@@ -10827,9 +10844,18 @@ async function executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPending
         };
         await Promise.all(slots.map(slot => generateBatchPosterSlot(slot, 0)));
         for(let round = 1; round <= BATCH_POSTER_IMAGE_MAX_RETRIES; round++){
+            if(node._agentStopRequested) break;
             const failedSlots = slots.filter(slot => slot.status !== 'succeeded');
             if(!failedSlots.length) break;
             await Promise.all(failedSlots.map(slot => generateBatchPosterSlot(slot, round)));
+        }
+        if(node._agentStopRequested){
+            removeBatchPosterRunPending(out, runToken, llmPendingIds);
+            finishBatchPosterRun(node, runToken);
+            refreshRunNodes(node, out);
+            setStatus(langIsEn() ? 'Batch Poster stopped' : 'Batch Poster 已停止');
+            scheduleSave();
+            return;
         }
         await saveCanvas();
         const generatedCount = slots.filter(slot => slot.status === 'succeeded').length;
@@ -10858,13 +10884,17 @@ async function executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPending
         scheduleSave();
     } catch(err) {
         removeBatchPosterRunPending(out, runToken, llmPendingIds);
-        finishBatchPosterRun(node, runToken, {error:err.message || String(err)});
+        const stopped = node._agentStopRequested || /已停止|Stopped/i.test(String(err?.message || err));
+        finishBatchPosterRun(node, runToken, stopped ? {} : {error:err.message || String(err)});
         refreshRunNodes(node, out);
-        showErrorModal(err.message || (langIsEn() ? 'Batch Poster failed' : 'Batch Poster 批量生成失败'), 'Batch Poster Agent');
+        if(!stopped) showErrorModal(err.message || (langIsEn() ? 'Batch Poster failed' : 'Batch Poster 批量生成失败'), 'Batch Poster Agent');
+        else setStatus(langIsEn() ? 'Batch Poster stopped' : 'Batch Poster 已停止');
         scheduleSave();
+    } finally {
+        delete node._agentStopRequested;
     }
 }
-async function runBatchPosterAgent(nodeId){
+async function runBatchPosterAgent(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || node.type !== 'batchPosterAgent' || isNodeDisabled(node)) return;
     const count = Math.max(1, Math.min(10, Number(node.batch_count || 3)));
@@ -10874,6 +10904,7 @@ async function runBatchPosterAgent(nodeId){
         node.runStatus = 'failed';
         node.runError = msg;
         refreshNodes([nodeId]);
+        if(opts.cascade) throw new Error(msg);
         return;
     }
     if(batchPosterUsesCustomTheme(node) && !normalizeBatchPosterCustomTheme(node.custom_theme)){
@@ -10881,8 +10912,10 @@ async function runBatchPosterAgent(nodeId){
         node.runStatus = 'failed';
         node.runError = msg;
         refreshNodes([nodeId]);
+        if(opts.cascade) throw new Error(msg);
         return;
     }
+    delete node._agentStopRequested;
     const runToken = uid('bpr');
     const ctx = snapshotBatchPosterRunContext(node, count, posterRef);
     const llmPendingIds = Array.from({length:count}, () => uid('p'));
@@ -10911,7 +10944,8 @@ async function runBatchPosterAgent(nodeId){
     scheduleSave();
     refreshNodes([nodeId]);
     setStatus(batchPosterBrainstormStatusLabelFromCfg(ctx.brainstorm));
-    void executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPendingIds);
+    if(opts.cascade) await executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPendingIds);
+    else void executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPendingIds);
 }
 function runBatchPosterFromButton(nodeId, event){
     event?.preventDefault?.();
@@ -11117,8 +11151,8 @@ function nineGridAgentRefsPayload(node){
 }
 function updateNineGridAgentProgress(node, phase, current, total){
     node.batchProgress = {phase, current, total};
+    // 只改按钮文案，避免运行中 refreshNodes 重建 body 导致输入失焦
     updateNineGridRunButtons(node);
-    refreshNodes([node.id]);
 }
 function updateNineGridRunButtons(node){
     const el = nodesEl?.querySelector?.(`.node[data-id="${CSS.escape(node.id)}"]`);
@@ -11285,6 +11319,8 @@ async function runNineGridPhaseB(nodeId){
         } catch(cropErr) {
             node.croppedUrls = [];
             node.runError = cropErr.message || String(cropErr);
+            node.runStatus = 'failed';
+            throw cropErr;
         }
         node.runStatus = 'done';
     } catch(err) {
@@ -15666,6 +15702,9 @@ function runCascadeNodeByType(node, opts={}){
     if(node.type === 'generator') return runGenerator(node.id, runOpts);
     if(node.type === 'replicaAgent') return runReplicaAgent(node.id, runOpts);
     if(node.type === 'imageRepairAgent') return runImageRepairAgent(node.id, runOpts);
+    if(node.type === 'batchPosterAgent') return runBatchPosterAgent(node.id, runOpts);
+    if(node.type === 'nineGridAgent') return runNineGridFull(node.id);
+    if(node.type === 'slotsLoopVideoAgent') return runSlotsLoopVideoAgent(node.id, runOpts);
     if(node.type === 'msgen') return runMsGenNode(node.id, runOpts);
     if(node.type === 'comfy') return runComfyNode(node.id, runOpts);
     if(node.type === 'ltxDirector') return runLTXDirectorNode(node.id, runOpts);
@@ -15693,7 +15732,7 @@ async function runLimitedCascadeRounds(rounds, limit, runner){
     return Promise.allSettled(workers);
 }
 function canvasRunTypes(){
-    return ['generator','msgen','comfy','ltxDirector','llm','video','rh','replicaAgent','imageRepairAgent'];
+    return ['generator','msgen','comfy','ltxDirector','llm','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent'];
 }
 function canvasWorkflowEdges(){
     const runTypes = canvasRunTypes();
@@ -15982,13 +16021,12 @@ async function runOneCascadePass(order, options={}){
         node.runStatus = 'running';
         refreshNodes([id]);
         try {
-            if(node.type === 'generator') await runGenerator(id, {cascade:true});
-            else if(node.type === 'msgen') await runMsGenNode(id, {cascade:true});
-            else if(node.type === 'comfy') await runComfyNode(id, {cascade:true});
-            else if(node.type === 'ltxDirector') await runLTXDirectorNode(id, {cascade:true});
-            else if(node.type === 'llm') await runLLMNode(id, {cascade:true});
-            else if(node.type === 'video') await runVideoNode(id, {cascade:true});
-            else if(node.type === 'rh') await runRhNode(id, {cascade:true});
+            // 统一走 runCascadeNodeByType，避免 Agent 节点被静默跳过
+            await runCascadeNodeByType(node, {cascade:true, ...options});
+            if(node.runStatus === 'failed'){
+                node._cascadeFailed = true;
+                throw new Error(node.runError || (langIsEn() ? 'Node failed' : '节点失败'));
+            }
             node.runStatus = 'done';
             refreshNodes([id]);
         } catch(err) {
@@ -16527,18 +16565,59 @@ function agentStopAllBtnHtml(nodeId){
     const pendingN = agentPendingCount(nodeId);
     if(pendingN <= 0) return '';
     const label = langIsEn() ? 'Stop' : '停止';
-    return `<button class="gen-stop-all-btn" type="button" data-stop-all="${escapeAttr(nodeId)}" title="${escapeAttr(langIsEn() ? `Cancel ${pendingN} in-flight task(s)` : `取消 ${pendingN} 个进行中的任务`)}"><i data-lucide="square" class="w-3.5 h-3.5"></i><span>${escapeHtml(label)}</span></button>`;
+    return `<button class="gen-stop-all-btn" type="button" data-stop-all="${escapeAttr(nodeId)}" title="${escapeAttr(langIsEn() ? `Stop local queue (${pendingN}); in-flight server jobs are cancelled when possible` : `停止本地队列（${pendingN}）；进行中的服务端任务会尽量取消`)}"><i data-lucide="square" class="w-3.5 h-3.5"></i><span>${escapeHtml(label)}</span></button>`;
 }
 function agentGenRunActionsHtml(nodeId, primaryBtnHtml){
     const stopHtml = agentStopAllBtnHtml(nodeId);
     if(!stopHtml) return primaryBtnHtml;
     return `<div class="gen-run-actions">${primaryBtnHtml}${stopHtml}</div>`;
 }
+function collectAgentPendingTaskIds(nodeId){
+    if(!nodeId) return [];
+    const ids = [];
+    nodes.filter(n => n.type === 'output').forEach(out => {
+        (out._pending || []).forEach(p => {
+            if(p?.run?.node?.id !== nodeId) return;
+            if(p.canvasTaskId) ids.push({
+                taskId:String(p.canvasTaskId),
+                type:String(p.canvasTaskType || ''),
+            });
+        });
+    });
+    return ids;
+}
+function cancelAgentServerTasks(taskRefs){
+    (taskRefs || []).forEach(({taskId, type}) => {
+        if(!taskId) return;
+        let url = '';
+        if(type === 'replica-agent') url = `/api/canvas/replica-agent-tasks/${encodeURIComponent(taskId)}/cancel`;
+        else if(type === 'image-repair-agent') url = `/api/canvas/image-repair-agent-tasks/${encodeURIComponent(taskId)}/cancel`;
+        if(!url) return;
+        // fire-and-forget：UI 已清队列，取消失败不阻塞
+        void apiFetch(url, {method:'POST'}).catch(() => {});
+    });
+}
 function stopAgentGeneration(nodeId){
-    if(!nodeId || agentPendingCount(nodeId) <= 0) return;
+    if(!nodeId) return;
+    const node = nodes.find(n => n.id === nodeId);
+    const pendingN = agentPendingCount(nodeId);
+    const activeBatch = node?.type === 'batchPosterAgent' ? activeBatchPosterRunCount(node) : 0;
+    if(pendingN <= 0 && activeBatch <= 0) return;
+    const taskRefs = collectAgentPendingTaskIds(nodeId);
+    if(node) node._agentStopRequested = true;
+    cancelAgentServerTasks(taskRefs);
     const outIds = pendingOutputIdsForAgent(nodeId);
     clearAgentOutputPending(nodeId);
-    reconcileAgentRunStateFromPending(nodeId);
+    if(node?.type === 'batchPosterAgent'){
+        node._batchPosterRuns = null;
+        syncBatchPosterNodeRunState(node);
+    } else {
+        reconcileAgentRunStateFromPending(nodeId);
+    }
+    if(node){
+        node.running = false;
+        if(node.runStatus === 'running' || node.runStatus === 'queued') node.runStatus = 'idle';
+    }
     refreshNodes([nodeId, ...outIds]);
     syncLinkFlowForNodes([nodeId, ...outIds]);
     refreshOutputTimer();
@@ -16599,6 +16678,11 @@ function resetTransientNodeRunState(){
         );
     });
     nodes.forEach(n => {
+        // Batch Poster 内存 run 表在重开后不可恢复，必须清掉以免假 running
+        if(n._batchPosterRuns) n._batchPosterRuns = null;
+        delete n._batchPosterTitlePrefetchBusy;
+        delete n.cellEditing;
+        delete n._agentStopRequested;
         const pending = agentPendingCount(n.id);
         if(pending > 0){
             n.running = true;
@@ -16607,6 +16691,7 @@ function resetTransientNodeRunState(){
         }
         n.running = false;
         delete n._batchProgress;
+        delete n.batchProgress;
         if(n.runStatus === 'running' || n.runStatus === 'queued'){
             n.runStatus = 'idle';
         }
@@ -16722,8 +16807,10 @@ async function pollReplicaAgentTask(taskId){
                 completeReplicaAgentTask(taskId, data);
                 return 'completed';
             }
-            if(data.status === 'failed'){
-                failCanvasImageTask(taskId, data.error || (langIsEn() ? 'Replica Agent failed' : '复刻 Agent 失败'));
+            if(data.status === 'failed' || data.status === 'cancelled'){
+                failCanvasImageTask(taskId, data.error || (data.status === 'cancelled'
+                    ? (langIsEn() ? 'Cancelled' : '已取消')
+                    : (langIsEn() ? 'Replica Agent failed' : '复刻 Agent 失败')));
                 return 'failed';
             }
             await sleep(2000);
@@ -16805,8 +16892,10 @@ async function pollImageRepairAgentTask(taskId){
                 completeImageRepairAgentTask(taskId, data);
                 return 'completed';
             }
-            if(data.status === 'failed'){
-                failCanvasImageTask(taskId, data.error || (langIsEn() ? 'Repair Agent failed' : '修图 Agent 失败'));
+            if(data.status === 'failed' || data.status === 'cancelled'){
+                failCanvasImageTask(taskId, data.error || (data.status === 'cancelled'
+                    ? (langIsEn() ? 'Cancelled' : '已取消')
+                    : (langIsEn() ? 'Repair Agent failed' : '修图 Agent 失败')));
                 return 'failed';
             }
             await sleep(2000);

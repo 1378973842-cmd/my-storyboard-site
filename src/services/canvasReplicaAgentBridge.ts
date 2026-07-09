@@ -181,7 +181,8 @@ export type ReplicaAgentTaskStatus =
   | "processing_stage1"
   | "processing_stage2"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export type ReplicaAgentRoute = "full" | "wash_only";
 
@@ -667,7 +668,13 @@ function stageLabelForStatus(status: ReplicaAgentTaskStatus, task?: ReplicaAgent
     return "完成";
   }
   if (status === "failed") return "失败";
+  if (status === "cancelled") return "已取消";
   return "";
+}
+
+function isReplicaTaskCancelled(task: ReplicaAgentTask): boolean {
+  // 宽类型读取，避免 await 后 TS 把 status 收窄成当前阶段字面量
+  return (task as { status: string }).status === "cancelled";
 }
 
 /** 是否进入完整双阶段：用户提供了至少一张角色参考图即执行换人 */
@@ -775,6 +782,7 @@ async function runReplicaAgentTask(
       characterRefCount: characterInputs.length,
       backgroundInput: backgroundInput.slice(0, 80),
     });
+    if (isReplicaTaskCancelled(task)) return;
     const washedUpstream = await runStoryboardRunningHubG2Job({
       prompt: washPrompt,
       images: [backgroundInput],
@@ -782,6 +790,7 @@ async function runReplicaAgentTask(
       aspect_ratio: aspectRatio,
       projectRoot: deps.projectRoot,
     });
+    if (isReplicaTaskCancelled(task)) return;
     task.washed_image_url = await persistOwned(washedUpstream);
 
     if (!runStage2) {
@@ -802,6 +811,7 @@ async function runReplicaAgentTask(
       characterInputs,
       persistOwned
     );
+    if (isReplicaTaskCancelled(task)) return;
     const swapPrompt = buildSwapPrompt(stylePrompt, swapMarkers, swapCharacterInputs.length);
     task.swap_prompt = swapPrompt;
 
@@ -820,6 +830,7 @@ async function runReplicaAgentTask(
       aspect_ratio: aspectRatio,
       projectRoot: deps.projectRoot,
     });
+    if (isReplicaTaskCancelled(task)) return;
     task.final_image_url = await persistOwned(finalUpstream);
 
     task.status = "completed";
@@ -827,6 +838,7 @@ async function runReplicaAgentTask(
     task.updated_at = Date.now();
     console.log("[replica-agent] completed full", { taskId, final: task.final_image_url });
   } catch (err) {
+    if (isReplicaTaskCancelled(task)) return;
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[replica-agent] failed:", taskId, msg);
     task.status = "failed";
@@ -891,5 +903,20 @@ export function registerCanvasReplicaAgentRoutes(app: Express, deps: ReplicaAgen
       error: task.error || undefined,
       updated_at: task.updated_at,
     });
+  });
+
+  app.post("/api/canvas/replica-agent-tasks/:taskId/cancel", ...(gate ? [gate] : []), (req, res) => {
+    const task = tasks.get(req.params.taskId);
+    if (!task) {
+      return res.status(404).json({ error: "复刻 Agent 任务不存在", status: "failed" });
+    }
+    if (task.status === "completed" || task.status === "failed" || task.status === "cancelled") {
+      return res.json({ id: task.id, status: task.status });
+    }
+    task.status = "cancelled";
+    task.error = "已取消";
+    task.stage_label = "已取消";
+    task.updated_at = Date.now();
+    return res.json({ id: task.id, status: "cancelled" });
   });
 }

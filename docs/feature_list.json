@@ -94,7 +94,10 @@
         { "id": "C8", "desc": "工作流 JSON 导出/导入", "status": "done", "priority": 19 },
         { "id": "C9", "desc": "素材库点击放置到画布", "status": "done", "priority": 20 },
         { "id": "C10", "desc": "画布校验/下载类 alert 改 softAlert 状态栏", "status": "done", "priority": 21 },
-        { "id": "D4", "desc": "Hero 视频背景（导演暂缓；素材下载+ffmpeg 压缩后填 COVER_HERO_VIDEO）", "status": "todo", "priority": 13 }
+        { "id": "D4", "desc": "Hero 视频背景（导演暂缓；素材下载+ffmpeg 压缩后填 COVER_HERO_VIDEO）", "status": "todo", "priority": 13 },
+        { "id": "AG1", "desc": "Agent P0：serializable 剥离运行时字段 + resetTransient 清 _batchPosterRuns；九宫格切图失败改 failed", "status": "done", "priority": 22 },
+        { "id": "AG2", "desc": "Agent P1：Cascade 接入 batch/nine/slots；stop 调 cancel API", "status": "done", "priority": 23 },
+        { "id": "AG3", "desc": "Agent P2：九宫格进度增量刷新防失焦；theme-catalog 加鉴权", "status": "done", "priority": 24 }
       ]
     },
     {

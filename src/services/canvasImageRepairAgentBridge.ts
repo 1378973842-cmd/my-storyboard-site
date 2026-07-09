@@ -48,7 +48,8 @@ type ImageRepairTaskStatus =
   | "processing_blur"
   | "processing_composite"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 type ImageRepairTask = {
   id: string;
@@ -62,6 +63,10 @@ type ImageRepairTask = {
   final_image_url: string;
   error: string;
 };
+
+function isImageRepairTaskCancelled(task: ImageRepairTask): boolean {
+  return (task as { status: string }).status === "cancelled";
+}
 
 export type ImageRepairAgentRunBody = {
   source_image_url?: string;
@@ -333,6 +338,7 @@ async function runImageRepairTask(
       model: normalized.textModel,
       userPrompt: normalized.reversePrompt,
     });
+    if (isImageRepairTaskCancelled(task)) return;
     task.reversed_prompt = reversed;
 
     task.status = "processing_lineart";
@@ -346,6 +352,7 @@ async function runImageRepairTask(
       aspectRatio: normalized.aspectRatio,
       projectRoot: deps.projectRoot,
     });
+    if (isImageRepairTaskCancelled(task)) return;
     task.lineart_image_url = await persistOwned(lineartUpstream);
 
     task.status = "processing_blur";
@@ -358,6 +365,7 @@ async function runImageRepairTask(
       aspect_ratio: normalized.aspectRatio,
       projectRoot: deps.projectRoot,
     });
+    if (isImageRepairTaskCancelled(task)) return;
     task.blur_image_url = await persistOwned(blurUpstream);
 
     task.status = "processing_composite";
@@ -372,6 +380,7 @@ async function runImageRepairTask(
       aspectRatio: normalized.aspectRatio,
       projectRoot: deps.projectRoot,
     });
+    if (isImageRepairTaskCancelled(task)) return;
     task.final_image_url = await persistOwned(compositeUpstream);
 
     task.status = "completed";
@@ -379,6 +388,7 @@ async function runImageRepairTask(
     task.updated_at = Date.now();
     console.log("[image-repair-agent] completed", { taskId, final: task.final_image_url });
   } catch (err) {
+    if (isImageRepairTaskCancelled(task)) return;
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[image-repair-agent] failed:", taskId, msg);
     task.status = "failed";
@@ -434,5 +444,20 @@ export function registerCanvasImageRepairAgentRoutes(app: Express, deps: ImageRe
       final_image_url: task.final_image_url || undefined,
       error: task.error || undefined,
     });
+  });
+
+  app.post("/api/canvas/image-repair-agent-tasks/:taskId/cancel", ...(gate ? [gate] : []), (req, res) => {
+    const task = tasks.get(req.params.taskId);
+    if (!task) {
+      return res.status(404).json({ error: "修图 Agent 任务不存在", status: "failed" });
+    }
+    if (task.status === "completed" || task.status === "failed" || task.status === "cancelled") {
+      return res.json({ id: task.id, status: task.status });
+    }
+    task.status = "cancelled";
+    task.error = "已取消";
+    task.stage_label = "已取消";
+    task.updated_at = Date.now();
+    return res.json({ id: task.id, status: "cancelled" });
   });
 }
