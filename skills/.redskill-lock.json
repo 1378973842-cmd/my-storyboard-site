@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "skills": {
+    "mx-shell-prompt": {
+      "name": "mx-shell-prompt",
+      "version": "1.5.0",
+      "source": "redskill",
+      "install_dir": "D:\\刘恒志\\代码\\gemini-deploy\\skills\\mx-shell-prompt",
+      "installed_at": "1783590009365",
+      "sha256": "cd55359d29c2930fb25cce17305cf1348720ec8cc0f4e639aca6fd8dffa0a725"
+    }
+  }
+}

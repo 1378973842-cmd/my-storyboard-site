@@ -93,7 +93,7 @@ function isImagePreviewUrl(raw: unknown): boolean {
   );
 }
 
-/** 从画布节点中提取一张代表性预览图（优先 output 结果，其次 image / frameStack） */
+/** 从画布节点中提取一张代表性预览图（优先 output，其次 generator 图台，再 image / frameStack） */
 function extractPreviewUrl(doc: CanvasDocument): string {
   const nodes = Array.isArray(doc.nodes) ? (doc.nodes as Record<string, unknown>[]) : [];
   const urls: string[] = [];
@@ -102,11 +102,31 @@ function extractPreviewUrl(doc: CanvasDocument): string {
     if (!isImagePreviewUrl(url) || urls.includes(url)) return;
     urls.push(url);
   };
+  const pushHistoryLike = (node: Record<string, unknown>) => {
+    if (Array.isArray(node.history)) {
+      for (const item of node.history as unknown[]) {
+        if (item && typeof item === "object" && "url" in (item as object)) {
+          push((item as { url?: unknown }).url);
+        } else {
+          push(item);
+        }
+      }
+    }
+    if (Array.isArray(node.previewRoundUrls)) {
+      for (const u of node.previewRoundUrls) push(u);
+    }
+  };
 
   for (const node of nodes) {
     if (node.type === "output" && Array.isArray(node.images)) {
       for (const img of node.images as Record<string, unknown>[]) push(img?.url);
     }
+  }
+  if (urls.length) return urls[urls.length - 1];
+
+  // Gen Console：结果常只在 generator.history，无 Output
+  for (const node of nodes) {
+    if (node.type === "generator") pushHistoryLike(node);
   }
   if (urls.length) return urls[urls.length - 1];
 

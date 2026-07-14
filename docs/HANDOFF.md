@@ -1,21 +1,17 @@
 # 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  1. **Agent 节点审计修复 P0–P2**（2026-07-09）：
-     - **P0**：`serializableCanvasNode` 剥离 `_batchPosterRuns` / `cellEditing` 等；`resetTransientNodeRunState` 清 Batch Poster 假运行；九宫格切图失败 → `runStatus=failed`。
-     - **P1**：Cascade / 一键运行接入 `batchPosterAgent` / `nineGridAgent` / `slotsLoopVideoAgent`；`runOneCascadePass` 统一走 `runCascadeNodeByType`；复刻/修图新增 `/cancel`；`stopAgentGeneration` 清本地队列并调 cancel。
-     - **P2**：九宫格进度只更新按钮文案（防失焦）；`batch-poster-theme-catalog` 加 gate。
-  2. **浅色主题拍板**：L2 琥珀主色 + 画布暗房（方案 A）。
-  3. **D3 / 第 4 波**：已提交 `5cc6ce7` 并 push，待手测。
-- **产品重心**：主页 + 功能壳 + 画布；导演台暂不做。
+  1. **AG13–17**：Gen Console / 节点结果库。
+  2. **选中描边**：贴合图片边缘。
+  3. **AG18**：周边适配——批量导出含 generator.history；画布封面读 generator；收藏定位闪图台/历史卡；工作流模板剥离 history；收藏页文案更新。
 - **验证状态**：`node init.mjs` 通过。
-- **明日焦点**：手测 Agent 停止/Cascade/Batch Poster 重开无假运行；第 4 波 + D3。
+- **明日焦点**：手测 AG18（纯 generator 板导出/封面/收藏定位）；P2 其它生成节点是否 Gen Console 化（产品决策）。
 - **Blockers**：无。
-- **未提交 Git**（用户未要求 commit）。
+- **未提交 Git**。
 
 ## 新对话开场白（复制给 Agent）
 
 ```
-继续 gemini-deploy。先读 docs/HANDOFF.md、docs/STUDIO_RULES.md、docs/feature_list.json。
-Agent P0–P2 已施工待手测；第 4 波与 D3 待确认。
+继续 gemini-deploy。先读 docs/HANDOFF.md。
+AG18 周边适配已落地，手测纯 generator 板导出/封面/收藏定位。
 ```

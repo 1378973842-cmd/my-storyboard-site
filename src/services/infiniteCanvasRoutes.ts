@@ -20,6 +20,10 @@ import { registerCanvasSiteImageRoutes } from "./canvasSiteImageBridge.js";
 import { registerCanvasLlmRoutes } from "./canvasLlmBridge.js";
 import { registerCanvasBatchPosterRoutes } from "./canvasBatchPosterBridge.js";
 import { registerCanvasSlotsLoopVideoRoutes } from "./canvasSlotsLoopVideoBridge.js";
+import { registerCanvasMxShellPromptRoutes } from "./canvasMxShellPromptBridge.js";
+import { registerCanvasDeepWhiteShotRoutes } from "./canvasDeepWhiteShotBridge.js";
+import { registerCanvasDeepWhiteExportRoutes } from "./canvasDeepWhiteExportBridge.js";
+import { registerCanvasScreenwritingRoutes } from "./canvasScreenwritingBridge.js";
 import { registerCanvasReplicaAgentRoutes } from "./canvasReplicaAgentBridge.js";
 import { registerCanvasImageRepairAgentRoutes } from "./canvasImageRepairAgentBridge.js";
 import {
@@ -416,6 +420,10 @@ export function registerInfiniteCanvasRoutes(
   registerCanvasLlmRoutes(app, projectRoot, gate);
   registerCanvasBatchPosterRoutes(app, projectRoot, gate);
   registerCanvasSlotsLoopVideoRoutes(app, projectRoot, gate);
+  registerCanvasMxShellPromptRoutes(app, projectRoot, gate);
+  registerCanvasDeepWhiteShotRoutes(app, projectRoot, gate);
+  registerCanvasDeepWhiteExportRoutes(app, projectRoot, gate);
+  registerCanvasScreenwritingRoutes(app, projectRoot, gate);
   registerRunningHubWorkflowRoutes(app, {
     projectRoot,
     requireGate: gate,

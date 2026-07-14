@@ -160,7 +160,7 @@ export const MyFavoritesPage = memo(function MyFavoritesPage({
             我的收藏
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-on-surface/65">
-            在画布 Output 图片右上角点星标收藏。点击图片可放大查看；右键图片可回到画布中的原始位置；满意的作品可分享到公共画廊。
+            在画布 Output 或「图片生成」节点结果里点星标收藏。点击图片可放大查看；右键图片可回到画布中的原始位置；满意的作品可分享到公共画廊。
           </p>
         </motion.div>
 

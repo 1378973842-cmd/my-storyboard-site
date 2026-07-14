@@ -1,0 +1,4 @@
+interface:
+  display_name: "DeepWhite 导演分镜设计师 v3"
+  short_description: "十位导演规则库生成分镜图和视频基础镜头表"
+  default_prompt: "Use $deepwhite-cinematic-shot-designer-zh-v3 to turn this scene into Chinese director-level storyboard image shots and video-prompt foundation shots."

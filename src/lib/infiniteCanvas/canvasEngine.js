@@ -1,4 +1,4 @@
-﻿/* eslint-disable */
+/* eslint-disable */
 /** Infinite canvas engine — scoped to canvasRoot. */
 import {
     augmentImagePromptWithReferenceCostumeLock,
@@ -1955,11 +1955,14 @@ async function generatorSizeForRun(gen, refs){
 }
 function normalizeApiNodeLayout(node){
     if(!node || node.type !== 'generator') return;
-    if(Number(node.w || 0) === 418) node.w = 380;
-    if(node.h || Math.abs(Number(node.w || 380) - 380) > 1) node._userSized = true;
+    const w = Number(node.w || 0);
+    if(w === 418 || w === 380 || w === 420) node.w = 260;
+    if(node.h || Math.abs(Number(node.w || 260) - 260) > 1) node._userSized = true;
 }
-const GENERATOR_BASE_W = 380;
-const GENERATOR_MIN_W = 220;
+const GENERATOR_BASE_W = 260;
+const GENERATOR_MIN_W = 180;
+let imageGenDockEl = null;
+let imageGenDockNodeId = null;
 function generatorUiScale(node){
     return Number(node.w || GENERATOR_BASE_W) / GENERATOR_BASE_W;
 }
@@ -2238,6 +2241,10 @@ function preventCanvasMiddleMouseDefault(e){
 function applyViewport(){
     if(!world) return;
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
+    const inv = 1 / Math.max(0.08, Number(viewport.scale || 1));
+    linkControlsEl?.querySelectorAll?.('.link-delete')?.forEach(btn => {
+        btn.style.setProperty('--link-delete-inv', String(inv));
+    });
     if(minimapState) updateMinimapViewport();
     else scheduleMinimapRender();
     notifyViewportScaleChange();
@@ -2464,16 +2471,26 @@ function clearFavoriteImageHighlight(){
         favoriteImageHighlightTimer = null;
     }
     if(nodesEl){
-        nodesEl.querySelectorAll('.output-img-wrap.is-favorite-locate-flash').forEach(el => {
+        nodesEl.querySelectorAll('.is-favorite-locate-flash').forEach(el => {
             el.classList.remove('is-favorite-locate-flash');
         });
     }
+    genHistoryPanelEl?.querySelectorAll?.('.is-favorite-locate-flash').forEach(el => {
+        el.classList.remove('is-favorite-locate-flash');
+    });
 }
 function nodeContainsFavoriteImage(node, targetUrl){
     if(!node || !targetUrl) return false;
     if(node.type === 'image' && normalizeFavoritePath(node.url) === targetUrl) return true;
     if(node.type === 'output' || node.type === 'frameStack'){
         return (node.images || []).some(item => normalizeFavoritePath(outputUrlValue(item)) === targetUrl);
+    }
+    if(node.type === 'generator'){
+        const hit = (raw) => normalizeFavoritePath(outputUrlValue(raw)) === targetUrl;
+        if((node.history || []).some(hit)) return true;
+        if((node.previewRoundUrls || []).some(hit)) return true;
+        if((node.generatedOutputs || []).some(hit)) return true;
+        return false;
     }
     if(Array.isArray(node.generatedOutputs)){
         return node.generatedOutputs.some(url => normalizeFavoritePath(url) === targetUrl);
@@ -2484,7 +2501,7 @@ function resolveFavoriteTargetNode(nodeId, imageUrl){
     const targetUrl = normalizeFavoritePath(imageUrl);
     if(nodeId){
         const direct = nodes.find(n => n.id === nodeId);
-        if(direct && (!targetUrl || nodeContainsFavoriteImage(direct, targetUrl) || direct.type === 'output' || direct.type === 'frameStack')) return direct;
+        if(direct && (!targetUrl || nodeContainsFavoriteImage(direct, targetUrl) || direct.type === 'output' || direct.type === 'frameStack' || direct.type === 'generator' || direct.type === 'image')) return direct;
     }
     if(!targetUrl) return nodeId ? nodes.find(n => n.id === nodeId) || null : null;
     for(const node of nodes){
@@ -2492,23 +2509,44 @@ function resolveFavoriteTargetNode(nodeId, imageUrl){
     }
     return nodeId ? nodes.find(n => n.id === nodeId) || null : null;
 }
+function flashFavoriteLocateEl(el){
+    if(!el) return false;
+    el.classList.add('is-favorite-locate-flash');
+    favoriteImageHighlightTimer = setTimeout(() => {
+        el.classList.remove('is-favorite-locate-flash');
+        favoriteImageHighlightTimer = null;
+    }, 4200);
+    return true;
+}
 function flashFavoriteOutputImage(nodeId, imageUrl){
     clearFavoriteImageHighlight();
     const targetUrl = normalizeFavoritePath(imageUrl);
     if(!targetUrl || !nodesEl) return;
     const nodeEl = nodesEl.querySelector(`.node[data-id="${CSS.escape(String(nodeId))}"]`);
     if(!nodeEl) return;
-    const wraps = nodeEl.querySelectorAll('.output-img-wrap[data-output-url]');
-    for(const wrap of wraps){
+    // Output 画廊
+    for(const wrap of nodeEl.querySelectorAll('.output-img-wrap[data-output-url]')){
         const wrapUrl = normalizeFavoritePath(wrap.dataset.outputUrl || wrap.querySelector('img')?.dataset?.url || '');
-        if(wrapUrl !== targetUrl) continue;
-        wrap.classList.add('is-favorite-locate-flash');
-        favoriteImageHighlightTimer = setTimeout(() => {
-            wrap.classList.remove('is-favorite-locate-flash');
-            favoriteImageHighlightTimer = null;
-        }, 4200);
-        break;
+        if(wrapUrl === targetUrl && flashFavoriteLocateEl(wrap)) return;
     }
+    // 节点结果库浮层（可能挂在 canvasRoot，不在 nodeEl 内）
+    const panelScope = genHistoryPanelNodeId === String(nodeId) ? genHistoryPanelEl : null;
+    for(const card of (panelScope?.querySelectorAll?.('.gen-history-card[data-history-url]') || [])){
+        if(normalizeFavoritePath(card.dataset.historyUrl || '') === targetUrl && flashFavoriteLocateEl(card)) return;
+    }
+    // Generator 图台 / 顶条缩略图
+    for(const el of nodeEl.querySelectorAll('.gen-stage-hero[data-preview-url], .gen-stage-thumb[data-preview-url]')){
+        if(normalizeFavoritePath(el.getAttribute('data-preview-url') || '') === targetUrl && flashFavoriteLocateEl(el)) return;
+    }
+    // 拖入图：贴在 img 上闪
+    if(nodeEl.classList.contains('image-node')){
+        const img = nodeEl.querySelector('img');
+        if(img && normalizeFavoritePath(img.getAttribute('src') || '') === targetUrl && flashFavoriteLocateEl(img)) return;
+        if(img && flashFavoriteLocateEl(img)) return;
+    }
+    // 兜底：生成节点闪当前图台框
+    const stage = nodeEl.querySelector('.gen-stage-frame, .gen-stage-hero');
+    if(stage) flashFavoriteLocateEl(stage);
 }
 function focusCanvasFavoriteTarget({ nodeId = '', imageUrl = '' } = {}){
     if(!canvas || !board || !nodesEl) return false;
@@ -2627,24 +2665,36 @@ function scheduleViewportSave(){
     }, 2000);
 }
 function refreshOutputTimer(){
-    const hasPending = nodes.some(n => n.type === 'output' && (n._pending || []).length);
+    const hasPending = nodes.some(n =>
+        ((n.type === 'output' || n.type === 'generator') && (n._pending || []).length)
+    );
     if(hasPending && !outputTimer){
         outputTimer = setInterval(() => {
             const pendingById = new Map();
-            nodes.filter(n => n.type === 'output').forEach(node => {
+            nodes.filter(n => n.type === 'output' || n.type === 'generator').forEach(node => {
                 (node._pending || []).forEach(p => pendingById.set(p.id, p));
             });
             if(pendingById.size){
-                domQueryAll('.output-time-pill.running').forEach(pill => {
-                    const pendingId = pill.closest('[data-pending-id]')?.dataset.pendingId;
+                domQueryAll('.output-time-pill.running, .gen-history-pending-time').forEach(pill => {
+                    const pendingId = pill.dataset.pendingId
+                        || pill.closest('[data-pending-id]')?.dataset.pendingId;
                     const pending = pendingById.get(pendingId);
                     if(!pending) return;
                     if(pending.stageLabel) pill.textContent = pending.stageLabel;
                     else pill.textContent = formatRunDuration(nowMs() - Number(pending.startedAt || nowMs()));
                 });
+                if(genHistoryPanelEl && genHistoryPanelNodeId){
+                    const node = nodes.find(n => n.id === genHistoryPanelNodeId);
+                    if(node && generatorPendingList(node).length){
+                        // 仅刷新计时文案；完整重绘留给完成回调
+                    } else if(node) {
+                        refreshOpenGenHistoryPanel();
+                    }
+                }
             } else {
                 clearInterval(outputTimer);
                 outputTimer = null;
+                if(genHistoryPanelEl && genHistoryPanelNodeId) refreshOpenGenHistoryPanel();
             }
         }, 1000);
     } else if(!hasPending && outputTimer){
@@ -2824,13 +2874,19 @@ async function loadCanvasList(openFirst=true){
     }
 }
 let workflowTemplates = [];
-const WORKFLOW_RUNTIME_DROP = ['running','runStatus','runError','_cascadeIdx','_cascadeFailed','_cascadeIdx','generatedOutputs','outputText','frameOutputId'];
+const WORKFLOW_RUNTIME_DROP = ['running','runStatus','runError','_cascadeIdx','_cascadeFailed','_cascadeIdx','generatedOutputs','outputText','frameOutputId','history','previewRoundUrls','previewIndex','historyOpen','_pending'];
 function stripNodeForWorkflowTemplate(node){
     const copy = {...(node || {})};
     WORKFLOW_RUNTIME_DROP.forEach(key => delete copy[key]);
     delete copy._ltxEditor;
     delete copy._pending;
     if(copy.type === 'output') copy.images = [];
+    if(copy.type === 'generator'){
+        copy.history = [];
+        copy.previewRoundUrls = [];
+        delete copy.previewIndex;
+        copy.historyOpen = false;
+    }
     if(copy.type === 'image'){
         copy.url = '';
         copy.name = copy.name || (langIsEn() ? 'Reference image' : '参考图');
@@ -2928,6 +2984,85 @@ function instantiateWorkflowTemplate(template, offset={x:0, y:0}){
             node.running = false;
             node.runStatus = node.runStatus || 'idle';
             node.runError = '';
+        }
+        if(node.type === 'mxShellPromptAgent'){
+            node.inputs = [];
+            node.model = clampAgentTextModel(node.model);
+            node.mode = normalizeMxShellPromptMode(node.mode);
+            node.cameraIntensity = normalizeMxShellCameraIntensity(node.cameraIntensity);
+            node.story = String(node.story || '').slice(0, 12000);
+            node.atmosphere = String(node.atmosphere || '').slice(0, 800);
+            node.outputText = String(node.outputText || '');
+            node.viewNodeId = String(node.viewNodeId || '');
+            if(!node.refNames || typeof node.refNames !== 'object') node.refNames = {};
+            if(!node.refKinds || typeof node.refKinds !== 'object') node.refKinds = {};
+            node.running = false;
+            node.runStatus = node.runStatus || 'idle';
+            node.runError = '';
+        }
+        if(node.type === 'mxShellPromptView' || (node.type === 'textOutput' && node.kind === 'mxShell')){
+            if(node.type === 'mxShellPromptView') node.type = 'textOutput';
+            node.kind = 'mxShell';
+            node.text = String(node.text || '');
+            node.mode = String(node.mode || '');
+            node.mode_label = String(node.mode_label || '');
+            node.sourceAgentId = String(node.sourceAgentId || '');
+            node.sections = Array.isArray(node.sections) ? node.sections : null;
+            if(!Array.isArray(node.expandedSections)) node.expandedSections = [];
+        }
+        if(node.type === 'deepWhiteShotAgent'){
+            node.inputs = [];
+            node.model = clampAgentTextModel(node.model);
+            node.scene = String(node.scene || '').slice(0, 20000);
+            node.scene_name = String(node.scene_name || '').slice(0, 40);
+            node.director_hint = String(node.director_hint || '').slice(0, 120);
+            node.outputText = String(node.outputText || '');
+            node.viewNodeId = String(node.viewNodeId || '');
+            if(!node.refNames || typeof node.refNames !== 'object') node.refNames = {};
+            if(!node.refKinds || typeof node.refKinds !== 'object') node.refKinds = {};
+            node.running = false;
+            node.runStatus = node.runStatus || 'idle';
+            node.runError = '';
+        }
+        if(node.type === 'deepWhiteShotView' || (node.type === 'textOutput' && node.kind === 'deepWhite')){
+            if(node.type === 'deepWhiteShotView') node.type = 'textOutput';
+            node.kind = 'deepWhite';
+            node.text = String(node.text || '');
+            node.scene_name = String(node.scene_name || '');
+            node.primary_director = String(node.primary_director || '');
+            node.filename = String(node.filename || '');
+            node.sourceAgentId = String(node.sourceAgentId || '');
+            node.sections = Array.isArray(node.sections) ? node.sections : null;
+            node.image_shot_count = Number(node.image_shot_count || 0) || 0;
+            node.video_shot_count = Number(node.video_shot_count || 0) || 0;
+            if(!Array.isArray(node.expandedSections)) node.expandedSections = [];
+        }
+        if(node.type === 'textOutput' && (node.kind === 'seedance' || node.kind === 'screenwriting')){
+            node.text = String(node.text || '');
+            node.mode = String(node.mode || '');
+            node.mode_label = String(node.mode_label || '');
+            node.sourceAgentId = String(node.sourceAgentId || '');
+            node.sections = Array.isArray(node.sections) ? node.sections : null;
+            if(!Array.isArray(node.expandedSections)) node.expandedSections = [];
+        }
+        if(node.type === 'screenwritingAgent'){
+            node.inputs = [];
+            node.model = clampAgentTextModel(node.model);
+            node.mode = normalizeScreenwritingMode(node.mode);
+            node.brief = String(node.brief || '').slice(0, 8000);
+            node.material = String(node.material || '').slice(0, 20000);
+            node.durationHint = String(node.durationHint || '').slice(0, 80);
+            node.outputText = String(node.outputText || '');
+            node.viewNodeId = String(node.viewNodeId || '');
+            node.running = false;
+            node.runStatus = node.runStatus || 'idle';
+            node.runError = '';
+        }
+        if(node.type === 'textOutput' && !node.kind){
+            node.text = String(node.text || '');
+            node.sections = Array.isArray(node.sections) ? node.sections : null;
+            if(!Array.isArray(node.expandedSections)) node.expandedSections = [];
+            node.sourceAgentId = String(node.sourceAgentId || '');
         }
         if(node.type === 'nineGridAgent'){
             node.inputs = [];
@@ -3622,6 +3757,7 @@ async function createCanvas(){
         viewport = canvas.viewport || {x:0, y:0, scale:1};
         lastKnownSavedNodeCount = nodes.length;
         sanitizeConnections();
+        migrateLegacyTextViewNodes();
         migrateImageBatchNodes();
         migratePromptGroupNodes();
         syncAllLoopImageBatchSizes();
@@ -3797,6 +3933,7 @@ async function openCanvas(id, options = {}){
         localCanvasDirty = false;
         resetTransientNodeRunState();
         sanitizeConnections();
+        migrateLegacyTextViewNodes();
         migrateImageBatchNodes();
         migratePromptGroupNodes();
         syncAllLoopImageBatchSizes();
@@ -3885,6 +4022,7 @@ function applyRemoteCanvasData(remote){
         lastKnownSavedNodeCount = nodes.length;
         resetTransientNodeRunState();
         sanitizeConnections();
+        migrateLegacyTextViewNodes();
         migrateImageBatchNodes();
         migratePromptGroupNodes();
         syncAllLoopImageBatchSizes();
@@ -4335,7 +4473,11 @@ function setSpacePanArmed(active){
 }
 function addImageNode(point){
     const p = point || defaultPoint(-120, 0);
-    return addNode({id:uid('img'), type:'image', x:p.x, y:p.y, url:'', name:'空白图片'});
+    const node = addNode({id:uid('img'), type:'image', x:p.x, y:p.y, url:'', name:'空白图片', prompt:'', previewRoundUrls:[]});
+    selected.clear();
+    if(node?.id) selected.add(node.id);
+    refreshSelectionVisuals();
+    return node;
 }
 function addPromptNode(point){
     const p = point || defaultPoint(0, 0);
@@ -4392,7 +4534,11 @@ function addLLMNode(point){
 function addGeneratorNode(point){
     const p = point || defaultPoint(120, 0);
     const providerId = imageApiProviders()[0]?.id || '';
-    return addNode({id:uid('gen'), type:'generator', x:p.x, y:p.y, apiProvider:providerId, model:allImageModels(providerId)[0] || '', ratio:'square', resolution:'1k', customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'', customWidth:'', customHeight:'', inputs:[]});
+    const node = addNode({id:uid('gen'), type:'generator', x:p.x, y:p.y, w:260, apiProvider:providerId, model:allImageModels(providerId)[0] || '', prompt:'', previewRoundUrls:[], history:[], ratio:'square', resolution:'1k', customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'', customWidth:'', customHeight:'', inputs:[]});
+    selected.clear();
+    if(node?.id) selected.add(node.id);
+    refreshSelectionVisuals();
+    return node;
 }
 function addReplicaAgentNode(point){
     const p = point || defaultPoint(160, 0);
@@ -4515,6 +4661,316 @@ function addSlotsLoopVideoAgentNode(point){
         runError:'',
         running:false,
     });
+}
+function normalizeMxShellPromptMode(value){
+    const original = String(value || '').trim();
+    if(original === 'one_shot' || original === 'multi_cam') return original;
+    const raw = original.toLowerCase().replace(/[\s_-]+/g, '');
+    if(raw === 'oneshot' || raw === 'onelongtake' || raw === 'single' || original.includes('一镜')) return 'one_shot';
+    if(raw === 'multicam' || raw === 'multishot' || original.includes('多机位') || original.includes('分镜')) return 'multi_cam';
+    return 'multi_cam';
+}
+function normalizeMxShellCameraIntensity(value){
+    const raw = String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+    if(raw === 'restrained' || raw === '克制' || raw === 'low') return 'restrained';
+    if(raw === 'flashy' || raw === '炫技' || raw === 'high') return 'flashy';
+    return 'standard';
+}
+function mxShellPromptModeLabel(mode){
+    return normalizeMxShellPromptMode(mode) === 'one_shot'
+        ? (langIsEn() ? 'One continuous shot' : '一镜到底')
+        : (langIsEn() ? 'Multi-cam storyboard' : '多机位分镜');
+}
+/** 按 Mx-Shell skill 四段模板拆开展示 */
+function splitMxShellPromptSections(text){
+    const raw = String(text || '').trim();
+    if(!raw) return [];
+    const headers = ['【基础设定】', '【氛围与画质】', '【声音】', '【画面内容】'];
+    const found = [];
+    for(const h of headers){
+        const idx = raw.indexOf(h);
+        if(idx >= 0) found.push({title:h, start:idx});
+    }
+    if(!found.length) return [{title:langIsEn() ? 'Prompt' : '提示词', body:raw}];
+    found.sort((a, b) => a.start - b.start);
+    return found.map((item, i) => {
+        const end = i + 1 < found.length ? found[i + 1].start : raw.length;
+        const body = raw.slice(item.start + item.title.length, end).replace(/^\s*\n?/, '').trim();
+        return {title:item.title, body};
+    });
+}
+
+function migrateLegacyTextViewNodes(){
+    let changed = false;
+    nodes.forEach(node => {
+        if(!node) return;
+        if(node.type === 'mxShellPromptView'){
+            node.type = 'textOutput';
+            node.kind = 'mxShell';
+            if(!Array.isArray(node.expandedSections)) node.expandedSections = [];
+            node.w = Math.max(Number(node.w || 0), 600);
+            node.h = Math.max(Number(node.h || 0), 560);
+            changed = true;
+        } else if(node.type === 'deepWhiteShotView'){
+            node.type = 'textOutput';
+            node.kind = 'deepWhite';
+            if(!Array.isArray(node.expandedSections)) node.expandedSections = [];
+            node.w = Math.max(Number(node.w || 0), 600);
+            node.h = Math.max(Number(node.h || 0), 560);
+            changed = true;
+        } else if(node.type === 'textOutput'){
+            if(!Array.isArray(node.expandedSections)) node.expandedSections = [];
+            if(!node.kind && node.mode) node.kind = 'mxShell';
+            if(!node.kind && (node.scene_name || node.primary_director || node.filename)) node.kind = 'deepWhite';
+        }
+    });
+    if(changed) scheduleSave();
+}
+function isTextOutputNode(node){
+    return Boolean(node && node.type === 'textOutput');
+}
+function textOutputKindLabel(kind){
+    if(kind === 'mxShell') return langIsEn() ? 'Mx-Shell Output' : 'Mx-Shell 输出';
+    if(kind === 'deepWhite') return langIsEn() ? 'DeepWhite Output' : 'DeepWhite 输出';
+    if(kind === 'seedance') return langIsEn() ? 'Seedance Export' : 'Seedance 导出';
+    if(kind === 'screenwriting') return langIsEn() ? 'Screenwriting Output' : '编剧输出';
+    return langIsEn() ? 'Text Output' : '文本输出';
+}
+function normalizeScreenwritingMode(mode){
+    const m = String(mode || '').trim();
+    if(['from_scratch','diagnose','rewrite','scene'].includes(m)) return m;
+    return 'from_scratch';
+}
+function screenwritingModeLabel(mode){
+    const m = normalizeScreenwritingMode(mode);
+    if(langIsEn()){
+        return ({from_scratch:'From scratch', diagnose:'Diagnose', rewrite:'Rewrite', scene:'Scene'})[m] || m;
+    }
+    return ({from_scratch:'从零创作', diagnose:'诊断', rewrite:'改写', scene:'分场'})[m] || m;
+}
+function textOutputSectionSummary(body){
+    const line = String(body || '').replace(/\s+/g, ' ').trim();
+    if(!line) return langIsEn() ? '(empty)' : '（空）';
+    return line.length > 72 ? line.slice(0, 72) + '…' : line;
+}
+function addTextOutputNode(point, kind=''){
+    const p = point || defaultPoint(680, 0);
+    return addNode({
+        id:uid('txtout'),
+        type:'textOutput',
+        x:p.x,
+        y:p.y,
+        w:600,
+        h:560,
+        kind:kind || '',
+        text:'',
+        sections:null,
+        expandedSections:[],
+        sourceAgentId:'',
+        mode:'',
+        mode_label:'',
+        scene_name:'',
+        primary_director:'',
+        filename:'',
+        image_shot_count:0,
+        video_shot_count:0,
+    });
+}
+function ensureAgentTextOutputNode(agent, kind){
+    if(!agent || !kind) return null;
+    let out = null;
+    if(agent.viewNodeId){
+        out = nodes.find(n => n.id === agent.viewNodeId && isTextOutputNode(n) && (!n.kind || n.kind === kind)) || null;
+    }
+    if(!out){
+        out = connections
+            .filter(c => c.from === agent.id)
+            .map(c => nodes.find(n => n.id === c.to))
+            .find(n => isTextOutputNode(n) && (!n.kind || n.kind === kind)) || null;
+    }
+    if(!out){
+        // legacy view types still on board before migrate
+        const legacyType = kind === 'mxShell' ? 'mxShellPromptView' : kind === 'deepWhite' ? 'deepWhiteShotView' : '';
+        if(legacyType){
+            out = connections
+                .filter(c => c.from === agent.id)
+                .map(c => nodes.find(n => n.id === c.to))
+                .find(n => n?.type === legacyType) || null;
+            if(out){
+                out.type = 'textOutput';
+                out.kind = kind;
+                if(!Array.isArray(out.expandedSections)) out.expandedSections = [];
+            }
+        }
+    }
+    if(!out){
+        out = addTextOutputNode({x:agent.x + 480, y:agent.y}, kind);
+        connections.push({id:uid('c'), from:agent.id, to:out.id});
+    }
+    out.kind = kind;
+    agent.viewNodeId = out.id;
+    out.sourceAgentId = agent.id;
+    return out;
+}
+function syncMxShellPromptToTextOutput(agent, promptText, meta={}){
+    const out = ensureAgentTextOutputNode(agent, 'mxShell');
+    if(!out) return null;
+    const text = String(promptText || '').trim();
+    out.kind = 'mxShell';
+    out.text = text;
+    out.mode = normalizeMxShellPromptMode(meta.mode || agent.mode);
+    out.mode_label = String(meta.mode_label || mxShellPromptModeLabel(out.mode));
+    out.sections = splitMxShellPromptSections(text);
+    out.sourceAgentId = agent.id;
+    return out;
+}
+function syncDeepWhiteShotToTextOutput(agent, data){
+    const out = ensureAgentTextOutputNode(agent, 'deepWhite');
+    if(!out) return null;
+    const markdown = String(data?.markdown || data?.display_text || agent.outputText || '').trim();
+    out.kind = 'deepWhite';
+    out.text = markdown;
+    out.scene_name = String(data?.scene_name || agent.scene_name || '').trim();
+    out.primary_director = String(data?.primary_director || '').trim();
+    out.filename = String(data?.filename || '').trim();
+    out.sections = Array.isArray(data?.sections) && data.sections.length
+        ? data.sections
+        : splitDeepWhiteDocSections(markdown);
+    out.image_shot_count = Number(data?.image_shot_count || 0) || 0;
+    out.video_shot_count = Number(data?.video_shot_count || 0) || 0;
+    out.sourceAgentId = agent.id;
+    return out;
+}
+
+function addMxShellPromptAgentNode(point){
+    const p = point || defaultPoint(220, 0);
+    return addNode({
+        id:uid('mxshell'),
+        type:'mxShellPromptAgent',
+        x:p.x,
+        y:p.y,
+        w:400,
+        h:400,
+        model:defaultAgentChatModel(),
+        mode:'multi_cam',
+        cameraIntensity:'standard',
+        story:'',
+        atmosphere:'',
+        outputText:'',
+        outputData:null,
+        viewNodeId:'',
+        refNames:{},
+        refKinds:{},
+        runStatus:'idle',
+        runError:'',
+        running:false,
+    });
+}
+function addMxShellPromptViewNode(point){
+    // legacy alias → textOutput
+    return addTextOutputNode(point, 'mxShell');
+}
+function splitDeepWhiteDocSections(markdown){
+    const raw = String(markdown || '').trim();
+    if(!raw) return [];
+    const re = /^##\s+(.+)$/gm;
+    const hits = [];
+    let m;
+    while((m = re.exec(raw))){
+        hits.push({title:m[1].trim(), start:m.index, headEnd:m.index + m[0].length});
+    }
+    if(!hits.length) return [{title:langIsEn() ? 'Document' : '文档', body:raw}];
+    return hits.map((h, i) => {
+        const end = i + 1 < hits.length ? hits[i + 1].start : raw.length;
+        return {title:h.title, body:raw.slice(h.headEnd, end).replace(/^\s*\n?/, '').trim()};
+    });
+}
+function addDeepWhiteShotAgentNode(point){
+    const p = point || defaultPoint(240, 0);
+    return addNode({
+        id:uid('dwshot'),
+        type:'deepWhiteShotAgent',
+        x:p.x,
+        y:p.y,
+        w:400,
+        h:400,
+        model:defaultAgentChatModel(),
+        scene:'',
+        scene_name:'',
+        director_hint:'',
+        outputText:'',
+        outputData:null,
+        viewNodeId:'',
+        refNames:{},
+        refKinds:{},
+        runStatus:'idle',
+        runError:'',
+        running:false,
+    });
+}
+function addDeepWhiteShotViewNode(point){
+    // legacy alias → textOutput
+    return addTextOutputNode(point, 'deepWhite');
+}
+function addScreenwritingAgentNode(point){
+    const p = point || defaultPoint(260, 0);
+    return addNode({
+        id:uid('swrite'),
+        type:'screenwritingAgent',
+        x:p.x,
+        y:p.y,
+        w:400,
+        h:420,
+        model:defaultAgentChatModel(),
+        mode:'from_scratch',
+        brief:'',
+        material:'',
+        durationHint:'',
+        outputText:'',
+        outputData:null,
+        viewNodeId:'',
+        runStatus:'idle',
+        runError:'',
+        running:false,
+    });
+}
+function syncScreenwritingToTextOutput(agent, data){
+    const out = ensureAgentTextOutputNode(agent, 'screenwriting');
+    if(!out) return null;
+    const markdown = String(data?.markdown || data?.display_text || agent.outputText || '').trim();
+    out.kind = 'screenwriting';
+    out.text = markdown;
+    out.mode = normalizeScreenwritingMode(data?.mode || agent.mode);
+    out.mode_label = String(data?.mode_label || screenwritingModeLabel(out.mode));
+    out.sections = splitDeepWhiteDocSections(markdown);
+    out.sourceAgentId = agent.id;
+    return out;
+}
+function ensureSeedanceTextOutput(agent){
+    if(!agent) return null;
+    let out = connections
+        .filter(c => c.from === agent.id)
+        .map(c => nodes.find(n => n.id === c.to))
+        .find(n => isTextOutputNode(n) && n.kind === 'seedance') || null;
+    if(!out){
+        out = addTextOutputNode({x:agent.x + 480, y:agent.y + 100}, 'seedance');
+        connections.push({id:uid('c'), from:agent.id, to:out.id});
+    }
+    out.kind = 'seedance';
+    out.sourceAgentId = agent.id;
+    return out;
+}
+function syncSeedanceToTextOutput(agent, data){
+    const out = ensureSeedanceTextOutput(agent);
+    if(!out) return null;
+    const text = String(data?.prompt || data?.display_text || '').trim();
+    out.kind = 'seedance';
+    out.text = text;
+    out.mode = '';
+    out.mode_label = langIsEn() ? 'Seedance' : 'Seedance';
+    out.sections = text.includes('【') ? splitMxShellPromptSections(text) : (text ? [{title:langIsEn() ? 'Prompt' : '提示词', body:text}] : []);
+    out.sourceAgentId = agent.id;
+    return out;
 }
 function addMsGenNode(point){
     const p = point || defaultPoint(140, 0);
@@ -5656,6 +6112,9 @@ function linkCreateOptions(state){
                 {type:'batchPosterAgent', label:'Batch Poster Agent', icon:'layout-grid'},
                 {type:'nineGridAgent', label:langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent', icon:'grid-3x3'},
                 {type:'slotsLoopVideoAgent', label:langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent', icon:'repeat-2'},
+                {type:'mxShellPromptAgent', label:langIsEn() ? 'Mx-Shell Prompt Agent' : 'Mx-Shell 提示词 Agent', icon:'film'},
+                {type:'deepWhiteShotAgent', label:langIsEn() ? 'DeepWhite Shot Agent' : 'DeepWhite 导演分镜 Agent', icon:'clapperboard'},
+                {type:'screenwritingAgent', label:langIsEn() ? 'Screenwriting Agent' : '编剧 Agent', icon:'pen-line'},
                 {type:'videoReverse', label:'视频反推', icon:'scan-search'},
                 {type:'llm', label:'LLM', icon:'message-square-text'}
             ]);
@@ -5694,7 +6153,7 @@ function openLinkCreateMenu(originId, originKind, clientX, clientY){
 }
 function openGeneratorNodeMenu(nodeId, clientX, clientY){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || (!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent' && node.type !== 'slotsLoopVideoAgent')) return false;
+    if(!node || (!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent' && node.type !== 'slotsLoopVideoAgent' && node.type !== 'mxShellPromptAgent' && node.type !== 'deepWhiteShotAgent' && node.type !== 'screenwritingAgent')) return false;
     const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(nodeId)}"]`);
     const rect = el?.getBoundingClientRect();
     const point = screenToWorld(clientX, clientY);
@@ -5837,6 +6296,23 @@ function outputImageUrls(node){
 function outputDownloadableImageUrls(node){
     return (node?.images || []).map(outputUrlValue).filter(url => url && !isMissingAssetUrl(url) && (url.startsWith('/output/') || url.startsWith('/assets/')));
 }
+/** Gen Console：从 history / 预览条收集可导出图（与 Output 同路径规则） */
+function generatorExportImageUrls(node){
+    if(!node || node.type !== 'generator') return [];
+    const urls = [];
+    const seen = new Set();
+    const push = (raw) => {
+        const url = outputUrlValue(raw);
+        if(!url || seen.has(url) || isMissingAssetUrl(url)) return;
+        if(!(url.startsWith('/output/') || url.startsWith('/assets/'))) return;
+        seen.add(url);
+        urls.push(url);
+    };
+    (node.history || []).forEach(push);
+    (node.previewRoundUrls || []).forEach(push);
+    (node.generatedOutputs || []).forEach(push);
+    return urls;
+}
 function createInputGroupFromOutput(node, point){
     const urls = outputImageUrls(node);
     if(!node || !urls.length) return null;
@@ -5973,6 +6449,12 @@ function createNodeByType(type, point){
     if(type === 'batchPosterAgent') return addBatchPosterAgentNode(point);
     if(type === 'nineGridAgent') return addNineGridAgentNode(point);
     if(type === 'slotsLoopVideoAgent') return addSlotsLoopVideoAgentNode(point);
+    if(type === 'mxShellPromptAgent') return addMxShellPromptAgentNode(point);
+    if(type === 'mxShellPromptView') return addTextOutputNode(point, 'mxShell');
+    if(type === 'deepWhiteShotAgent') return addDeepWhiteShotAgentNode(point);
+    if(type === 'deepWhiteShotView') return addTextOutputNode(point, 'deepWhite');
+    if(type === 'screenwritingAgent') return addScreenwritingAgentNode(point);
+    if(type === 'textOutput') return addTextOutputNode(point);
     if(type === 'videoReverse') return addVideoReverseNode(point);
     if(type === 'msgen') return addMsGenNode(point);
     if(type === 'video') return addVideoNode(point);
@@ -5996,6 +6478,12 @@ function menuAdd(type){
     if(type === 'batchPosterAgent') addBatchPosterAgentNode(menuPoint);
     if(type === 'nineGridAgent') addNineGridAgentNode(menuPoint);
     if(type === 'slotsLoopVideoAgent') addSlotsLoopVideoAgentNode(menuPoint);
+    if(type === 'mxShellPromptAgent') addMxShellPromptAgentNode(menuPoint);
+    if(type === 'mxShellPromptView') addTextOutputNode(menuPoint, 'mxShell');
+    if(type === 'deepWhiteShotAgent') addDeepWhiteShotAgentNode(menuPoint);
+    if(type === 'deepWhiteShotView') addTextOutputNode(menuPoint, 'deepWhite');
+    if(type === 'screenwritingAgent') addScreenwritingAgentNode(menuPoint);
+    if(type === 'textOutput') addTextOutputNode(menuPoint);
     if(type === 'videoReverse') addVideoReverseNode(menuPoint);
     if(type === 'msgen') addMsGenNode(menuPoint);
     if(type === 'video') addVideoNode(menuPoint);
@@ -6525,12 +7013,17 @@ async function downloadAllCanvasOutputImages(){
     if(!ensureCanvas()) return;
     const urls = [];
     const seen = new Set();
+    const pushUrl = (url) => {
+        if(!url || seen.has(url)) return;
+        seen.add(url);
+        urls.push(url);
+    };
     nodes.filter(n => n.type === 'output' || n.type === 'frameStack').forEach(node => {
-        outputDownloadableImageUrls(node).forEach(url => {
-            if(!url || seen.has(url)) return;
-            seen.add(url);
-            urls.push(url);
-        });
+        outputDownloadableImageUrls(node).forEach(pushUrl);
+    });
+    // Gen Console：无 Output 时结果只在 generator.history
+    nodes.filter(n => n.type === 'generator').forEach(node => {
+        generatorExportImageUrls(node).forEach(pushUrl);
     });
     if(!urls.length){
         softAlert(tr('canvas.outputDownloadEmpty'));
@@ -8128,6 +8621,7 @@ function render(options = {}){
     refreshGeometry();
     refreshGeometryAfterLayout();
     refreshOutputTimer();
+    syncImageGenDock();
 }
 function refreshNodes(ids=[]){
     const uniqueIds = [...new Set((ids || []).filter(Boolean))];
@@ -8155,10 +8649,11 @@ function refreshNodes(ids=[]){
     refreshGeometryAfterLayout();
     refreshOutputTimer();
     syncLinkFlowForNodes(uniqueIds);
+    syncImageGenDock();
 }
 /** 运行态徽章 HTML（与 renderNode 一致） */
 function nodeRunStatusHtml(node){
-    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','videoReverse'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent','videoReverse'].includes(node.type) && node.runStatus
         && node.runStatus !== 'idle';
     if(!showStatus) return '';
     const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -8192,38 +8687,44 @@ function patchGenRunButton(el, node, defaultLabel, activeLabel){
     btn.classList.toggle('running', Boolean(state.runningCls));
     if(isNodeDisabled(node)) btn.setAttribute('disabled', '');
     else btn.removeAttribute('disabled');
+    btn.title = state.label;
+    btn.setAttribute('aria-label', state.label);
+    // 圆形发送钮只保留图标，避免「图片生成」挤进 44px 圆里
+    if(btn.classList.contains('gen-dock-send')){
+        const iconName = state.runningCls ? 'loader-circle' : 'arrow-up';
+        btn.innerHTML = `<i data-lucide="${iconName}" class="w-4 h-4${state.runningCls ? ' gen-dock-send-spin' : ''}"></i>`;
+        refreshIcons(btn);
+        return true;
+    }
     const icon = btn.querySelector('i[data-lucide]');
     const iconHtml = icon ? icon.outerHTML : '';
     btn.innerHTML = `${iconHtml}${escapeHtml(state.label)}`;
     return true;
 }
-/** generator 增量刷新：不重建 gen-settings，保住表单焦点 */
+/** generator 增量刷新：节点内只剩图台；控制台在外挂 dock */
 function refreshGeneratorNodeContent(node){
     if(node.type !== 'generator') return false;
     const el = nodesEl.querySelector(`.generator-node[data-id="${CSS.escape(node.id)}"], .node.generator-node[data-id="${CSS.escape(node.id)}"]`);
-    if(!el?.querySelector('.gen-settings')) return false;
+    if(!el?.querySelector('.gen-stage-slot')) return false;
     if(!patchNodeHeadStatus(el, node)) return false;
-    patchGenRunButton(el, node, tr('canvas.apiGenerate'), tr('canvas.generating'));
-    patchNodeRetryBar(el, node);
-    const cascadeSlot = el.querySelector('.gen-run-row');
-    if(cascadeSlot){
-        cascadeSlot.querySelectorAll('.gen-cascade-btn').forEach(b => b.remove());
-        const cascadeHtml = cascadeBtnHtml(node);
-        if(cascadeHtml){
-            cascadeSlot.insertAdjacentHTML('beforeend', cascadeHtml);
-            bindCascadeButtons(cascadeSlot, node.id);
-        }
-    }
-    // 输入缩略图可更新；不碰 .gen-settings
     try {
-        const sources = orderedSources(node, generatorSources(node));
-        const imageInputs = sources
-            .map(src => ({...src, refs:imageRefsOnly(src.refs || [])}))
-            .filter(src => src.refs?.length);
-        renderPromptPreview(el.querySelector('.prompt-list'), sources.filter(src => src.prompt && !src.refs?.length));
-        renderImageInputList(el.querySelector('.input-list'), node, imageInputs);
+        refreshGenStage(el, node);
     } catch(err) {
-        console.warn('[infinite-canvas] generator incremental patch partial fail', err);
+        console.warn('[infinite-canvas] generator stage patch fail', err);
+    }
+    if(imageGenDockNodeId === node.id){
+        const runBtn = imageGenDockEl?.querySelector?.('.gen-btn');
+        if(runBtn) patchGenRunButton(imageGenDockEl, node, tr('canvas.apiGenerate'), tr('canvas.generating'));
+        const cascadeSlot = imageGenDockEl?.querySelector?.('.gen-run-row');
+        if(cascadeSlot){
+            cascadeSlot.querySelectorAll('.gen-cascade-btn').forEach(b => b.remove());
+            const cascadeHtml = cascadeBtnHtml(node);
+            if(cascadeHtml){
+                cascadeSlot.insertAdjacentHTML('beforeend', cascadeHtml);
+                bindCascadeButtons(cascadeSlot, node.id);
+            }
+        }
+        patchNodeRetryBar(imageGenDockEl, node);
     }
     return true;
 }
@@ -8292,7 +8793,8 @@ function restoreOutputScrolls(state){
     });
 }
 function isNodeControl(target){
-    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select');
+    // 注意：.gen-stage / 图台主图不计入控件，单击需选中节点以唤出下方控制台
+    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs');
 }
 function destroyLTXEditor(node){
     if(!node?._ltxEditor) return;
@@ -8306,7 +8808,7 @@ const NODE_TYPE_ICON = {
     image:'image', prompt:'type', loop:'repeat', promptGroup:'layers', group:'folder',
     imageBatch:'images', frameStack:'images', llm:'brain', replicaAgent:'copy',
     imageRepairAgent:'wrench', batchPosterAgent:'layout-grid', nineGridAgent:'grid-3x3',
-    slotsLoopVideoAgent:'clapperboard', videoReverse:'rewind', comfy:'workflow',
+    slotsLoopVideoAgent:'clapperboard', mxShellPromptAgent:'film', mxShellPromptView:'file-text', textOutput:'file-output', deepWhiteShotAgent:'clapperboard', deepWhiteShotView:'book-open', screenwritingAgent:'pen-line', videoReverse:'rewind', comfy:'workflow',
     ltxDirector:'film', rh:'cloud', msgen:'sparkles', video:'video', output:'layout-grid'
 };
 function renderNode(node){
@@ -8316,7 +8818,7 @@ function renderNode(node){
     const size = defaultNodeSize(node.type);
     const hasFixedSize = Boolean(node.h || size.h);
     const inGroup = nodes.some(g => (g.type === 'group' || g.type === 'promptGroup' || g.type === 'imageBatch') && (g.items || []).includes(node.id));
-    el.className = `node ${node.type}-node ${node.type === 'frameStack' ? 'output-node ' : ''}${inGroup ? 'group-member ' : ''}${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''} ${isNodeDisabled(node) ? 'is-disabled' : ''}`;
+    el.className = `node ${node.type}-node ${node.type === 'frameStack' ? 'output-node ' : ''}${node.type === 'textOutput' && node.kind === 'mxShell' ? 'is-mxShell ' : ''}${node.type === 'textOutput' && node.kind === 'deepWhite' ? 'is-deepWhite ' : ''}${inGroup ? 'group-member ' : ''}${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''} ${isNodeDisabled(node) ? 'is-disabled' : ''}`;
     el.style.left = `${node.x}px`;
     el.style.top = `${node.y}px`;
     el.style.width = `${node.w || size.w}px`;
@@ -8331,7 +8833,7 @@ function renderNode(node){
         applyNodeSelection(node.id, e);
     };
     el.oncontextmenu = e => {
-        if(!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'output' && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent' && node.type !== 'slotsLoopVideoAgent') return;
+        if(!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'output' && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent' && node.type !== 'slotsLoopVideoAgent' && node.type !== 'mxShellPromptAgent' && node.type !== 'deepWhiteShotAgent' && node.type !== 'screenwritingAgent' && node.type !== 'textOutput') return;
         e.preventDefault();
         e.stopPropagation();
         if(node.type === 'output'){
@@ -8340,10 +8842,10 @@ function renderNode(node){
         }
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'imageBatch' ? (langIsEn() ? 'Image batch' : '图片组') : node.type === 'frameStack' ? (langIsEn() ? 'Frame Stack' : '截帧集') : node.type === 'llm' ? 'LLM' : node.type === 'replicaAgent' ? '复刻 Agent' : node.type === 'imageRepairAgent' ? (langIsEn() ? 'Repair Agent' : '修图 Agent') : node.type === 'batchPosterAgent' ? 'Batch Poster Agent' : node.type === 'nineGridAgent' ? (langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent') : node.type === 'slotsLoopVideoAgent' ? (langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent') : node.type === 'videoReverse' ? '视频反推' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'imageBatch' ? (langIsEn() ? 'Image batch' : '图片组') : node.type === 'frameStack' ? (langIsEn() ? 'Frame Stack' : '截帧集') : node.type === 'llm' ? 'LLM' : node.type === 'replicaAgent' ? '复刻 Agent' : node.type === 'imageRepairAgent' ? (langIsEn() ? 'Repair Agent' : '修图 Agent') : node.type === 'batchPosterAgent' ? 'Batch Poster Agent' : node.type === 'nineGridAgent' ? (langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent') : node.type === 'slotsLoopVideoAgent' ? (langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent') : node.type === 'mxShellPromptAgent' ? (langIsEn() ? 'Mx-Shell Prompt Agent' : 'Mx-Shell 提示词 Agent') : node.type === 'textOutput' ? textOutputKindLabel(node.kind) : node.type === 'mxShellPromptView' ? textOutputKindLabel('mxShell') : node.type === 'deepWhiteShotAgent' ? (langIsEn() ? 'DeepWhite Shot Agent' : 'DeepWhite 导演分镜 Agent') : node.type === 'deepWhiteShotView' ? textOutputKindLabel('deepWhite') : node.type === 'screenwritingAgent' ? (langIsEn() ? 'Screenwriting Agent' : '编剧 Agent') : node.type === 'videoReverse' ? '视频反推' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 运行状态徽章：含单节点失败与级联失败
-    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','videoReverse'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent','videoReverse'].includes(node.type) && node.runStatus
         && node.runStatus !== 'idle';
     const statusHtml = showStatus ? (() => {
         const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -8376,7 +8878,11 @@ function renderNode(node){
             const missing = isMissingAssetUrl(node.url);
             const mediaKind = mediaKindForNode(node);
             const isEditableImage = mediaKind === 'image' && !missing;
-            body.innerHTML = `<div class="image-preview-wrap">${missing ? missingAssetHtml(node.url) : `<img src="${escapeAttr(node.url)}" draggable="false">`}</div><div class="image-caption text-[11px] text-gray-400 truncate">${escapeHtml(node.name || 'image')}${missing ? ` · ${langIsEn() ? 'missing' : '文件缺失'}` : ''}</div>`;
+            // 静帧：无框纯图（无 caption）；音视频保留卡片+标题
+            const stillCaption = missing
+                ? `<div class="image-caption text-[11px] text-gray-400 truncate">${escapeHtml(node.name || 'image')} · ${langIsEn() ? 'missing' : '文件缺失'}</div>`
+                : '';
+            body.innerHTML = `<div class="image-preview-wrap" title="${escapeAttr(node.name || 'image')}">${missing ? missingAssetHtml(node.url) : `<img src="${escapeAttr(node.url)}" draggable="false" alt="">`}</div>${stillCaption}`;
             if(!missing && mediaKind !== 'image'){
                 const mediaHtml = mediaKind === 'video'
                     ? `<div class="media-card video-card"><div class="video-player-wrap"><video src="${escapeAttr(node.url)}" data-url="${escapeAttr(node.url)}" controls preload="auto" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video><button type="button" class="btn-capture-frame">${langIsEn() ? 'Capture frame' : '截取当前帧'}</button></div></div>`
@@ -8419,9 +8925,13 @@ function renderNode(node){
             }
             if(isEditableImage) body.addEventListener('dblclick', openEditor, true);
             if(loadedImg && loadedImg.complete && loadedImg.naturalHeight > 0){
+                fitImageNodeToNaturalAspect(node, el, loadedImg);
                 requestAnimationFrame(refreshGeometry);
             } else if(loadedImg) {
-                loadedImg.onload = () => refreshGeometryAfterLayout();
+                loadedImg.onload = () => {
+                    fitImageNodeToNaturalAspect(node, el, loadedImg);
+                    refreshGeometryAfterLayout();
+                };
             }
         } else {
         body.innerHTML = `<div class="blank-image"><i data-lucide="image-plus" class="w-7 h-7"></i><div class="text-[11px] font-bold">${tr('canvas.clickDragPasteImage')}</div></div>`;
@@ -8444,6 +8954,8 @@ function renderNode(node){
             refreshGeneratorInputViews();
             refreshDownstreamVideoReverseNodes(node.id);
             refreshDownstreamSlotsLoopVideoNodes(node.id);
+            refreshDownstreamMxShellPromptNodes(node.id);
+            refreshDownstreamDeepWhiteShotNodes(node.id);
             scheduleLinkGeometryRefresh([node.id]);
         };
     }
@@ -8521,6 +9033,10 @@ function renderNode(node){
     if(node.type === 'batchPosterAgent') body.appendChild(renderBatchPosterAgentBody(node));
     if(node.type === 'nineGridAgent') body.appendChild(renderNineGridAgentBody(node));
     if(node.type === 'slotsLoopVideoAgent') body.appendChild(renderSlotsLoopVideoAgentBody(node));
+    if(node.type === 'mxShellPromptAgent') body.appendChild(renderMxShellPromptAgentBody(node));
+    if(node.type === 'mxShellPromptView' || node.type === 'deepWhiteShotView' || node.type === 'textOutput') body.appendChild(renderTextOutputBody(node));
+    if(node.type === 'deepWhiteShotAgent') body.appendChild(renderDeepWhiteShotAgentBody(node));
+    if(node.type === 'screenwritingAgent') body.appendChild(renderScreenwritingAgentBody(node));
     if(node.type === 'videoReverse') body.appendChild(renderVideoReverseBody(node));
     if(node.type === 'msgen') body.appendChild(renderMsGenBody(node));
     if(node.type === 'video') body.appendChild(renderVideoBody(node));
@@ -8598,8 +9114,8 @@ function renderNode(node){
         if(!isNodeDragSurface(e.target)) return;
         startNodeDrag(e, node);
     };
-    const canInput = ['generator','comfy','ltxDirector','output','llm','msgen','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','videoReverse','frameStack','loop'].includes(node.type);
-    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','replicaAgent','imageRepairAgent','videoReverse','slotsLoopVideoAgent','frameStack','imageBatch'].includes(node.type);
+    const canInput = ['generator','comfy','ltxDirector','output','llm','msgen','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent','textOutput','videoReverse','frameStack','loop'].includes(node.type);
+    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','replicaAgent','imageRepairAgent','videoReverse','slotsLoopVideoAgent','mxShellPromptAgent','textOutput','mxShellPromptView','deepWhiteShotAgent','deepWhiteShotView','screenwritingAgent','frameStack','imageBatch'].includes(node.type);
     if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"><span class="port-dot"></span></div>`);
     if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"><span class="port-dot"></span></div>`);
     el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
@@ -8685,6 +9201,10 @@ async function toggleOutputFavorite(wrap, node){
     if(!url) return;
     const meta = outputMetaFor(url, node);
     const btn = wrap.querySelector('.output-fav-btn');
+    await toggleFavoriteForUrl(url, meta, node, btn);
+}
+async function toggleFavoriteForUrl(url, meta={}, node=null, btn=null){
+    if(!url) return;
     if(btn) btn.disabled = true;
     try {
         const res = await apiFetch('/api/favorites/toggle', {
@@ -8704,21 +9224,79 @@ async function toggleOutputFavorite(wrap, node){
         if(!res.ok) throw new Error(data.error || (langIsEn() ? 'Favorite failed' : '收藏失败'));
         const canonical = normalizeFavoritePath(data.item?.thumbnail_path || url);
         rememberFavoritePath(canonical || url, !!data.favorited);
-        const liveWrap = wrap.isConnected
-            ? wrap
-            : nodesEl?.querySelector(`.output-img-wrap[data-output-url="${CSS.escape(normalizeFavoritePath(url) || url)}"]`);
-        syncOutputFavoriteBtn(liveWrap?.querySelector('.output-fav-btn'), url);
-        if(liveWrap) refreshIcons(liveWrap);
+        syncOutputFavoriteBtn(btn, url);
+        if(btn) refreshIcons(btn.parentElement || btn);
+        // 同步节点结果面板与 Output 卡上的星标
+        syncOutputFavoriteButtons();
+        if(genHistoryPanelEl){
+            genHistoryPanelEl.querySelectorAll(`.gen-history-action-fav[data-url], .output-fav-btn`).forEach(el => {
+                const u = el.dataset.url || el.closest('[data-url]')?.dataset.url || '';
+                if(u && (normalizeFavoritePath(u) === canonical || u === url || normalizeFavoritePath(u) === normalizeFavoritePath(url))){
+                    syncOutputFavoriteBtn(el, url);
+                }
+            });
+            refreshIcons(genHistoryPanelEl);
+        }
         setStatus(data.favorited ? (langIsEn() ? 'Added to favorites' : '已加入我的收藏') : (langIsEn() ? 'Removed from favorites' : '已取消收藏'));
     } catch(e) {
         setStatus(e instanceof Error ? e.message : (langIsEn() ? 'Favorite failed' : '收藏失败'));
     } finally {
-        const liveWrap = wrap.isConnected
-            ? wrap
-            : nodesEl?.querySelector(`.output-img-wrap[data-output-url="${CSS.escape(normalizeFavoritePath(url) || url)}"]`);
-        const liveBtn = liveWrap?.querySelector('.output-fav-btn') || btn;
-        if(liveBtn) liveBtn.disabled = false;
+        if(btn) btn.disabled = false;
     }
+}
+function generatorHistoryLightboxSource(node){
+    return {
+        id: node?.id || '',
+        type: 'generator',
+        images: generatorHistoryItems(node),
+    };
+}
+function openGeneratorHistoryLightbox(node, url){
+    if(!url) return;
+    openOutputLightbox(url, generatorHistoryLightboxSource(node));
+}
+function genHistoryCardActionsHtml(url, item){
+    if(!url) return '';
+    const favActive = isOutputUrlFavorited(url);
+    const favTitle = favActive
+        ? (langIsEn() ? 'Remove from favorites' : '取消收藏')
+        : (langIsEn() ? 'Add to favorites' : '收藏');
+    return `<div class="gen-history-card-actions">
+        <button type="button" class="gen-history-mini-btn output-fav-btn${favActive ? ' is-active' : ''}" data-action="fav" data-url="${escapeAttr(url)}" title="${escapeAttr(favTitle)}" aria-pressed="${favActive ? 'true' : 'false'}"><i data-lucide="star" class="w-3.5 h-3.5"></i></button>
+        <button type="button" class="gen-history-mini-btn" data-action="download" data-url="${escapeAttr(url)}" title="${escapeAttr(langIsEn() ? 'Download' : '下载')}"><i data-lucide="download" class="w-3.5 h-3.5"></i></button>
+        <button type="button" class="gen-history-mini-btn" data-action="zoom" data-url="${escapeAttr(url)}" title="${escapeAttr(langIsEn() ? 'Enlarge' : '放大')}"><i data-lucide="maximize-2" class="w-3.5 h-3.5"></i></button>
+    </div>`;
+}
+function bindGenHistoryMediaActions(root, node){
+    if(!root || !node) return;
+    root.querySelectorAll('[data-action="fav"][data-url]').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            const url = btn.dataset.url || '';
+            const item = generatorHistoryItems(node).find(x => x.url === url) || {url};
+            void toggleFavoriteForUrl(url, item, node, btn);
+        };
+    });
+    root.querySelectorAll('[data-action="download"][data-url]').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            const url = btn.dataset.url || '';
+            if(!url) return;
+            downloadUrl(url, outputDownloadName(url)).catch(err => softAlert(err.message || tr('canvas.outputDownloadEmpty')));
+        };
+    });
+    root.querySelectorAll('[data-action="zoom"][data-url]').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            openGeneratorHistoryLightbox(node, btn.dataset.url || '');
+        };
+    });
 }
 function bindOutputWrap(wrap, node){
     const img = wrap.querySelector('img');
@@ -8886,12 +9464,15 @@ function defaultNodeSize(type){
     if(type === 'prompt') return {w:310, h:0};
     if(type === 'loop') return {w:336, h:0};
     if(type === 'llm') return {w:420, h:590};
-    if(type === 'generator') return {w:380, h:0};
+    if(type === 'generator') return {w:260, h:0};
     if(type === 'replicaAgent') return {w:320, h:480};
     if(type === 'imageRepairAgent') return {w:320, h:460};
     if(type === 'batchPosterAgent') return {w:340, h:520};
     if(type === 'nineGridAgent') return {w:360, h:560};
     if(type === 'slotsLoopVideoAgent') return {w:380, h:520};
+    if(type === 'mxShellPromptAgent') return {w:400, h:400};
+    if(type === 'mxShellPromptView' || type === 'deepWhiteShotView' || type === 'textOutput') return {w:600, h:560};
+    if(type === 'deepWhiteShotAgent') return {w:400, h:400};
     if(type === 'videoReverse') return {w:380, h:460};
     if(type === 'msgen') return {w:380, h:0};
     if(type === 'video') return {w:400, h:0};
@@ -9986,6 +10567,1124 @@ function runSlotsLoopVideoFromButton(nodeId, event){
     void runSlotsLoopVideoAgent(nodeId);
 }
 window.runSlotsLoopVideoFromButton = runSlotsLoopVideoFromButton;
+function mxShellPromptAgentStory(node){
+    const sources = orderedSources(node, generatorSources(node));
+    const promptSrc = sources.find(s => s.prompt && !s.refs?.length);
+    const upstream = String(promptSrc?.prompt || '').trim();
+    const inline = String(node.story || '').trim();
+    if(upstream && inline) return `${upstream}\n${inline}`.trim();
+    return upstream || inline;
+}
+function collectMxShellRefEntries(node){
+    if(!node || (node.type !== 'mxShellPromptAgent' && node.type !== 'deepWhiteShotAgent')) return [];
+    if(!node.refNames || typeof node.refNames !== 'object') node.refNames = {};
+    if(!node.refKinds || typeof node.refKinds !== 'object') node.refKinds = {};
+    const sources = orderedSources(node, generatorSources(node));
+    const entries = [];
+    const seen = new Set();
+    sources.forEach(src => {
+        if(entries.length >= 8) return;
+        imageRefsOnly(src.refs || []).forEach(ref => {
+            if(entries.length >= 8) return;
+            const key = String(src.imageId || src.id || ref.url || '');
+            if(!ref.url || !key || seen.has(key)) return;
+            seen.add(key);
+            entries.push({
+                key,
+                imageId:src.imageId || null,
+                url:ref.url,
+                name:String(ref.name || '').trim(),
+                preview:src.preview || ref.url,
+            });
+        });
+    });
+    return entries;
+}
+function mxShellPromptAgentImageUrls(node){
+    return collectMxShellRefEntries(node).map(e => e.url).filter(Boolean);
+}
+function mxShellPromptAgentImageBindings(node){
+    const entries = collectMxShellRefEntries(node);
+    return entries.map((entry, idx) => {
+        const name = String(node.refNames?.[entry.key] ?? entry.name ?? '').trim().slice(0, 24);
+        const kindRaw = String(node.refKinds?.[entry.key] || 'auto').trim().toLowerCase();
+        const kind = ['character','prop','scene'].includes(kindRaw) ? kindRaw : 'auto';
+        return { index: idx + 1, name, kind, url: entry.url };
+    });
+}
+function renderMxShellRefList(list, node, emptyText=null){
+    if(!list) return;
+    if(!node.refNames || typeof node.refNames !== 'object') node.refNames = {};
+    if(!node.refKinds || typeof node.refKinds !== 'object') node.refKinds = {};
+    const entries = collectMxShellRefEntries(node);
+    if(!entries.length){
+        list.innerHTML = `<div class="nine-grid-ref-empty">${escapeHtml(emptyText || (langIsEn() ? 'Optional: connect reference images' : '可选：连接角色/道具/场景参考图'))}</div>`;
+        return;
+    }
+    const namedCount = entries.filter(e => String(node.refNames[e.key] || e.name || '').trim()).length;
+    list.innerHTML = `
+        <div class="nine-grid-ref-hint">${langIsEn()
+            ? 'Name each image to match story roles/props/scenes (e.g. Xiao Ming). Bound as {@图N}.'
+            : '为每张图命名，与故事中的角色/道具/场景对应（如「小明」）。生成时按绑定写入 {@图N}。'} ${namedCount ? (langIsEn() ? `· ${namedCount} named` : `· 已命名 ${namedCount} 张`) : (langIsEn() ? '· unnamed = model infers' : '· 未命名则由模型推断')}</div>
+        <div class="nine-grid-ref-row">${entries.map((entry, idx) => {
+            const stored = String(node.refNames[entry.key] ?? entry.name ?? '').trim();
+            const kind = String(node.refKinds[entry.key] || 'auto');
+            return `<div class="nine-grid-ref-item mx-shell-ref-item" data-ref-key="${escapeAttr(entry.key)}">
+                <div class="nine-grid-ref-thumb"><img src="${escapeAttr(entry.preview)}" alt="" referrerpolicy="no-referrer"><span class="nine-grid-ref-index">图${idx + 1}</span></div>
+                <select class="select-lite mx-shell-ref-kind" data-ref-key="${escapeAttr(entry.key)}">
+                    <option value="auto" ${kind === 'auto' ? 'selected' : ''}>${langIsEn() ? 'Auto' : '自动'}</option>
+                    <option value="character" ${kind === 'character' ? 'selected' : ''}>${langIsEn() ? 'Character' : '角色'}</option>
+                    <option value="prop" ${kind === 'prop' ? 'selected' : ''}>${langIsEn() ? 'Prop' : '道具'}</option>
+                    <option value="scene" ${kind === 'scene' ? 'selected' : ''}>${langIsEn() ? 'Scene' : '场景'}</option>
+                </select>
+                <input type="text" class="nine-grid-ref-name setting-input mx-shell-ref-name" data-ref-key="${escapeAttr(entry.key)}" value="${escapeHtml(stored)}" placeholder="${escapeAttr(langIsEn() ? 'Name e.g. Mia' : '名称，如 小明')}" maxlength="24">
+            </div>`;
+        }).join('')}</div>`;
+    list.querySelectorAll('.mx-shell-ref-name').forEach(input => {
+        input.onmousedown = e => e.stopPropagation();
+        input.oninput = e => {
+            e.stopPropagation();
+            const key = input.dataset.refKey;
+            if(!key) return;
+            node.refNames[key] = input.value.slice(0, 24);
+            const entry = entries.find(item => item.key === key);
+            if(entry?.imageId){
+                const imgNode = nodes.find(n => n.id === entry.imageId);
+                if(imgNode) imgNode.name = node.refNames[key];
+            }
+            scheduleSave();
+        };
+    });
+    list.querySelectorAll('.mx-shell-ref-kind').forEach(sel => {
+        sel.onmousedown = e => e.stopPropagation();
+        sel.onclick = e => e.stopPropagation();
+        sel.onchange = e => {
+            e.stopPropagation();
+            const key = sel.dataset.refKey;
+            if(!key) return;
+            node.refKinds[key] = String(sel.value || 'auto');
+            scheduleSave();
+        };
+    });
+}
+async function resolveMxShellImageUrlForApi(rawUrl){
+    const url = String(rawUrl || '').trim();
+    if(!url) return '';
+    if(url.startsWith('data:')) return url;
+    if(url.startsWith('blob:')) return await urlToBase64(url);
+    if(url.startsWith('/') && !url.startsWith('//')){
+        if(url.startsWith('/uploads/')) return url;
+        try { return await urlToBase64(url); } catch { return url; }
+    }
+    return url;
+}
+function refreshDownstreamMxShellPromptNodes(fromNodeId){
+    const targetIds = connections
+        .filter(c => c.from === fromNodeId)
+        .map(c => c.to)
+        .filter(id => nodes.find(n => n.id === id)?.type === 'mxShellPromptAgent');
+    if(targetIds.length) refreshNodes(targetIds);
+}
+function refreshDownstreamDeepWhiteShotNodes(fromNodeId){
+    const targetIds = connections
+        .filter(c => c.from === fromNodeId)
+        .map(c => c.to)
+        .filter(id => nodes.find(n => n.id === id)?.type === 'deepWhiteShotAgent');
+    if(targetIds.length) refreshNodes(targetIds);
+}
+function renderMxShellPromptAgentBody(node){
+    node.model = clampAgentTextModel(node.model);
+    node.mode = normalizeMxShellPromptMode(node.mode);
+    node.cameraIntensity = normalizeMxShellCameraIntensity(node.cameraIntensity);
+    const sources = orderedSources(node, generatorSources(node));
+    const promptSrc = sources.find(s => s.prompt && !s.refs?.length);
+    const upstreamStory = String(promptSrc?.prompt || '').trim();
+    const story = mxShellPromptAgentStory(node);
+    const imageUrls = mxShellPromptAgentImageUrls(node);
+    const outputText = String(node.outputText || '').trim();
+    if(node.runStatus === 'done' && !outputText){
+        node.runStatus = 'failed';
+        node.runError = langIsEn()
+            ? 'Marked done but no prompt text. Please regenerate.'
+            : '显示完成但没有提示词正文，请重新生成。';
+    }
+    const modeLabel = mxShellPromptModeLabel(node.mode);
+    const modelName = clampAgentTextModel(node.model);
+    const namedRefs = mxShellPromptAgentImageBindings(node).filter(b => b.name).length;
+    const statusBits = [];
+    statusBits.push(imageUrls.length
+        ? (langIsEn() ? `${imageUrls.length} refs · ${namedRefs} named` : `${imageUrls.length} 张参考 · 已命名 ${namedRefs}`)
+        : (langIsEn() ? 'No refs' : '无参考图'));
+    statusBits.push(story.length >= 10
+        ? (upstreamStory && !String(node.story || '').trim() ? (langIsEn() ? 'Upstream story' : '上游故事') : (langIsEn() ? 'Story ready' : '故事就绪'))
+        : (langIsEn() ? 'Need story' : '需故事'));
+    statusBits.push(modelName);
+    const wrap = document.createElement('div');
+    wrap.className = 'generator-body mx-shell-prompt-body agent-console-body';
+    wrap.innerHTML = `
+        <div class="agent-status-bar ${story.length >= 10 ? 'ok' : 'warn'}">${escapeHtml(statusBits.join(' · '))}</div>
+        ${outputText ? `
+        <div class="mx-shell-result-compact">
+            <div class="mx-shell-result-compact-title">${langIsEn() ? 'Ready' : '已生成'} · ${escapeHtml(modeLabel)}</div>
+            <button type="button" class="gen-btn mx-shell-focus-view-btn"><i data-lucide="panel-right" class="w-4 h-4"></i><span>${langIsEn() ? 'Open text output' : '打开文本输出'}</span></button>
+        </div>` : node.runStatus === 'failed' && node.runError ? `
+        <div class="mx-shell-result-compact is-error-panel">
+            <div class="mx-shell-result-compact-hint">${escapeHtml(node.runError)}</div>
+        </div>` : ''}
+        <div class="agent-console-grid">
+            <label class="field">
+                <div class="setting-title">${langIsEn() ? 'Mode' : '模式'}</div>
+                <select class="select-lite mx-shell-mode">
+                    <option value="multi_cam" ${node.mode === 'multi_cam' ? 'selected' : ''}>${langIsEn() ? 'Multi-cam' : '多机位'}</option>
+                    <option value="one_shot" ${node.mode === 'one_shot' ? 'selected' : ''}>${langIsEn() ? 'One-shot' : '一镜到底'}</option>
+                </select>
+            </label>
+            <label class="field">
+                <div class="setting-title">${langIsEn() ? 'Camera intensity' : '运镜强度'}</div>
+                <select class="select-lite mx-shell-camera-intensity">
+                    <option value="restrained" ${node.cameraIntensity === 'restrained' ? 'selected' : ''}>${langIsEn() ? 'Restrained' : '克制'}</option>
+                    <option value="standard" ${node.cameraIntensity === 'standard' ? 'selected' : ''}>${langIsEn() ? 'Standard' : '标准'}</option>
+                    <option value="flashy" ${node.cameraIntensity === 'flashy' ? 'selected' : ''}>${langIsEn() ? 'Flashy' : '炫技'}</option>
+                </select>
+            </label>
+            <label class="field">
+                <div class="setting-title">${langIsEn() ? 'Model' : '模型'}</div>
+                <select class="select-lite mx-shell-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
+            </label>
+        </div>
+        <label class="field">
+            <div class="setting-title">${langIsEn() ? 'Story / draft' : '故事 / 草稿'}</div>
+            ${upstreamStory && !String(node.story || '').trim() ? `<div class="mx-shell-upstream-preview">${escapeHtml(upstreamStory.slice(0, 220))}${upstreamStory.length > 220 ? '…' : ''}</div>` : ''}
+            <textarea class="mx-shell-story" placeholder="${langIsEn() ? 'Paste outline / script…' : '粘贴故事大纲 / 剧本…'}">${escapeHtml(node.story || '')}</textarea>
+        </label>
+        <label class="field">
+            <div class="setting-title">${langIsEn() ? 'Atmosphere (optional)' : '氛围（可选）'}</div>
+            <textarea class="mx-shell-atmosphere" placeholder="${langIsEn() ? 'Look / grade…' : '画质 / 氛围…'}">${escapeHtml(node.atmosphere || '')}</textarea>
+        </label>
+        <details class="agent-refs-fold" ${imageUrls.length ? 'open' : ''}>
+            <summary>${langIsEn() ? 'Reference images (optional)' : '参考图（可选）'}</summary>
+            <div class="mx-shell-ref-list"></div>
+        </details>
+        ${node.runError && !(node.runStatus === 'failed' && !outputText) ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
+        <div class="gen-run-row">
+            <button class="gen-btn mx-shell-run-btn ${node.running ? 'running' : ''}"><i data-lucide="film" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Generating…' : '生成中…') : (langIsEn() ? 'Generate' : '生成提示词')}</span></button>
+        </div>
+    `;
+    const modeSelect = wrap.querySelector('.mx-shell-mode');
+    modeSelect.onmousedown = e => e.stopPropagation();
+    modeSelect.onclick = e => e.stopPropagation();
+    modeSelect.onchange = e => {
+        e.stopPropagation();
+        node.mode = normalizeMxShellPromptMode(e.target.value);
+        scheduleSave();
+        refreshNodes([node.id]);
+    };
+    const intensitySelect = wrap.querySelector('.mx-shell-camera-intensity');
+    intensitySelect.onmousedown = e => e.stopPropagation();
+    intensitySelect.onclick = e => e.stopPropagation();
+    intensitySelect.onchange = e => {
+        e.stopPropagation();
+        node.cameraIntensity = normalizeMxShellCameraIntensity(e.target.value);
+        scheduleSave();
+        refreshNodes([node.id]);
+    };
+    const modelSelect = wrap.querySelector('.mx-shell-text-model');
+    modelSelect.onmousedown = e => e.stopPropagation();
+    modelSelect.onclick = e => e.stopPropagation();
+    modelSelect.onchange = e => {
+        e.stopPropagation();
+        node.model = clampAgentTextModel(e.target.value);
+        scheduleSave();
+        refreshNodes([node.id]);
+    };
+    const storyEl = wrap.querySelector('.mx-shell-story');
+    bindScrollableText(storyEl);
+    storyEl.oninput = e => {
+        node.story = String(e.target.value || '').slice(0, 12000);
+        scheduleSave();
+    };
+    const atmosphereEl = wrap.querySelector('.mx-shell-atmosphere');
+    bindScrollableText(atmosphereEl);
+    atmosphereEl.oninput = e => {
+        node.atmosphere = String(e.target.value || '').slice(0, 800);
+        scheduleSave();
+    };
+    const focusBtn = wrap.querySelector('.mx-shell-focus-view-btn');
+    if(focusBtn){
+        focusBtn.onclick = e => {
+            e.stopPropagation();
+            const view = ensureAgentTextOutputNode(node, 'mxShell');
+            if(view && outputText) syncMxShellPromptToTextOutput(node, outputText, node.outputData || {});
+            if(view){
+                selected.clear();
+                selected.add(view.id);
+                refreshNodes([node.id, view.id]);
+                scheduleSave();
+                requestAnimationFrame(() => {
+                    document.querySelector(`.node[data-id="${view.id}"]`)?.scrollIntoView?.({block:'nearest', behavior:'smooth'});
+                });
+            }
+        };
+    }
+    wrap.querySelector('.mx-shell-run-btn').onclick = e => {
+        e.stopPropagation();
+        void runMxShellPromptAgent(node.id);
+    };
+    renderMxShellRefList(wrap.querySelector('.mx-shell-ref-list'), node, langIsEn() ? 'Optional: connect reference images' : '可选：连接角色/道具/场景参考图');
+    return wrap;
+}
+function renderTextOutputBody(node){
+    if(node.type === 'mxShellPromptView'){ node.type = 'textOutput'; node.kind = node.kind || 'mxShell'; }
+    if(node.type === 'deepWhiteShotView'){ node.type = 'textOutput'; node.kind = node.kind || 'deepWhite'; }
+    const kind = node.kind || (node.mode ? 'mxShell' : (node.scene_name || node.primary_director ? 'deepWhite' : ''));
+    if(kind && !node.kind) node.kind = kind;
+    const text = String(node.text || '').trim();
+    let sections = Array.isArray(node.sections) && node.sections.length ? node.sections : null;
+    if(!sections){
+        sections = kind === 'deepWhite' ? splitDeepWhiteDocSections(text) : splitMxShellPromptSections(text);
+    }
+    if(!Array.isArray(node.expandedSections)) node.expandedSections = [];
+    const expanded = new Set(node.expandedSections.map(Number).filter(n => Number.isFinite(n)));
+    const allExpanded = sections.length > 0 && sections.every((_, i) => expanded.has(i));
+    const wrap = document.createElement('div');
+    wrap.className = 'generator-body text-output-body';
+    if(!text){
+        wrap.innerHTML = `
+            <div class="mx-shell-view-empty">
+                <div class="mx-shell-view-empty-title">${langIsEn() ? 'Waiting for text output' : '等待文本输出'}</div>
+                <div class="mx-shell-view-empty-hint">${langIsEn()
+                    ? 'Connect an Mx-Shell or DeepWhite Agent and generate.'
+                    : '请连接 Mx-Shell / DeepWhite Agent 并生成；结果会按章节折叠展示。'}</div>
+            </div>
+        `;
+        return wrap;
+    }
+    const pill = kind === 'deepWhite'
+        ? 'DeepWhite v3'
+        : (String(node.mode_label || mxShellPromptModeLabel(node.mode) || 'Mx-Shell'));
+    const metaBits = [];
+    if(kind === 'deepWhite'){
+        if(node.scene_name) metaBits.push(escapeHtml(node.scene_name));
+        if(node.primary_director) metaBits.push(escapeHtml(node.primary_director));
+        if(node.image_shot_count) metaBits.push(`${node.image_shot_count}${langIsEn() ? ' shots' : ' 镜'}`);
+    } else {
+        metaBits.push(langIsEn() ? 'Seedance-ready TXT' : 'Seedance 可用 TXT');
+    }
+    const sectionsHtml = sections.map((sec, i) => {
+        const open = expanded.has(i);
+        const title = kind === 'deepWhite' ? `## ${sec.title}` : sec.title;
+        return `
+        <section class="text-output-section ${open ? 'is-open' : ''}" data-sec="${i}">
+            <button type="button" class="text-output-section-toggle" data-sec="${i}">
+                <i data-lucide="${open ? 'chevron-down' : 'chevron-right'}" class="w-3.5 h-3.5"></i>
+                <span class="text-output-section-title">${escapeHtml(title)}</span>
+                <span class="text-output-section-summary">${escapeHtml(textOutputSectionSummary(sec.body))}</span>
+            </button>
+            ${open ? `
+            <div class="text-output-section-actions">
+                <button type="button" class="gen-btn text-output-sec-copy" data-sec="${i}" title="${langIsEn() ? 'Copy section' : '复制本章'}"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button>
+            </div>
+            <pre class="text-output-section-body">${escapeHtml(sec.body || '')}</pre>` : ''}
+        </section>`;
+    }).join('');
+    wrap.innerHTML = `
+        <div class="text-output-toolbar">
+            <div class="text-output-toolbar-meta">
+                <span class="mx-shell-view-pill">${escapeHtml(pill)}</span>
+                <span class="mx-shell-view-meta-hint">${metaBits.join(' · ') || (langIsEn() ? 'Text output' : '文本输出')}</span>
+            </div>
+            <div class="text-output-toolbar-actions">
+                <button type="button" class="gen-btn text-output-toggle-all" title="${allExpanded ? (langIsEn() ? 'Collapse all' : '全部折叠') : (langIsEn() ? 'Expand all' : '全部展开')}"><i data-lucide="${allExpanded ? 'chevrons-up' : 'chevrons-down'}" class="w-3.5 h-3.5"></i></button>
+                <button type="button" class="gen-btn text-output-open-reader"><i data-lucide="maximize-2" class="w-4 h-4"></i><span>${langIsEn() ? 'Reader' : '大屏阅读'}</span></button>
+                <button type="button" class="gen-btn text-output-copy-all"><i data-lucide="copy" class="w-4 h-4"></i><span>${langIsEn() ? 'Copy' : '复制'}</span></button>
+            </div>
+        </div>
+        <div class="text-output-sections">${sectionsHtml}</div>
+    `;
+    wrap.querySelectorAll('.text-output-section-body').forEach(el => bindScrollableText(el));
+    wrap.querySelectorAll('.text-output-section-toggle').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            const idx = Number(btn.getAttribute('data-sec'));
+            const set = new Set(node.expandedSections.map(Number));
+            if(set.has(idx)) set.delete(idx); else set.add(idx);
+            node.expandedSections = [...set].sort((a,b)=>a-b);
+            scheduleSave();
+            refreshNodes([node.id]);
+        };
+    });
+    wrap.querySelectorAll('.text-output-sec-copy').forEach(btn => {
+        btn.onclick = async e => {
+            e.stopPropagation();
+            const idx = Number(btn.getAttribute('data-sec'));
+            const sec = sections[idx];
+            const chunk = !sec ? '' : (kind === 'deepWhite' ? `## ${sec.title}\n${sec.body || ''}` : `${sec.title}\n${sec.body || ''}`).trim();
+            const ok = await copyTextToClipboard(chunk);
+            setStatus(ok ? (langIsEn() ? 'Section copied' : '已复制本章') : (langIsEn() ? 'Copy failed' : '复制失败'));
+        };
+    });
+    const toggleAll = wrap.querySelector('.text-output-toggle-all');
+    if(toggleAll){
+        toggleAll.onclick = e => {
+            e.stopPropagation();
+            node.expandedSections = allExpanded ? [] : sections.map((_, i) => i);
+            scheduleSave();
+            refreshNodes([node.id]);
+        };
+    }
+    const openReaderBtn = wrap.querySelector('.text-output-open-reader');
+    if(openReaderBtn){
+        openReaderBtn.onclick = e => {
+            e.stopPropagation();
+            openTextOutputReader(node.id);
+        };
+    }
+    const copyAll = wrap.querySelector('.text-output-copy-all');
+    if(copyAll){
+        copyAll.onclick = async e => {
+            e.stopPropagation();
+            const ok = await copyTextToClipboard(text);
+            setStatus(ok ? (langIsEn() ? 'Copied' : '已复制全文') : (langIsEn() ? 'Copy failed' : '复制失败'));
+        };
+    }
+    return wrap;
+}
+
+let textOutputReaderNodeId = '';
+let textOutputReaderEls = null;
+function getTextOutputReaderEls(){
+    if(textOutputReaderEls?.root?.isConnected) return textOutputReaderEls;
+    const root = document.getElementById('textOutputReader');
+    if(!root) return null;
+    textOutputReaderEls = {
+        root,
+        title: document.getElementById('textOutputReaderTitle'),
+        meta: document.getElementById('textOutputReaderMeta'),
+        toc: document.getElementById('textOutputReaderToc'),
+        content: document.getElementById('textOutputReaderContent'),
+        copyBtn: document.getElementById('textOutputReaderCopyBtn'),
+        closeBtn: document.getElementById('textOutputReaderCloseBtn'),
+    };
+    return textOutputReaderEls;
+}
+function closeTextOutputReader(){
+    const els = getTextOutputReaderEls();
+    if(!els) return;
+    els.root.classList.remove('open');
+    textOutputReaderNodeId = '';
+    if(els.content) els.content.innerHTML = '';
+    if(els.toc) els.toc.innerHTML = '';
+}
+function openTextOutputReader(nodeId){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || !(node.type === 'textOutput' || node.type === 'mxShellPromptView' || node.type === 'deepWhiteShotView')) return;
+    const els = getTextOutputReaderEls();
+    if(!els) return;
+    const kind = node.kind || (node.mode ? 'mxShell' : (node.scene_name || node.primary_director ? 'deepWhite' : ''));
+    const text = String(node.text || '').trim();
+    let sections = Array.isArray(node.sections) && node.sections.length ? node.sections : null;
+    if(!sections){
+        sections = kind === 'deepWhite' ? splitDeepWhiteDocSections(text) : splitMxShellPromptSections(text);
+    }
+    textOutputReaderNodeId = node.id;
+    if(els.title) els.title.textContent = textOutputKindLabel(kind);
+    const metaBits = [];
+    if(kind === 'deepWhite'){
+        if(node.scene_name) metaBits.push(node.scene_name);
+        if(node.primary_director) metaBits.push(node.primary_director);
+        if(node.image_shot_count) metaBits.push(`${node.image_shot_count}${langIsEn() ? ' shots' : ' 镜'}`);
+    } else {
+        metaBits.push(String(node.mode_label || mxShellPromptModeLabel(node.mode) || 'Mx-Shell'));
+        metaBits.push(langIsEn() ? 'Seedance-ready TXT' : 'Seedance 可用 TXT');
+    }
+    if(els.meta) els.meta.textContent = metaBits.filter(Boolean).join(' · ');
+    if(els.toc){
+        els.toc.innerHTML = sections.map((sec, i) => `
+            <button type="button" class="text-output-reader-toc-item" data-sec="${i}">${escapeHtml(sec.title || (`${i + 1}`))}</button>
+        `).join('');
+        els.toc.querySelectorAll('.text-output-reader-toc-item').forEach(btn => {
+            btn.onclick = e => {
+                e.stopPropagation();
+                const idx = Number(btn.getAttribute('data-sec'));
+                els.toc.querySelectorAll('.text-output-reader-toc-item').forEach(b => b.classList.toggle('is-active', b === btn));
+                const target = els.content?.querySelector(`.text-output-reader-section[data-sec="${idx}"]`);
+                target?.scrollIntoView?.({ block:'start', behavior:'smooth' });
+            };
+        });
+        els.toc.querySelector('.text-output-reader-toc-item')?.classList.add('is-active');
+    }
+    if(els.content){
+        els.content.innerHTML = sections.map((sec, i) => `
+            <section class="text-output-reader-section" data-sec="${i}" id="text-output-reader-sec-${i}">
+                <div class="text-output-reader-section-head">
+                    <h3 class="text-output-reader-section-title">${escapeHtml(kind === 'deepWhite' ? String(sec.title || '') : sec.title)}</h3>
+                    <button type="button" class="text-output-reader-icon-btn text-output-reader-sec-copy" data-sec="${i}" title="${langIsEn() ? 'Copy section' : '复制本章'}"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button>
+                </div>
+                <pre class="text-output-reader-section-body">${escapeHtml(sec.body || '')}</pre>
+            </section>
+        `).join('') || `<div class="mx-shell-view-empty-hint">${langIsEn() ? 'Empty document' : '文档为空'}</div>`;
+        els.content.querySelectorAll('.text-output-reader-sec-copy').forEach(btn => {
+            btn.onclick = async e => {
+                e.stopPropagation();
+                const idx = Number(btn.getAttribute('data-sec'));
+                const sec = sections[idx];
+                const chunk = !sec ? '' : (kind === 'deepWhite' ? `## ${sec.title}\n${sec.body || ''}` : `${sec.title}\n${sec.body || ''}`).trim();
+                const ok = await copyTextToClipboard(chunk);
+                if(ok){
+                    btn.classList.add('is-copied');
+                    setTimeout(() => btn.classList.remove('is-copied'), 900);
+                }
+                setStatus(ok ? (langIsEn() ? 'Section copied' : '已复制本章') : (langIsEn() ? 'Copy failed' : '复制失败'));
+            };
+        });
+        els.content.scrollTop = 0;
+    }
+    if(els.copyBtn){
+        els.copyBtn.onclick = async e => {
+            e.stopPropagation();
+            const ok = await copyTextToClipboard(text);
+            if(ok){
+                els.copyBtn.classList.add('is-copied');
+                setTimeout(() => els.copyBtn.classList.remove('is-copied'), 900);
+            }
+            setStatus(ok ? (langIsEn() ? 'Copied' : '已复制全文') : (langIsEn() ? 'Copy failed' : '复制失败'));
+        };
+    }
+    if(els.closeBtn){
+        els.closeBtn.onclick = e => {
+            e.stopPropagation();
+            closeTextOutputReader();
+        };
+    }
+    els.root.onclick = e => {
+        if(e.target === els.root) closeTextOutputReader();
+    };
+    els.root.classList.toggle('theme-dark', document.documentElement.classList.contains('theme-dark') || canvasRoot?.classList.contains('theme-dark'));
+    els.root.classList.add('open');
+    if(window.lucide?.createIcons) window.lucide.createIcons({ nodes: [els.root] });
+}
+window.openTextOutputReader = openTextOutputReader;
+window.closeTextOutputReader = closeTextOutputReader;
+
+async function runMxShellPromptAgent(nodeId, opts={}){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || node.type !== 'mxShellPromptAgent' || isNodeDisabled(node)) return;
+    const story = mxShellPromptAgentStory(node);
+    if(story.trim().length < 10){
+        const msg = langIsEn()
+            ? 'Provide a story/script/storyboard draft (≥10 chars), or connect a Prompt node.'
+            : '请提供故事大纲/剧本/分镜草稿（至少 10 字），或连接提示词节点。';
+        node.runStatus = 'failed';
+        node.runError = msg;
+        refreshNodes([nodeId]);
+        return;
+    }
+    if(!opts.cascade){
+        node.runStatus = 'running';
+        node.runError = '';
+        node.running = true;
+        refreshNodes([nodeId]);
+    }
+    setStatus(langIsEn() ? 'Mx-Shell Prompt Agent: generating…' : 'Mx-Shell 提示词 Agent：正在生成…');
+    const execute = async () => {
+    try {
+        const bindings = mxShellPromptAgentImageBindings(node);
+        const imageUrls = [];
+        const resolvedBindings = [];
+        for(const b of bindings){
+            try {
+                const resolved = await resolveMxShellImageUrlForApi(b.url);
+                if(!resolved) continue;
+                imageUrls.push(resolved);
+                resolvedBindings.push({ index: imageUrls.length, name: b.name, kind: b.kind });
+            } catch(err) {
+                throw new Error(langIsEn()
+                    ? `Cannot read reference image: ${err?.message || err}`
+                    : `无法读取参考图：${err?.message || err}`);
+            }
+        }
+        const res = await apiFetch('/api/canvas/mx-shell-prompt', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                mode:normalizeMxShellPromptMode(node.mode),
+                cameraIntensity:normalizeMxShellCameraIntensity(node.cameraIntensity),
+                story,
+                atmosphere:String(node.atmosphere || '').trim(),
+                imageUrls,
+                imageBindings:resolvedBindings,
+                model:clampAgentTextModel(node.model),
+            }),
+        });
+        if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Mx-Shell prompt failed' : 'Mx-Shell 提示词生成失败'));
+        const data = await res.json();
+        const promptText = String(data.display_text || data.prompt || '').trim();
+        if(!promptText){
+            throw new Error(langIsEn()
+                ? 'Model returned empty Mx-Shell prompt text'
+                : '模型返回了空的 Mx-Shell 提示词正文');
+        }
+        node.outputData = data;
+        node.outputText = promptText;
+        const view = syncMxShellPromptToTextOutput(node, promptText, data);
+        if(!opts.cascade) node.running = false;
+        node.runStatus = 'done';
+        node.runError = '';
+        const refreshIds = [nodeId];
+        if(view) refreshIds.push(view.id);
+        refreshNodes(refreshIds);
+        setStatus(langIsEn() ? 'Mx-Shell prompt ready — see Prompt View on the right' : 'Mx-Shell 提示词已生成 — 见右侧「提示词展示」节点');
+        scheduleSave();
+        if(view){
+            requestAnimationFrame(() => {
+                document.querySelector(`.node[data-id="${view.id}"]`)?.scrollIntoView?.({ block:'nearest', behavior:'smooth' });
+            });
+        }
+    } catch(err) {
+        if(!opts.cascade) node.running = false;
+        node.runStatus = 'failed';
+        node.runError = err.message || String(err);
+        refreshNodes([nodeId]);
+        if(opts.cascade) throw err;
+        scheduleSave();
+    }
+    };
+    if(opts.cascade) await execute();
+    else void execute();
+}
+function runMxShellPromptFromButton(nodeId, event){
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    void runMxShellPromptAgent(nodeId);
+}
+window.runMxShellPromptFromButton = runMxShellPromptFromButton;
+
+function deepWhiteShotAgentScene(node){
+    const sources = orderedSources(node, generatorSources(node));
+    const promptSrc = sources.find(s => s.prompt && !s.refs?.length);
+    const upstream = String(promptSrc?.prompt || '').trim();
+    const inline = String(node.scene || '').trim();
+    if(upstream && inline) return `${upstream}\n${inline}`.trim();
+    return upstream || inline;
+}
+function renderDeepWhiteShotAgentBody(node){
+    node.model = clampAgentTextModel(node.model);
+    const scene = deepWhiteShotAgentScene(node);
+    const sources = orderedSources(node, generatorSources(node));
+    const promptSrc = sources.find(s => s.prompt && !s.refs?.length);
+    const upstreamScene = String(promptSrc?.prompt || '').trim();
+    const outputText = String(node.outputText || '').trim();
+    const imageUrls = mxShellPromptAgentImageUrls(node);
+    const namedRefs = mxShellPromptAgentImageBindings(node).filter(b => b.name).length;
+    if(node.runStatus === 'done' && !outputText){
+        node.runStatus = 'failed';
+        node.runError = langIsEn() ? 'Marked done but no document. Please regenerate.' : '显示完成但没有分镜文档，请重新生成。';
+    }
+    const modelName = clampAgentTextModel(node.model);
+    const dwBits = [];
+    dwBits.push(imageUrls.length
+        ? (langIsEn() ? `${imageUrls.length} refs · ${namedRefs} named` : `${imageUrls.length} 张参考 · 已命名 ${namedRefs}`)
+        : (langIsEn() ? 'No refs' : '无参考图'));
+    dwBits.push(scene.length >= 20
+        ? (upstreamScene && !String(node.scene || '').trim() ? (langIsEn() ? 'Upstream scene' : '上游场景') : (langIsEn() ? 'Scene ready' : '场景就绪'))
+        : (langIsEn() ? 'Need scene ≥20' : '需场景≥20字'));
+    dwBits.push(modelName);
+    dwBits.push('DeepWhite v3');
+    const wrap = document.createElement('div');
+    wrap.className = 'generator-body deepwhite-shot-body agent-console-body';
+    wrap.innerHTML = `
+        <div class="agent-status-bar ${scene.length >= 20 ? 'ok' : 'warn'}">${escapeHtml(dwBits.join(' · '))}</div>
+        ${outputText ? `
+        <div class="mx-shell-result-compact">
+            <div class="mx-shell-result-compact-title">${langIsEn() ? 'Ready' : '已生成'}${node.outputData?.primary_director ? ' · ' + escapeHtml(node.outputData.primary_director) : ''}</div>
+            <button type="button" class="gen-btn deepwhite-focus-view-btn"><i data-lucide="panel-right" class="w-4 h-4"></i><span>${langIsEn() ? 'Open text output' : '打开文本输出'}</span></button>
+            <div class="gen-run-row deepwhite-export-row">
+                <button type="button" class="gen-btn deepwhite-to-ninegrid-btn"><i data-lucide="grid-3x3" class="w-4 h-4"></i><span>${langIsEn() ? 'Push to Nine Grid' : '推送到九宫格'}</span></button>
+                <button type="button" class="gen-btn deepwhite-seedance-btn"><i data-lucide="film" class="w-4 h-4"></i><span>${langIsEn() ? 'Export Seedance' : '导出 Seedance'}</span></button>
+            </div>
+        </div>` : node.runStatus === 'failed' && node.runError ? `
+        <div class="mx-shell-result-compact is-error-panel">
+            <div class="mx-shell-result-compact-hint">${escapeHtml(node.runError)}</div>
+        </div>` : ''}
+        <div class="agent-console-grid">
+            <label class="field">
+                <div class="setting-title">${langIsEn() ? 'Model' : '模型'}</div>
+                <select class="select-lite deepwhite-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
+            </label>
+            <label class="field">
+                <div class="setting-title">${langIsEn() ? 'Scene name' : '场景名'}</div>
+                <input class="setting-input deepwhite-scene-name" type="text" maxlength="40" value="${escapeHtml(node.scene_name || '')}" placeholder="${escapeAttr(langIsEn() ? 'Optional' : '可选')}">
+            </label>
+        </div>
+        <label class="field">
+            <div class="setting-title">${langIsEn() ? 'Scene / screenplay' : '场景 / 剧本'}</div>
+            ${upstreamScene && !String(node.scene || '').trim() ? `<div class="mx-shell-upstream-preview">${escapeHtml(upstreamScene.slice(0, 220))}${upstreamScene.length > 220 ? '…' : ''}</div>` : ''}
+            <textarea class="deepwhite-scene" placeholder="${langIsEn() ? 'Paste scene…' : '粘贴场景 / 剧本…'}">${escapeHtml(node.scene || '')}</textarea>
+        </label>
+        <label class="field">
+            <div class="setting-title">${langIsEn() ? 'Director hint (optional)' : '导演倾向（可选）'}</div>
+            <input class="setting-input deepwhite-director-hint" type="text" maxlength="120" value="${escapeHtml(node.director_hint || '')}" placeholder="${escapeAttr(langIsEn() ? 'e.g. Hitchcock' : '如：希区柯克')}">
+            <span class="batch-poster-field-hint">${langIsEn() ? 'Blank = auto-pick by dramatic function (not random).' : '留空则按戏剧功能自动选主规则（非随机）。'}</span>
+        </label>
+        <details class="agent-refs-fold" ${imageUrls.length ? 'open' : ''}>
+            <summary>${langIsEn() ? 'Reference images (optional)' : '参考图（可选）'}</summary>
+            <div class="mx-shell-ref-list"></div>
+        </details>
+        ${node.runError && !(node.runStatus === 'failed' && !outputText) ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
+        <div class="gen-run-row">
+            <button class="gen-btn deepwhite-run-btn ${node.running ? 'running' : ''}"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Designing…' : '设计中…') : (langIsEn() ? 'Generate' : '生成分镜')}</span></button>
+        </div>
+    `;
+    const modelSelect = wrap.querySelector('.deepwhite-text-model');
+    modelSelect.onmousedown = e => e.stopPropagation();
+    modelSelect.onclick = e => e.stopPropagation();
+    modelSelect.onchange = e => {
+        e.stopPropagation();
+        node.model = clampAgentTextModel(e.target.value);
+        scheduleSave();
+        refreshNodes([node.id]);
+    };
+    const nameEl = wrap.querySelector('.deepwhite-scene-name');
+    nameEl.onmousedown = e => e.stopPropagation();
+    nameEl.oninput = e => {
+        node.scene_name = String(e.target.value || '').slice(0, 40);
+        scheduleSave();
+    };
+    const sceneEl = wrap.querySelector('.deepwhite-scene');
+    bindScrollableText(sceneEl);
+    sceneEl.oninput = e => {
+        node.scene = String(e.target.value || '').slice(0, 20000);
+        scheduleSave();
+    };
+    const hintEl = wrap.querySelector('.deepwhite-director-hint');
+    hintEl.onmousedown = e => e.stopPropagation();
+    hintEl.oninput = e => {
+        node.director_hint = String(e.target.value || '').slice(0, 120);
+        scheduleSave();
+    };
+    const focusBtn = wrap.querySelector('.deepwhite-focus-view-btn');
+    if(focusBtn){
+        focusBtn.onclick = e => {
+            e.stopPropagation();
+            const view = ensureAgentTextOutputNode(node, 'deepWhite');
+            if(view && outputText) syncDeepWhiteShotToTextOutput(node, node.outputData || {markdown:outputText});
+            if(view){
+                selected.clear();
+                selected.add(view.id);
+                refreshNodes([node.id, view.id]);
+                scheduleSave();
+                requestAnimationFrame(() => {
+                    document.querySelector(`.node[data-id="${view.id}"]`)?.scrollIntoView?.({block:'nearest', behavior:'smooth'});
+                });
+            }
+        };
+    }
+    const nineBtn = wrap.querySelector('.deepwhite-to-ninegrid-btn');
+    if(nineBtn){
+        nineBtn.onclick = e => {
+            e.stopPropagation();
+            void pushDeepWhiteToNineGrid(node.id);
+        };
+    }
+    const seedBtn = wrap.querySelector('.deepwhite-seedance-btn');
+    if(seedBtn){
+        seedBtn.onclick = e => {
+            e.stopPropagation();
+            void exportDeepWhiteSeedance(node.id);
+        };
+    }
+    wrap.querySelector('.deepwhite-run-btn').onclick = e => {
+        e.stopPropagation();
+        void runDeepWhiteShotAgent(node.id);
+    };
+    renderMxShellRefList(wrap.querySelector('.mx-shell-ref-list'), node, langIsEn() ? 'Optional: connect reference images' : '可选：连接角色/道具/场景参考图');
+    return wrap;
+}
+async function runDeepWhiteShotAgent(nodeId, opts={}){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || node.type !== 'deepWhiteShotAgent' || isNodeDisabled(node)) return;
+    const scene = deepWhiteShotAgentScene(node);
+    if(scene.trim().length < 20){
+        const msg = langIsEn()
+            ? 'Provide a scene/screenplay (≥20 chars), or connect a Prompt node. DeepWhite requires a scene before designing shots.'
+            : '请提供场景/剧本（至少 20 字），或连接提示词节点。DeepWhite skill 要求先有场景再设计镜头。';
+        node.runStatus = 'failed';
+        node.runError = msg;
+        refreshNodes([nodeId]);
+        return;
+    }
+    if(!opts.cascade){
+        node.runStatus = 'running';
+        node.runError = '';
+        node.running = true;
+        refreshNodes([nodeId]);
+    }
+    setStatus(langIsEn() ? 'DeepWhite Shot Agent: designing…' : 'DeepWhite 导演分镜 Agent：正在设计…');
+    const execute = async () => {
+    try {
+        const bindings = mxShellPromptAgentImageBindings(node);
+        const imageUrls = [];
+        const resolvedBindings = [];
+        for(const b of bindings){
+            try {
+                const resolved = await resolveMxShellImageUrlForApi(b.url);
+                if(!resolved) continue;
+                imageUrls.push(resolved);
+                resolvedBindings.push({ index: imageUrls.length, name: b.name, kind: b.kind });
+            } catch(err) {
+                throw new Error(langIsEn()
+                    ? `Cannot read reference image: ${err?.message || err}`
+                    : `无法读取参考图：${err?.message || err}`);
+            }
+        }
+        const res = await apiFetch('/api/canvas/deepwhite-shot', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                scene,
+                sceneName:String(node.scene_name || '').trim(),
+                directorHint:String(node.director_hint || '').trim(),
+                imageUrls,
+                imageBindings:resolvedBindings,
+                includeImagePrompts:true,
+                model:clampAgentTextModel(node.model),
+            }),
+        });
+        if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'DeepWhite shot design failed' : 'DeepWhite 分镜生成失败'));
+        const data = await res.json();
+        const markdown = String(data.markdown || data.display_text || '').trim();
+        if(!markdown) throw new Error(langIsEn() ? 'Empty DeepWhite document' : 'DeepWhite 文档为空');
+        node.outputData = data;
+        node.outputText = markdown;
+        if(data.scene_name) node.scene_name = String(data.scene_name).slice(0, 40);
+        const view = syncDeepWhiteShotToTextOutput(node, data);
+        if(!opts.cascade) node.running = false;
+        node.runStatus = 'done';
+        node.runError = '';
+        const refreshIds = [nodeId];
+        if(view) refreshIds.push(view.id);
+        refreshNodes(refreshIds);
+        setStatus(langIsEn() ? 'DeepWhite document ready — see Doc node on the right' : 'DeepWhite 分镜文档已生成 — 见右侧文档节点');
+        scheduleSave();
+        if(view){
+            requestAnimationFrame(() => {
+                document.querySelector(`.node[data-id="${view.id}"]`)?.scrollIntoView?.({ block:'nearest', behavior:'smooth' });
+            });
+        }
+    } catch(err) {
+        if(!opts.cascade) node.running = false;
+        node.runStatus = 'failed';
+        node.runError = err.message || String(err);
+        refreshNodes([nodeId]);
+        if(opts.cascade) throw err;
+        scheduleSave();
+    }
+    };
+    if(opts.cascade) await execute();
+    else void execute();
+}
+function runDeepWhiteShotFromButton(nodeId, event){
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    void runDeepWhiteShotAgent(nodeId);
+}
+window.runDeepWhiteShotFromButton = runDeepWhiteShotFromButton;
+
+function findDownstreamNineGridFromDeepWhite(agent){
+    if(!agent) return null;
+    const outs = connections
+        .filter(c => c.from === agent.id)
+        .map(c => nodes.find(n => n.id === c.to))
+        .filter(Boolean);
+    const direct = outs.find(n => n.type === 'nineGridAgent');
+    if(direct) return direct;
+    for(const view of outs.filter(n => isTextOutputNode(n) || n.type === 'deepWhiteShotView')){
+        const ng = connections
+            .filter(c => c.from === view.id)
+            .map(c => nodes.find(n => n.id === c.to))
+            .find(n => n?.type === 'nineGridAgent');
+        if(ng) return ng;
+    }
+    return null;
+}
+async function pushDeepWhiteToNineGrid(nodeId){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || node.type !== 'deepWhiteShotAgent' || isNodeDisabled(node)) return;
+    const markdown = String(node.outputText || '').trim();
+    if(!markdown){
+        setStatus(langIsEn() ? 'No DeepWhite document to push' : '没有可推送的 DeepWhite 文档');
+        return;
+    }
+    let nine = findDownstreamNineGridFromDeepWhite(node);
+    if(!nine){
+        nine = addNineGridAgentNode({x:node.x + 480, y:node.y});
+        connections.push({id:uid('c'), from:node.id, to:nine.id});
+    }
+    setStatus(langIsEn() ? 'Pushing DeepWhite → Nine Grid…' : '正在推送 DeepWhite → 九宫格…');
+    try {
+        const res = await apiFetch('/api/canvas/deepwhite-to-ninegrid', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                markdown,
+                model:clampAgentTextModel(node.model),
+            }),
+        });
+        if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'DeepWhite → Nine Grid failed' : '推送到九宫格失败'));
+        const data = await res.json();
+        const shots = Array.isArray(data.shots) ? data.shots : [];
+        if(!shots.length) throw new Error(langIsEn() ? 'No shots returned' : '未返回九宫格镜头');
+        nine.shots = shots;
+        nine.promptSource = 'deepWhite';
+        nine.autoCrop = false;
+        nine.runStatus = 'done';
+        nine.runError = '';
+        nine.running = false;
+        nine.gridUrl = null;
+        nine.croppedUrls = [];
+        refreshNodes([nodeId, nine.id]);
+        scheduleSave();
+        setStatus(langIsEn()
+            ? `Nine Grid ready · ${shots.length} shots (auto-crop off — board only)`
+            : `九宫格已就绪 · ${shots.length} 镜（已关自动切格，默认只出整板）`);
+        requestAnimationFrame(() => {
+            document.querySelector(`.node[data-id="${nine.id}"]`)?.scrollIntoView?.({block:'nearest', behavior:'smooth'});
+        });
+    } catch(err) {
+        setStatus(err.message || String(err));
+        nine.runStatus = 'failed';
+        nine.runError = err.message || String(err);
+        refreshNodes([nine.id]);
+        scheduleSave();
+    }
+}
+async function exportDeepWhiteSeedance(nodeId){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || node.type !== 'deepWhiteShotAgent' || isNodeDisabled(node)) return;
+    const markdown = String(node.outputText || '').trim();
+    if(!markdown){
+        setStatus(langIsEn() ? 'No DeepWhite document to export' : '没有可导出的 DeepWhite 文档');
+        return;
+    }
+    setStatus(langIsEn() ? 'Exporting Seedance…' : '正在导出 Seedance…');
+    try {
+        const res = await apiFetch('/api/canvas/deepwhite-seedance', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                markdown,
+                model:clampAgentTextModel(node.model),
+            }),
+        });
+        if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Seedance export failed' : 'Seedance 导出失败'));
+        const data = await res.json();
+        const view = syncSeedanceToTextOutput(node, data);
+        const refreshIds = [nodeId];
+        if(view) refreshIds.push(view.id);
+        refreshNodes(refreshIds);
+        scheduleSave();
+        setStatus(langIsEn()
+            ? `Seedance ready${data.shot_count ? ` · ${data.shot_count} shots` : ''}`
+            : `Seedance 已导出${data.shot_count ? ` · ${data.shot_count} 镜` : ''}`);
+        if(view){
+            requestAnimationFrame(() => {
+                document.querySelector(`.node[data-id="${view.id}"]`)?.scrollIntoView?.({block:'nearest', behavior:'smooth'});
+            });
+        }
+    } catch(err) {
+        setStatus(err.message || String(err));
+    }
+}
+
+function renderScreenwritingAgentBody(node){
+    node.model = clampAgentTextModel(node.model);
+    node.mode = normalizeScreenwritingMode(node.mode);
+    const outputText = String(node.outputText || '').trim();
+    if(node.runStatus === 'done' && !outputText){
+        node.runStatus = 'failed';
+        node.runError = langIsEn() ? 'Marked done but no script. Please regenerate.' : '显示完成但没有剧本，请重新生成。';
+    }
+    const wrap = document.createElement('div');
+    wrap.className = 'generator-body screenwriting-agent-body agent-console-body';
+    wrap.innerHTML = `
+        <div class="agent-status-bar ${String(node.brief || '').trim().length >= 8 || String(node.material || '').trim().length >= 8 ? 'ok' : 'warn'}">${escapeHtml([
+            screenwritingModeLabel(node.mode),
+            clampAgentTextModel(node.model),
+            outputText ? (langIsEn() ? 'Ready' : '已生成') : (langIsEn() ? 'Need brief/material' : '需 brief/素材'),
+        ].join(' · '))}</div>
+        ${outputText ? `
+        <div class="mx-shell-result-compact">
+            <div class="mx-shell-result-compact-title">${langIsEn() ? 'Ready' : '已生成'}${node.outputData?.title ? ' · ' + escapeHtml(node.outputData.title) : ''}</div>
+            <button type="button" class="gen-btn screenwriting-focus-view-btn"><i data-lucide="panel-right" class="w-4 h-4"></i><span>${langIsEn() ? 'Open text output' : '打开文本输出'}</span></button>
+        </div>` : node.runStatus === 'failed' && node.runError ? `
+        <div class="mx-shell-result-compact is-error-panel">
+            <div class="mx-shell-result-compact-hint">${escapeHtml(node.runError)}</div>
+        </div>` : ''}
+        <div class="agent-console-grid">
+            <label class="field">
+                <div class="setting-title">${langIsEn() ? 'Mode' : '模式'}</div>
+                <select class="select-lite screenwriting-mode">
+                    <option value="from_scratch" ${node.mode === 'from_scratch' ? 'selected' : ''}>${langIsEn() ? 'From scratch' : '从零创作'}</option>
+                    <option value="diagnose" ${node.mode === 'diagnose' ? 'selected' : ''}>${langIsEn() ? 'Diagnose' : '诊断'}</option>
+                    <option value="rewrite" ${node.mode === 'rewrite' ? 'selected' : ''}>${langIsEn() ? 'Rewrite' : '改写'}</option>
+                    <option value="scene" ${node.mode === 'scene' ? 'selected' : ''}>${langIsEn() ? 'Scene' : '分场'}</option>
+                </select>
+            </label>
+            <label class="field">
+                <div class="setting-title">${langIsEn() ? 'Model' : '模型'}</div>
+                <select class="select-lite screenwriting-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
+            </label>
+        </div>
+        <label class="field">
+            <div class="setting-title">${langIsEn() ? 'Duration hint' : '时长提示'}</div>
+            <input class="setting-input screenwriting-duration" type="text" maxlength="80" value="${escapeHtml(node.durationHint || '')}" placeholder="${escapeAttr(langIsEn() ? 'e.g. 90s / 3min' : '如：90秒 / 3分钟')}">
+        </label>
+        <label class="field">
+            <div class="setting-title">${langIsEn() ? 'Brief' : 'Brief / 创意'}</div>
+            <textarea class="screenwriting-brief" placeholder="${langIsEn() ? 'Logline / brief…' : '一句话创意 / brief…'}">${escapeHtml(node.brief || '')}</textarea>
+        </label>
+        <label class="field">
+            <div class="setting-title">${langIsEn() ? 'Material' : '素材 / 原文'}</div>
+            <textarea class="screenwriting-material" placeholder="${langIsEn() ? 'Paste draft / material…' : '粘贴草稿 / 素材…'}">${escapeHtml(node.material || '')}</textarea>
+        </label>
+        ${node.runError && !(node.runStatus === 'failed' && !outputText) ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
+        <div class="gen-run-row">
+            <button class="gen-btn screenwriting-run-btn ${node.running ? 'running' : ''}"><i data-lucide="pen-line" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Writing…' : '创作中…') : (langIsEn() ? 'Generate' : '生成剧本')}</span></button>
+        </div>
+    `;
+    const modeSelect = wrap.querySelector('.screenwriting-mode');
+    modeSelect.onmousedown = e => e.stopPropagation();
+    modeSelect.onclick = e => e.stopPropagation();
+    modeSelect.onchange = e => {
+        e.stopPropagation();
+        node.mode = normalizeScreenwritingMode(e.target.value);
+        scheduleSave();
+        refreshNodes([node.id]);
+    };
+    const modelSelect = wrap.querySelector('.screenwriting-text-model');
+    modelSelect.onmousedown = e => e.stopPropagation();
+    modelSelect.onclick = e => e.stopPropagation();
+    modelSelect.onchange = e => {
+        e.stopPropagation();
+        node.model = clampAgentTextModel(e.target.value);
+        scheduleSave();
+        refreshNodes([node.id]);
+    };
+    const durationEl = wrap.querySelector('.screenwriting-duration');
+    durationEl.onmousedown = e => e.stopPropagation();
+    durationEl.oninput = e => {
+        node.durationHint = String(e.target.value || '').slice(0, 80);
+        scheduleSave();
+    };
+    const briefEl = wrap.querySelector('.screenwriting-brief');
+    bindScrollableText(briefEl);
+    briefEl.oninput = e => {
+        node.brief = String(e.target.value || '').slice(0, 8000);
+        scheduleSave();
+    };
+    const materialEl = wrap.querySelector('.screenwriting-material');
+    bindScrollableText(materialEl);
+    materialEl.oninput = e => {
+        node.material = String(e.target.value || '').slice(0, 20000);
+        scheduleSave();
+    };
+    const focusBtn = wrap.querySelector('.screenwriting-focus-view-btn');
+    if(focusBtn){
+        focusBtn.onclick = e => {
+            e.stopPropagation();
+            const view = ensureAgentTextOutputNode(node, 'screenwriting');
+            if(view && outputText) syncScreenwritingToTextOutput(node, node.outputData || {markdown:outputText});
+            if(view){
+                selected.clear();
+                selected.add(view.id);
+                refreshNodes([node.id, view.id]);
+                scheduleSave();
+                requestAnimationFrame(() => {
+                    document.querySelector(`.node[data-id="${view.id}"]`)?.scrollIntoView?.({block:'nearest', behavior:'smooth'});
+                });
+            }
+        };
+    }
+    wrap.querySelector('.screenwriting-run-btn').onclick = e => {
+        e.stopPropagation();
+        void runScreenwritingAgent(node.id);
+    };
+    return wrap;
+}
+async function runScreenwritingAgent(nodeId, opts={}){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || node.type !== 'screenwritingAgent' || isNodeDisabled(node)) return;
+    const brief = String(node.brief || '').trim();
+    const material = String(node.material || '').trim();
+    if(brief.length < 8 && material.length < 8){
+        const msg = langIsEn()
+            ? 'Provide a brief or material (≥8 chars).'
+            : '请提供 brief 或素材（至少 8 字）。';
+        node.runStatus = 'failed';
+        node.runError = msg;
+        refreshNodes([nodeId]);
+        return;
+    }
+    if(!opts.cascade){
+        node.runStatus = 'running';
+        node.runError = '';
+        node.running = true;
+        refreshNodes([nodeId]);
+    }
+    setStatus(langIsEn() ? 'Screenwriting Agent: writing…' : '编剧 Agent：正在创作…');
+    const execute = async () => {
+    try {
+        const res = await apiFetch('/api/canvas/screenwriting', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                mode:normalizeScreenwritingMode(node.mode),
+                brief,
+                material,
+                durationHint:String(node.durationHint || '').trim(),
+                model:clampAgentTextModel(node.model),
+            }),
+        });
+        if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Screenwriting failed' : '编剧生成失败'));
+        const data = await res.json();
+        const markdown = String(data.markdown || data.display_text || '').trim();
+        if(!markdown) throw new Error(langIsEn() ? 'Empty screenwriting output' : '编剧输出为空');
+        node.outputData = data;
+        node.outputText = markdown;
+        if(data.mode) node.mode = normalizeScreenwritingMode(data.mode);
+        const view = syncScreenwritingToTextOutput(node, data);
+        if(!opts.cascade) node.running = false;
+        node.runStatus = 'done';
+        node.runError = '';
+        const refreshIds = [nodeId];
+        if(view) refreshIds.push(view.id);
+        refreshNodes(refreshIds);
+        setStatus(langIsEn() ? 'Screenwriting ready — see text output' : '编剧已生成 — 见右侧文本输出');
+        scheduleSave();
+        if(view){
+            requestAnimationFrame(() => {
+                document.querySelector(`.node[data-id="${view.id}"]`)?.scrollIntoView?.({block:'nearest', behavior:'smooth'});
+            });
+        }
+    } catch(err) {
+        if(!opts.cascade) node.running = false;
+        node.runStatus = 'failed';
+        node.runError = err.message || String(err);
+        refreshNodes([nodeId]);
+        if(opts.cascade) throw err;
+        scheduleSave();
+    }
+    };
+    if(opts.cascade) await execute();
+    else void execute();
+}
+function runScreenwritingFromButton(nodeId, event){
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    void runScreenwritingAgent(nodeId);
+}
+window.runScreenwritingFromButton = runScreenwritingFromButton;
+
 function replicaAgentUpstreamImages(node, ctx=loopContext){
     if(!node || node.type !== 'replicaAgent') return [];
     return orderedSources(node, generatorSources(node, ctx))
@@ -11039,6 +12738,9 @@ function normalizeNineGridAgentNode(node){
     if(!node.resolution) node.resolution = '4k';
     if(!node.ratio) node.ratio = 'wide';
     if(!node.quality) node.quality = 'medium';
+    // 默认自动切 9；DeepWhite 推送会设为 false
+    if(typeof node.autoCrop !== 'boolean') node.autoCrop = true;
+    if(!node.promptSource) node.promptSource = '';
     const legacy = String(node.imageModel || node.model || '').trim();
     if(/^nano-banana-pro-4k$/i.test(legacy) || legacy === 'nano') node.model = models.nano || 'nano-banana-pro';
     else if(legacy) node.model = resolveImageModel(legacy);
@@ -11109,6 +12811,8 @@ function addNineGridAgentNode(point){
         croppedUrls:[],
         cropPadding:0,
         cropGap:0,
+        autoCrop:true,
+        promptSource:'',
         apiProvider:providerId,
         model:models.nano || 'nano-banana-pro',
         resolution:'4k',
@@ -11162,14 +12866,17 @@ function updateNineGridRunButtons(node){
     const full = el.querySelector('.nine-grid-full-btn span');
     const progress = node.batchProgress || {};
     const runningLabel = langIsEn() ? 'Running…' : '运行中…';
+    const phaseBIdle = node.autoCrop
+        ? (langIsEn() ? 'Phase B: Grid + crop' : '② 生成大图并切格')
+        : (langIsEn() ? 'Phase B: Board only' : '② 只生成大图');
     if(node.running){
         if(phaseA) phaseA.textContent = progress.phase === 'text' ? runningLabel : (langIsEn() ? 'Phase A: Prompts' : '① 生成分镜');
-        if(phaseB) phaseB.textContent = progress.phase === 'image' ? runningLabel : (langIsEn() ? 'Phase B: Grid image' : '② 生成大图');
+        if(phaseB) phaseB.textContent = (progress.phase === 'image' || progress.phase === 'crop') ? runningLabel : phaseBIdle;
         if(full) full.textContent = runningLabel;
         return;
     }
     if(phaseA) phaseA.textContent = langIsEn() ? 'Phase A: Prompts' : '① 生成分镜';
-    if(phaseB) phaseB.textContent = langIsEn() ? 'Phase B: Grid image' : '② 生成大图';
+    if(phaseB) phaseB.textContent = phaseBIdle;
     if(full) full.textContent = langIsEn() ? 'Run all' : '一键全流程';
 }
 async function nineGridFetchJson(body){
@@ -11216,24 +12923,60 @@ async function syncNineGridSpawnedOutputs(node, croppedUrls, opts={}){
     refreshNodes(refreshIds);
     scheduleSave();
 }
+/** 只出大图（不切格）时，把整板分镜图丢到 Output */
+async function syncNineGridBoardOutput(node, gridUrl){
+    const url = String(gridUrl || '').trim();
+    if(!url) return;
+    const refs = nineGridAgentRefs(node);
+    const run = runSnapshot(node, langIsEn() ? 'Nine Grid Board' : '九宫格整板', refs);
+    const out = outputForNode(node, 460);
+    if(out){
+        appendOutputImages(out, [url], refs[0] || null, [{
+            runMs:0,
+            run,
+            model:resolveImageModel(node.model),
+            prompt:(normalizeNineGridShots(node.shots) || []).map(s => s.prompt).filter(Boolean).join('\n').slice(0, 2000),
+            kind:'image',
+        }]);
+    }
+    node.croppedUrls = [];
+    const refreshIds = [node.id];
+    if(out) refreshIds.push(out.id);
+    refreshNodes(refreshIds);
+    scheduleSave();
+}
+function nineGridShouldConfirmOverwritePrompts(node){
+    const shots = normalizeNineGridShots(node.shots);
+    if(!shots?.length) return false;
+    return String(node.promptSource || '') === 'deepWhite';
+}
+function confirmNineGridOverwriteDeepWhite(node){
+    if(!nineGridShouldConfirmOverwritePrompts(node)) return true;
+    const msg = langIsEn()
+        ? 'This Nine Grid already has DeepWhite-pushed prompts. Regenerate Phase A and overwrite them?'
+        : '当前九宫格已有 DeepWhite 推送的分镜提示词。重新跑「① 生成分镜」会覆盖它们，确定吗？';
+    return window.confirm(msg);
+}
 async function runNineGridPhaseA(nodeId){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || node.type !== 'nineGridAgent' || isNodeDisabled(node)) return;
+    if(!node || node.type !== 'nineGridAgent' || isNodeDisabled(node)) return false;
+    // 取消覆盖确认时必须返回 false，避免「一键全流程」继续跑 Phase B
+    if(!confirmNineGridOverwriteDeepWhite(node)) return false;
     const story = nineGridAgentStory(node);
     const refs = nineGridAgentRefsPayload(node);
     if(story.length < 10){
-        const msg = langIsEn() ? 'Enter a story (10+ chars) or connect a Prompt node.' : '请输入剧本（至少 10 字）或连接 Prompt 节点。';
+        const msg = langIsEn() ? 'Enter a story (10+ chars) or connect a Prompt node.' : '请输入剧本（至少 10 字）或上游连接 Prompt。';
         node.runStatus = 'failed';
         node.runError = msg;
         refreshNodes([nodeId]);
-        return;
+        return false;
     }
     if(!refs.length){
         const msg = langIsEn() ? 'Connect at least one reference image.' : '请至少连接 1 张参考图。';
         node.runStatus = 'failed';
         node.runError = msg;
         refreshNodes([nodeId]);
-        return;
+        return false;
     }
     node.running = true;
     node.runStatus = 'running';
@@ -11249,6 +12992,7 @@ async function runNineGridPhaseA(nodeId){
         const shots = normalizeNineGridShots(data.shots);
         if(!shots) throw new Error(langIsEn() ? 'Invalid shots response' : '分镜提示词返回格式异常');
         node.shots = shots;
+        node.promptSource = 'story';
         node.refLooks = Array.isArray(data.refLooks) ? data.refLooks : [];
         const visionWarn = nineGridRefVisionWarnings(node);
         if(visionWarn.length){
@@ -11261,9 +13005,11 @@ async function runNineGridPhaseA(nodeId){
         node.gridUrl = null;
         node.croppedUrls = [];
         node.runStatus = 'done';
+        return true;
     } catch(err) {
         node.runStatus = 'failed';
         node.runError = err.message || String(err);
+        return false;
     } finally {
         node.running = false;
         node.batchProgress = null;
@@ -11275,6 +13021,7 @@ async function runNineGridPhaseA(nodeId){
 async function runNineGridPhaseB(nodeId){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || node.type !== 'nineGridAgent' || isNodeDisabled(node)) return;
+    normalizeNineGridAgentNode(node);
     const refs = nineGridAgentRefsPayload(node);
     const shots = normalizeNineGridShots(node.shots);
     if(!refs.length){
@@ -11308,19 +13055,26 @@ async function runNineGridPhaseB(nodeId){
         const gridUrl = result.url || (Array.isArray(result.images) ? result.images[0] : '') || '';
         if(!gridUrl) throw new Error(langIsEn() ? 'No grid image URL returned' : '未返回九宫格大图 URL');
         node.gridUrl = gridUrl;
-        node.running = true;
-        updateNineGridAgentProgress(node, 'crop', 0, 1);
-        try {
-            const dataUrls = await splitNineGridToNine(gridUrl, node.cropPadding || 0, node.cropGap || 0);
-            const uploaded = await uploadNineGridDataUrls(dataUrls);
-            const urls = uploaded.map(f => f.url).filter(Boolean);
-            if(urls.length !== 9) throw new Error(langIsEn() ? 'Upload after split failed' : '切图上传失败');
-            await syncNineGridSpawnedOutputs(node, urls, {newGroup:true});
-        } catch(cropErr) {
-            node.croppedUrls = [];
-            node.runError = cropErr.message || String(cropErr);
-            node.runStatus = 'failed';
-            throw cropErr;
+        if(node.autoCrop){
+            node.running = true;
+            updateNineGridAgentProgress(node, 'crop', 0, 1);
+            try {
+                const dataUrls = await splitNineGridToNine(gridUrl, node.cropPadding || 0, node.cropGap || 0);
+                const uploaded = await uploadNineGridDataUrls(dataUrls);
+                const urls = uploaded.map(f => f.url).filter(Boolean);
+                if(urls.length !== 9) throw new Error(langIsEn() ? 'Upload after split failed' : '切图上传失败');
+                await syncNineGridSpawnedOutputs(node, urls, {newGroup:true});
+            } catch(cropErr) {
+                node.croppedUrls = [];
+                node.runError = cropErr.message || String(cropErr);
+                node.runStatus = 'failed';
+                throw cropErr;
+            }
+        } else {
+            await syncNineGridBoardOutput(node, gridUrl);
+            setStatus(langIsEn()
+                ? 'Nine Grid board ready (auto-crop off). Use “Re-crop 9” if needed.'
+                : '九宫格整板已生成（未自动切格）。需要时再点「切 9 张」。');
         }
         node.runStatus = 'done';
     } catch(err) {
@@ -11335,9 +13089,12 @@ async function runNineGridPhaseB(nodeId){
     }
 }
 async function runNineGridFull(nodeId){
-    await runNineGridPhaseA(nodeId);
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || node.runStatus === 'failed' || !normalizeNineGridShots(node.shots)) return;
+    if(!node || node.type !== 'nineGridAgent' || isNodeDisabled(node)) return;
+    const phaseAOk = await runNineGridPhaseA(nodeId);
+    if(!phaseAOk) return;
+    const after = nodes.find(n => n.id === nodeId);
+    if(!after || after.runStatus === 'failed' || !normalizeNineGridShots(after.shots)) return;
     await runNineGridPhaseB(nodeId);
 }
 async function runNineGridCrop(nodeId){
@@ -11464,10 +13221,15 @@ function renderNineGridAgentBody(node){
             <div class="input-list nine-grid-input-list"></div>
         </div>
         <div class="nine-grid-section nine-grid-crop-row">
+            <label class="nine-grid-autocrop-label">
+                <input type="checkbox" class="nine-grid-autocrop" ${node.autoCrop ? 'checked' : ''}>
+                <span>${langIsEn() ? 'Auto-crop 9 after board' : '生成大图后自动切 9 张'}</span>
+            </label>
             <label><span>Padding</span><input type="number" class="nine-grid-padding setting-input" min="0" max="200" value="${Number(node.cropPadding || 0)}"></label>
             <label><span>Gap</span><input type="number" class="nine-grid-gap setting-input" min="0" max="200" value="${Number(node.cropGap || 0)}"></label>
             <button type="button" class="nine-grid-estimate-gap-btn">${langIsEn() ? 'Estimate seam' : '估算 seam'}</button>
         </div>
+        ${node.promptSource === 'deepWhite' ? `<div class="nine-grid-hint">${langIsEn() ? 'Prompts from DeepWhite · auto-crop off by default' : '分镜来自 DeepWhite · 默认不自动切格'}</div>` : ''}
         <div class="nine-grid-section">
             <label class="nine-grid-model-field">
                 <span>${langIsEn() ? 'Text model' : '文本模型'}</span>
@@ -11502,9 +13264,9 @@ function renderNineGridAgentBody(node){
     runRow.className = 'gen-run-row nine-grid-run-row';
     runRow.innerHTML = `
         <button type="button" class="gen-btn nine-grid-phase-a-btn ${node.running ? 'running' : ''}"><span>${langIsEn() ? 'Phase A: Prompts' : '① 生成分镜'}</span></button>
-        <button type="button" class="gen-btn nine-grid-phase-b-btn ${node.running ? 'running' : ''}"><span>${langIsEn() ? 'Phase B: Grid image' : '② 生成大图'}</span></button>
+        <button type="button" class="gen-btn nine-grid-phase-b-btn ${node.running ? 'running' : ''}"><span>${node.autoCrop ? (langIsEn() ? 'Phase B: Grid + crop' : '② 生成大图并切格') : (langIsEn() ? 'Phase B: Board only' : '② 只生成大图')}</span></button>
         <button type="button" class="gen-btn nine-grid-full-btn ${node.running ? 'running' : ''}"><span>${langIsEn() ? 'Run all' : '一键全流程'}</span></button>
-        <button type="button" class="gen-btn nine-grid-crop-btn ${node.running ? 'running' : ''}" ${!node.gridUrl || isNodeDisabled(node) ? 'disabled' : ''}><span>${langIsEn() ? 'Re-crop 9' : '重新切 9 张'}</span></button>
+        <button type="button" class="gen-btn nine-grid-crop-btn ${node.running ? 'running' : ''}" ${!node.gridUrl || isNodeDisabled(node) ? 'disabled' : ''}><span>${langIsEn() ? 'Crop 9' : '切 9 张'}</span></button>
     `;
     wrap.appendChild(scroll);
     wrap.appendChild(runRow);
@@ -11526,6 +13288,17 @@ function bindNineGridAgentControls(wrap, node){
             scheduleSave();
         };
         storyEl.onmousedown = e => e.stopPropagation();
+    }
+    const autoCropEl = wrap.querySelector('.nine-grid-autocrop');
+    if(autoCropEl){
+        autoCropEl.onmousedown = e => e.stopPropagation();
+        autoCropEl.onclick = e => e.stopPropagation();
+        autoCropEl.onchange = e => {
+            e.stopPropagation();
+            node.autoCrop = Boolean(autoCropEl.checked);
+            scheduleSave();
+            refreshNodes([node.id]);
+        };
     }
     const padEl = wrap.querySelector('.nine-grid-padding');
     if(padEl){
@@ -12329,70 +14102,717 @@ async function runVideoReverseNode(nodeId, opts={}){
         if(opts.cascade) throw err;
     }
 }
-function renderGeneratorBody(node){
-    const wrap = document.createElement('div');
-    wrap.className = 'generator-body';
-    const inputSources = generatorSources(node);
-    const ordered = orderedSources(node, inputSources);
-    const imageInputs = ordered.filter(src => src.refs?.length);
-    const promptInputs = ordered.filter(src => src.prompt && !src.refs?.length);
-    node.apiProvider = resolveImageProviderId(node.apiProvider || '');
-    const migratedModel = normalizeLegacyImageModelId(node.model);
-    if(migratedModel !== String(node.model || '').trim()) node.model = migratedModel;
-    const imageProviderModels = providerImageModels(node.apiProvider);
-    if(!imageProviderModels.length) node.model = '';
-    else if(!imageProviderModels.includes(resolveImageModel(node.model))) node.model = imageProviderModels[0] || '';
-    const perItemRefs = perItemGroupImageRefs(ordered, null);
-    const perItemHint = perItemRefs?.length >= 2
-        ? `<div class="image-batch-per-item-hint text-[10px] text-amber-400/90 mb-2">${escapeHtml(trf('canvas.imageBatchPerItemHint', {n: perItemRefs.length}))}</div>`
-        : '';
-    wrap.innerHTML = `
-        <div class="prompt-list mb-3"></div>
-        <div class="generator-section-label">${tr('canvas.images')}</div>
-        ${perItemHint}
-        <div class="input-list"></div>
-        <div class="gen-settings">
-            <div class="gen-settings-row gen-provider-row">
-                <select class="select-lite provider-select">${providerOptions(node.apiProvider)}</select>
-                <select class="select-lite model-select">${imageModelOptions(node.model, node.apiProvider)}</select>
+/** 上游 Prompt 节点 + 节点内 textarea 合并为同一条生图 prompt */
+function composeGeneratorPrompt(gen, sources){
+    const parts = [
+        ...(sources || []).map(s => String(s?.prompt || '').trim()).filter(Boolean),
+        String(gen?.prompt || '').trim()
+    ].filter(Boolean);
+    return parts.join('\n\n');
+}
+function isGenConsoleNode(node){
+    return node && node.type === 'generator';
+}
+const MAX_GEN_PREVIEW = 24;
+const MAX_GEN_HISTORY = 48;
+let genHistoryPanelEl = null;
+let genHistoryPanelNodeId = null;
+
+function generatorHistoryItems(node){
+    if(!isGenConsoleNode(node)) return [];
+    if(Array.isArray(node.history) && node.history.length){
+        return node.history
+            .map(item => {
+                const url = outputUrlValue(item);
+                if(!url) return null;
+                if(item && typeof item === 'object') return {...item, url};
+                return {url};
+            })
+            .filter(Boolean);
+    }
+    // 旧画布：仅有 previewRoundUrls 时升格为无元数据条目
+    return (node.previewRoundUrls || [])
+        .map(outputUrlValue)
+        .filter(Boolean)
+        .map(url => ({url}));
+}
+function syncGeneratorPreviewFromHistory(gen){
+    if(!isGenConsoleNode(gen)) return;
+    const urls = generatorHistoryItems(gen).map(item => item.url).filter(Boolean);
+    gen.previewRoundUrls = urls.length > MAX_GEN_PREVIEW ? urls.slice(-MAX_GEN_PREVIEW) : urls;
+    clampGeneratorPreviewIndex(gen);
+}
+function clampGeneratorPreviewIndex(gen){
+    if(!gen) return;
+    const urls = generatorPreviewUrls(gen);
+    if(!urls.length){
+        delete gen.previewIndex;
+        return;
+    }
+    const idx = Number(gen.previewIndex);
+    if(!Number.isFinite(idx)){
+        gen.previewIndex = urls.length - 1;
+        return;
+    }
+    gen.previewIndex = Math.max(0, Math.min(urls.length - 1, idx));
+}
+function resetGeneratorPreviewRound(gen){
+    if(!isGenConsoleNode(gen)) return;
+    // 新一轮生成不清空整库 history，只重置本轮预览指针由 append 接管
+    gen.historyOpen = false;
+}
+function appendGeneratorHistory(gen, outputs, meta={}){
+    if(!isGenConsoleNode(gen)) return;
+    const urls = (outputs || []).map(outputUrlValue).filter(Boolean);
+    if(!urls.length) return;
+    const prompt = outputMetaPrompt(meta) || String(gen.prompt || '').trim();
+    const model = outputImageModelLabel(meta) || String(gen.model || '');
+    const runMs = Number(meta.runMs || 0) || 0;
+    const run = meta.run || null;
+    const existing = generatorHistoryItems(gen);
+    const seen = new Set(existing.map(item => item.url));
+    const next = [...existing];
+    urls.forEach(url => {
+        if(seen.has(url)) return;
+        seen.add(url);
+        next.push({
+            url,
+            prompt: prompt || '',
+            model: model || '',
+            runMs,
+            run,
+            viewed: false,
+            createdAt: nowMs(),
+        });
+    });
+    gen.history = next.length > MAX_GEN_HISTORY ? next.slice(-MAX_GEN_HISTORY) : next;
+    syncGeneratorPreviewFromHistory(gen);
+    gen.previewIndex = Math.max(0, (gen.previewRoundUrls || []).length - 1);
+}
+function appendGeneratorPreviewRound(gen, outputs, meta={}){
+    appendGeneratorHistory(gen, outputs, meta);
+}
+function generatorPreviewUrls(node){
+    const items = generatorHistoryItems(node);
+    if(items.length){
+        const urls = items.map(item => item.url).filter(Boolean);
+        return urls.length > MAX_GEN_PREVIEW ? urls.slice(-MAX_GEN_PREVIEW) : urls;
+    }
+    const round = Array.isArray(node?.previewRoundUrls) ? node.previewRoundUrls : [];
+    const raw = round.length
+        ? round.map(outputUrlValue).filter(Boolean)
+        : (node?.generatedOutputs || []).map(outputUrlValue).filter(Boolean);
+    return raw.length > MAX_GEN_PREVIEW ? raw.slice(-MAX_GEN_PREVIEW) : raw;
+}
+function generatorHistoryItemAt(node, index){
+    const items = generatorHistoryItems(node);
+    if(!items.length) return null;
+    const idx = Math.max(0, Math.min(items.length - 1, Number(index)));
+    return items[idx] || null;
+}
+function setGeneratorPrimaryFromHistory(gen, historyIndex){
+    if(!isGenConsoleNode(gen)) return;
+    const items = generatorHistoryItems(gen);
+    if(!items.length) return;
+    const idx = Math.max(0, Math.min(items.length - 1, Number(historyIndex)));
+    const item = items[idx];
+    if(!item?.url) return;
+    // 预览条只保留最近 MAX_GEN_PREVIEW：把选中项映射到 previewRoundUrls 下标
+    syncGeneratorPreviewFromHistory(gen);
+    const previewUrls = gen.previewRoundUrls || [];
+    let previewIdx = previewUrls.indexOf(item.url);
+    if(previewIdx < 0){
+        // 选中的在更早历史里：临时塞进预览尾部
+        previewUrls.push(item.url);
+        gen.previewRoundUrls = previewUrls.length > MAX_GEN_PREVIEW
+            ? previewUrls.slice(-MAX_GEN_PREVIEW)
+            : previewUrls;
+        previewIdx = gen.previewRoundUrls.length - 1;
+    }
+    gen.previewIndex = previewIdx;
+    gen.historyIndex = idx;
+}
+function fitImageNodeToNaturalAspect(node, el, img){
+    if(!node || node.type !== 'image' || !img) return;
+    if(mediaKindForNode(node) !== 'image') return;
+    const nw = img.naturalWidth || 0;
+    const nh = img.naturalHeight || 0;
+    if(!nw || !nh) return;
+    // 手动拉过大小则只保留框内 contain，不改写比例驱动的高
+    if(node._userSized) return;
+    const w = Math.max(48, Number(node.w || el?.offsetWidth || defaultNodeSize('image').w || 260));
+    const h = Math.max(48, Math.round(w * nh / nw));
+    node.w = w;
+    node.h = h;
+    if(el){
+        el.style.width = `${w}px`;
+        el.style.height = `${h}px`;
+        el.classList.add('sized');
+    }
+}
+function applyNaturalAspectFromImg(img, frameEl, node){
+    if(!img || !frameEl) return;
+    const apply = () => {
+        const nw = img.naturalWidth || 0;
+        const nh = img.naturalHeight || 0;
+        if(!nw || !nh) return;
+        frameEl.style.aspectRatio = `${nw} / ${nh}`;
+        if(node?.type === 'generator' && !node._userSized){
+            delete node._baseFrameH;
+            fitGeneratorNodeHeight(node);
+            if(selected.has(node.id)) requestAnimationFrame(() => positionImageGenDock(node));
+        }
+    };
+    if(img.complete && img.naturalWidth > 0) apply();
+    else img.addEventListener('load', apply, {once:true});
+}
+function generatorPendingList(node){
+    if(!isGenConsoleNode(node)) return [];
+    const list = [];
+    const take = (host) => {
+        (host?._pending || []).forEach(p => {
+            if(!p?.id) return;
+            if(host.type === 'output' && p.run?.node?.id && p.run.node.id !== node.id) return;
+            list.push(p);
+        });
+    };
+    take(node);
+    nodes.filter(n => n.type === 'output').forEach(take);
+    return list;
+}
+function closeGenHistoryPanel(){
+    if(genHistoryPanelEl){
+        genHistoryPanelEl.remove();
+        genHistoryPanelEl = null;
+    }
+    genHistoryPanelNodeId = null;
+}
+function refreshOpenGenHistoryPanel(){
+    if(!genHistoryPanelEl || !genHistoryPanelNodeId) return;
+    const node = nodes.find(n => n.id === genHistoryPanelNodeId);
+    if(!node || node.type !== 'generator'){
+        closeGenHistoryPanel();
+        return;
+    }
+    openGenHistoryPanel(node, {reuse:true});
+}
+function openGenHistoryPanel(node, opts={}){
+    if(!isGenConsoleNode(node)) return;
+    const root = canvasRoot || document.querySelector('.infinite-canvas-root');
+    if(!root) return;
+    const reuse = Boolean(opts.reuse) && genHistoryPanelEl;
+    if(!reuse){
+        closeGenHistoryPanel();
+        genHistoryPanelEl = document.createElement('div');
+        genHistoryPanelEl.className = 'gen-history-panel';
+        genHistoryPanelEl.innerHTML = `
+            <div class="gen-history-shell" role="dialog" aria-modal="true" aria-label="${escapeAttr(langIsEn() ? 'Node results' : '节点结果')}">
+                <div class="gen-history-head">
+                    <div>
+                        <div class="gen-history-title">${langIsEn() ? 'Node results' : '节点结果'}</div>
+                        <div class="gen-history-sub">${langIsEn() ? 'Prompts & models stay with each result' : '每张结果保留提示词与模型信息'}</div>
+                    </div>
+                    <button type="button" class="gen-history-close" aria-label="${escapeAttr(langIsEn() ? 'Close' : '关闭')}">×</button>
+                </div>
+                <input class="gen-history-search" type="search" placeholder="${escapeAttr(langIsEn() ? 'Search prompt / model…' : '搜索提示词 / 模型…')}" autocomplete="off" />
+                <div class="gen-history-body">
+                    <div class="gen-history-grid"></div>
+                    <aside class="gen-history-detail">
+                        <div class="gen-history-detail-empty">${langIsEn() ? 'Select a result' : '选择一张查看详情'}</div>
+                    </aside>
+                </div>
             </div>
-            <div class="gen-settings-row gen-params-row api-size-row">
-                <select class="select-lite resolution compact-select" data-field="resolution">
-                    <option value="1k">1K</option>
-                    <option value="2k">2K</option>
-                    <option value="4k">4K</option>
-                    <option value="custom">${tr('canvas.custom')}</option>
-                </select>
-                <select class="select-lite ratio compact-select" data-field="ratio">
-                    <option value="square">1:1</option>
-                    <option value="portrait">2:3</option>
-                    <option value="landscape">3:2</option>
-                    <option value="portrait43">3:4</option>
-                    <option value="landscape43">4:3</option>
-                    <option value="story">9:16</option>
-                    <option value="wide">16:9</option>
-                    <option value="source">${tr('canvas.adaptiveRatio')}</option>
-                    <option value="custom">${tr('canvas.custom')}</option>
-                </select>
-                <select class="select-lite mj-quality-select compact-select" hidden aria-hidden="true">
-                    <option value="1">Q 1</option>
-                    <option value="4">Q 4</option>
-                </select>
+        `;
+        root.appendChild(genHistoryPanelEl);
+        genHistoryPanelEl.addEventListener('click', e => {
+            if(e.target === genHistoryPanelEl) closeGenHistoryPanel();
+        });
+        genHistoryPanelEl.querySelector('.gen-history-close').onclick = e => {
+            e.stopPropagation();
+            closeGenHistoryPanel();
+        };
+        const search = genHistoryPanelEl.querySelector('.gen-history-search');
+        search.oninput = () => {
+            const current = nodes.find(n => n.id === genHistoryPanelNodeId);
+            if(current) renderGenHistoryPanelContent(current);
+        };
+        search.onkeydown = e => e.stopPropagation();
+    }
+    genHistoryPanelNodeId = node.id;
+    genHistoryPanelEl.classList.add('open');
+    renderGenHistoryPanelContent(node);
+    refreshOutputTimer();
+    requestAnimationFrame(() => {
+        const focus = genHistoryPanelEl?.querySelector?.('.gen-history-card.is-pending, .gen-history-card.is-active');
+        focus?.scrollIntoView?.({block:'nearest', behavior:'smooth'});
+    });
+}
+function renderGenHistoryPendingCards(node, pendingList){
+    return (pendingList || []).map((p, i) => {
+        const prompt = String(p.run?.prompt || node.prompt || '').trim();
+        const model = String(p.run?.node?.model || node.model || '').trim();
+        const elapsed = formatRunDuration(nowMs() - Number(p.startedAt || nowMs()));
+        const caption = prompt
+            ? escapeHtml(prompt.length > 72 ? `${prompt.slice(0, 71)}…` : prompt)
+            : escapeHtml(langIsEn() ? 'Generating…' : '生成中…');
+        return `<div class="gen-history-card is-pending" role="button" tabindex="0" data-pending-id="${escapeAttr(p.id)}" data-pending-index="${i}">
+            <div class="gen-history-thumb gen-history-thumb-pending">
+                <div class="output-pending-waves" aria-hidden="true"><span></span><span></span><span></span></div>
+                <span class="gen-history-pending-time" data-pending-id="${escapeAttr(p.id)}">${escapeHtml(p.stageLabel || elapsed)}</span>
+            </div>
+            <div class="gen-history-card-meta">
+                <div class="gen-history-card-prompt" title="${escapeAttr(prompt)}">${caption}</div>
+                <div class="gen-history-card-foot">
+                    <span>${escapeHtml(model || '—')}</span>
+                    <span class="gen-history-pending-badge">${langIsEn() ? 'Generating' : '生成中'}</span>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+function showGenHistoryPendingDetail(node, pending){
+    const detail = genHistoryPanelEl?.querySelector?.('.gen-history-detail');
+    if(!detail || !pending) return;
+    const prompt = String(pending.run?.prompt || node.prompt || '').trim();
+    const model = String(pending.run?.node?.model || node.model || '').trim();
+    const elapsed = formatRunDuration(nowMs() - Number(pending.startedAt || nowMs()));
+    detail.innerHTML = `
+        <div class="gen-history-detail-preview is-pending">
+            <div class="output-pending-waves" aria-hidden="true"><span></span><span></span><span></span></div>
+            <span class="gen-history-pending-time" data-pending-id="${escapeAttr(pending.id)}">${escapeHtml(pending.stageLabel || elapsed)}</span>
+        </div>
+        <div class="gen-history-detail-fields">
+            <div class="gen-history-detail-row"><span>${langIsEn() ? 'Status' : '状态'}</span><strong>${langIsEn() ? 'Generating' : '生成中'}</strong></div>
+            <div class="gen-history-detail-row"><span>${langIsEn() ? 'Model' : '模型'}</span><strong>${escapeHtml(model || '—')}</strong></div>
+            <div class="gen-history-detail-row"><span>${langIsEn() ? 'Elapsed' : '已用时'}</span><strong class="gen-history-pending-time" data-pending-id="${escapeAttr(pending.id)}">${escapeHtml(pending.stageLabel || elapsed)}</strong></div>
+            <label class="gen-history-detail-prompt-label">${langIsEn() ? 'Prompt' : '提示词'}</label>
+            <textarea class="gen-history-detail-prompt" readonly rows="8">${escapeHtml(prompt || '')}</textarea>
+            <div class="gen-history-detail-actions">
+                <button type="button" class="gen-history-action" data-action="use-prompt"${prompt ? '' : ' disabled'}>${langIsEn() ? 'Use prompt' : '回填提示词'}</button>
+                <button type="button" class="gen-history-action secondary" data-action="copy-prompt"${prompt ? '' : ' disabled'}>${langIsEn() ? 'Copy' : '复制'}</button>
+            </div>
+        </div>
+    `;
+    const useBtn = detail.querySelector('[data-action="use-prompt"]');
+    const copyBtn = detail.querySelector('[data-action="copy-prompt"]');
+    if(useBtn){
+        useBtn.onclick = e => {
+            e.stopPropagation();
+            if(!prompt) return;
+            node.prompt = prompt;
+            applyNodeSelection(node.id, e);
+            syncImageGenDock();
+            scheduleSave();
+        };
+    }
+    if(copyBtn){
+        copyBtn.onclick = async e => {
+            e.stopPropagation();
+            if(!prompt) return;
+            try { await navigator.clipboard.writeText(prompt); } catch {}
+        };
+    }
+}
+function renderGenHistoryPanelContent(node){
+    if(!genHistoryPanelEl || !node) return;
+    const grid = genHistoryPanelEl.querySelector('.gen-history-grid');
+    const search = genHistoryPanelEl.querySelector('.gen-history-search');
+    const q = String(search?.value || '').trim().toLowerCase();
+    const pendingList = generatorPendingList(node).filter(p => {
+        if(!q) return true;
+        const prompt = String(p.run?.prompt || node.prompt || '');
+        const model = String(p.run?.node?.model || node.model || '');
+        return `${prompt} ${model}`.toLowerCase().includes(q);
+    });
+    const items = generatorHistoryItems(node);
+    const filtered = items
+        .map((item, index) => ({item, index}))
+        .filter(({item}) => {
+            if(!q) return true;
+            return `${item.prompt || ''} ${item.model || ''}`.toLowerCase().includes(q);
+        })
+        .reverse(); // 最新在前
+    const activeUrl = generatorPreviewUrls(node)[
+        Math.max(0, Math.min((generatorPreviewUrls(node).length || 1) - 1, Number(node.previewIndex ?? 0)))
+    ];
+    const pendingHtml = renderGenHistoryPendingCards(node, pendingList);
+    const doneHtml = filtered.map(({item, index}) => {
+        const url = item.url;
+        const promptShort = String(item.prompt || '').trim();
+        const caption = promptShort
+            ? escapeHtml(promptShort.length > 72 ? `${promptShort.slice(0, 71)}…` : promptShort)
+            : escapeHtml(langIsEn() ? '(no prompt)' : '（无提示词）');
+        const model = escapeHtml(item.model || '');
+        const pill = item.runMs ? escapeHtml(formatRunDuration(item.runMs)) : '';
+        return `<div class="gen-history-card ${url === activeUrl ? 'is-active' : ''}" role="button" tabindex="0" data-history-index="${index}" data-history-url="${escapeAttr(url)}">
+            <div class="gen-history-thumb">
+                <img src="${escapeAttr(url)}" alt="" loading="lazy">
+                ${genHistoryCardActionsHtml(url, item)}
+            </div>
+            <div class="gen-history-card-meta">
+                <div class="gen-history-card-prompt" title="${escapeAttr(promptShort)}">${caption}</div>
+                <div class="gen-history-card-foot">
+                    <span>${model || '—'}</span>
+                    ${pill ? `<span>${pill}</span>` : ''}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+    if(!pendingHtml && !doneHtml){
+        grid.innerHTML = `<div class="gen-history-empty">${langIsEn() ? 'No results yet' : '暂无结果'}</div>`;
+    } else {
+        grid.innerHTML = `${pendingHtml}${doneHtml}`;
+    }
+    bindGenHistoryMediaActions(grid, node);
+    grid.querySelectorAll('.gen-history-card.is-pending[data-pending-id]').forEach(card => {
+        card.onclick = e => {
+            if(e.target.closest('[data-action]')) return;
+            e.stopPropagation();
+            const pending = pendingList.find(p => p.id === card.dataset.pendingId)
+                || generatorPendingList(node).find(p => p.id === card.dataset.pendingId);
+            if(!pending) return;
+            grid.querySelectorAll('.gen-history-card').forEach(c => c.classList.toggle('is-active', c === card));
+            showGenHistoryPendingDetail(node, pending);
+        };
+    });
+    grid.querySelectorAll('.gen-history-card[data-history-index]').forEach(card => {
+        card.onclick = e => {
+            if(e.target.closest('[data-action]')) return;
+            e.stopPropagation();
+            const idx = Number(card.dataset.historyIndex);
+            setGeneratorPrimaryFromHistory(node, idx);
+            showGenHistoryDetail(node, idx);
+            const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
+            if(el) refreshGenStage(el, node);
+            syncImageGenDock();
+            scheduleSave();
+            grid.querySelectorAll('.gen-history-card').forEach(c => c.classList.toggle('is-active', c === card));
+        };
+        card.ondblclick = e => {
+            if(e.target.closest('[data-action]')) return;
+            e.stopPropagation();
+            const idx = Number(card.dataset.historyIndex);
+            const item = generatorHistoryItemAt(node, idx);
+            if(item?.url) openGeneratorHistoryLightbox(node, item.url);
+        };
+    });
+    if(pendingList.length){
+        showGenHistoryPendingDetail(node, pendingList[0]);
+        grid.querySelector('.gen-history-card.is-pending')?.classList.add('is-active');
+    } else {
+        const prefer = Number.isFinite(Number(node.historyIndex))
+            ? Number(node.historyIndex)
+            : items.findIndex(item => item.url === activeUrl);
+        showGenHistoryDetail(node, prefer >= 0 ? prefer : items.length - 1);
+    }
+    refreshIcons(genHistoryPanelEl);
+}
+function showGenHistoryDetail(node, historyIndex){
+    const detail = genHistoryPanelEl?.querySelector?.('.gen-history-detail');
+    if(!detail) return;
+    const item = generatorHistoryItemAt(node, historyIndex);
+    if(!item){
+        detail.innerHTML = `<div class="gen-history-detail-empty">${langIsEn() ? 'Select a result' : '选择一张查看详情'}</div>`;
+        return;
+    }
+    const prompt = String(item.prompt || '').trim();
+    const model = String(item.model || '').trim();
+    const duration = item.runMs ? formatRunDuration(item.runMs) : '';
+    const favActive = isOutputUrlFavorited(item.url);
+    const favTitle = favActive
+        ? (langIsEn() ? 'Remove from favorites' : '取消收藏')
+        : (langIsEn() ? 'Add to favorites' : '收藏');
+    detail.innerHTML = `
+        <div class="gen-history-detail-preview">
+            <img src="${escapeAttr(item.url)}" alt="">
+            ${genHistoryCardActionsHtml(item.url, item)}
+        </div>
+        <div class="gen-history-detail-fields">
+            <div class="gen-history-detail-row"><span>${langIsEn() ? 'Model' : '模型'}</span><strong>${escapeHtml(model || '—')}</strong></div>
+            ${duration ? `<div class="gen-history-detail-row"><span>${langIsEn() ? 'Time' : '耗时'}</span><strong>${escapeHtml(duration)}</strong></div>` : ''}
+            <label class="gen-history-detail-prompt-label">${langIsEn() ? 'Prompt' : '提示词'}</label>
+            <textarea class="gen-history-detail-prompt" readonly rows="8">${escapeHtml(prompt || '')}</textarea>
+            <div class="gen-history-detail-actions">
+                <button type="button" class="gen-history-action" data-action="zoom" data-url="${escapeAttr(item.url)}">${langIsEn() ? 'Enlarge' : '放大查看'}</button>
+                <button type="button" class="gen-history-action secondary output-fav-btn${favActive ? ' is-active' : ''}" data-action="fav" data-url="${escapeAttr(item.url)}" title="${escapeAttr(favTitle)}" aria-pressed="${favActive ? 'true' : 'false'}">${langIsEn() ? 'Favorite' : '收藏'}</button>
+                <button type="button" class="gen-history-action secondary" data-action="download" data-url="${escapeAttr(item.url)}">${langIsEn() ? 'Download' : '下载'}</button>
+                <button type="button" class="gen-history-action secondary" data-action="use-prompt"${prompt ? '' : ' disabled'}>${langIsEn() ? 'Use prompt' : '回填提示词'}</button>
+                <button type="button" class="gen-history-action secondary" data-action="copy-prompt"${prompt ? '' : ' disabled'}>${langIsEn() ? 'Copy' : '复制'}</button>
+                <button type="button" class="gen-history-action secondary" data-action="set-primary">${langIsEn() ? 'Set as preview' : '设为主图'}</button>
+            </div>
+        </div>
+    `;
+    bindGenHistoryMediaActions(detail, node);
+    const useBtn = detail.querySelector('[data-action="use-prompt"]');
+    const copyBtn = detail.querySelector('[data-action="copy-prompt"]');
+    const primaryBtn = detail.querySelector('[data-action="set-primary"]');
+    if(useBtn){
+        useBtn.onclick = e => {
+            e.stopPropagation();
+            if(!prompt) return;
+            node.prompt = prompt;
+            applyNodeSelection(node.id, e);
+            syncImageGenDock();
+            scheduleSave();
+            setStatus(langIsEn() ? 'Prompt applied' : '已回填提示词');
+            setTimeout(() => { if(canvas) setStatus('Ready'); }, 1600);
+        };
+    }
+    if(copyBtn){
+        copyBtn.onclick = async e => {
+            e.stopPropagation();
+            if(!prompt) return;
+            try {
+                await navigator.clipboard.writeText(prompt);
+                setStatus(langIsEn() ? 'Copied' : '已复制');
+            } catch {
+                setStatus(langIsEn() ? 'Copy failed' : '复制失败');
+            }
+            setTimeout(() => { if(canvas) setStatus('Ready'); }, 1600);
+        };
+    }
+    if(primaryBtn){
+        primaryBtn.onclick = e => {
+            e.stopPropagation();
+            setGeneratorPrimaryFromHistory(node, historyIndex);
+            const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
+            if(el) refreshGenStage(el, node);
+            syncImageGenDock();
+            scheduleSave();
+            renderGenHistoryPanelContent(node);
+        };
+    }
+    refreshIcons(detail);
+}
+function bindGenStageInteractions(root, node){
+    const stageRoot = () => {
+        if(root?.classList?.contains('gen-stage-slot')) return root.parentElement || root;
+        return root?.closest?.('.node') || root;
+    };
+    const hero = root?.querySelector?.('.gen-stage-hero[data-preview-url]');
+    if(hero){
+        // 单击交给节点选中（唤出控制台）；双击再看大图
+        hero.ondblclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            const url = hero.getAttribute('data-preview-url');
+            if(url) openGeneratorHistoryLightbox(node, url);
+        };
+        const img = hero.querySelector('img');
+        const frame = hero.closest('.gen-stage-frame');
+        applyNaturalAspectFromImg(img, frame, node);
+    }
+    const badge = root?.querySelector?.('.gen-stage-badge');
+    if(badge){
+        badge.onmousedown = e => e.stopPropagation();
+        badge.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            applyNodeSelection(node.id, e);
+            // 角标打开完整历史库（含提示词）；Alt 仍展开顶条快切
+            if(e.altKey){
+                node.historyOpen = !node.historyOpen;
+                refreshGenStage(stageRoot(), node);
+                scheduleSave();
+                return;
+            }
+            openGenHistoryPanel(node);
+        };
+    }
+    root?.querySelectorAll?.('.gen-stage-thumb[data-preview-index]').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.stopPropagation();
+            applyNodeSelection(node.id, e);
+            node.previewIndex = Number(btn.dataset.previewIndex || 0);
+            refreshGenStage(stageRoot(), node);
+            scheduleSave();
+            syncImageGenDock();
+            fitGeneratorNodeHeight(node);
+            requestAnimationFrame(() => positionImageGenDock(node));
+        };
+    });
+}
+function renderGenStageHtml(node){
+    if(isGenConsoleNode(node) && Array.isArray(node.history) && node.history.length > MAX_GEN_HISTORY){
+        node.history = node.history.slice(-MAX_GEN_HISTORY);
+        syncGeneratorPreviewFromHistory(node);
+    }
+    if(isGenConsoleNode(node) && Array.isArray(node.previewRoundUrls) && node.previewRoundUrls.length > MAX_GEN_PREVIEW){
+        node.previewRoundUrls = node.previewRoundUrls.slice(-MAX_GEN_PREVIEW);
+    }
+    const historyItems = generatorHistoryItems(node);
+    const urls = generatorPreviewUrls(node);
+    const pendingN = agentPendingCount(node.id);
+    const isBusy = pendingN > 0 || Boolean(node.running) || node.runStatus === 'running' || node.runStatus === 'queued';
+    const busyLabel = node._batchProgress
+        ? (langIsEn() ? `Generating ${node._batchProgress}…` : `生成中 ${node._batchProgress}…`)
+        : (pendingN > 1
+            ? (langIsEn() ? `Generating (${pendingN})…` : `生成中 (${pendingN})…`)
+            : (langIsEn() ? 'Generating…' : '生成中…'));
+    const busyOverlay = isBusy
+        ? `<div class="gen-stage-busy" aria-live="polite">
+            <div class="output-pending-waves" aria-hidden="true"><span></span><span></span><span></span></div>
+            <span class="gen-stage-busy-label">${escapeHtml(busyLabel)}</span>
+        </div>`
+        : '';
+    if(!urls.length){
+        return `<div class="gen-stage is-empty ${isBusy ? 'is-busy' : ''}">
+            <div class="gen-stage-frame">
+                <div class="gen-stage-empty"><i data-lucide="image" class="w-10 h-10"></i></div>
+                ${busyOverlay}
+            </div>
+        </div>`;
+    }
+    clampGeneratorPreviewIndex(node);
+    const primary = urls[Math.max(0, Math.min(urls.length - 1, Number(node.previewIndex ?? urls.length - 1)))];
+    const open = Boolean(node.historyOpen) && urls.length > 1;
+    const historyCount = Math.max(historyItems.length, urls.length);
+    const badge = historyCount >= 1
+        ? `<button type="button" class="gen-stage-badge ${open ? 'is-open' : ''}" title="${escapeAttr(langIsEn() ? 'Open node results' : '打开节点结果')}" aria-expanded="${open ? 'true' : 'false'}">
+            <span>${historyCount}</span><i data-lucide="${open ? 'chevron-up' : 'chevron-down'}" class="w-3 h-3"></i>
+        </button>`
+        : '';
+    const thumbs = urls.length > 1
+        ? `<div class="gen-stage-thumbs ${open ? 'is-open' : ''}" role="listbox" aria-hidden="${open ? 'false' : 'true'}">${urls.map((url, i) =>
+            `<button type="button" class="gen-stage-thumb ${url === primary ? 'is-active' : ''}" data-preview-url="${escapeAttr(url)}" data-preview-index="${i}" title="${i + 1}" role="option" aria-selected="${url === primary ? 'true' : 'false'}">
+                <img src="${escapeAttr(url)}" alt="">
+            </button>`
+        ).join('')}</div>`
+        : '';
+    return `<div class="gen-stage has-images ${open ? 'history-open' : ''} ${isBusy ? 'is-busy' : ''}">
+        <div class="gen-stage-frame">
+            <div class="gen-stage-hero" data-preview-url="${escapeAttr(primary)}" role="img">
+                <img src="${escapeAttr(primary)}" alt="">
+            </div>
+            ${busyOverlay}
+            ${badge}
+            ${thumbs}
+        </div>
+    </div>`;
+}
+function refreshGenStage(root, node){
+    const host = root?.querySelector?.('.gen-stage-slot') || (root?.classList?.contains('gen-stage-slot') ? root : null);
+    if(!host || !node) return;
+    host.innerHTML = renderGenStageHtml(node);
+    bindGenStageInteractions(host, node);
+    const activeThumb = host.querySelector('.gen-stage-thumb.is-active');
+    if(activeThumb && node.historyOpen){
+        requestAnimationFrame(() => activeThumb.scrollIntoView({inline:'nearest', block:'nearest', behavior:'smooth'}));
+    }
+    refreshIcons(host);
+    fitGeneratorNodeHeight(node);
+    if(selected.has(node.id)) requestAnimationFrame(() => positionImageGenDock(node));
+}
+function genDockRatioOptions(node){
+    return `
+        <option value="square">1:1</option>
+        <option value="portrait">2:3</option>
+        <option value="landscape">3:2</option>
+        <option value="portrait43">3:4</option>
+        <option value="landscape43">4:3</option>
+        <option value="story">9:16</option>
+        <option value="wide">16:9</option>
+        <option value="source">${tr('canvas.adaptiveRatio')}</option>
+        <option value="custom">${tr('canvas.custom')}</option>
+    `;
+}
+function genRatioShortLabel(ratio){
+    const map = {
+        source: langIsEn() ? 'Auto' : '自适应',
+        square: '1:1',
+        story: '9:16',
+        wide: '16:9',
+        portrait43: '3:4',
+        landscape43: '4:3',
+        landscape: '3:2',
+        portrait: '2:3',
+        custom: langIsEn() ? 'Custom' : '自定义',
+    };
+    return map[ratio] || String(ratio || '1:1');
+}
+function genResShortLabel(resolution){
+    const key = String(resolution || '1k').toLowerCase();
+    if(key === 'custom') return langIsEn() ? 'Custom' : '自定义';
+    return key.toUpperCase();
+}
+function genSizeSummaryText(node){
+    const ratio = genRatioShortLabel(node?.ratio || 'square');
+    const caps = generatorModelCaps(node?.model);
+    if(!caps.resolutionKeys?.length) return ratio;
+    return `${ratio} · ${genResShortLabel(node?.resolution || '1k')}`;
+}
+function genDockSizePanelHtml(node){
+    const ratios = [
+        {key:'source', label: langIsEn() ? 'Auto' : '自适应', ar:'1 / 1'},
+        {key:'square', label:'1:1', ar:'1 / 1'},
+        {key:'story', label:'9:16', ar:'9 / 16'},
+        {key:'wide', label:'16:9', ar:'16 / 9'},
+        {key:'portrait43', label:'3:4', ar:'3 / 4'},
+        {key:'landscape43', label:'4:3', ar:'4 / 3'},
+        {key:'landscape', label:'3:2', ar:'3 / 2'},
+        {key:'portrait', label:'2:3', ar:'2 / 3'},
+        {key:'custom', label: langIsEn() ? 'Custom' : '自定义', ar:'1 / 1'},
+    ];
+    const ratioBtns = ratios.map(r => `
+        <button type="button" class="gen-dock-ratio-btn" data-ratio="${r.key}" title="${escapeAttr(r.label)}">
+            <span class="gen-dock-ratio-icon" style="aspect-ratio:${r.ar}"></span>
+            <span class="gen-dock-ratio-label">${escapeHtml(r.label)}</span>
+        </button>
+    `).join('');
+    return `
+        <div class="gen-dock-size">
+            <button type="button" class="gen-dock-size-summary" aria-expanded="false">
+                <i data-lucide="rectangle-vertical" class="w-3.5 h-3.5 gen-dock-chip-icon"></i>
+                <span class="gen-dock-size-summary-text">${escapeHtml(genSizeSummaryText(node))}</span>
+                <i data-lucide="chevron-up" class="w-3.5 h-3.5 gen-dock-size-chevron"></i>
+            </button>
+            <div class="gen-dock-size-panel" hidden>
+                <div class="gen-dock-size-section">
+                    <div class="gen-dock-size-section-title">${langIsEn() ? 'Resolution' : '分辨率'}</div>
+                    <div class="gen-dock-res-row">
+                        <button type="button" class="gen-dock-res-btn" data-resolution="1k">1K</button>
+                        <button type="button" class="gen-dock-res-btn" data-resolution="2k">2K</button>
+                        <button type="button" class="gen-dock-res-btn" data-resolution="4k">4K</button>
+                    </div>
+                </div>
+                <div class="gen-dock-size-section">
+                    <div class="gen-dock-size-section-title">${langIsEn() ? 'Aspect ratio' : '比例'}</div>
+                    <div class="gen-dock-ratio-grid">${ratioBtns}</div>
+                </div>
+            </div>
+            <select class="select-lite ratio compact-select gen-dock-hidden-select" data-field="ratio" hidden aria-hidden="true">
+                ${genDockRatioOptions(node)}
+            </select>
+            <select class="select-lite resolution compact-select gen-dock-hidden-select" data-field="resolution" hidden aria-hidden="true">
+                <option value="1k">1K</option>
+                <option value="2k">2K</option>
+                <option value="4k">4K</option>
+                <option value="custom">${tr('canvas.custom')}</option>
+            </select>
+        </div>
+    `;
+}
+function genDockAdvancedHtml(node){
+    return `
+        <div class="gen-settings gen-dock-advanced" hidden>
+            <div class="gen-dock-advanced-title">${langIsEn() ? 'More settings' : '更多设置'}</div>
+            <div class="gen-settings-row gen-params-row api-size-row gen-dock-quality-row">
                 <select class="select-lite quality-select">
                     <option value="auto">Q auto</option>
                     <option value="low">Q low</option>
                     <option value="medium">Q med</option>
                     <option value="high">Q high</option>
                 </select>
-                <div class="gen-count-row">
-                    <div class="gen-stepper">
-                        <button class="gen-step-btn" data-step="-1" type="button" title="${tr('canvas.decrease')}" aria-label="${tr('canvas.decreaseCount')}"><i data-lucide="chevron-left" class="w-3.5 h-3.5"></i></button>
-                        <input class="gen-count-input" type="text" inputmode="numeric" pattern="[0-9]*" value="${Math.max(1, Math.min(8, Number(node.count || 1)))}">
-                        <button class="gen-step-btn" data-step="1" type="button" title="${tr('canvas.increase')}" aria-label="${tr('canvas.increaseCount')}"><i data-lucide="chevron-right" class="w-3.5 h-3.5"></i></button>
-                    </div>
-                </div>
             </div>
             <div class="gen-mj-panel" hidden>
+                <div class="gen-dock-advanced-subtitle">${langIsEn() ? 'Midjourney / Niji' : 'Midjourney / Niji 参数'}</div>
+                <div class="gen-settings-row gen-params-row">
+                    <select class="select-lite mj-quality-select compact-select" hidden aria-hidden="true">
+                        <option value="1">Q 1</option>
+                        <option value="4">Q 4</option>
+                    </select>
+                </div>
                 <div class="gen-settings-row gen-mj-advanced-row">
                     <label class="field">
                         <div class="setting-title">${tr('canvas.mjChaos')}</div>
@@ -12454,383 +14874,427 @@ function renderGeneratorBody(node){
                 <button class="secondary-btn fit-size-btn" type="button" style="height:32px;align-self:flex-end;padding:0 10px;font-size:11px">${tr('canvas.fitImageSize')}</button>
             </div>
         </div>
-        <div class="gen-run-row">
-            ${hasUpstreamLoop(node.id) ? '' : (() => {
-                const genBtn = agentPendingRunState(node.id, tr('canvas.apiGenerate'), tr('canvas.generating'));
-                return agentGenRunActionsHtml(node.id, `<button class="gen-btn ${genBtn.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''}><i data-lucide="zap" class="w-4 h-4"></i>${escapeHtml(genBtn.label)}</button>`);
-            })()}
-            ${cascadeBtnHtml(node)}
-        </div>
-        ${retryBarHtml(node)}
     `;
+}
+function genDockShellHtml(node, opts={}){
+    const countVal = Math.max(1, Math.min(8, Number(node.count || 1)));
+    const runLabel = agentPendingRunState(node.id, tr('canvas.apiGenerate'), tr('canvas.generating'));
+    const runBtn = `<button class="gen-btn gen-dock-send ${runLabel.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''} type="button" title="${escapeAttr(runLabel.label)}"><i data-lucide="arrow-up" class="w-4 h-4"></i></button>`;
+    const runHtml = opts.skipRun
+        ? ''
+        : (hasUpstreamLoop(node.id) ? '' : agentGenRunActionsHtml(node.id, runBtn));
+    const cascade = opts.showCascade ? cascadeBtnHtml(node) : '';
+    const upstream = opts.showUpstream !== false ? `<div class="prompt-list gen-dock-upstream"></div>` : '';
+    const refs = opts.showRefs
+        ? `<div class="gen-dock-refs"><div class="input-list"></div></div>`
+        : '';
+    return `
+        <div class="gen-dock ${opts.floating ? 'is-floating' : 'is-embedded'}">
+            <textarea class="gen-dock-prompt" placeholder="${escapeAttr(langIsEn() ? 'Describe anything you want to generate…' : '描述任何你想要生成的内容')}" rows="3">${escapeHtml(node.prompt || '')}</textarea>
+            ${upstream}
+            ${refs}
+            <div class="gen-dock-bar">
+                <div class="gen-dock-group gen-dock-group-source">
+                    <label class="gen-dock-chip gen-dock-chip-provider">
+                        <select class="select-lite provider-select gen-dock-select" title="Provider">${providerOptions(node.apiProvider)}</select>
+                    </label>
+                    <label class="gen-dock-chip gen-dock-chip-model">
+                        <select class="select-lite model-select gen-dock-select" title="Model">${imageModelOptions(node.model, node.apiProvider)}</select>
+                    </label>
+                </div>
+                <span class="gen-dock-sep" aria-hidden="true"></span>
+                <div class="gen-dock-group gen-dock-group-size">
+                    ${genDockSizePanelHtml(node)}
+                </div>
+                <span class="gen-dock-sep" aria-hidden="true"></span>
+                <div class="gen-dock-group gen-dock-group-tools">
+                    <button type="button" class="gen-dock-gear" title="${escapeAttr(langIsEn() ? 'More settings' : '更多设置')}" aria-label="settings"><i data-lucide="sliders-horizontal" class="w-4 h-4"></i></button>
+                </div>
+                <span class="gen-dock-sep" aria-hidden="true"></span>
+                <div class="gen-dock-group gen-dock-group-run">
+                    <div class="gen-dock-count-lite" title="${escapeAttr(langIsEn() ? 'Batch count (1-8)' : '生成数量（1-8）')}">
+                        <button type="button" class="gen-dock-count-step" data-count-delta="-1" aria-label="decrease">−</button>
+                        <input class="gen-dock-count-input" type="number" min="1" max="8" step="1" value="${countVal}" inputmode="numeric" aria-label="count">
+                        <span class="gen-dock-count-suffix">x</span>
+                        <button type="button" class="gen-dock-count-step" data-count-delta="1" aria-label="increase">+</button>
+                    </div>
+                    <div class="gen-run-row gen-dock-run">
+                        ${runHtml}
+                        ${cascade}
+                    </div>
+                </div>
+            </div>
+            ${genDockAdvancedHtml(node)}
+            ${opts.showRetry !== false ? retryBarHtml(node) : ''}
+        </div>
+    `;
+}
+function renderGeneratorBody(node){
+    const wrap = document.createElement('div');
+    wrap.className = 'generator-body gen-stage-only';
+    node.apiProvider = resolveImageProviderId(node.apiProvider || '');
+    const migratedModel = normalizeLegacyImageModelId(node.model);
+    if(migratedModel !== String(node.model || '').trim()) node.model = migratedModel;
+    const imageProviderModels = providerImageModels(node.apiProvider);
+    if(!imageProviderModels.length) node.model = '';
+    else if(!imageProviderModels.includes(resolveImageModel(node.model))) node.model = imageProviderModels[0] || '';
+    wrap.innerHTML = `<div class="gen-stage-slot">${renderGenStageHtml(node)}</div>`;
+    refreshGenStage(wrap, node);
+    refreshIcons(wrap);
+    return wrap;
+}
+function removeImageGenDock(){
+    imageGenDockEl?.remove();
+    imageGenDockEl = null;
+    imageGenDockNodeId = null;
+}
+function positionImageGenDock(node){
+    if(!imageGenDockEl || !node) return;
+    const nodeEl = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
+    const nodeW = Number(node.w || (node.type === 'generator' ? GENERATOR_BASE_W : defaultNodeSize('image').w) || 260);
+    let nodeH = Number(node.h || 0);
+    if(!nodeH && nodeEl){
+        const rect = nodeEl.getBoundingClientRect();
+        nodeH = Math.max(nodeEl.offsetHeight || 0, rect.height / Math.max(viewport?.scale || 1, 0.01));
+    }
+    if(!nodeH) nodeH = Number(defaultNodeSize('image').h || 336);
+    // 宽度跟内容走，保证参数名全露；再相对节点水平居中
+    imageGenDockEl.style.width = 'max-content';
+    imageGenDockEl.style.minWidth = `${Math.max(360, nodeW)}px`;
+    imageGenDockEl.style.maxWidth = 'min(96vw, 980px)';
+    const place = () => {
+        if(!imageGenDockEl || imageGenDockNodeId !== node.id) return;
+        const dockW = Math.max(imageGenDockEl.offsetWidth || 0, nodeW);
+        imageGenDockEl.style.left = `${node.x + (nodeW - dockW) / 2}px`;
+        imageGenDockEl.style.top = `${node.y + nodeH + 16}px`;
+    };
+    place();
+    requestAnimationFrame(place);
+}
+function bindImageGenDockControls(wrap, node){
+    if(!node || node.type !== 'generator') return;
+    node.apiProvider = resolveImageProviderId(node.apiProvider || '');
+    const migratedModel = normalizeLegacyImageModelId(node.model);
+    if(migratedModel !== String(node.model || '').trim()) node.model = migratedModel;
+    const models = providerImageModels(node.apiProvider);
+    if(!models.length) node.model = '';
+    else if(!models.includes(resolveImageModel(node.model))) node.model = models[0] || '';
+    if(node.prompt == null) node.prompt = '';
+    node.count = Math.max(1, Math.min(8, Number(node.count || 1)));
     const providerSelect = wrap.querySelector('.provider-select');
     const modelSelect = wrap.querySelector('.model-select');
-    providerSelect.onmousedown = e => e.stopPropagation();
-    providerSelect.onclick = e => e.stopPropagation();
-    providerSelect.onchange = e => {
-        e.stopPropagation();
-        node.apiProvider = e.target.value;
-        const providerModels = providerImageModels(node.apiProvider);
-        if(!providerModels.includes(resolveImageModel(node.model))) node.model = providerModels[0] || '';
-        modelSelect.innerHTML = imageModelOptions(node.model, node.apiProvider);
-        normalizeApiNodeSizeChoice(node);
-        syncSizeControls();
-        scheduleSave();
-    };
-    modelSelect.onmousedown = e => e.stopPropagation();
-    modelSelect.onclick = e => e.stopPropagation();
-    modelSelect.onchange = e => {
-        e.stopPropagation();
-        node.model = e.target.value;
-        normalizeApiNodeSizeChoice(node);
-        syncSizeControls();
-        scheduleSave();
-    };
-    const ratioSelect = wrap.querySelector('.ratio');
-    const resolutionSelect = wrap.querySelector('.resolution');
-    const qualitySelect = wrap.querySelector('.quality-select');
-    const mjQualitySelect = wrap.querySelector('.mj-quality-select');
-    const genMjPanel = wrap.querySelector('.gen-mj-panel');
-    const mjChaosInput = wrap.querySelector('.mj-chaos-input');
-    const mjStylizeInput = wrap.querySelector('.mj-stylize-input');
-    const mjIwInput = wrap.querySelector('.mj-iw-input');
-    const mjWeirdField = wrap.querySelector('.mj-weird-field');
-    const mjWeirdInput = wrap.querySelector('.mj-weird-input');
-    const mjSvField = wrap.querySelector('.mj-sv-field');
-    const mjSvSelect = wrap.querySelector('.mj-sv-select');
-    const mjHdField = wrap.querySelector('.mj-hd-field');
-    const mjHdCheck = wrap.querySelector('.mj-hd-check');
-    const mjRawCheck = wrap.querySelector('.mj-raw-check');
-    const mjHdInput = wrap.querySelector('.mj-hd-input');
-    const mjRawInput = wrap.querySelector('.mj-raw-input');
-    const customRatioRow = wrap.querySelector('.custom-ratio-row');
-    const customSizeRow = wrap.querySelector('.custom-size-row');
-    const customRatioWInput = wrap.querySelector('.custom-ratio-w-input');
-    const customRatioHInput = wrap.querySelector('.custom-ratio-h-input');
-    const customWInput = wrap.querySelector('.custom-w-input');
-    const customHInput = wrap.querySelector('.custom-h-input');
-    const fitSizeBtn = wrap.querySelector('.fit-size-btn');
-    const genSettingsEl = wrap.querySelector('.gen-settings');
-    const paramsRowEl = wrap.querySelector('.gen-params-row');
-    const referenceImages = ordered.flatMap(src => src.refs || []);
-    const syncGeneratorParamLayout = () => {
-        const caps = generatorModelCaps(node.model);
-        const isYouchuan = Boolean(caps.showYouchuanPanel);
-        const showQuality = Boolean(caps.showQuality);
-        const showMjQuality = Boolean(caps.showMjQuality);
-        const showResolution = caps.resolutionKeys.length > 0;
-        if(genSettingsEl){
-            genSettingsEl.dataset.showQuality = showQuality ? '1' : '0';
-            genSettingsEl.dataset.modelProfile = caps.profile || 'standard';
-        }
-        if(paramsRowEl){
-            let cols = 3;
-            if(isYouchuan && showMjQuality) cols = 3;
-            else if(isYouchuan) cols = 2;
-            else if(showQuality && showResolution) cols = 4;
-            else if(showQuality || showResolution) cols = 3;
-            else cols = 2;
-            paramsRowEl.dataset.cols = String(cols);
-        }
-        resolutionSelect.classList.toggle('is-hidden', !showResolution);
-        resolutionSelect.toggleAttribute('hidden', !showResolution);
-        qualitySelect.classList.toggle('is-hidden', !showQuality);
-        qualitySelect.toggleAttribute('hidden', !showQuality);
-        qualitySelect.setAttribute('aria-hidden', showQuality ? 'false' : 'true');
-        mjQualitySelect.classList.toggle('is-hidden', !showMjQuality);
-        mjQualitySelect.toggleAttribute('hidden', !showMjQuality);
-        mjQualitySelect.setAttribute('aria-hidden', showMjQuality ? 'false' : 'true');
-        if(genMjPanel) genMjPanel.hidden = !isYouchuan;
-        if(mjHdField) mjHdField.classList.toggle('is-hidden', !caps.showMjHd);
-        if(mjWeirdField) mjWeirdField.classList.toggle('is-hidden', !caps.showWeird);
-        if(mjSvField) mjSvField.classList.toggle('is-hidden', !caps.showSvSelect);
-        if(genSettingsEl) genSettingsEl.dataset.iwMax = String(caps.iwMax || 3);
-        if(modelSelect?.selectedIndex >= 0) modelSelect.title = modelSelect.options[modelSelect.selectedIndex]?.text || '';
-        if(providerSelect?.selectedIndex >= 0) providerSelect.title = providerSelect.options[providerSelect.selectedIndex]?.text || '';
-        rebaseGeneratorFrame(node);
-    };
-    const syncYouchuanControls = () => {
-        ensureYouchuanNodeDefaults(node);
-        const caps = generatorModelCaps(node.model);
-        if(!caps.showYouchuanPanel){
-            syncGeneratorParamLayout();
-            return;
-        }
-        if(caps.showMjQuality){
-            const values = caps.mjQualityValues || ['1','4'];
-            const selected = values.includes(String(node.mjQuality || '1')) ? String(node.mjQuality) : (caps.defaultMjQuality || '1');
-            node.mjQuality = selected;
-            mjQualitySelect.innerHTML = values.map(v => `<option value="${v}">Q ${v}</option>`).join('');
-            mjQualitySelect.value = selected;
-        }
-        if(mjChaosInput) mjChaosInput.value = String(node.mjChaos ?? 0);
-        if(mjStylizeInput) mjStylizeInput.value = String(node.mjStylize ?? 0);
-        if(mjWeirdInput && caps.showWeird) mjWeirdInput.value = String(node.mjWeird ?? 0);
-        if(mjIwInput){
-            const iwMax = caps.iwMax || 3;
-            mjIwInput.max = String(iwMax);
-            mjIwInput.value = String(node.mjIw ?? 1);
-        }
-        if(mjSvSelect && caps.showSvSelect) mjSvSelect.value = String(node.mjSv ?? 4);
-        if(mjHdInput) mjHdInput.checked = Boolean(node.mjHd);
-        if(mjRawInput) mjRawInput.checked = Boolean(node.mjRaw);
-        mjHdCheck?.classList.toggle('active', Boolean(node.mjHd));
-        mjRawCheck?.classList.toggle('active', Boolean(node.mjRaw));
-        syncGeneratorParamLayout();
-    };
-    const syncQualityControls = () => {
-        const caps = generatorModelCaps(node.model);
-        if(caps.showYouchuanPanel){
-            syncYouchuanControls();
-            return;
-        }
-        if(!caps.showQuality){
-            node.quality = 'auto';
-            syncGeneratorParamLayout();
-            return;
-        }
-        const values = caps.qualityValues || ['low','medium','high'];
-        const current = String(node.quality || caps.defaultQuality || 'medium').trim().toLowerCase();
-        const selected = values.includes(current) ? current : (caps.defaultQuality || 'medium');
-        node.quality = selected;
-        qualitySelect.innerHTML = values.map(v => `<option value="${v}">Q ${v}</option>`).join('');
-        qualitySelect.value = selected;
-        qualitySelect.disabled = false;
-        syncGeneratorParamLayout();
-    };
-    const hydrateCustomParts = () => {
-        if((!node.customRatioWidth || !node.customRatioHeight) && node.customRatio) {
-            const raw = String(node.customRatio || '');
-            if(raw.includes(':')){
-                const [w,h] = raw.split(':');
-                node.customRatioWidth = node.customRatioWidth || w;
-                node.customRatioHeight = node.customRatioHeight || h;
-            }
-        }
-        if((!node.customWidth || !node.customHeight) && node.customSize) {
-            const parsed = parseSizeValue(node.customSize);
-            node.customWidth = node.customWidth || parsed?.width || '';
-            node.customHeight = node.customHeight || parsed?.height || '';
-        }
-    };
-    hydrateCustomParts();
-    let sourceRatioRequest = 0;
-    const updateSourceRatioFromFirstRef = async () => {
-        if(node.ratio !== 'source') return;
-        const ref = referenceImages.find(item => item.url);
-        const requestId = ++sourceRatioRequest;
-        if(!ref){
-            node.customRatio = '';
-            node.customRatioWidth = '';
-            node.customRatioHeight = '';
-            customRatioWInput.value = '';
-            customRatioHInput.value = '';
-            return;
-        }
-        try {
-            const dims = await getImageDimensions(ref.url);
-            if(requestId !== sourceRatioRequest || node.ratio !== 'source') return;
-            const parts = ratioPartsFromDimensions(dims.width, dims.height);
-            node.customRatioWidth = String(parts.width);
-            node.customRatioHeight = String(parts.height);
-            node.customRatio = `${parts.width}:${parts.height}`;
-            customRatioWInput.value = node.customRatioWidth;
-            customRatioHInput.value = node.customRatioHeight;
-            scheduleSave();
-        } catch(_) {}
-    };
-    const syncSizeControls = () => {
-        normalizeApiNodeSizeChoice(node);
-        const caps = generatorModelCaps(node.model);
-        const showResolution = caps.resolutionKeys.length > 0;
-        [...ratioSelect.options].forEach(opt => {
-            const allowed = caps.ratioKeys.includes(opt.value);
-            opt.disabled = !allowed;
-            opt.hidden = !allowed;
-        });
-        [...resolutionSelect.options].forEach(opt => {
-            const allowed = caps.resolutionKeys.includes(opt.value);
-            opt.disabled = !allowed;
-            opt.hidden = !allowed;
-        });
-        const squareOption = ratioSelect.querySelector('option[value="square"]');
-        if(squareOption){
-            squareOption.disabled = false;
-            squareOption.title = '';
-        }
-        const ratioValue = node.ratio && [...ratioSelect.options].some(opt => opt.value === node.ratio && !opt.hidden) ? node.ratio : (caps.ratioKeys.includes('square') ? 'square' : caps.ratioKeys[0]);
-        ratioSelect.value = ratioValue;
-        node.ratio = ratioValue;
-        const resolutionValue = showResolution && node.resolution && caps.resolutionKeys.includes(node.resolution)
-            ? node.resolution
-            : (caps.resolutionKeys[0] || '1k');
-        if(showResolution){
-            resolutionSelect.value = resolutionValue;
-            node.resolution = resolutionValue;
-        }
-        ratioSelect.disabled = node.resolution === 'custom';
-        customRatioRow.style.display = (node.ratio === 'custom' || node.ratio === 'source') ? 'flex' : 'none';
-        customSizeRow.style.display = node.resolution === 'custom' ? 'flex' : 'none';
-        customRatioWInput.disabled = node.ratio === 'source';
-        customRatioHInput.disabled = node.ratio === 'source';
-        customRatioWInput.value = node.customRatioWidth || '';
-        customRatioHInput.value = node.customRatioHeight || '';
-        customWInput.value = node.customWidth || '';
-        customHInput.value = node.customHeight || '';
-        if(fitSizeBtn) fitSizeBtn.disabled = !referenceImages.some(ref => ref.url);
-        syncQualityControls();
-        if(node.ratio === 'source') updateSourceRatioFromFirstRef();
-    };
-    const bindMjField = (el, apply) => {
-        if(!el) return;
-        el.onmousedown = e => e.stopPropagation();
-        el.onclick = e => e.stopPropagation();
-        el.onchange = e => { e.stopPropagation(); apply(e); syncMjControls(); scheduleSave(); };
-        el.oninput = e => { e.stopPropagation(); apply(e); scheduleSave(); };
-    };
-    bindMjField(mjQualitySelect, e => { node.mjQuality = e.target.value === '4' ? '4' : '1'; });
-    bindMjField(mjChaosInput, e => { node.mjChaos = clampGenInt(e.target.value, 0, 100, 0); });
-    bindMjField(mjStylizeInput, e => { node.mjStylize = clampGenInt(e.target.value, 0, 1000, 0); });
-    bindMjField(mjWeirdInput, e => { node.mjWeird = clampGenInt(e.target.value, 0, 3000, 0); });
-    bindMjField(mjIwInput, e => {
-        const iwMax = generatorModelCaps(node.model).iwMax || 3;
-        node.mjIw = clampGenFloat(e.target.value, 0, iwMax, 1);
-    });
-    bindMjField(mjSvSelect, e => { node.mjSv = clampGenInt(e.target.value, 1, 4, 4); });
-    [mjHdCheck, mjRawCheck].forEach(label => {
-        if(!label) return;
-        label.onmousedown = e => e.stopPropagation();
-        label.onclick = e => {
+    const gearBtn = wrap.querySelector('.gen-dock-gear');
+    const advancedEl = wrap.querySelector('.gen-dock-advanced');
+    const sizeSummary = wrap.querySelector('.gen-dock-size-summary');
+    const sizePanel = wrap.querySelector('.gen-dock-size-panel');
+    const sizeSummaryText = wrap.querySelector('.gen-dock-size-summary-text');
+    if(gearBtn && advancedEl){
+        gearBtn.onclick = e => {
             e.stopPropagation();
-            e.preventDefault();
-            if(label === mjHdCheck){
-                node.mjHd = !node.mjHd;
-                if(mjHdInput) mjHdInput.checked = node.mjHd;
-            } else {
-                node.mjRaw = !node.mjRaw;
-                if(mjRawInput) mjRawInput.checked = node.mjRaw;
-            }
-            syncYouchuanControls();
-            scheduleSave();
-        };
-    });
-    qualitySelect.onmousedown = e => e.stopPropagation();
-    qualitySelect.onclick = e => e.stopPropagation();
-    qualitySelect.onchange = e => {
-        e.stopPropagation();
-        node.quality = e.target.value;
-        scheduleSave();
-    };
-    ratioSelect.onmousedown = e => e.stopPropagation();
-    ratioSelect.onclick = e => e.stopPropagation();
-    ratioSelect.onchange = e => {
-        e.stopPropagation();
-        node.ratio = e.target.value;
-        normalizeApiNodeSizeChoice(node);
-        if(node.ratio !== 'custom' && node.ratio !== 'source') {
-            node.customRatio = '';
-            node.customRatioWidth = '';
-            node.customRatioHeight = '';
-        } else if(node.ratio === 'source') {
-            node.customRatio = '';
-            node.customRatioWidth = '';
-            node.customRatioHeight = '';
-        }
-        syncSizeControls();
-        scheduleSave();
-    };
-    resolutionSelect.onmousedown = e => e.stopPropagation();
-    resolutionSelect.onclick = e => e.stopPropagation();
-    resolutionSelect.onchange = e => {
-        e.stopPropagation();
-        node.resolution = e.target.value;
-        if(node.resolution === 'custom') {
-            node.ratio = '';
-        } else if(!node.ratio) {
-            node.ratio = 'square';
-            node.customSize = '';
-            node.customWidth = '';
-            node.customHeight = '';
-        } else {
-            node.customSize = '';
-            node.customWidth = '';
-            node.customHeight = '';
-        }
-        normalizeApiNodeSizeChoice(node);
-        syncSizeControls();
-        scheduleSave();
-    };
-    [customRatioWInput, customRatioHInput].forEach(input => {
-        input.onmousedown = e => e.stopPropagation();
-        input.onclick = e => e.stopPropagation();
-        input.oninput = e => {
-            node.customRatioWidth = customRatioWInput.value;
-            node.customRatioHeight = customRatioHInput.value;
-            node.customRatio = node.customRatioWidth && node.customRatioHeight ? `${node.customRatioWidth}:${node.customRatioHeight}` : '';
-            node.ratio = 'custom';
-            syncSizeControls();
-            scheduleSave();
-        };
-    });
-    [customWInput, customHInput].forEach(input => {
-        input.onmousedown = e => e.stopPropagation();
-        input.onclick = e => e.stopPropagation();
-        input.oninput = e => {
-            node.customWidth = customWInput.value;
-            node.customHeight = customHInput.value;
-            node.customSize = node.customWidth && node.customHeight ? `${node.customWidth}x${node.customHeight}` : '';
-            node.resolution = 'custom';
-            node.ratio = '';
-            syncSizeControls();
-            scheduleSave();
-        };
-    });
-    if(fitSizeBtn){
-        fitSizeBtn.onmousedown = e => e.stopPropagation();
-        fitSizeBtn.onclick = async e => {
-            e.stopPropagation();
-            const ref = referenceImages.find(item => item.url);
-            if(!ref) return;
-            try {
-                const dims = await getImageDimensions(ref.url);
-                node.customWidth = dims.width;
-                node.customHeight = dims.height;
-                node.customSize = `${dims.width}x${dims.height}`;
-                node.resolution = 'custom';
-                node.ratio = '';
-                syncSizeControls();
-                scheduleSave();
-            } catch(err) {
-                    showErrorModal(tr('canvas.imageReadFailed'));
-            }
+            if(sizePanel) sizePanel.hidden = true;
+            if(sizeSummary) sizeSummary.setAttribute('aria-expanded', 'false');
+            advancedEl.hidden = !advancedEl.hidden;
+            gearBtn.classList.toggle('is-open', !advancedEl.hidden);
         };
     }
-    syncSizeControls();
-    const countInput = wrap.querySelector('.gen-count-input');
-    countInput.onmousedown = e => e.stopPropagation();
-    countInput.onclick = e => e.stopPropagation();
-    countInput.oninput = e => {
-        const value = Math.max(1, Math.min(8, Number(e.target.value) || 1));
-        node.count = value;
-        scheduleSave();
-    };
-    countInput.onblur = e => { e.target.value = String(Math.max(1, Math.min(8, Number(node.count || 1)))); };
-    wrap.querySelectorAll('[data-step]').forEach(btn => {
-        btn.onclick = e => {
+    if(sizeSummary && sizePanel){
+        sizeSummary.onclick = e => {
             e.stopPropagation();
-            const next = Math.max(1, Math.min(8, Number(node.count || 1) + Number(btn.dataset.step || 0)));
-            node.count = next;
-            countInput.value = String(next);
+            if(advancedEl){
+                advancedEl.hidden = true;
+                gearBtn?.classList.remove('is-open');
+            }
+            const open = sizePanel.hidden;
+            sizePanel.hidden = !open;
+            sizeSummary.setAttribute('aria-expanded', open ? 'true' : 'false');
+            sizeSummary.classList.toggle('is-open', open);
+        };
+    }
+    const promptEl = wrap.querySelector('.gen-dock-prompt');
+    if(promptEl){
+        bindScrollableText(promptEl);
+        promptEl.oninput = e => {
+            node.prompt = e.target.value;
             scheduleSave();
         };
+    }
+    const syncSizeControlsLite = () => {
+        normalizeApiNodeSizeChoice(node);
+        const caps = generatorModelCaps(node.model);
+        const ratioSelect = wrap.querySelector('.ratio');
+        const resolutionSelect = wrap.querySelector('.resolution');
+        const qualitySelect = wrap.querySelector('.quality-select');
+        const mjQualitySelect = wrap.querySelector('.mj-quality-select');
+        const genMjPanel = wrap.querySelector('.gen-mj-panel');
+        if(ratioSelect){
+            [...ratioSelect.options].forEach(opt => {
+                const allowed = caps.ratioKeys.includes(opt.value);
+                opt.disabled = !allowed;
+                opt.hidden = !allowed;
+            });
+            const ratioValue = node.ratio && [...ratioSelect.options].some(opt => opt.value === node.ratio && !opt.hidden)
+                ? node.ratio
+                : (caps.ratioKeys.includes('square') ? 'square' : caps.ratioKeys[0]);
+            ratioSelect.value = ratioValue;
+            node.ratio = ratioValue;
+        }
+        if(resolutionSelect){
+            const showResolution = caps.resolutionKeys.length > 0;
+            resolutionSelect.classList.toggle('is-hidden', !showResolution);
+            resolutionSelect.toggleAttribute('hidden', !showResolution);
+            if(showResolution){
+                const resolutionValue = node.resolution && caps.resolutionKeys.includes(node.resolution)
+                    ? node.resolution
+                    : (caps.resolutionKeys[0] || '1k');
+                resolutionSelect.value = resolutionValue;
+                node.resolution = resolutionValue;
+            }
+        }
+        wrap.querySelectorAll('.gen-dock-res-btn').forEach(btn => {
+            const key = btn.getAttribute('data-resolution');
+            const allowed = !caps.resolutionKeys.length || caps.resolutionKeys.includes(key);
+            btn.hidden = !allowed;
+            btn.disabled = !allowed;
+            btn.classList.toggle('is-active', allowed && key === String(node.resolution || '').toLowerCase());
+        });
+        wrap.querySelectorAll('.gen-dock-ratio-btn').forEach(btn => {
+            const key = btn.getAttribute('data-ratio');
+            const allowed = caps.ratioKeys.includes(key);
+            btn.hidden = !allowed;
+            btn.disabled = !allowed;
+            btn.classList.toggle('is-active', allowed && key === node.ratio);
+        });
+        const resRow = wrap.querySelector('.gen-dock-res-row');
+        const resSection = resRow?.closest?.('.gen-dock-size-section');
+        if(resRow) resRow.hidden = !(caps.resolutionKeys.length > 0);
+        if(resSection) resSection.hidden = !(caps.resolutionKeys.length > 0);
+        if(sizeSummaryText) sizeSummaryText.textContent = genSizeSummaryText(node);
+        if(advancedEl) advancedEl.dataset.modelProfile = caps.profile || 'standard';
+        const qualityRow = wrap.querySelector('.gen-dock-quality-row');
+        if(qualitySelect){
+            const showQuality = Boolean(caps.showQuality);
+            qualitySelect.classList.toggle('is-hidden', !showQuality);
+            qualitySelect.toggleAttribute('hidden', !showQuality);
+            if(qualityRow) qualityRow.hidden = !showQuality;
+        }
+        if(mjQualitySelect){
+            const showMjQuality = Boolean(caps.showMjQuality);
+            mjQualitySelect.classList.toggle('is-hidden', !showMjQuality);
+            mjQualitySelect.toggleAttribute('hidden', !showMjQuality);
+            mjQualitySelect.setAttribute('aria-hidden', showMjQuality ? 'false' : 'true');
+            if(showMjQuality) mjQualitySelect.value = String(node.mjQuality || caps.defaultMjQuality || '1');
+        }
+        if(genMjPanel) genMjPanel.hidden = !caps.showYouchuanPanel;
+        const weirdField = wrap.querySelector('.mj-weird-field');
+        const hdField = wrap.querySelector('.mj-hd-field');
+        const svField = wrap.querySelector('.mj-sv-field');
+        const iwInput = wrap.querySelector('.mj-iw-input');
+        if(weirdField) weirdField.classList.toggle('is-hidden', !caps.showWeird);
+        if(hdField) hdField.classList.toggle('is-hidden', !caps.showMjHd);
+        if(svField) svField.classList.toggle('is-hidden', !caps.showSvSelect);
+        if(iwInput && caps.iwMax != null){
+            iwInput.max = String(caps.iwMax);
+            if(Number(node.mjIw) > caps.iwMax){
+                node.mjIw = caps.iwMax;
+                iwInput.value = String(caps.iwMax);
+            }
+        }
+        const customRatioRow = wrap.querySelector('.custom-ratio-row');
+        const customSizeRow = wrap.querySelector('.custom-size-row');
+        if(customRatioRow) customRatioRow.style.display = node.ratio === 'custom' ? '' : 'none';
+        if(customSizeRow) customSizeRow.style.display = node.resolution === 'custom' ? '' : 'none';
+        if(modelSelect?.selectedIndex >= 0) modelSelect.title = modelSelect.options[modelSelect.selectedIndex]?.text || '';
+        if(providerSelect?.selectedIndex >= 0) providerSelect.title = providerSelect.options[providerSelect.selectedIndex]?.text || '';
+    };
+    if(providerSelect){
+        providerSelect.onmousedown = e => e.stopPropagation();
+        providerSelect.onclick = e => e.stopPropagation();
+        providerSelect.onchange = e => {
+            e.stopPropagation();
+            node.apiProvider = e.target.value;
+            const providerModels = providerImageModels(node.apiProvider);
+            if(!providerModels.includes(resolveImageModel(node.model))) node.model = providerModels[0] || '';
+            if(modelSelect) modelSelect.innerHTML = imageModelOptions(node.model, node.apiProvider);
+            syncSizeControlsLite();
+            scheduleSave();
+            positionImageGenDock(node);
+        };
+    }
+    if(modelSelect){
+        modelSelect.onmousedown = e => e.stopPropagation();
+        modelSelect.onclick = e => e.stopPropagation();
+        modelSelect.onchange = e => {
+            e.stopPropagation();
+            node.model = e.target.value;
+            syncSizeControlsLite();
+            scheduleSave();
+            positionImageGenDock(node);
+        };
+    }
+    wrap.querySelectorAll('.gen-dock-res-btn').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.stopPropagation();
+            node.resolution = btn.getAttribute('data-resolution') || '1k';
+            syncSizeControlsLite();
+            scheduleSave();
+            positionImageGenDock(node);
+        };
     });
-    const list = wrap.querySelector('.input-list');
-    renderImageInputList(list, node, imageInputs);
+    wrap.querySelectorAll('.gen-dock-ratio-btn').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.stopPropagation();
+            node.ratio = btn.getAttribute('data-ratio') || 'square';
+            syncSizeControlsLite();
+            scheduleSave();
+            positionImageGenDock(node);
+        };
+    });
+    const qualitySelect = wrap.querySelector('.quality-select');
+    if(qualitySelect){
+        qualitySelect.onmousedown = e => e.stopPropagation();
+        qualitySelect.onclick = e => e.stopPropagation();
+        qualitySelect.onchange = e => {
+            e.stopPropagation();
+            node.quality = e.target.value;
+            scheduleSave();
+        };
+    }
+    const mjQualitySelect = wrap.querySelector('.mj-quality-select');
+    if(mjQualitySelect){
+        mjQualitySelect.onmousedown = e => e.stopPropagation();
+        mjQualitySelect.onclick = e => e.stopPropagation();
+        mjQualitySelect.onchange = e => {
+            e.stopPropagation();
+            node.mjQuality = e.target.value;
+            scheduleSave();
+        };
+    }
+    const bindMjNumber = (selector, key, clampFn) => {
+        const el = wrap.querySelector(selector);
+        if(!el) return;
+        el.onmousedown = e => e.stopPropagation();
+        el.oninput = e => {
+            e.stopPropagation();
+            node[key] = clampFn(e.target.value);
+            e.target.value = String(node[key]);
+            scheduleSave();
+        };
+    };
+    bindMjNumber('.mj-chaos-input', 'mjChaos', v => clampGenInt(v, 0, 100, 0));
+    bindMjNumber('.mj-stylize-input', 'mjStylize', v => clampGenInt(v, 0, 1000, 0));
+    bindMjNumber('.mj-weird-input', 'mjWeird', v => clampGenInt(v, 0, 3000, 0));
+    bindMjNumber('.mj-iw-input', 'mjIw', v => {
+        const caps = generatorModelCaps(node.model);
+        return clampGenFloat(v, 0, caps.iwMax || 3, 1);
+    });
+    const mjSvSelect = wrap.querySelector('.mj-sv-select');
+    if(mjSvSelect){
+        mjSvSelect.onmousedown = e => e.stopPropagation();
+        mjSvSelect.onclick = e => e.stopPropagation();
+        mjSvSelect.value = String(node.mjSv || 4);
+        mjSvSelect.onchange = e => {
+            e.stopPropagation();
+            node.mjSv = clampGenInt(e.target.value, 1, 4, 4);
+            scheduleSave();
+        };
+    }
+    const bindMjCheck = (selector, key) => {
+        const el = wrap.querySelector(selector);
+        if(!el) return;
+        el.onchange = e => {
+            e.stopPropagation();
+            node[key] = Boolean(e.target.checked);
+            el.closest('.setting-check')?.classList.toggle('active', node[key]);
+            scheduleSave();
+        };
+    };
+    bindMjCheck('.mj-hd-input', 'mjHd');
+    bindMjCheck('.mj-raw-input', 'mjRaw');
+    const countInput = wrap.querySelector('.gen-dock-count-input');
+    const applyCount = (raw) => {
+        const next = Math.max(1, Math.min(8, Math.round(Number(raw) || 1)));
+        node.count = next;
+        if(countInput) countInput.value = String(next);
+        scheduleSave();
+        return next;
+    };
+    if(countInput){
+        countInput.onmousedown = e => e.stopPropagation();
+        countInput.onclick = e => e.stopPropagation();
+        countInput.onchange = e => {
+            e.stopPropagation();
+            applyCount(e.target.value);
+        };
+        countInput.onkeydown = e => {
+            if(e.key === 'Enter'){
+                e.preventDefault();
+                applyCount(countInput.value);
+                countInput.blur();
+            }
+        };
+        countInput.onwheel = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            const delta = e.deltaY < 0 ? 1 : -1;
+            applyCount(Number(node.count || 1) + delta);
+        };
+    }
+    wrap.querySelectorAll('.gen-dock-count-step').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.stopPropagation();
+            const delta = Number(btn.getAttribute('data-count-delta') || 0);
+            applyCount(Number(node.count || 1) + delta);
+        };
+    });
+    syncSizeControlsLite();
+    const sources = orderedSources(node, generatorSources(node));
+    const imageInputs = sources
+        .map(src => ({...src, refs:imageRefsOnly(src.refs || [])}))
+        .filter(src => src.refs?.length);
+    const promptInputs = sources.filter(src => src.prompt && !src.refs?.length);
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
+    renderImageInputList(wrap.querySelector('.input-list'), node, imageInputs);
     const genBtn = wrap.querySelector('.gen-btn');
     if(genBtn) genBtn.onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
     bindCascadeButtons(wrap, node.id);
-    return wrap;
+    wrap.onmousedown = e => e.stopPropagation();
+    wrap.onclick = e => e.stopPropagation();
+}
+function remountImageGenDock(node){
+    removeImageGenDock();
+    if(!nodesEl || !node || node.type !== 'generator') return;
+    const host = document.createElement('div');
+    host.className = 'image-gen-dock-host';
+    host.dataset.imageDockFor = node.id;
+    host.innerHTML = genDockShellHtml(node, {
+        floating:true,
+        showUpstream:true,
+        showRefs:true,
+        showCascade:true,
+        showRetry:true
+    });
+    bindImageGenDockControls(host, node);
+    mountCanvasCustomSelects(host);
+    nodesEl.appendChild(host);
+    imageGenDockEl = host;
+    imageGenDockNodeId = node.id;
+    requestAnimationFrame(() => positionImageGenDock(node));
+    refreshIcons(host);
+}
+function syncImageGenDock(){
+    const onlyId = selected.size === 1 ? [...selected][0] : null;
+    const only = onlyId ? nodes.find(n => n.id === onlyId) : null;
+    // 控制台只挂在「图片生成」节点上；拖入的 image 只是素材
+    const ok = only && !isNodeDisabled(only) && only.type === 'generator';
+    if(!ok){
+        removeImageGenDock();
+        return;
+    }
+    if(imageGenDockNodeId !== only.id || !imageGenDockEl?.isConnected) remountImageGenDock(only);
+    else positionImageGenDock(only);
 }
 function renderVideoBody(node){
     const wrap = document.createElement('div');
@@ -14306,6 +16770,8 @@ function hasDownstreamGenerator(nodeId){
 function shouldCreateOutputForNode(node){
     if(!node) return false;
     if(hasExplicitOutputConnection(node.id)) return true;
+    // Gen Console：结果落在原节点预览，不自动建 Output（仅手连 Output 时写入）
+    if(node.type === 'generator') return false;
     return !hasDownstreamGenerator(node.id);
 }
 function outputForNode(node, dx=460){
@@ -14320,6 +16786,22 @@ function outputForNode(node, dx=460){
         connections.push({id:uid('c'), from:node.id, to:out.id});
     }
     return out;
+}
+/** 有显式 Output 则挂其上；否则挂回源节点（Generator 本地队列） */
+function pendingHostForNode(node){
+    if(!node) return null;
+    return outputForNode(node, 460) || node;
+}
+function pushNodePending(node, pendings){
+    const host = pendingHostForNode(node);
+    if(!host || !pendings?.length) return host;
+    host._pending = [...(host._pending || []), ...pendings];
+    return host;
+}
+function revealGeneratorResultsWhileRunning(gen){
+    if(!isGenConsoleNode(gen)) return;
+    openGenHistoryPanel(gen);
+    refreshOutputTimer();
 }
 function generatedImageRefs(node){
     const keepGeneratedMedia = ['rh','ltxDirector','video'].includes(node?.type);
@@ -14357,6 +16839,14 @@ function mediaRefsFromNode(node){
             return {url, name:outputImageName(url) || `output-${i + 1}`, kind};
         }).filter(Boolean);
     }
+    // Generator：右端口吐当前舞台主图（与预览一致）
+    if(node.type === 'generator'){
+        const urls = generatorPreviewUrls(node);
+        if(!urls.length) return [];
+        const idx = Math.max(0, Math.min(urls.length - 1, Number(node.previewIndex ?? urls.length - 1)));
+        const url = urls[idx];
+        return [{url, name:outputImageName(url) || 'generated-1', kind:'image'}];
+    }
     if(CANVAS_MEDIA_OUTPUT_TYPES.includes(node.type)) return generatedImageRefs(node);
     return [];
 }
@@ -14367,6 +16857,19 @@ function generatorSources(gen, ctx=loopContext){
             // 从 output 节点取最新一张图当作 reference 给下游
             const last = [...n.images].reverse().map(outputUrlValue).find(Boolean);
             if(last) return {id:n.id, type:'outputImage', label:'上游输出', preview:last, refs:[{url:last, name:'output.png'}], prompt:''};
+        }
+        if(n.type === 'generator'){
+            const refs = mediaRefsFromNode(n);
+            if(refs.length){
+                return {
+                    id:`${n.id}:preview`,
+                    type:'generatedImage',
+                    label:langIsEn() ? 'Generated preview' : '生成预览',
+                    preview:refs[0].url,
+                    refs,
+                    prompt:''
+                };
+            }
         }
         if(CANVAS_MEDIA_OUTPUT_TYPES.includes(n.type)){
             const refs = generatedImageRefs(n);
@@ -14454,6 +16957,10 @@ function generatorSources(gen, ctx=loopContext){
         if(n.type === 'llm' && (n.mode || 'node') === 'node' && n.outputText) return {id:n.id, type:'llm', label:(n.outputText || 'LLM').slice(0, 32), refs:[], prompt:n.outputText || ''};
         if(n.type === 'videoReverse' && n.outputText) return {id:n.id, type:'videoReverse', label:(n.outputText || '视频反推').slice(0, 32), refs:[], prompt:n.outputText || ''};
         if(n.type === 'slotsLoopVideoAgent' && n.outputText) return {id:n.id, type:'slotsLoopVideoAgent', label:(n.outputText || 'Slots 循环视频').slice(0, 32), refs:[], prompt:n.outputText || ''};
+        if(n.type === 'mxShellPromptAgent' && n.outputText) return {id:n.id, type:'mxShellPromptAgent', label:(n.outputText || 'Mx-Shell').slice(0, 32), refs:[], prompt:n.outputText || ''};
+        if((n.type === 'textOutput' || n.type === 'mxShellPromptView' || n.type === 'deepWhiteShotView') && n.text) return {id:n.id, type:'textOutput', label:(n.text || textOutputKindLabel(n.kind)).slice(0, 32), refs:[], prompt:n.text || ''};
+        if(n.type === 'deepWhiteShotAgent' && n.outputText) return {id:n.id, type:'deepWhiteShotAgent', label:(n.outputText || 'DeepWhite').slice(0, 32), refs:[], prompt:n.outputText || ''};
+        if(n.type === 'screenwritingAgent' && n.outputText) return {id:n.id, type:'screenwritingAgent', label:(n.outputText || '编剧').slice(0, 32), refs:[], prompt:n.outputText || ''};
         return null;
     }).flat().filter(Boolean);
 }
@@ -14535,7 +17042,10 @@ function refreshGeneratorInputViews(){
             .map(src => ({...src, refs:imageRefsOnly(src.refs || [])}))
             .filter(src => src.refs?.length);
         renderPromptPreview(el.querySelector('.prompt-list'), sources.filter(src => src.prompt && !src.refs?.length));
-        if(gen.type === 'generator') renderImageInputList(el.querySelector('.input-list'), gen, imageInputs);
+        if(gen.type === 'generator'){
+            refreshGenStage(el, gen);
+            if(imageGenDockNodeId === gen.id) syncImageGenDock();
+        }
         if(gen.type === 'msgen') renderImageInputList(el.querySelector('.ms-img-list'), gen, imageInputs);
         if(gen.type === 'comfy') renderComfyImages(el.querySelector('.input-list'), gen, imageInputs);
         if(gen.type === 'ltxDirector'){
@@ -14620,19 +17130,18 @@ async function buildGeneratorTaskPayload(gen, prompt, refs){
 async function runGeneratorSingle(gen, prompt, refs, opts={}){
     const count = Math.max(1, Math.min(8, Number(gen.count || 1)));
     const out = outputForNode(gen, 460);
+    resetGeneratorPreviewRound(gen);
     const run = runSnapshot(gen, prompt || 'Edit the reference images.', refs);
     const payload = await buildGeneratorTaskPayload(gen, prompt || 'Edit the reference images.', refs);
     const taskInfos = await Promise.all(Array.from({length:count}, () => createCanvasImageTask(payload)));
     const pendingIds = taskInfos.map(() => uid('p'));
-    if(out) out._pending = [
-        ...(out._pending || []),
-        ...taskInfos.map((task, index) => makePending(pendingIds[index], run, {
-            canvasTaskId:task.task_id,
-            canvasTaskType:'online-image',
-            appendGenerated:Boolean(opts.appendGenerated)
-        }))
-    ];
+    pushNodePending(gen, taskInfos.map((task, index) => makePending(pendingIds[index], run, {
+        canvasTaskId:task.task_id,
+        canvasTaskType:'online-image',
+        appendGenerated:Boolean(opts.appendGenerated)
+    })));
     refreshRunNodes(gen, out);
+    revealGeneratorResultsWhileRunning(gen);
     scheduleSave();
     await saveCanvas();
     const pollAll = () => Promise.all(taskInfos.map(task => pollCanvasImageTask(task.task_id)));
@@ -14649,6 +17158,7 @@ async function runGeneratorBatchParallel(gen, prompt, perItemRefs, opts={}){
     const out = outputForNode(gen, 460);
     const promptText = prompt || 'Edit the reference images.';
     const count = Math.max(1, Math.min(8, Number(gen.count || 1)));
+    resetGeneratorPreviewRound(gen);
     const jobs = perItemRefs.flatMap(ref => Array.from({length:count}, () => imageRefsOnly([ref])));
     const totalJobs = jobs.length;
     if(opts.cascade){
@@ -14663,15 +17173,13 @@ async function runGeneratorBatchParallel(gen, prompt, perItemRefs, opts={}){
         const taskInfo = await createCanvasImageTask(payload);
         return {run, taskInfo, pendingId:uid('p')};
     }));
-    if(out) out._pending = [
-        ...(out._pending || []),
-        ...submitted.map(item => makePending(item.pendingId, item.run, {
-            canvasTaskId:item.taskInfo.task_id,
-            canvasTaskType:'online-image',
-            appendGenerated:true
-        }))
-    ];
+    pushNodePending(gen, submitted.map(item => makePending(item.pendingId, item.run, {
+        canvasTaskId:item.taskInfo.task_id,
+        canvasTaskType:'online-image',
+        appendGenerated:true
+    })));
     refreshRunNodes(gen, out);
+    revealGeneratorResultsWhileRunning(gen);
     scheduleSave();
     await saveCanvas();
     let done = 0;
@@ -14700,7 +17208,7 @@ async function runGenerator(genId, opts={}){
     if(!gen || isNodeDisabled(gen)) return;
     const loopCtx = opts.loopContext !== undefined ? opts.loopContext : loopContext;
     const sources = orderedSources(gen, generatorSources(gen, loopCtx));
-    const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
+    const prompt = composeGeneratorPrompt(gen, sources);
     const refs = imageRefsOnly(sources.flatMap(s => s.refs || []));
     if(!prompt && !refs.length){ softAlert(tr('canvas.needPromptOrImage')); return; }
     if(isYouchuanRhModel(gen.model) && !prompt){ softAlert(tr('canvas.youchuanNeedPrompt')); return; }
@@ -14759,16 +17267,18 @@ async function runGeneratorLegacy(genId, opts={}){
     if(!gen || isNodeDisabled(gen)) return;
     const loopCtx = opts.loopContext !== undefined ? opts.loopContext : loopContext;
     const sources = orderedSources(gen, generatorSources(gen, loopCtx));
-    const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
+    const prompt = composeGeneratorPrompt(gen, sources);
     const refs = imageRefsOnly(sources.flatMap(s => s.refs || []));
     if(!prompt && !refs.length){ softAlert(tr('canvas.needPromptOrImage')); return; }
     const count = Math.max(1, Math.min(8, Number(gen.count || 1)));
     let out = outputForNode(gen, 460);
+    resetGeneratorPreviewRound(gen);
     const pendingIds = Array.from({length:count}, () => uid('p'));
     const run = runSnapshot(gen, prompt || 'Edit the reference images.', refs);
-    if(out) out._pending = [...(out._pending||[]), ...pendingIds.map(id => makePending(id, run))];
+    pushNodePending(gen, pendingIds.map(id => makePending(id, run)));
     syncAppendableNodeRunState(gen);
     refreshRunNodes(gen, out);
+    revealGeneratorResultsWhileRunning(gen);
     const execute = async () => {
     try {
         const rawPrompt = prompt || 'Edit the reference images.';
@@ -14789,31 +17299,34 @@ async function runGeneratorLegacy(genId, opts={}){
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify(payload)
         }).then(async r => { if(!r.ok) throw new Error(await responseErrorMessage(r, tr('canvas.generationFailed'))); return r.json(); })));
-        if(!pendingIds.some(id => (out?._pending || []).some(p => p.id === id))){
+        const host = out || gen;
+        if(!pendingIds.some(id => (host._pending || []).some(p => p.id === id))){
             reconcileAgentRunStateFromPending(gen.id);
             refreshRunNodes(gen, out);
             return;
         }
         const images = results.flatMap(result => result.images || []);
-        const metas = collectRunMetas(out, pendingIds);
+        const metas = collectRunMetas(host, pendingIds);
         run.request = results[0] ? requestMetaFromResult(results[0]) : {};
-        if(out) out._pending = (out._pending||[]).filter(p => !pendingIds.includes(p.id));
-        appendOutputImages(out, images, refs[0], metas);
+        host._pending = (host._pending||[]).filter(p => !pendingIds.includes(p.id));
+        if(out) appendOutputImages(out, images, refs[0], metas);
         mergeGeneratedOutputs(gen, images, Boolean(opts.cascade));
+        appendGeneratorPreviewRound(gen, images, metas[0] || {run, runMs:Math.max(...metas.map(m => m.runMs || 0), 0)});
         addGenerationLog({run, outputs:images, runMs:Math.max(...metas.map(m => m.runMs || 0), 0)});
         syncAgentRunStatusAfterTask(gen, {completed:agentPendingCount(gen.id) === 0});
         refreshRunNodes(gen, out);
         scheduleSave();
     } catch(err) {
-        if(!pendingIds.some(id => (out?._pending || []).some(p => p.id === id))){
+        const host = out || gen;
+        if(!pendingIds.some(id => (host._pending || []).some(p => p.id === id))){
             reconcileAgentRunStateFromPending(gen.id);
             refreshRunNodes(gen, out);
             if(opts.cascade) throw err;
             return;
         }
-        const metas = collectRunMetas(out, pendingIds);
+        const metas = collectRunMetas(host, pendingIds);
         addGenerationLog({run, outputs:[], runMs:Math.max(...metas.map(m => m.runMs || 0), 0), error:err.message || String(err)});
-        if(out) out._pending = (out._pending||[]).filter(p => !pendingIds.includes(p.id));
+        host._pending = (host._pending||[]).filter(p => !pendingIds.includes(p.id));
         syncAgentRunStatusAfterTask(gen, {failed:agentPendingCount(gen.id) === 0, error:err.message || String(err)});
         refreshRunNodes(gen, out);
         if(opts.cascade) throw err;
@@ -15705,6 +18218,9 @@ function runCascadeNodeByType(node, opts={}){
     if(node.type === 'batchPosterAgent') return runBatchPosterAgent(node.id, runOpts);
     if(node.type === 'nineGridAgent') return runNineGridFull(node.id);
     if(node.type === 'slotsLoopVideoAgent') return runSlotsLoopVideoAgent(node.id, runOpts);
+    if(node.type === 'mxShellPromptAgent') return runMxShellPromptAgent(node.id, runOpts);
+    if(node.type === 'deepWhiteShotAgent') return runDeepWhiteShotAgent(node.id, runOpts);
+    if(node.type === 'screenwritingAgent') return runScreenwritingAgent(node.id, runOpts);
     if(node.type === 'msgen') return runMsGenNode(node.id, runOpts);
     if(node.type === 'comfy') return runComfyNode(node.id, runOpts);
     if(node.type === 'ltxDirector') return runLTXDirectorNode(node.id, runOpts);
@@ -15732,7 +18248,7 @@ async function runLimitedCascadeRounds(rounds, limit, runner){
     return Promise.allSettled(workers);
 }
 function canvasRunTypes(){
-    return ['generator','msgen','comfy','ltxDirector','llm','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent'];
+    return ['generator','msgen','comfy','ltxDirector','llm','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent'];
 }
 function canvasWorkflowEdges(){
     const runTypes = canvasRunTypes();
@@ -16530,12 +19046,16 @@ function makePending(id, run, task={}){
 }
 function agentPendingCount(nodeId){
     if(!nodeId) return 0;
-    return nodes.filter(n => n.type === 'output').reduce((sum, out) => {
-        return sum + (out._pending || []).filter(p => p.run?.node?.id === nodeId).length;
-    }, 0);
+    const self = nodes.find(n => n.id === nodeId);
+    let sum = self && self.type !== 'output' ? (self._pending || []).length : 0;
+    return nodes.filter(n => n.type === 'output').reduce((acc, out) => {
+        return acc + (out._pending || []).filter(p => p.run?.node?.id === nodeId).length;
+    }, sum);
 }
 function clearAgentOutputPending(nodeId){
     if(!nodeId) return;
+    const self = nodes.find(n => n.id === nodeId);
+    if(self && self.type !== 'output') self._pending = [];
     nodes.filter(n => n.type === 'output').forEach(out => {
         out._pending = (out._pending || []).filter(p => p.run?.node?.id !== nodeId);
     });
@@ -16575,6 +19095,15 @@ function agentGenRunActionsHtml(nodeId, primaryBtnHtml){
 function collectAgentPendingTaskIds(nodeId){
     if(!nodeId) return [];
     const ids = [];
+    const self = nodes.find(n => n.id === nodeId);
+    if(self && self.type !== 'output'){
+        (self._pending || []).forEach(p => {
+            if(p.canvasTaskId) ids.push({
+                taskId:String(p.canvasTaskId),
+                type:String(p.canvasTaskType || ''),
+            });
+        });
+    }
     nodes.filter(n => n.type === 'output').forEach(out => {
         (out._pending || []).forEach(p => {
             if(p?.run?.node?.id !== nodeId) return;
@@ -16672,8 +19201,9 @@ function syncAgentRunStatusAfterTask(gen, {completed=false, failed=false, error=
 /** 重开画布 / 远端同步：JS 轮询已断，清掉不可恢复的 pending 与卡住的运行徽章 */
 function resetTransientNodeRunState(){
     const resumable = new Set(['online-image', 'replica-agent', 'image-repair-agent']);
-    nodes.filter(n => n.type === 'output').forEach(out => {
-        out._pending = (out._pending || []).filter(p =>
+    nodes.forEach(host => {
+        if(host.type !== 'output' && host.type !== 'generator') return;
+        host._pending = (host._pending || []).filter(p =>
             Boolean(p?.canvasTaskId) && resumable.has(String(p.canvasTaskType || ''))
         );
     });
@@ -16769,12 +19299,13 @@ function collectRunMeta(out, id){
     return collectRunMetas(out, [id])[0] || {runMs:0, run:{}};
 }
 function findOutputByPendingId(pendingId){
-    return nodes.find(n => n.type === 'output' && (n._pending || []).some(p => p.id === pendingId));
+    return nodes.find(n => (n.type === 'output' || n.type === 'generator') && (n._pending || []).some(p => p.id === pendingId));
 }
 function findPendingTask(taskId){
-    for(const out of nodes.filter(n => n.type === 'output')){
-        const pending = (out._pending || []).find(p => p.canvasTaskId === taskId);
-        if(pending) return {out, pending};
+    for(const host of nodes){
+        if(host.type !== 'output' && host.type !== 'generator') continue;
+        const pending = (host._pending || []).find(p => p.canvasTaskId === taskId);
+        if(pending) return {out: host, pending};
     }
     return null;
 }
@@ -16946,10 +19477,13 @@ function completeCanvasImageTask(taskId, result){
     meta.run.request = requestMetaFromResult(result);
     const images = result.images || [];
     out._pending = (out._pending || []).filter(p => p.id !== pending.id);
-    appendOutputImages(out, images, meta.run?.refs?.[0], [meta]);
-    const gen = nodes.find(n => n.id === meta.run?.node?.id);
+    if(out.type === 'output'){
+        appendOutputImages(out, images, meta.run?.refs?.[0], [meta]);
+    }
+    const gen = nodes.find(n => n.id === meta.run?.node?.id) || (out.type === 'generator' ? out : null);
     if(gen){
         mergeGeneratedOutputs(gen, images, Boolean(pending.appendGenerated));
+        appendGeneratorPreviewRound(gen, images, meta);
         const stillPending = agentPendingCount(gen.id);
         gen.running = stillPending > 0;
         if(stillPending > 0) gen.runStatus = 'running';
@@ -16957,9 +19491,15 @@ function completeCanvasImageTask(taskId, result){
             gen.runStatus = 'done';
             gen.runError = '';
         }
+        if(gen.type === 'generator'){
+            const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(gen.id)}"]`);
+            if(el) refreshGenStage(el, gen);
+            if(imageGenDockNodeId === gen.id) syncImageGenDock();
+            if(genHistoryPanelNodeId === gen.id) refreshOpenGenHistoryPanel();
+        }
     }
     addGenerationLog({run:meta.run, outputs:images, runMs:meta.runMs || 0});
-    refreshRunNodes(gen, out);
+    refreshRunNodes(gen, out.type === 'output' ? out : null);
     scheduleSave();
 }
 function failCanvasImageTask(taskId, message){
@@ -16969,17 +19509,17 @@ function failCanvasImageTask(taskId, message){
     const run = pending.run || {};
     const runMs = nowMs() - Number(pending.startedAt || nowMs());
     out._pending = (out._pending || []).filter(p => p.id !== pending.id);
-    const gen = nodes.find(n => n.id === run?.node?.id);
+    const gen = nodes.find(n => n.id === run?.node?.id) || (out.type === 'generator' ? out : null);
     if(gen){
         syncAgentRunStatusAfterTask(gen, {failed:agentPendingCount(gen.id) === 0, error:message || tr('canvas.generationFailed')});
     }
     addGenerationLog({run, outputs:[], runMs, error:message || tr('canvas.generationFailed')});
-    refreshRunNodes(gen, out);
+    refreshRunNodes(gen, out.type === 'output' ? out : null);
     scheduleSave();
 }
 function resumeCanvasImageTasks(){
-    nodes.filter(n => n.type === 'output').forEach(out => {
-        (out._pending || []).forEach(p => {
+    nodes.filter(n => n.type === 'output' || n.type === 'generator').forEach(host => {
+        (host._pending || []).forEach(p => {
             if(p.canvasTaskType === 'online-image' && p.canvasTaskId) pollCanvasImageTask(p.canvasTaskId);
             if(p.canvasTaskType === 'replica-agent' && p.canvasTaskId) pollReplicaAgentTask(p.canvasTaskId);
             if(p.canvasTaskType === 'image-repair-agent' && p.canvasTaskId) pollImageRepairAgentTask(p.canvasTaskId);
@@ -17841,7 +20381,7 @@ function nodeBounds(ids){
     const y2 = Math.max(...rects.map(r => r.y + r.h));
     return {x:x1, y:y1, w:x2 - x1, h:y2 - y1};
 }
-const FLOW_NODE_ORDER = {image:0, prompt:1, group:2, promptGroup:2, loop:3, llm:4, generator:5, replicaAgent:5, imageRepairAgent:5, videoReverse:5, slotsLoopVideoAgent:5, msgen:5, video:5, rh:5, comfy:5, ltxDirector:5, output:6, frameStack:6, imageBatch:6};
+const FLOW_NODE_ORDER = {image:0, prompt:1, group:2, promptGroup:2, loop:3, llm:4, generator:5, replicaAgent:5, imageRepairAgent:5, videoReverse:5, slotsLoopVideoAgent:5, mxShellPromptAgent:5, deepWhiteShotAgent:5, screenwritingAgent:5, textOutput:6, mxShellPromptView:6, deepWhiteShotView:6, msgen:5, video:5, rh:5, comfy:5, ltxDirector:5, output:6, frameStack:6, imageBatch:6};
 function moveNodeWithChildren(node, newX, newY){
     if(!node) return;
     const dx = newX - Number(node.x || 0);
@@ -17970,7 +20510,7 @@ function canvasNodeSearchLabel(node){
         image:'Image', prompt:'Prompt', loop:'Loop', promptGroup:'Prompts', group:'Group',
         output:'Output', imageBatch:'Image batch', frameStack:'Frame Stack', llm:'LLM',
         replicaAgent:'Replica Agent', imageRepairAgent:'Repair Agent', batchPosterAgent:'Batch Poster',
-        nineGridAgent:'Nine Grid', slotsLoopVideoAgent:'Slots Loop', videoReverse:'Video Reverse',
+        nineGridAgent:'Nine Grid', slotsLoopVideoAgent:'Slots Loop', mxShellPromptAgent:'Mx-Shell', textOutput:'Text Output', mxShellPromptView:'Mx-Shell View', deepWhiteShotAgent:'DeepWhite', deepWhiteShotView:'DeepWhite Doc', screenwritingAgent:'Screenwriting', videoReverse:'Video Reverse',
         comfy:'ComfyUI', ltxDirector:'LTX Director', rh:'RunningHub', msgen:'ModelScope',
         video:'Video', generator:'Generator',
     }[node.type] || node.type || 'Node';
@@ -18392,6 +20932,10 @@ function onNodeDrag(e){
     updateGroupDropHighlights([dragNode.node, ...(dragNode.children || []).map(c => c.node)], lastMouseBoard);
     scheduleLinkGeometryRefresh(movingIds);
     scheduleMinimapRender({ positionsOnly: true });
+    if(imageGenDockNodeId && movingIds.has(imageGenDockNodeId)){
+        const dockNode = nodes.find(n => n.id === imageGenDockNodeId);
+        if(dockNode) positionImageGenDock(dockNode);
+    }
 }
 function startNodeResize(e, node){
     e.preventDefault();
@@ -18668,6 +21212,26 @@ function canConnect(fromId, toId){
         if(['image','group','output','frameStack','imageBatch'].includes(from.type)) return true;
         return CANVAS_MEDIA_OUTPUT_TYPES.includes(from.type);
     }
+    if(to.type === 'mxShellPromptAgent'){
+        if(['prompt','promptGroup','loop','llm'].includes(from.type)) return true;
+        if(['image','group','output','frameStack','imageBatch'].includes(from.type)) return true;
+        return CANVAS_MEDIA_OUTPUT_TYPES.includes(from.type);
+    }
+    if(to.type === 'textOutput' || to.type === 'mxShellPromptView' || to.type === 'deepWhiteShotView'){
+        if(from.type === 'mxShellPromptAgent') return !to.kind || to.kind === 'mxShell' || to.type === 'mxShellPromptView';
+        if(from.type === 'deepWhiteShotAgent') return !to.kind || to.kind === 'deepWhite' || to.kind === 'seedance' || to.type === 'deepWhiteShotView';
+        if(from.type === 'screenwritingAgent') return !to.kind || to.kind === 'screenwriting';
+        return false;
+    }
+    if(to.type === 'deepWhiteShotAgent'){
+        if(['prompt','promptGroup','loop','llm','screenwritingAgent','textOutput'].includes(from.type)) return true;
+        if(['image','group','output','frameStack','imageBatch'].includes(from.type)) return true;
+        return false;
+    }
+    if(to.type === 'screenwritingAgent'){
+        if(['prompt','promptGroup','loop','llm'].includes(from.type)) return true;
+        return false;
+    }
     if(to.type === 'videoReverse') return ['image','prompt'].includes(from.type);
     if(to.type === 'frameStack'){
         if(from.type === 'image'){
@@ -18688,6 +21252,15 @@ function canConnect(fromId, toId){
     if(from.type === 'batchPosterAgent') return to.type === 'output';
     if(from.type === 'nineGridAgent') return to.type === 'output' || to.type === 'imageBatch';
     if(from.type === 'slotsLoopVideoAgent') return to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm';
+    if(from.type === 'mxShellPromptAgent') return to.type === 'textOutput' || to.type === 'mxShellPromptView' || to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'video';
+    if(from.type === 'screenwritingAgent') return to.type === 'textOutput' || to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'deepWhiteShotAgent';
+    if(from.type === 'textOutput' || from.type === 'mxShellPromptView' || from.type === 'deepWhiteShotView'){
+        if(from.kind === 'deepWhite' || from.type === 'deepWhiteShotView') return to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'nineGridAgent';
+        if(from.kind === 'screenwriting') return to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'deepWhiteShotAgent';
+        if(from.kind === 'seedance') return to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'video';
+        return to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'video';
+    }
+    if(from.type === 'deepWhiteShotAgent') return to.type === 'textOutput' || to.type === 'deepWhiteShotView' || to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'nineGridAgent';
     if(from.type === 'videoReverse') return CANVAS_GENERATOR_TYPES.includes(to.type) || to.type === 'llm' || to.type === 'replicaAgent';
     if(CANVAS_GENERATOR_TYPES.includes(from.type)){
         if(to.type === 'output') return true;
@@ -19046,8 +21619,13 @@ function ensureConnectionLinkDom(c){
         btn = linkDeleteButton(c, a, b);
         linkControlsEl.appendChild(btn);
     } else {
-        btn.style.left = `${(a.x + b.x) / 2}px`;
-        btn.style.top = `${(a.y + b.y) / 2}px`;
+        const mid = cubicPoint(a, b, 0.5);
+        btn.style.left = `${mid.x}px`;
+        btn.style.top = `${mid.y}px`;
+        const inv = 1 / Math.max(0.08, Number(viewport.scale || 1));
+        btn.style.setProperty('--link-delete-inv', String(inv));
+        btn.classList.toggle('visible', isConnectionSelected(c));
+        btn.classList.toggle('hover', hoveredConnectionId === c.id);
     }
 }
 function syncLinkDomToConnections(){
@@ -19137,18 +21715,31 @@ function renderKnifeTrail(){
     linksEl.appendChild(poly);
 }
 function linkDeleteButton(connection, a, b){
+    const mid = cubicPoint(a, b, 0.5);
     const btn = document.createElement('button');
     btn.className = `link-delete ${isConnectionSelected(connection) ? 'visible' : ''} ${hoveredConnectionId === connection.id ? 'hover' : ''}`;
     btn.type = 'button';
     btn.title = tr('canvas.deleteLink');
     btn.setAttribute('aria-label', tr('canvas.deleteLink'));
     btn.dataset.connectionId = connection.id;
-    btn.style.left = `${(a.x + b.x) / 2}px`;
-    btn.style.top = `${(a.y + b.y) / 2}px`;
+    btn.style.left = `${mid.x}px`;
+    btn.style.top = `${mid.y}px`;
+    // 抵消世界缩放，保证屏幕上可点区域约 32px
+    const inv = 1 / Math.max(0.08, Number(viewport.scale || 1));
+    btn.style.setProperty('--link-delete-inv', String(inv));
     btn.textContent = '×';
     btn.onmousedown = e => {
         e.preventDefault();
         e.stopPropagation();
+    };
+    btn.onpointerdown = e => {
+        e.preventDefault();
+        e.stopPropagation();
+    };
+    btn.onclick = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        deleteConnection(connection.id, e);
     };
     return btn;
 }
@@ -19210,7 +21801,7 @@ function updateConnectionHoverFromMouse(e){
         return;
     }
     const point = screenToWorld(e.clientX, e.clientY);
-    const threshold = Math.max(12, 16 / viewport.scale);
+    const threshold = Math.max(18, 22 / Math.max(0.08, viewport.scale || 1));
     let bestId = '';
     let best = Infinity;
     connections.forEach(c => {
@@ -19219,7 +21810,10 @@ function updateConnectionHoverFromMouse(e){
         const pad = threshold;
         if(point.x < Math.min(from.x, to.x) - pad || point.x > Math.max(from.x, to.x) + pad ||
             point.y < Math.min(from.y, to.y) - pad || point.y > Math.max(from.y, to.y) + pad) return;
-        const d = connectionDistanceToPoint(c, point, from, to);
+        // 曲线中点附近放宽命中，方便点到删除钮
+        const mid = cubicPoint(from, to, 0.5);
+        const midDist = Math.hypot(point.x - mid.x, point.y - mid.y);
+        const d = Math.min(connectionDistanceToPoint(c, point, from, to), midDist * 0.85);
         if(d < best){ best = d; bestId = c.id; }
     });
     setHoveredConnection(best <= threshold ? bestId : '');
@@ -19248,6 +21842,7 @@ function refreshSelectionVisuals(){
     });
     updateLinkSelectionState();
     updateMinimapSelection();
+    syncImageGenDock();
 }
 /** 单击/拖拽前更新选中态（Ctrl/Cmd 多选） */
 function applyNodeSelection(nodeId, e){
@@ -19263,6 +21858,7 @@ function applyNodeSelection(nodeId, e){
         changed = true;
     }
     if(changed) refreshSelectionVisuals();
+    else syncImageGenDock(); // 已选中时仍确保控制台在位（点图台唤出）
     return changed;
 }
 function pathEl(x1,y1,x2,y2,cls, connectionId=null){
@@ -19717,6 +22313,7 @@ on(window, 'keydown', e => {
         setSpacePanArmed(true);
     }
     if(e.key === 'Shift' && !isEditableTarget(document.activeElement)) setKnifeMode(true);
+    if(e.key === 'Escape' && genHistoryPanelEl) { closeGenHistoryPanel(); return; }
     if(e.key === 'Escape' && document.getElementById('canvasGenerationBrowser')) { closeCanvasGenerationBrowser(); return; }
     if(e.key === 'Escape' && document.getElementById('canvasNodeSearchModal')) { closeCanvasNodeSearch(); return; }
     if(e.key === 'Escape' && domGet('imageEditModal')?.classList.contains('open')) { closeImageEditor(); return; }
@@ -19728,6 +22325,7 @@ on(window, 'keydown', e => {
         return;
     }
     if(e.key === 'Escape' && outputLightbox?.classList.contains('open')) { closeOutputLightbox(); return; }
+    if(e.key === 'Escape' && document.getElementById('textOutputReader')?.classList.contains('open')) { closeTextOutputReader(); return; }
     if(e.key === 'Escape' && tempLink){ cancelTempLink(); return; }
     if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') { e.preventDefault(); groupSelectedImages(); }
     if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
@@ -20037,7 +22635,7 @@ async function mountInfiniteCanvasEngineInner(root) {
 
 function exposeCanvasGlobals() {
   const map = {
-    addImageNode, addPromptNode, addLoopNode, addLLMNode, addGeneratorNode, addReplicaAgentNode, addImageRepairAgentNode, addBatchPosterAgentNode, addNineGridAgentNode, addSlotsLoopVideoAgentNode, addVideoReverseNode, addMsGenNode, addImageBatchNode, runReplicaAgentFromButton, runImageRepairAgentFromButton, runBatchPosterFromButton, runNineGridFromButton, runSlotsLoopVideoFromButton,
+    addImageNode, addPromptNode, addLoopNode, addLLMNode, addGeneratorNode, addReplicaAgentNode, addImageRepairAgentNode, addBatchPosterAgentNode, addNineGridAgentNode, addSlotsLoopVideoAgentNode, addMxShellPromptAgentNode, addMxShellPromptViewNode, addDeepWhiteShotAgentNode, addDeepWhiteShotViewNode, addTextOutputNode, addVideoReverseNode, addMsGenNode, addImageBatchNode, runReplicaAgentFromButton, runImageRepairAgentFromButton, runBatchPosterFromButton, runNineGridFromButton, runSlotsLoopVideoFromButton, runMxShellPromptFromButton, runDeepWhiteShotFromButton,
     addVideoNode, addRhNode, addComfyNode, addLTXDirectorNode, addOutputNode, addPromptGroupNode, groupSelectedImages, createImageBatchFromSelection, createPromptGroupFromSelection, organizeSelectedNodes,
     openCanvasNodeSearch, performUndo, performRedo,
     openCanvasHistoryHub, openCanvasGenerationBrowser, placeImageUrlOnCanvas, downloadAllCanvasOutputImages,

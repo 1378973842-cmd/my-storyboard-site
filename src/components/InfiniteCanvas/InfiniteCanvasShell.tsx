@@ -62,6 +62,10 @@ const AGENT_FLYOUT_GROUPS: FlyoutGroup[] = [
       { icon: 'layout-grid', label: 'Poster Agent', action: () => canvasWin['addBatchPosterAgentNode']?.() },
       { icon: 'grid-3x3', label: '九宫格 Agent', action: () => canvasWin['addNineGridAgentNode']?.() },
       { icon: 'repeat-2', label: 'Slots 循环视频 Agent', action: () => canvasWin['addSlotsLoopVideoAgentNode']?.() },
+      { icon: 'film', label: 'Mx-Shell 提示词 Agent', action: () => canvasWin['addMxShellPromptAgentNode']?.() },
+      { icon: 'file-text', label: 'Mx-Shell 提示词展示', action: () => canvasWin['addMxShellPromptViewNode']?.() },
+      { icon: 'clapperboard', label: 'DeepWhite 导演分镜 Agent', action: () => canvasWin['addDeepWhiteShotAgentNode']?.() },
+      { icon: 'book-open', label: 'DeepWhite 分镜文档', action: () => canvasWin['addDeepWhiteShotViewNode']?.() },
     ],
   },
 ];
@@ -650,8 +654,11 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('batchPosterAgent')}><i data-lucide="layout-grid" className="w-4 h-4"></i><span>Batch Poster Agent</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('nineGridAgent')}><i data-lucide="grid-3x3" className="w-4 h-4"></i><span>九宫格 Agent</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('slotsLoopVideoAgent')}><i data-lucide="repeat-2" className="w-4 h-4"></i><span>Slots 循环视频 Agent</span></button>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('mxShellPromptAgent')}><i data-lucide="film" className="w-4 h-4"></i><span>Mx-Shell 提示词 Agent</span></button>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('deepWhiteShotAgent')}><i data-lucide="clapperboard" className="w-4 h-4"></i><span>DeepWhite 导演分镜 Agent</span></button>
                       <div className="menu-section-title">输出</div>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('output')}><i data-lucide="circle-dot" className="w-4 h-4"></i><span>Output</span></button>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('textOutput')}><i data-lucide="file-output" className="w-4 h-4"></i><span>文本输出</span></button>
                   </div>
                   <div id="linkCreateMenu" className="create-menu"></div>
                   <div id="nodeInputMenu" className="create-menu"></div>
@@ -699,6 +706,24 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                           <button id="outputRerunBtn" className="preview-text-btn" type="button"><i data-lucide="refresh-cw" className="w-3.5 h-3.5"></i><span data-i18n="canvas.rerun">再次运行</span></button>
                       </div>
                   </div>
+                  </div>
+              </div>
+              <div id="textOutputReader" className="text-output-reader">
+                  <div className="text-output-reader-panel" onClick={(e) => e.stopPropagation()}>
+                      <div className="text-output-reader-head">
+                          <div className="text-output-reader-head-text">
+                              <div id="textOutputReaderTitle" className="text-output-reader-title">文本输出</div>
+                              <div id="textOutputReaderMeta" className="text-output-reader-meta"></div>
+                          </div>
+                          <div className="text-output-reader-head-actions">
+                              <button id="textOutputReaderCopyBtn" className="text-output-reader-icon-btn" type="button" title="复制全文" aria-label="复制全文"><i data-lucide="copy" className="w-3.5 h-3.5"></i></button>
+                              <button id="textOutputReaderCloseBtn" className="text-output-reader-icon-btn" type="button" title="关闭" aria-label="关闭"><i data-lucide="x" className="w-3.5 h-3.5"></i></button>
+                          </div>
+                      </div>
+                      <div className="text-output-reader-body">
+                          <nav id="textOutputReaderToc" className="text-output-reader-toc" aria-label="章节目录"></nav>
+                          <div id="textOutputReaderContent" className="text-output-reader-content"></div>
+                      </div>
                   </div>
               </div>
               <div id="workflowTemplateModal" className="workflow-template-modal studio-modal-backdrop" onClick={() => canvasWin["closeWorkflowTemplateModal"]?.()}>
