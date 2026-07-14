@@ -7,7 +7,7 @@
 - **验证状态**：`node init.mjs` 通过。
 - **明日焦点**：手测 AG18（纯 generator 板导出/封面/收藏定位）；P2 其它生成节点是否 Gen Console 化（产品决策）。
 - **Blockers**：无。
-- **未提交 Git**。
+- **未提交 Git**：本波已 commit `daf6ed7`（ahead of origin/deploy by 2）。需要时再 push。
 
 ## 新对话开场白（复制给 Agent）
 
