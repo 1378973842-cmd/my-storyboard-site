@@ -1,17 +1,16 @@
 # 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  1. **AG13–17**：Gen Console / 节点结果库。
-  2. **选中描边**：贴合图片边缘。
-  3. **AG18**：周边适配——批量导出含 generator.history；画布封面读 generator；收藏定位闪图台/历史卡；工作流模板剥离 history；收藏页文案更新。
-- **验证状态**：`node init.mjs` 通过。
-- **明日焦点**：手测 AG18（纯 generator 板导出/封面/收藏定位）；P2 其它生成节点是否 Gen Console 化（产品决策）。
+  1. 多图双路径 / 拖线自选 / gen→gen 仅参考 / 预览线保留 —— 已落地。
+  2. **本轮**：图片生成节点控制台在画布缩放时 **反缩放保持屏幕尺寸**（贴在节点下方，间距按屏像素）。
+- **验证状态**：见本轮 `node init.mjs`。
+- **明日焦点**：手测 Ctrl+滚轮缩放时控制台大小；AG25；待 commit。
 - **Blockers**：无。
-- **未提交 Git**：本波已 commit `daf6ed7`（ahead of origin/deploy by 2）。需要时再 push。
+- **未提交 Git**：多项画布改动待 commit。
 
 ## 新对话开场白（复制给 Agent）
 
 ```
 继续 gemini-deploy。先读 docs/HANDOFF.md。
-AG18 周边适配已落地，手测纯 generator 板导出/封面/收藏定位。
+生成控制台缩放时保持屏幕尺寸。下一决策 AG25。待 commit。
 ```

@@ -112,7 +112,18 @@
         { "id": "AG15", "desc": "Generator 历史：角标展开顶条缩略图；横向滚动；最近 24 张截断", "status": "done", "priority": 36 },
         { "id": "AG16", "desc": "Generator 节点结果库：history[] 含 prompt/model；角标打开浮层；回填/复制提示词", "status": "done", "priority": 37 },
         { "id": "AG17", "desc": "修：发送钮图标化、图台生成动画、连线X命中/层级/曲线中点", "status": "done", "priority": 38 },
-        { "id": "AG18", "desc": "Gen Console 周边适配：批量导出/画布封面读 generator.history；收藏定位闪图台；工作流模板剥离 history", "status": "done", "priority": 39 }
+        { "id": "AG18", "desc": "Gen Console 周边适配：批量导出/画布封面读 generator.history；收藏定位闪图台；工作流模板剥离 history", "status": "done", "priority": 39 },
+        { "id": "AG19", "desc": "C：中间链 pending 挂本节点（RH/msgen/video/comfy/ltx/replica/repair）+ commitMediaOutputs", "status": "done", "priority": 40 },
+        { "id": "AG20", "desc": "A：Generator 图台/节点结果缩略图拖出复制到画布", "status": "done", "priority": 41 },
+        { "id": "AG21", "desc": "B：轻量 Gen Console——媒体生成类不自动 Output + 节点内结果台 + 贴边选中", "status": "done", "priority": 42 },
+        { "id": "AG22", "desc": "完整 Gen Console 试点：msgen 无框图台+浮动 dock（共享 isGenConsoleNode）；ltx/comfy 明确不迁", "status": "done", "priority": 43 },
+        { "id": "AG22b", "desc": "产品：菜单隐藏 msgen（保留旧画布兼容；日常不用魔搭）", "status": "done", "priority": 43.5 },
+        { "id": "AG23", "desc": "完整 Gen Console：video 无框图台/视频台+浮动 dock", "status": "done", "priority": 44 },
+        { "id": "AG24", "desc": "完整 Gen Console：RH 摘要 dock —— 产品决定撤回，RH 保持节点内原 UI", "status": "cancelled", "priority": 45 },
+        { "id": "AG25", "desc": "完整 Gen Console：复刻/修图壳优先（无框结果台+浮动控制）", "status": "todo", "priority": 46 },
+        { "id": "AG26", "desc": "节点结果改为图台内 2×2 网格（角标展开/收起；下载/设主图；日常不弹全屏库）", "status": "done", "priority": 47 },
+        { "id": "AG27", "desc": "多图双路径：角标展开=节点内网格查看；右键展开所有节点=拆成独立图片生成节点并上游扇出", "status": "done", "priority": 48 },
+        { "id": "AG28", "desc": "叠卡角标合并；生成节点拖线自选下游；gen→gen 仅参考不级联一键运行", "status": "done", "priority": 49 }
       ]
     },
     {

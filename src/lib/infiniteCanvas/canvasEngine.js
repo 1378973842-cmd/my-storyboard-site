@@ -65,11 +65,14 @@ function isCanvasInteracting(){
     return Boolean(dragBoard || dragNode || pendingNodeDrag || resizeNode || minimapDrag || tempLink);
 }
 /** 删除/撤销等编辑操作前清掉可能卡住的拖拽态，避免 render() 被 isCanvasInteracting 挡掉 */
-function cancelTempLink(){
+function endLinkDragListeners(){
     if(linkDragCleanup){
         linkDragCleanup();
         linkDragCleanup = null;
     }
+}
+function cancelTempLink(){
+    endLinkDragListeners();
     if(!tempLink) return;
     tempLink = null;
     if(linksEl){
@@ -1055,7 +1058,7 @@ let runningHubWorkflowCache = {};
 let managedProviderId = 'runninghub';
 let localImageModels = [];
 let localChatModels = [];
-const HIDDEN_CANVAS_NODE_TYPES = new Set(['msgen', 'comfy', 'ltxDirector']);
+const HIDDEN_CANVAS_NODE_TYPES = new Set(['comfy', 'ltxDirector', 'msgen']);
 function filterCanvasNodeOptions(options){
     return (options || []).filter(opt => !HIDDEN_CANVAS_NODE_TYPES.has(opt.type));
 }
@@ -1082,10 +1085,11 @@ let clipboard = null;
 let lastImagePasteAt = 0;
 const activeCanvasTaskPolls = new Set();
 let hoveredConnectionId = '';
+let linkDeleteHoverPos = null;
 let connHoverRAF = 0;
 let connHoverPendingEvent = null;
 let connHoverLastAt = 0;
-const CONN_HOVER_MIN_MS = 56;
+const CONN_HOVER_MIN_MS = 0;
 let lastMouseBoard = {x: 0, y: 0};
 let undoStack = [];
 let redoStack = [];
@@ -1972,20 +1976,33 @@ function measureGeneratorBaseFrame(node, el){
     return Math.max(96, Math.ceil(scaleWrap.scrollHeight + 8));
 }
 function syncGeneratorNodeScale(node, el){
-    if(!el || node.type !== 'generator') return 1;
+    if(!el || !isGenConsoleNode(node)) return 1;
     const scale = generatorUiScale(node);
     el.style.setProperty('--generator-ui-scale', String(scale));
     return scale;
 }
+function genStageGridCols(count){
+    const n = Math.max(1, Number(count) || 1);
+    if(n <= 4) return 2;
+    // 多图：按接近方形加列，避免只剩两列竖向长条
+    return Math.min(6, Math.max(3, Math.ceil(Math.sqrt(n))));
+}
 function syncGeneratorNodeFrame(node, el){
-    if(!el || node.type !== 'generator') return;
+    if(!el || !isGenConsoleNode(node)) return;
     const scale = syncGeneratorNodeScale(node, el);
     if(!node._baseFrameH) node._baseFrameH = measureGeneratorBaseFrame(node, el);
     const isManual = Boolean(node._userSized || Math.abs(scale - 1) > 0.01);
+    const urls = generatorPreviewUrls(node);
+    const gridOpen = Boolean(node.historyOpen) && urls.length > 1;
     if(!isManual){
-        node.w = GENERATOR_BASE_W;
+        // 网格展开时按列数加宽，收起叠卡回到基础宽度
+        const cols = gridOpen ? genStageGridCols(urls.length) : 2;
+        const w = gridOpen
+            ? Math.round(GENERATOR_BASE_W * Math.max(1, cols / 2))
+            : GENERATOR_BASE_W;
+        node.w = w;
         delete node.h;
-        el.style.width = `${GENERATOR_BASE_W}px`;
+        el.style.width = `${w}px`;
         el.style.height = '';
         el.classList.remove('sized');
         return;
@@ -2015,7 +2032,7 @@ function rebaseGeneratorFrame(node){
     });
 }
 function fitGeneratorNodeHeight(node){
-    if(!node || node.type !== 'generator') return;
+    if(!node || !isGenConsoleNode(node)) return;
     const el = nodesEl?.querySelector(`.node[data-id="${node.id}"]`);
     if(!el) return;
     if(node._baseFrameH) syncGeneratorNodeFrame(node, el);
@@ -2241,14 +2258,15 @@ function preventCanvasMiddleMouseDefault(e){
 function applyViewport(){
     if(!world) return;
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
-    const inv = 1 / Math.max(0.08, Number(viewport.scale || 1));
-    linkControlsEl?.querySelectorAll?.('.link-delete')?.forEach(btn => {
-        btn.style.setProperty('--link-delete-inv', String(inv));
-    });
     if(minimapState) updateMinimapViewport();
     else scheduleMinimapRender();
     notifyViewportScaleChange();
     scheduleViewportNodeCull();
+    // 缩放/平移后重贴控制台（保持屏幕尺寸）
+    if(imageGenDockNodeId && imageGenDockEl){
+        const dockNode = nodes.find(n => n.id === imageGenDockNodeId);
+        if(dockNode) positionImageGenDock(dockNode);
+    }
 }
 /** 视口外节点 visibility:hidden（保留布局，避免连线端点错位） */
 function scheduleViewportNodeCull(){
@@ -2535,7 +2553,7 @@ function flashFavoriteOutputImage(nodeId, imageUrl){
         if(normalizeFavoritePath(card.dataset.historyUrl || '') === targetUrl && flashFavoriteLocateEl(card)) return;
     }
     // Generator 图台 / 顶条缩略图
-    for(const el of nodeEl.querySelectorAll('.gen-stage-hero[data-preview-url], .gen-stage-thumb[data-preview-url]')){
+    for(const el of nodeEl.querySelectorAll('.gen-stage-hero[data-preview-url], .gen-stage-thumb[data-preview-url], .gen-stage-tile[data-preview-url]')){
         if(normalizeFavoritePath(el.getAttribute('data-preview-url') || '') === targetUrl && flashFavoriteLocateEl(el)) return;
     }
     // 拖入图：贴在 img 上闪
@@ -4993,6 +5011,9 @@ function addMsGenNode(point){
         msCustomHeight:'',
         count:1,
         fitImage:false,
+        prompt:'',
+        history:[],
+        previewRoundUrls:[],
         inputs:[],
         running:false
     });
@@ -5016,6 +5037,9 @@ function addVideoNode(point){
         cameraFixed:false,
         generateAudio:false,
         useFrameRoles:false,
+        prompt:'',
+        history:[],
+        previewRoundUrls:[],
         inputs:[],
         running:false
     });
@@ -5105,7 +5129,19 @@ async function urlToBase64(url){
 }
 function renderMsGenBody(node){
     const wrap = document.createElement('div');
-    wrap.className = 'generator-body';
+    wrap.className = 'generator-body gen-stage-only';
+    if(node.prompt == null) node.prompt = '';
+    if(!Array.isArray(node.history)) node.history = [];
+    if(!Array.isArray(node.previewRoundUrls)) node.previewRoundUrls = [];
+    wrap.innerHTML = `<div class="gen-stage-slot">${renderGenStageHtml(node)}</div>`;
+    refreshGenStage(wrap, node);
+    refreshIcons(wrap);
+    return wrap;
+}
+/** ModelScope 控制台（浮动 dock 内容，不进节点壳） */
+function buildMsGenDockContent(node){
+    const wrap = document.createElement('div');
+    wrap.className = 'msgen-dock-body';
     const modelKey = node.msgenModel || 'zimage';
     const msModel = MS_GEN_MODELS[modelKey] || MS_GEN_MODELS.zimage;
     const inputSources = generatorSources(node);
@@ -5122,7 +5158,9 @@ function renderMsGenBody(node){
     const loraEnabled = Boolean(node.msLoraEnabled);
     const loraStrength = node.msLoraStrength ?? Number(selectedMsLora?.strength ?? 0.8);
     const msCount = Math.max(1, Math.min(8, Number(node.count || 1)));
+    if(node.prompt == null) node.prompt = '';
     wrap.innerHTML = `
+        <textarea class="gen-dock-prompt ms-local-prompt" placeholder="${escapeAttr(langIsEn() ? 'Describe anything you want to generate…' : '描述任何你想要生成的内容')}" rows="3">${escapeHtml(node.prompt || '')}</textarea>
         <div class="ms-model-tabs">
             ${Object.entries(MS_GEN_MODELS).map(([k,m]) =>
                 `<button type="button" data-model="${k}" class="${modelKey===k?'active':''}">${escapeHtml(m.labelKey ? tr(m.labelKey) : m.label)}</button>`
@@ -5213,14 +5251,19 @@ function renderMsGenBody(node){
                 ${!msLoras.length ? `<div class="gen-settings-row"><div style="color:var(--faint);font-size:11px;font-weight:700;line-height:1.45">${tr('canvas.noLoraForModel')}</div></div>` : ''}
             </div>
             <div class="gen-run-row">
-                ${agentGenRunActionsHtml(node.id, `<button class="gen-btn ${agentPendingRunState(node.id, tr('canvas.msGenerate'), tr('canvas.generating')).runningCls}">
-                    <i data-lucide="zap" class="w-4 h-4"></i>${escapeHtml(agentPendingRunState(node.id, tr('canvas.msGenerate'), tr('canvas.generating')).label)}
+                ${agentGenRunActionsHtml(node.id, `<button class="gen-btn gen-dock-send ${agentPendingRunState(node.id, tr('canvas.msGenerate'), tr('canvas.generating')).runningCls}" type="button" title="${escapeAttr(agentPendingRunState(node.id, tr('canvas.msGenerate'), tr('canvas.generating')).label)}">
+                    <i data-lucide="arrow-up" class="w-4 h-4"></i>
                 </button>`)}
                 ${cascadeBtnHtml(node)}
             </div>
             ${retryBarHtml(node)}
         </div>
     `;
+    const localPrompt = wrap.querySelector('.ms-local-prompt');
+    if(localPrompt){
+        bindScrollableText(localPrompt);
+        localPrompt.oninput = e => { node.prompt = e.target.value; scheduleSave(); };
+    }
     wrap.querySelectorAll('.ms-model-tabs button').forEach(btn => {
         btn.onclick = e => {
             e.stopPropagation();
@@ -5230,8 +5273,9 @@ function renderMsGenBody(node){
                 node.msLoraEnabled = false;
             }
             node.msgenModel = btn.dataset.model;
-            render();
             scheduleSave();
+            if(imageGenDockNodeId === node.id) remountImageGenDock(node);
+            else refreshNodes([node.id]);
         };
     });
     const msCustomModelSelect = wrap.querySelector('.ms-custom-model-select');
@@ -5245,7 +5289,8 @@ function renderMsGenBody(node){
             delete node.msLoraStrength;
             node.msLoraEnabled = false;
             scheduleSave();
-            render();
+            if(imageGenDockNodeId === node.id) remountImageGenDock(node);
+            else refreshNodes([node.id]);
         };
     }
     const msRatioSelect = wrap.querySelector('[data-field="msRatio"]');
@@ -5392,7 +5437,8 @@ function renderMsGenBody(node){
                 node.msLoraStrength = Number(msLoras[0].strength ?? 0.8);
             }
             scheduleSave();
-            render();
+            if(imageGenDockNodeId === node.id) remountImageGenDock(node);
+            else refreshNodes([node.id]);
         };
     }
     const msLoraSelect = wrap.querySelector('.ms-lora-select');
@@ -5404,7 +5450,8 @@ function renderMsGenBody(node){
             const picked = msLoras.find(lora => String(lora.id || '').trim() === node.msLoraId);
             node.msLoraStrength = Number(picked?.strength ?? node.msLoraStrength ?? 0.8);
             scheduleSave();
-            render();
+            if(imageGenDockNodeId === node.id) remountImageGenDock(node);
+            else refreshNodes([node.id]);
         };
     }
     const msLoraSlider = wrap.querySelector('.ms-lora-strength-slider');
@@ -5438,6 +5485,8 @@ function renderMsGenBody(node){
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
     wrap.querySelector('.gen-btn').onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
     bindCascadeButtons(wrap, node.id);
+    wrap.onmousedown = e => e.stopPropagation();
+    wrap.onclick = e => e.stopPropagation();
     return wrap;
 }
 async function runMsGenNode(nodeId, opts={}){
@@ -5445,7 +5494,7 @@ async function runMsGenNode(nodeId, opts={}){
     if(!node || isNodeDisabled(node)) return;
     const loopCtx = opts.loopContext !== undefined ? opts.loopContext : loopContext;
     const sources = orderedSources(node, generatorSources(node, loopCtx));
-    const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
+    const prompt = composeGeneratorPrompt(node, sources);
     const refs = imageRefsOnly(sources.flatMap(s => s.refs || []));
     const modelKey = node.msgenModel || 'zimage';
     const msModel = MS_GEN_MODELS[modelKey] || MS_GEN_MODELS.zimage;
@@ -5455,12 +5504,12 @@ async function runMsGenNode(nodeId, opts={}){
     if(msModel.supportsImage && !refs.length){ softAlert(tr('canvas.needImage')); return; }
     const count = Math.max(1, Math.min(8, Number(node.count || 1)));
     // 链路中间节点默认不创建 Output；链尾、手动开启或已有 Output 连接时才输出。
-    let out = outputForNode(node, 460);
     const pendingIds = Array.from({length:count}, () => uid('p'));
     const run = runSnapshot(node, prompt, refs);
-    if(out) out._pending = [...(out._pending || []), ...pendingIds.map(id => makePending(id, run))];
+    const host = pushNodePending(node, pendingIds.map(id => makePending(id, run)));
     syncAppendableNodeRunState(node);
-    refreshRunNodes(node, out);
+    refreshRunNodes(node, host);
+    revealGeneratorResultsWhileRunning(node);
     const execute = async () => {
     try {
         const size = apiImageSize(node.msRatio ?? 'square', node.msResolution || '1k', node.msCustomRatio || '', node.msCustomSize || '');
@@ -5513,22 +5562,29 @@ async function runMsGenNode(nodeId, opts={}){
             return await res.json();
         };
         const results = await Promise.all(Array.from({length:count}, submitMs));
-        const metas = collectRunMetas(out, pendingIds);
+        const metas = collectRunMetas(host, pendingIds);
         const outputUrls = results.map(data => data.url).filter(Boolean);
         run.request = results[0] ? requestMetaFromResult(results[0]) : {};
-        if(out) out._pending = (out._pending || []).filter(p => !pendingIds.includes(p.id));
-        appendOutputImages(out, outputUrls, refs[0], metas);
-        mergeGeneratedOutputs(node, outputUrls, Boolean(opts.cascade));
+        clearNodePending(host, pendingIds);
+        commitMediaOutputs(host, node, outputUrls, refs[0], metas, {cascade:opts.cascade});
+        appendGeneratorPreviewRound(node, outputUrls, {
+            ...metas[0],
+            run,
+            runMs:Math.max(...metas.map(m => m.runMs || 0), 0),
+            model: msModelId || node.msCustomModel || node.msgenModel || '',
+            prompt,
+        });
         addGenerationLog({run, outputs:outputUrls, runMs:Math.max(...metas.map(m => m.runMs || 0), 0)});
         syncAgentRunStatusAfterTask(node, {completed:agentPendingCount(node.id) === 0});
-        refreshRunNodes(node, out);
+        refreshRunNodes(node, host);
+        if(imageGenDockNodeId === node.id) syncImageGenDock();
         scheduleSave();
     } catch(err){
-        const metas = collectRunMetas(out, pendingIds);
+        const metas = collectRunMetas(host, pendingIds);
         addGenerationLog({run, outputs:[], runMs:Math.max(...metas.map(m => m.runMs || 0), 0), error:err.message || String(err)});
-        if(out) out._pending = (out._pending || []).filter(p => !pendingIds.includes(p.id));
+        clearNodePending(host, pendingIds);
         syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
-        refreshRunNodes(node, out);
+        refreshRunNodes(node, host);
         if(opts.cascade) throw err;
     }
     };
@@ -6102,6 +6158,7 @@ function linkCreateOptions(state){
     const node = nodes.find(n => n.id === state?.originId);
     if(!node) return [];
     if(state.originKind === 'out'){
+        // 从图片/提示词等拖出：可选各类生成节点
         if(['image','prompt','loop','group','promptGroup','llm'].includes(node.type)){
             return filterCanvasNodeOptions([
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
@@ -6116,6 +6173,18 @@ function linkCreateOptions(state){
                 {type:'deepWhiteShotAgent', label:langIsEn() ? 'DeepWhite Shot Agent' : 'DeepWhite 导演分镜 Agent', icon:'clapperboard'},
                 {type:'screenwritingAgent', label:langIsEn() ? 'Screenwriting Agent' : '编剧 Agent', icon:'pen-line'},
                 {type:'videoReverse', label:'视频反推', icon:'scan-search'},
+                {type:'llm', label:'LLM', icon:'message-square-text'}
+            ]);
+        }
+        // 从生成节点拖出：自选下游（生图作参考 / Output 等），禁止默认强塞 Output
+        if(CANVAS_GENERATOR_TYPES.includes(node.type) || node.type === 'videoReverse' || node.type === 'imageRepairAgent'){
+            return filterCanvasNodeOptions([
+                {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
+                {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
+                {type:'rh', label:tr('canvas.rhGenerate'), icon:'workflow'},
+                {type:'replicaAgent', label:'复刻 Agent', icon:'bot'},
+                {type:'imageRepairAgent', label:langIsEn() ? 'Repair Agent' : '修图 Agent', icon:'wand-sparkles'},
+                {type:'output', label:'Output', icon:'circle-dot'},
                 {type:'llm', label:'LLM', icon:'message-square-text'}
             ]);
         }
@@ -6159,11 +6228,11 @@ function openGeneratorNodeMenu(nodeId, clientX, clientY){
     const point = screenToWorld(clientX, clientY);
     const inputOptions = linkCreateOptions({originId:nodeId, originKind:'in', point});
     const outputOptions = [
-        {type:'output', label:'Output', icon:'circle-dot'},
         ...(CANVAS_IMAGE_OUTPUT_TYPES.includes(node.type) && node.type !== 'replicaAgent' && node.type !== 'imageRepairAgent' ? filterCanvasNodeOptions([
             {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
             {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'}
-        ]) : [])
+        ]) : []),
+        {type:'output', label:'Output', icon:'circle-dot'},
     ];
     const buttonsHtml = (options, kind) => `<div class="node-port-menu-grid">${options.map(opt => `<button class="menu-btn" data-link-create="${escapeAttr(opt.type)}" data-link-kind="${kind}" title="${escapeAttr(opt.label)}"><i data-lucide="${escapeAttr(opt.icon)}"></i><span>${escapeHtml(opt.label.replace('生成', ''))}</span></button>`).join('')}</div>`;
     linkCreateState = {originId:nodeId, originKind:'in', point};
@@ -6202,6 +6271,8 @@ function closeLinkCreateMenu(){
     nodeInputMenu.innerHTML = '';
     nodeOutputMenu.innerHTML = '';
     linkCreateState = null;
+    // 关掉选节点菜单时清掉悬空预览线
+    if(tempLink?.pendingMenu) cancelTempLink();
 }
 function openImageNodeMenu(nodeId, clientX, clientY){
     const node = nodes.find(n => n.id === nodeId);
@@ -8632,8 +8703,8 @@ function refreshNodes(ids=[]){
         const node = nodes.find(n => n.id === id);
         if(!node) continue;
         if(node.type === 'output' && refreshOutputNodeContent(node)) continue;
-        if(node.type === 'generator' && refreshGeneratorNodeContent(node)) continue;
         if(node.type === 'rh' && refreshRhNodeContent(node)) continue;
+        if(isGenConsoleNode(node) && refreshGeneratorNodeContent(node)) continue;
         const current = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
         if(!current){
             render();
@@ -8701,20 +8772,26 @@ function patchGenRunButton(el, node, defaultLabel, activeLabel){
     btn.innerHTML = `${iconHtml}${escapeHtml(state.label)}`;
     return true;
 }
-/** generator 增量刷新：节点内只剩图台；控制台在外挂 dock */
+/** generator / msgen 增量刷新：节点内只剩图台；控制台在外挂 dock */
 function refreshGeneratorNodeContent(node){
-    if(node.type !== 'generator') return false;
-    const el = nodesEl.querySelector(`.generator-node[data-id="${CSS.escape(node.id)}"], .node.generator-node[data-id="${CSS.escape(node.id)}"]`);
+    if(!isGenConsoleNode(node)) return false;
+    const el = nodesEl.querySelector(`.${node.type}-node[data-id="${CSS.escape(node.id)}"], .node.${node.type}-node[data-id="${CSS.escape(node.id)}"]`);
     if(!el?.querySelector('.gen-stage-slot')) return false;
     if(!patchNodeHeadStatus(el, node)) return false;
     try {
         refreshGenStage(el, node);
     } catch(err) {
-        console.warn('[infinite-canvas] generator stage patch fail', err);
+        console.warn('[infinite-canvas] gen-console stage patch fail', err);
     }
     if(imageGenDockNodeId === node.id){
+        const idleLabel = node.type === 'msgen'
+            ? tr('canvas.msGenerate')
+            : node.type === 'video'
+                ? tr('canvas.videoGenerate')
+                : tr('canvas.apiGenerate');
+        const busyLabel = tr('canvas.generating');
         const runBtn = imageGenDockEl?.querySelector?.('.gen-btn');
-        if(runBtn) patchGenRunButton(imageGenDockEl, node, tr('canvas.apiGenerate'), tr('canvas.generating'));
+        if(runBtn) patchGenRunButton(imageGenDockEl, node, idleLabel, busyLabel);
         const cascadeSlot = imageGenDockEl?.querySelector?.('.gen-run-row');
         if(cascadeSlot){
             cascadeSlot.querySelectorAll('.gen-cascade-btn').forEach(b => b.remove());
@@ -8756,7 +8833,9 @@ function refreshRhNodeContent(node){
     return true;
 }
 function refreshRunNodes(node, out=null){
-    refreshNodes([node?.id, out?.id]);
+    const ids = [node?.id];
+    if(out?.id && out.id !== node?.id) ids.push(out.id);
+    refreshNodes(ids);
 }
 function captureOutputScrolls(){
     const state = new Map();
@@ -8793,8 +8872,10 @@ function restoreOutputScrolls(state){
     });
 }
 function isNodeControl(target){
+    // 图台/轻量结果台主媒体：允许拖节点与 Alt 复制（含 video 结果）
+    if(target?.closest?.('.gen-stage-hero, .gen-stage-frame, .agent-result-hero, .agent-result-frame')) return false;
     // 注意：.gen-stage / 图台主图不计入控件，单击需选中节点以唤出下方控制台
-    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs');
+    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs, .gen-stage-tile, .gen-stage-tile-actions, .gen-stage-grid, .gen-stage-stack-expand, .gen-stage-stack');
 }
 function destroyLTXEditor(node){
     if(!node?._ltxEditor) return;
@@ -9043,6 +9124,7 @@ function renderNode(node){
     if(node.type === 'rh') body.appendChild(renderRhBody(node));
     if(node.type === 'comfy') body.appendChild(renderComfyBody(node));
     if(node.type === 'ltxDirector') body.appendChild(renderLTXDirectorBody(node));
+    mountAgentResultStage(body, node);
     if(node.type === 'output') {
         const pendingHtml = (node._pending || []).map(p => outputPendingHtml(p)).join('');
         body.innerHTML = renderOutputGrid(node, pendingHtml);
@@ -9089,7 +9171,7 @@ function renderNode(node){
         bindImageBatchUpload(body, node);
         bindGroupTidyButton(body, node);
     }
-    if(node.type === 'generator'){
+    if(node.type === 'generator' || node.type === 'msgen' || node.type === 'video'){
         const scaleWrap = document.createElement('div');
         scaleWrap.className = 'generator-node-scale';
         scaleWrap.appendChild(el.querySelector('.node-head'));
@@ -9122,7 +9204,7 @@ function renderNode(node){
     el.querySelector('.resize-handle').onmousedown = e => { if(e.button === 0 && !e.shiftKey) startNodeResize(e, node); };
     el.ondragstart = e => { e.preventDefault(); e.stopPropagation(); };
     bindNodeLayoutObserver(el);
-    if(node.type === 'generator') fitGeneratorNodeHeight(node);
+    if(isGenConsoleNode(node)) fitGeneratorNodeHeight(node);
     mountCanvasCustomSelects(el);
     return el;
 }
@@ -9267,6 +9349,31 @@ function genHistoryCardActionsHtml(url, item){
         <button type="button" class="gen-history-mini-btn" data-action="zoom" data-url="${escapeAttr(url)}" title="${escapeAttr(langIsEn() ? 'Enlarge' : '放大')}"><i data-lucide="maximize-2" class="w-3.5 h-3.5"></i></button>
     </div>`;
 }
+function bindCanvasImageDragCopy(img, url, prompt=''){
+    if(!img || !url) return;
+    img.draggable = true;
+    img.ondragstart = e => {
+        // Alt 复制节点 / 正在拖节点时，禁止抢成「拖出成图」
+        if(e.altKey || altModifierArmed || dragNode || pendingNodeDrag){
+            e.preventDefault();
+            return;
+        }
+        e.stopPropagation();
+        img.dataset.dragging = '1';
+        beginOutputDragSession(e, img, url, prompt);
+        setCanvasOutputDragActive(true);
+        setOutputDragPreview(e, img);
+        e.dataTransfer.effectAllowed = 'copy';
+        e.dataTransfer.setData('application/x-canvas-output-image', url);
+        e.dataTransfer.setData(OUTPUT_DRAG_PROMPT_MIME, prompt || '');
+        e.dataTransfer.setData('text/uri-list', url);
+    };
+    img.ondragend = () => {
+        endOutputDragSession();
+        setCanvasOutputDragActive(false);
+        setTimeout(() => { delete img.dataset.dragging; }, 0);
+    };
+}
 function bindGenHistoryMediaActions(root, node){
     if(!root || !node) return;
     root.querySelectorAll('[data-action="fav"][data-url]').forEach(btn => {
@@ -9296,6 +9403,13 @@ function bindGenHistoryMediaActions(root, node){
             e.stopPropagation();
             openGeneratorHistoryLightbox(node, btn.dataset.url || '');
         };
+    });
+    // 节点结果缩略图：拖出复制到画布
+    root.querySelectorAll('.gen-history-thumb img, .gen-history-thumb video, .gen-history-detail-preview img, .gen-history-detail-preview video').forEach(img => {
+        const url = img.getAttribute('src') || img.closest('[data-history-url]')?.dataset?.historyUrl || '';
+        if(!url) return;
+        const item = generatorHistoryItems(node).find(x => x.url === url) || {url};
+        bindCanvasImageDragCopy(img, url, String(item.prompt || ''));
     });
 }
 function bindOutputWrap(wrap, node){
@@ -9474,8 +9588,8 @@ function defaultNodeSize(type){
     if(type === 'mxShellPromptView' || type === 'deepWhiteShotView' || type === 'textOutput') return {w:600, h:560};
     if(type === 'deepWhiteShotAgent') return {w:400, h:400};
     if(type === 'videoReverse') return {w:380, h:460};
-    if(type === 'msgen') return {w:380, h:0};
-    if(type === 'video') return {w:400, h:0};
+    if(type === 'msgen') return {w:260, h:0};
+    if(type === 'video') return {w:260, h:0};
     if(type === 'rh') return {w:430, h:0};
     if(type === 'comfy') return {w:420, h:460};
     if(type === 'ltxDirector') return {w:1000, h:800};
@@ -13875,9 +13989,9 @@ async function runReplicaAgent(nodeId, opts={}){
         markers: normalizeReplicaTargetMarkers(node),
     });
     const refs = [background, ...characters].filter(r => r?.url).map(r => ({url:r.url, name:r.name || 'image'}));
-    let out = outputForNode(node, 460);
     const run = runSnapshot(node, node.style_prompt ? `复刻 Agent：${node.style_prompt}` : '复刻 Agent 双阶段生图', refs);
     const pendingId = uid('p');
+    let host = null;
     try {
         const res = await apiFetch('/api/canvas/replica-agent-run', {
             method:'POST',
@@ -13896,13 +14010,13 @@ async function runReplicaAgent(nodeId, opts={}){
         });
         if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Replica Agent failed to start' : '复刻 Agent 启动失败'));
         const data = await res.json();
-        if(out) out._pending = [...(out._pending || []), makePending(pendingId, run, {
+        host = pushNodePending(node, [makePending(pendingId, run, {
             canvasTaskId:data.task_id,
             canvasTaskType:'replica-agent',
             stageLabel:langIsEn() ? 'Analyzing frame…' : '正在分析画面…',
             appendGenerated:Boolean(opts.cascade)
-        })];
-        refreshRunNodes(node, out);
+        })]);
+        refreshRunNodes(node, host);
         scheduleSave();
         await saveCanvas();
         if(opts.cascade){
@@ -13921,13 +14035,13 @@ async function runReplicaAgent(nodeId, opts={}){
             node.runStatus = 'failed';
             node.runError = err.message || String(err);
         }
-        refreshRunNodes(node, out);
+        refreshRunNodes(node, host);
         scheduleSave();
         if(opts.cascade) throw err;
     } finally {
         if(opts.cascade){
             node.running = false;
-            refreshRunNodes(node, out);
+            refreshRunNodes(node, host);
         }
         setStatus('Ready');
     }
@@ -13964,7 +14078,6 @@ async function runImageRepairAgent(nodeId, opts={}){
     setStatus(langIsEn() ? `Starting repair Agent ×${count}…` : `正在启动修图 Agent ×${count}…`);
     const ratioPayload = await replicaAgentRatioForRun(node, source);
     const refs = [{url:source.url, name:source.name || 'image'}];
-    let out = outputForNode(node, 460);
     const run = runSnapshot(node, langIsEn() ? 'Repair Agent 4-stage pipeline' : '修图 Agent 四阶段修复', refs);
     const taskPayload = {
         source_image_url:canvasLocalUploadPath(source.url),
@@ -13974,6 +14087,7 @@ async function runImageRepairAgent(nodeId, opts={}){
         canvas_ratio:ratioPayload.canvas_ratio,
         canvas_custom_ratio:ratioPayload.canvas_custom_ratio || '',
     };
+    let host = null;
     try {
         await Promise.all(Array.from({length:count}, async () => {
             const res = await apiFetch('/api/canvas/image-repair-agent-run', {
@@ -13984,21 +14098,21 @@ async function runImageRepairAgent(nodeId, opts={}){
             if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Repair Agent failed to start' : '修图 Agent 启动失败'));
             const data = await res.json();
             const pendingId = uid('p');
-            if(out) out._pending = [...(out._pending || []), makePending(pendingId, run, {
+            host = pushNodePending(node, [makePending(pendingId, run, {
                 canvasTaskId:data.task_id,
                 canvasTaskType:'image-repair-agent',
                 stageLabel:langIsEn() ? 'Reversing prompt…' : '正在反推生成逻辑…',
                 appendGenerated:true
-            })];
+            })]);
             void pollImageRepairAgentTask(data.task_id);
         }));
-        refreshRunNodes(node, out);
+        refreshRunNodes(node, host);
         scheduleSave();
         await saveCanvas();
         setStatus(langIsEn() ? `Repair Agent queued ×${count}` : `已排队 ${count} 个修图任务`);
     } catch(err) {
         syncAgentRunStatusAfterTask(node, {failed:!opts.cascade, error: err.message || String(err)});
-        refreshRunNodes(node, out);
+        refreshRunNodes(node, host);
         scheduleSave();
         if(opts.cascade) throw err;
     }
@@ -14111,7 +14225,8 @@ function composeGeneratorPrompt(gen, sources){
     return parts.join('\n\n');
 }
 function isGenConsoleNode(node){
-    return node && node.type === 'generator';
+    // generator / video 完整 Gen Console；msgen 旧画布兼容但菜单隐藏；rh 保持节点内原 UI；ltx/comfy 明确不做
+    return node && (node.type === 'generator' || node.type === 'msgen' || node.type === 'video');
 }
 const MAX_GEN_PREVIEW = 24;
 const MAX_GEN_HISTORY = 48;
@@ -14165,8 +14280,8 @@ function appendGeneratorHistory(gen, outputs, meta={}){
     if(!isGenConsoleNode(gen)) return;
     const urls = (outputs || []).map(outputUrlValue).filter(Boolean);
     if(!urls.length) return;
-    const prompt = outputMetaPrompt(meta) || String(gen.prompt || '').trim();
-    const model = outputImageModelLabel(meta) || String(gen.model || '');
+    const prompt = outputMetaPrompt(meta) || String(meta.prompt || gen.prompt || '').trim();
+    const model = outputImageModelLabel(meta) || String(meta.model || gen.model || gen.msCustomModel || gen.msgenModel || '');
     const runMs = Number(meta.runMs || 0) || 0;
     const run = meta.run || null;
     const existing = generatorHistoryItems(gen);
@@ -14188,6 +14303,8 @@ function appendGeneratorHistory(gen, outputs, meta={}){
     gen.history = next.length > MAX_GEN_HISTORY ? next.slice(-MAX_GEN_HISTORY) : next;
     syncGeneratorPreviewFromHistory(gen);
     gen.previewIndex = Math.max(0, (gen.previewRoundUrls || []).length - 1);
+    // 一次出多张：默认叠卡（图1）；「展开」拆成独立节点（图2）
+    if(urls.length > 1) gen.historyOpen = false;
 }
 function appendGeneratorPreviewRound(gen, outputs, meta={}){
     appendGeneratorHistory(gen, outputs, meta);
@@ -14253,16 +14370,21 @@ function fitImageNodeToNaturalAspect(node, el, img){
 function applyNaturalAspectFromImg(img, frameEl, node){
     if(!img || !frameEl) return;
     const apply = () => {
-        const nw = img.naturalWidth || 0;
-        const nh = img.naturalHeight || 0;
+        const nw = img.naturalWidth || img.videoWidth || 0;
+        const nh = img.naturalHeight || img.videoHeight || 0;
         if(!nw || !nh) return;
         frameEl.style.aspectRatio = `${nw} / ${nh}`;
-        if(node?.type === 'generator' && !node._userSized){
+        if(isGenConsoleNode(node) && !node._userSized){
             delete node._baseFrameH;
             fitGeneratorNodeHeight(node);
             if(selected.has(node.id)) requestAnimationFrame(() => positionImageGenDock(node));
         }
     };
+    if(img.tagName === 'VIDEO'){
+        if(img.readyState >= 1 && img.videoWidth > 0) apply();
+        else img.addEventListener('loadedmetadata', apply, {once:true});
+        return;
+    }
     if(img.complete && img.naturalWidth > 0) apply();
     else img.addEventListener('load', apply, {once:true});
 }
@@ -14290,7 +14412,7 @@ function closeGenHistoryPanel(){
 function refreshOpenGenHistoryPanel(){
     if(!genHistoryPanelEl || !genHistoryPanelNodeId) return;
     const node = nodes.find(n => n.id === genHistoryPanelNodeId);
-    if(!node || node.type !== 'generator'){
+    if(!node || !isGenConsoleNode(node)){
         closeGenHistoryPanel();
         return;
     }
@@ -14446,7 +14568,7 @@ function renderGenHistoryPanelContent(node){
         const pill = item.runMs ? escapeHtml(formatRunDuration(item.runMs)) : '';
         return `<div class="gen-history-card ${url === activeUrl ? 'is-active' : ''}" role="button" tabindex="0" data-history-index="${index}" data-history-url="${escapeAttr(url)}">
             <div class="gen-history-thumb">
-                <img src="${escapeAttr(url)}" alt="" loading="lazy">
+                ${genStageThumbHtml(url)}
                 ${genHistoryCardActionsHtml(url, item)}
             </div>
             <div class="gen-history-card-meta">
@@ -14524,7 +14646,7 @@ function showGenHistoryDetail(node, historyIndex){
         : (langIsEn() ? 'Add to favorites' : '收藏');
     detail.innerHTML = `
         <div class="gen-history-detail-preview">
-            <img src="${escapeAttr(item.url)}" alt="">
+            ${genStageMediaHtml(item.url)}
             ${genHistoryCardActionsHtml(item.url, item)}
         </div>
         <div class="gen-history-detail-fields">
@@ -14589,18 +14711,36 @@ function bindGenStageInteractions(root, node){
         if(root?.classList?.contains('gen-stage-slot')) return root.parentElement || root;
         return root?.closest?.('.node') || root;
     };
-    const hero = root?.querySelector?.('.gen-stage-hero[data-preview-url]');
+    const refresh = () => {
+        refreshGenStage(stageRoot(), node);
+        scheduleSave();
+        syncImageGenDock();
+        fitGeneratorNodeHeight(node);
+        requestAnimationFrame(() => positionImageGenDock(node));
+    };
+    const openResultsMenu = (clientX, clientY) => {
+        openGenStageResultMenu(node.id, clientX, clientY);
+    };
+    const hero = root?.querySelector?.('.gen-stage-hero[data-preview-url], .gen-stage-stack-hero[data-preview-url]');
     if(hero){
-        // 单击交给节点选中（唤出控制台）；双击再看大图
         hero.ondblclick = e => {
             e.preventDefault();
             e.stopPropagation();
             const url = hero.getAttribute('data-preview-url');
             if(url) openGeneratorHistoryLightbox(node, url);
         };
-        const img = hero.querySelector('img');
+        hero.oncontextmenu = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            applyNodeSelection(node.id, e);
+            openResultsMenu(e.clientX, e.clientY);
+        };
+        const media = hero.querySelector('video, img');
         const frame = hero.closest('.gen-stage-frame');
-        applyNaturalAspectFromImg(img, frame, node);
+        if(!root.querySelector('.gen-stage-stack')){
+            applyNaturalAspectFromImg(media, frame, node);
+        }
+        if(media) media.draggable = false;
     }
     const badge = root?.querySelector?.('.gen-stage-badge');
     if(badge){
@@ -14609,29 +14749,151 @@ function bindGenStageInteractions(root, node){
             e.preventDefault();
             e.stopPropagation();
             applyNodeSelection(node.id, e);
-            // 角标打开完整历史库（含提示词）；Alt 仍展开顶条快切
-            if(e.altKey){
-                node.historyOpen = !node.historyOpen;
-                refreshGenStage(stageRoot(), node);
-                scheduleSave();
+            const urls = generatorPreviewUrls(node);
+            if(urls.length <= 1){
+                openGenHistoryPanel(node);
                 return;
             }
-            openGenHistoryPanel(node);
+            node.historyOpen = !node.historyOpen;
+            refresh();
         };
     }
-    root?.querySelectorAll?.('.gen-stage-thumb[data-preview-index]').forEach(btn => {
-        btn.onmousedown = e => e.stopPropagation();
-        btn.onclick = e => {
+    const expandBtn = root?.querySelector?.('.gen-stage-stack-expand, [data-action="expand-grid"]');
+    if(expandBtn){
+        expandBtn.onmousedown = e => e.stopPropagation();
+        expandBtn.onclick = e => {
+            e.preventDefault();
             e.stopPropagation();
             applyNodeSelection(node.id, e);
-            node.previewIndex = Number(btn.dataset.previewIndex || 0);
-            refreshGenStage(stageRoot(), node);
-            scheduleSave();
-            syncImageGenDock();
-            fitGeneratorNodeHeight(node);
-            requestAnimationFrame(() => positionImageGenDock(node));
+            // 角标展开：节点内查看全部结果（图1网格）
+            node.historyOpen = true;
+            refresh();
+        };
+    }
+    root?.querySelectorAll?.('.gen-stage-tile[data-preview-index]').forEach(tile => {
+        tile.onmousedown = e => {
+            if(e.target.closest('button')) e.stopPropagation();
+        };
+        tile.oncontextmenu = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            applyNodeSelection(node.id, e);
+            openResultsMenu(e.clientX, e.clientY);
+        };
+        tile.ondblclick = e => {
+            if(e.target.closest('button')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const url = tile.getAttribute('data-preview-url');
+            if(url) openGeneratorHistoryLightbox(node, url);
+        };
+        tile.onclick = e => {
+            if(e.target.closest('button')) return;
+            e.stopPropagation();
+            applyNodeSelection(node.id, e);
+            const idx = Number(tile.dataset.previewIndex || 0);
+            if(Number(node.previewIndex) !== idx){
+                node.previewIndex = idx;
+                refresh();
+            }
+        };
+        const media = tile.querySelector('img, video');
+        const url = tile.getAttribute('data-preview-url') || media?.getAttribute('src') || '';
+        const item = generatorHistoryItems(node).find(x => x.url === url) || {url};
+        bindCanvasImageDragCopy(media, url, String(item.prompt || ''));
+    });
+    root?.querySelectorAll?.('.gen-stage-tile [data-action]').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            applyNodeSelection(node.id, e);
+            const action = btn.getAttribute('data-action');
+            const tile = btn.closest('.gen-stage-tile');
+            const url = tile?.getAttribute('data-preview-url') || btn.getAttribute('data-url') || '';
+            const idx = Number(tile?.dataset.previewIndex || 0);
+            if(action === 'download'){
+                if(url) downloadUrl(url, outputDownloadName(url)).catch(err => softAlert(err.message || tr('canvas.outputDownloadEmpty')));
+                return;
+            }
+            if(action === 'collapse'){
+                node.historyOpen = false;
+                refresh();
+                return;
+            }
+            if(action === 'set-primary'){
+                node.previewIndex = idx;
+                refresh();
+            }
         };
     });
+}
+function genStageMediaHtml(url, className=''){
+    const cls = className ? ` class="${escapeAttr(className)}"` : '';
+    if(isVideoUrl(url)){
+        return `<video${cls} src="${escapeAttr(url)}" muted playsinline preload="metadata" draggable="false"></video>`;
+    }
+    return `<img${cls} src="${escapeAttr(url)}" alt="" draggable="false">`;
+}
+function genStageThumbHtml(url){
+    if(isVideoUrl(url)){
+        return `<video src="${escapeAttr(url)}" muted playsinline preload="metadata" draggable="false"></video>`;
+    }
+    return `<img src="${escapeAttr(url)}" alt="">`;
+}
+function genStageTileAspectCss(node){
+    const map = {
+        square:'1 / 1',
+        portrait:'2 / 3',
+        landscape:'3 / 2',
+        portrait43:'3 / 4',
+        landscape43:'4 / 3',
+        story:'9 / 16',
+        wide:'16 / 9',
+    };
+    return map[node?.ratio] || map[node?.msRatio] || '2 / 3';
+}
+function renderGenStageTileHtml(node, url, previewIndex, primaryUrl){
+    const isPrimary = url === primaryUrl;
+    const downloadLabel = langIsEn() ? 'Download' : '下载';
+    const primaryLabel = langIsEn() ? 'Set primary' : '设为主图';
+    const collapseLabel = langIsEn() ? 'Collapse' : '收起';
+    // 非主图：下载 + 设为主图；主图：下载 + 收起
+    const actionBtn = isPrimary
+        ? `<button type="button" class="gen-stage-tile-btn" data-action="collapse"><i data-lucide="minimize-2"></i><span>${escapeHtml(collapseLabel)}</span></button>`
+        : `<button type="button" class="gen-stage-tile-btn is-accent" data-action="set-primary"><span>${escapeHtml(primaryLabel)}</span></button>`;
+    return `<div class="gen-stage-tile ${isPrimary ? 'is-primary' : ''}" data-preview-url="${escapeAttr(url)}" data-preview-index="${previewIndex}" role="button" tabindex="0">
+        <div class="gen-stage-tile-media">${genStageMediaHtml(url)}</div>
+        <div class="gen-stage-tile-actions">
+            <button type="button" class="gen-stage-tile-btn" data-action="download" data-url="${escapeAttr(url)}"><i data-lucide="download"></i><span>${escapeHtml(downloadLabel)}</span></button>
+            ${actionBtn}
+        </div>
+    </div>`;
+}
+function renderGenStageStackHtml(node, urls, primary, busyOverlay){
+    const count = urls.length;
+    const peeks = urls.filter(u => u !== primary).slice(-3);
+    const peekHtml = peeks.map((_, i) => {
+        const depth = peeks.length - i;
+        return `<div class="gen-stage-stack-peek" style="--peek:${depth}" aria-hidden="true"></div>`;
+    }).join('');
+    const ar = genStageTileAspectCss(node);
+    const expandTitle = langIsEn() ? `View all ${count} results` : `展开查看全部 ${count} 张`;
+    return `<div class="gen-stage has-images is-stack">
+        <div class="gen-stage-frame is-stack" style="--gen-tile-ar:${ar}">
+            <div class="gen-stage-stack">
+                ${peekHtml}
+                <div class="gen-stage-stack-hero" data-preview-url="${escapeAttr(primary)}" role="img">
+                    ${genStageMediaHtml(primary)}
+                    <button type="button" class="gen-stage-stack-expand" data-action="expand-grid" title="${escapeAttr(expandTitle)}">
+                        <i data-lucide="layers" class="w-3 h-3"></i>
+                        <span>${count}</span>
+                    </button>
+                </div>
+            </div>
+            ${busyOverlay}
+        </div>
+    </div>`;
 }
 function renderGenStageHtml(node){
     if(isGenConsoleNode(node) && Array.isArray(node.history) && node.history.length > MAX_GEN_HISTORY){
@@ -14641,7 +14903,6 @@ function renderGenStageHtml(node){
     if(isGenConsoleNode(node) && Array.isArray(node.previewRoundUrls) && node.previewRoundUrls.length > MAX_GEN_PREVIEW){
         node.previewRoundUrls = node.previewRoundUrls.slice(-MAX_GEN_PREVIEW);
     }
-    const historyItems = generatorHistoryItems(node);
     const urls = generatorPreviewUrls(node);
     const pendingN = agentPendingCount(node.id);
     const isBusy = pendingN > 0 || Boolean(node.running) || node.runStatus === 'running' || node.runStatus === 'queued';
@@ -14656,10 +14917,11 @@ function renderGenStageHtml(node){
             <span class="gen-stage-busy-label">${escapeHtml(busyLabel)}</span>
         </div>`
         : '';
+    const emptyIcon = node.type === 'video' ? 'clapperboard' : 'image';
     if(!urls.length){
         return `<div class="gen-stage is-empty ${isBusy ? 'is-busy' : ''}">
             <div class="gen-stage-frame">
-                <div class="gen-stage-empty"><i data-lucide="image" class="w-10 h-10"></i></div>
+                <div class="gen-stage-empty"><i data-lucide="${emptyIcon}" class="w-10 h-10"></i></div>
                 ${busyOverlay}
             </div>
         </div>`;
@@ -14667,27 +14929,27 @@ function renderGenStageHtml(node){
     clampGeneratorPreviewIndex(node);
     const primary = urls[Math.max(0, Math.min(urls.length - 1, Number(node.previewIndex ?? urls.length - 1)))];
     const open = Boolean(node.historyOpen) && urls.length > 1;
-    const historyCount = Math.max(historyItems.length, urls.length);
-    const badge = historyCount >= 1
-        ? `<button type="button" class="gen-stage-badge ${open ? 'is-open' : ''}" title="${escapeAttr(langIsEn() ? 'Open node results' : '打开节点结果')}" aria-expanded="${open ? 'true' : 'false'}">
-            <span>${historyCount}</span><i data-lucide="${open ? 'chevron-up' : 'chevron-down'}" class="w-3 h-3"></i>
-        </button>`
-        : '';
-    const thumbs = urls.length > 1
-        ? `<div class="gen-stage-thumbs ${open ? 'is-open' : ''}" role="listbox" aria-hidden="${open ? 'false' : 'true'}">${urls.map((url, i) =>
-            `<button type="button" class="gen-stage-thumb ${url === primary ? 'is-active' : ''}" data-preview-url="${escapeAttr(url)}" data-preview-index="${i}" title="${i + 1}" role="option" aria-selected="${url === primary ? 'true' : 'false'}">
-                <img src="${escapeAttr(url)}" alt="">
-            </button>`
-        ).join('')}</div>`
-        : '';
-    return `<div class="gen-stage has-images ${open ? 'history-open' : ''} ${isBusy ? 'is-busy' : ''}">
+    if(open){
+        // 展开网格：全部预览；列数按数量接近方形排布（避免两列竖向长条）
+        const cols = genStageGridCols(urls.length);
+        const tiles = urls.map((url, i) => renderGenStageTileHtml(node, url, i, primary)).join('');
+        const ar = genStageTileAspectCss(node);
+        return `<div class="gen-stage has-images history-open is-grid ${isBusy ? 'is-busy' : ''}">
+            <div class="gen-stage-frame is-grid" style="--gen-tile-ar:${ar}; --gen-grid-cols:${cols}">
+                <div class="gen-stage-grid" role="listbox">${tiles}</div>
+                ${busyOverlay}
+            </div>
+        </div>`;
+    }
+    if(urls.length > 1){
+        return renderGenStageStackHtml(node, urls, primary, busyOverlay);
+    }
+    return `<div class="gen-stage has-images ${isBusy ? 'is-busy' : ''}">
         <div class="gen-stage-frame">
             <div class="gen-stage-hero" data-preview-url="${escapeAttr(primary)}" role="img">
-                <img src="${escapeAttr(primary)}" alt="">
+                ${genStageMediaHtml(primary)}
             </div>
             ${busyOverlay}
-            ${badge}
-            ${thumbs}
         </div>
     </div>`;
 }
@@ -14696,13 +14958,144 @@ function refreshGenStage(root, node){
     if(!host || !node) return;
     host.innerHTML = renderGenStageHtml(node);
     bindGenStageInteractions(host, node);
-    const activeThumb = host.querySelector('.gen-stage-thumb.is-active');
-    if(activeThumb && node.historyOpen){
-        requestAnimationFrame(() => activeThumb.scrollIntoView({inline:'nearest', block:'nearest', behavior:'smooth'}));
-    }
     refreshIcons(host);
+    // 叠卡↔网格内容高度/宽度变化，非手改尺寸时重测
+    if(!node._userSized) delete node._baseFrameH;
     fitGeneratorNodeHeight(node);
     if(selected.has(node.id)) requestAnimationFrame(() => positionImageGenDock(node));
+}
+/** 右键结果图：展开为多个独立图片生成节点（图2/3） */
+function openGenStageResultMenu(nodeId, clientX, clientY){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || !isGenConsoleNode(node)) return;
+    const urls = generatorPreviewUrls(node);
+    if(!urls.length) return;
+    closeCreateMenu();
+    closeLinkCreateMenu();
+    const canExpand = urls.length > 1;
+    imageNodeMenu.classList.remove('output-node-menu');
+    imageNodeMenu.innerHTML = `
+        ${canExpand ? `<button class="menu-btn" type="button" data-gen-expand-all="1"><i data-lucide="layout-grid" class="w-4 h-4"></i><span>${langIsEn() ? 'Expand all nodes' : '展开所有节点'}</span></button>` : ''}
+        <button class="menu-btn" type="button" data-gen-download-all="1"><i data-lucide="download" class="w-4 h-4"></i><span>${langIsEn() ? 'Download all' : '下载全部'}</span></button>
+    `;
+    const menuWidth = 220;
+    imageNodeMenu.style.left = `${Math.max(10, Math.min(window.innerWidth - menuWidth - 10, clientX))}px`;
+    imageNodeMenu.style.top = `${clientY}px`;
+    imageNodeMenu.classList.add('open');
+    imageNodeMenu.querySelector('[data-gen-expand-all]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        closeImageNodeMenu();
+        expandGenStageResultsToGeneratorNodes(nodeId);
+    });
+    imageNodeMenu.querySelector('[data-gen-download-all]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        closeImageNodeMenu();
+        urls.forEach(url => {
+            downloadUrl(url, outputDownloadName(url)).catch(err => softAlert(err.message || tr('canvas.outputDownloadEmpty')));
+        });
+    });
+    refreshIcons();
+}
+function buildExpandedGeneratorFromResult(source, url, histItem, x, y){
+    const prompt = String(histItem?.prompt || source.prompt || '').trim();
+    const model = String(histItem?.model || source.model || source.msCustomModel || '');
+    return {
+        id:uid('gen'),
+        type:source.type,
+        x,
+        y,
+        w:Number(source.w || 260),
+        apiProvider:source.apiProvider || '',
+        model:source.model || '',
+        prompt,
+        ratio:source.ratio || 'square',
+        resolution:source.resolution || '1k',
+        customRatio:source.customRatio || '',
+        customSize:source.customSize || '',
+        customRatioWidth:source.customRatioWidth || '',
+        customRatioHeight:source.customRatioHeight || '',
+        customWidth:source.customWidth || '',
+        customHeight:source.customHeight || '',
+        count:1,
+        quality:source.quality,
+        msgenModel:source.msgenModel,
+        msRatio:source.msRatio,
+        msResolution:source.msResolution,
+        msCustomModel:source.msCustomModel,
+        msCustomRatio:source.msCustomRatio,
+        msCustomSize:source.msCustomSize,
+        duration:source.duration,
+        aspectRatio:source.aspectRatio,
+        enhancePrompt:source.enhancePrompt,
+        enableUpsample:source.enableUpsample,
+        useFrameRoles:source.useFrameRoles,
+        previewRoundUrls:[url],
+        history:[{
+            url,
+            prompt,
+            model,
+            runMs:Number(histItem?.runMs || 0) || 0,
+            viewed:true,
+            createdAt:nowMs(),
+        }],
+        previewIndex:0,
+        historyOpen:false,
+        inputs:[],
+        runStatus:'idle',
+        running:false,
+    };
+}
+/** 右键「展开所有节点」：拆成独立图片生成节点，上游扇出，移除源节点（图2；点选即图3控制台） */
+function expandGenStageResultsToGeneratorNodes(sourceId){
+    const source = nodes.find(n => n.id === sourceId);
+    if(!source || !isGenConsoleNode(source)) return;
+    const urls = generatorPreviewUrls(source);
+    if(urls.length < 2){
+        softAlert(langIsEn() ? 'Need at least 2 results to expand' : '至少两张结果才能展开');
+        return;
+    }
+    try { pushUndo(); } catch(err) { console.warn('[infinite-canvas] undo snapshot failed', err); }
+    const items = generatorHistoryItems(source);
+    const baseW = Number(source.w || 260);
+    const rowH = Math.round(baseW * 1.45) + 36;
+    const startX = source.x;
+    const startY = source.y;
+    const incoming = connections.filter(c => c.to === source.id);
+    const outgoing = connections.filter(c => c.from === source.id);
+    const createdIds = [];
+    urls.forEach((url, i) => {
+        const histItem = items.find(x => x.url === url) || {url, prompt:source.prompt || ''};
+        const child = buildExpandedGeneratorFromResult(
+            source,
+            url,
+            histItem,
+            startX,
+            startY + i * rowH
+        );
+        nodes.push(child);
+        incoming.forEach(c => {
+            if(canConnect(c.from, child.id)){
+                connections.push({id:uid('c'), from:c.from, to:child.id});
+            }
+        });
+        createdIds.push(child.id);
+    });
+    const primaryUrl = urls[Math.max(0, Math.min(urls.length - 1, Number(source.previewIndex ?? urls.length - 1)))];
+    const primaryChildId = createdIds[Math.max(0, urls.indexOf(primaryUrl))] || createdIds[0];
+    outgoing.forEach(c => {
+        if(primaryChildId && canConnect(primaryChildId, c.to)){
+            connections.push({id:uid('c'), from:primaryChildId, to:c.to});
+        }
+    });
+    purgeNodeFromGroups(source.id);
+    try { destroyLTXEditor(source); } catch(_){ /* ignore */ }
+    nodes = nodes.filter(n => n.id !== source.id);
+    connections = connections.filter(c => c.from !== source.id && c.to !== source.id);
+    selected.clear();
+    if(primaryChildId) selected.add(primaryChildId);
+    syncGeneratorInputs();
+    commitCanvasStructureEdit();
+    scheduleSave();
 }
 function genDockRatioOptions(node){
     return `
@@ -14951,22 +15344,27 @@ function removeImageGenDock(){
 function positionImageGenDock(node){
     if(!imageGenDockEl || !node) return;
     const nodeEl = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
-    const nodeW = Number(node.w || (node.type === 'generator' ? GENERATOR_BASE_W : defaultNodeSize('image').w) || 260);
+    const nodeW = Number(node.w || (isGenConsoleNode(node) ? GENERATOR_BASE_W : defaultNodeSize('image').w) || 260);
     let nodeH = Number(node.h || 0);
     if(!nodeH && nodeEl){
         const rect = nodeEl.getBoundingClientRect();
         nodeH = Math.max(nodeEl.offsetHeight || 0, rect.height / Math.max(viewport?.scale || 1, 0.01));
     }
     if(!nodeH) nodeH = Number(defaultNodeSize('image').h || 336);
-    // 宽度跟内容走，保证参数名全露；再相对节点水平居中
+    const scale = Math.max(0.01, Number(viewport?.scale || 1));
+    const inv = 1 / scale;
+    // 控制台反缩放：画布 zoom 时保持屏幕像素尺寸不变
+    imageGenDockEl.style.transformOrigin = 'top center';
+    imageGenDockEl.style.transform = `scale(${inv})`;
     imageGenDockEl.style.width = 'max-content';
     imageGenDockEl.style.minWidth = `${Math.max(360, nodeW)}px`;
     imageGenDockEl.style.maxWidth = 'min(96vw, 980px)';
     const place = () => {
         if(!imageGenDockEl || imageGenDockNodeId !== node.id) return;
         const dockW = Math.max(imageGenDockEl.offsetWidth || 0, nodeW);
+        const gapWorld = 16 / scale;
         imageGenDockEl.style.left = `${node.x + (nodeW - dockW) / 2}px`;
-        imageGenDockEl.style.top = `${node.y + nodeH + 16}px`;
+        imageGenDockEl.style.top = `${node.y + nodeH + gapWorld}px`;
     };
     place();
     requestAnimationFrame(place);
@@ -15265,18 +15663,30 @@ function bindImageGenDockControls(wrap, node){
 }
 function remountImageGenDock(node){
     removeImageGenDock();
-    if(!nodesEl || !node || node.type !== 'generator') return;
+    if(!nodesEl || !node || !isGenConsoleNode(node)) return;
     const host = document.createElement('div');
     host.className = 'image-gen-dock-host';
     host.dataset.imageDockFor = node.id;
-    host.innerHTML = genDockShellHtml(node, {
-        floating:true,
-        showUpstream:true,
-        showRefs:true,
-        showCascade:true,
-        showRetry:true
-    });
-    bindImageGenDockControls(host, node);
+    if(node.type === 'msgen'){
+        const shell = document.createElement('div');
+        shell.className = 'gen-dock is-floating msgen-dock';
+        shell.appendChild(buildMsGenDockContent(node));
+        host.appendChild(shell);
+    } else if(node.type === 'video'){
+        const shell = document.createElement('div');
+        shell.className = 'gen-dock is-floating video-dock';
+        shell.appendChild(buildVideoDockContent(node));
+        host.appendChild(shell);
+    } else {
+        host.innerHTML = genDockShellHtml(node, {
+            floating:true,
+            showUpstream:true,
+            showRefs:true,
+            showCascade:true,
+            showRetry:true
+        });
+        bindImageGenDockControls(host, node);
+    }
     mountCanvasCustomSelects(host);
     nodesEl.appendChild(host);
     imageGenDockEl = host;
@@ -15287,8 +15697,7 @@ function remountImageGenDock(node){
 function syncImageGenDock(){
     const onlyId = selected.size === 1 ? [...selected][0] : null;
     const only = onlyId ? nodes.find(n => n.id === onlyId) : null;
-    // 控制台只挂在「图片生成」节点上；拖入的 image 只是素材
-    const ok = only && !isNodeDisabled(only) && only.type === 'generator';
+    const ok = only && !isNodeDisabled(only) && isGenConsoleNode(only);
     if(!ok){
         removeImageGenDock();
         return;
@@ -15298,15 +15707,29 @@ function syncImageGenDock(){
 }
 function renderVideoBody(node){
     const wrap = document.createElement('div');
-    wrap.className = 'generator-body';
+    wrap.className = 'generator-body gen-stage-only';
+    if(node.prompt == null) node.prompt = '';
+    if(!Array.isArray(node.history)) node.history = [];
+    if(!Array.isArray(node.previewRoundUrls)) node.previewRoundUrls = [];
+    wrap.innerHTML = `<div class="gen-stage-slot">${renderGenStageHtml(node)}</div>`;
+    refreshGenStage(wrap, node);
+    refreshIcons(wrap);
+    return wrap;
+}
+/** 视频生成控制台（浮动 dock，不进节点壳） */
+function buildVideoDockContent(node){
+    const wrap = document.createElement('div');
+    wrap.className = 'video-dock-body';
     const inputSources = generatorSources(node);
     const ordered = orderedSources(node, inputSources);
     const imageInputs = ordered.filter(src => src.refs?.length);
     const promptInputs = ordered.filter(src => src.prompt && !src.refs?.length);
     node.apiProvider = resolveVideoProviderId(node.apiProvider || 'comfly');
     node.model = node.model || 'veo3-fast';
+    if(node.prompt == null) node.prompt = '';
     wrap.innerHTML = `
-        <div class="prompt-list mb-3"></div>
+        <textarea class="gen-dock-prompt video-local-prompt" placeholder="${escapeAttr(langIsEn() ? 'Describe the video you want…' : '描述你想生成的视频…')}" rows="3">${escapeHtml(node.prompt || '')}</textarea>
+        <div class="prompt-list mb-2"></div>
         <div class="generator-section-label">${tr('canvas.images') || 'Images'}</div>
         <div class="input-list video-img-list"></div>
         <div class="gen-settings">
@@ -15356,12 +15779,17 @@ function renderVideoBody(node){
         <div class="gen-run-row">
             ${hasUpstreamLoop(node.id) ? '' : (() => {
                 const videoBtn = agentPendingRunState(node.id, tr('canvas.videoGenerate'), tr('canvas.generating'));
-                return agentGenRunActionsHtml(node.id, `<button class="gen-btn ${videoBtn.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''}><i data-lucide="clapperboard" class="w-4 h-4"></i>${escapeHtml(videoBtn.label)}</button>`);
+                return agentGenRunActionsHtml(node.id, `<button class="gen-btn gen-dock-send ${videoBtn.runningCls}" type="button" title="${escapeAttr(videoBtn.label)}" ${isNodeDisabled(node) ? 'disabled' : ''}><i data-lucide="arrow-up" class="w-4 h-4"></i></button>`);
             })()}
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
     `;
+    const localPrompt = wrap.querySelector('.video-local-prompt');
+    if(localPrompt){
+        bindScrollableText(localPrompt);
+        localPrompt.oninput = e => { node.prompt = e.target.value; scheduleSave(); };
+    }
     const providerSelect = wrap.querySelector('.video-provider');
     const modelSelect = wrap.querySelector('.video-model');
     const durationSelect = wrap.querySelector('.video-duration');
@@ -15394,16 +15822,18 @@ function renderVideoBody(node){
             e.stopPropagation();
             const field = btn.dataset.videoToggle;
             node[field] = !node[field];
-            render();
             scheduleSave();
+            if(imageGenDockNodeId === node.id) remountImageGenDock(node);
+            else refreshNodes([node.id]);
         };
     });
-    const list = wrap.querySelector('.video-img-list');
-    renderVideoImageInputs(list, node, imageInputs);
+    renderVideoImageInputs(wrap.querySelector('.video-img-list'), node, imageInputs);
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
     const videoGenBtn = wrap.querySelector('.gen-btn');
     if(videoGenBtn) videoGenBtn.onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
     bindCascadeButtons(wrap, node.id);
+    wrap.onmousedown = e => e.stopPropagation();
+    wrap.onclick = e => e.stopPropagation();
     return wrap;
 }
 function renderPromptPreview(container, promptInputs){
@@ -15418,26 +15848,12 @@ function renderImageInputList(list, node, imageInputs, emptyText=null){
     imageInputs.forEach((src, i) => {
         const item = document.createElement('div');
         item.className = 'input-item';
-        item.draggable = true;
         item.dataset.sourceId = src.id;
-        const previewHtml = src.preview && !isMissingAssetUrl(src.preview) ? `<img src="${escapeAttr(src.preview)}">` : (src.preview ? missingAssetHtml(src.preview, true) : '<i data-lucide="image" class="w-6 h-6 text-slate-400"></i>');
+        const previewHtml = src.preview && !isMissingAssetUrl(src.preview) ? `<img src="${escapeAttr(src.preview)}" draggable="false">` : (src.preview ? missingAssetHtml(src.preview, true) : '<i data-lucide="image" class="w-6 h-6 text-slate-400"></i>');
         item.innerHTML = `<span class="input-index">${i + 1}</span>${previewHtml}<span class="input-label">${escapeHtml(src.label)}</span>`;
-        item.ondragstart = e => {
-            e.stopPropagation();
-            internalDrag = true;
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('application/x-canvas-input', src.id);
-        };
-        item.ondragend = () => { internalDrag = false; };
-        item.ondragover = e => { e.preventDefault(); e.stopPropagation(); };
-        item.ondrop = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            reorderInput(node, e.dataTransfer.getData('application/x-canvas-input'), src.id);
-            internalDrag = false;
-        };
         list.appendChild(item);
     });
+    bindInputListPointerReorder(list, node);
     refreshIcons();
 }
 function renderVideoImageInputs(list, node, imageInputs){
@@ -15446,10 +15862,9 @@ function renderVideoImageInputs(list, node, imageInputs){
     imageInputs.forEach((src, i) => {
         const item = document.createElement('div');
         item.className = 'input-item video-input-item';
-        item.draggable = true;
         item.dataset.sourceId = src.id;
         const frameLabel = node.useFrameRoles && i === 0 ? tr('canvas.videoRoleFirstFrame') : node.useFrameRoles && i === 1 ? tr('canvas.videoRoleLastFrame') : '';
-        const previewHtml = src.preview && !isMissingAssetUrl(src.preview) ? `<img src="${escapeAttr(src.preview)}">` : (src.preview ? missingAssetHtml(src.preview, true) : '<i data-lucide="image" class="w-6 h-6 text-slate-400"></i>');
+        const previewHtml = src.preview && !isMissingAssetUrl(src.preview) ? `<img src="${escapeAttr(src.preview)}" draggable="false">` : (src.preview ? missingAssetHtml(src.preview, true) : '<i data-lucide="image" class="w-6 h-6 text-slate-400"></i>');
         item.innerHTML = `
             <div class="video-input-thumb">
                 <span class="input-index">${i + 1}</span>
@@ -15458,12 +15873,9 @@ function renderVideoImageInputs(list, node, imageInputs){
             </div>
             ${frameLabel ? `<div class="video-frame-label">${frameLabel}</div>` : ''}
         `;
-        item.ondragstart = e => { e.stopPropagation(); internalDrag = true; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('application/x-canvas-input', src.id); };
-        item.ondragend = () => { internalDrag = false; };
-        item.ondragover = e => { e.preventDefault(); e.stopPropagation(); };
-        item.ondrop = e => { e.preventDefault(); e.stopPropagation(); reorderInput(node, e.dataTransfer.getData('application/x-canvas-input'), src.id); internalDrag = false; };
         list.appendChild(item);
     });
+    bindInputListPointerReorder(list, node);
     refreshIcons();
 }
 function comfyWorkflowOptions(selected){
@@ -15639,38 +16051,26 @@ function renderComfyBody(node){
     return wrap;
 }
 function renderComfyImages(list, node, imageInputs){
+    if(!list) return;
     list.innerHTML = imageInputs.length ? '' : `<div class="text-[11px] text-gray-300 py-2">${tr('canvas.groupEmpty')}</div>`;
     imageInputs.forEach((src, i) => {
         const item = document.createElement('div');
         item.className = 'input-item';
-        item.draggable = true;
         item.dataset.sourceId = src.id;
         const firstRef = (src.refs || [])[0];
         const kind = mediaKindForRef(firstRef || src.preview);
         const icon = kind === 'video' ? 'file-video' : kind === 'audio' ? 'file-audio' : 'image';
         const label = kind === 'image' ? `${tr('canvas.image')} ${i + 1}` : `${nodeTitleForMedia({mediaKind:kind})} ${i + 1}`;
         const previewHtml = kind === 'video' && src.preview && !isMissingAssetUrl(src.preview)
-            ? `<video src="${escapeAttr(src.preview)}" muted preload="metadata" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video>`
+            ? `<video src="${escapeAttr(src.preview)}" muted preload="metadata" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback" draggable="false"></video>`
             : kind === 'audio'
                 ? `<i data-lucide="${icon}" class="w-6 h-6 text-slate-400"></i>`
-                : (src.preview && !isMissingAssetUrl(src.preview) ? `<img src="${escapeAttr(src.preview)}">` : (src.preview ? missingAssetHtml(src.preview, true) : `<i data-lucide="${icon}" class="w-6 h-6 text-slate-400"></i>`));
+                : (src.preview && !isMissingAssetUrl(src.preview) ? `<img src="${escapeAttr(src.preview)}" draggable="false">` : (src.preview ? missingAssetHtml(src.preview, true) : `<i data-lucide="${icon}" class="w-6 h-6 text-slate-400"></i>`));
         item.innerHTML = `<span class="input-index">${i + 1}</span>${previewHtml}<span class="input-label">${escapeHtml(label)}</span>`;
-        item.ondragstart = e => {
-            e.stopPropagation();
-            internalDrag = true;
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('application/x-canvas-input', src.id);
-        };
-        item.ondragend = () => { internalDrag = false; };
-        item.ondragover = e => { e.preventDefault(); e.stopPropagation(); };
-        item.ondrop = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            reorderInput(node, e.dataTransfer.getData('application/x-canvas-input'), src.id);
-            internalDrag = false;
-        };
         list.appendChild(item);
     });
+    bindInputListPointerReorder(list, node);
+    refreshIcons();
 }
 const RH_KNOWN_FIELD_OPTIONS = {
     aspectRatio:['1:1','16:9','9:16','4:3','3:4','4:5','5:4','3:2','2:3','21:9','9:21'],
@@ -16090,9 +16490,7 @@ function renderRhBody(node){
     const media = rhMediaSources(node);
     const fields = rhActiveFields(node);
     const mode = selectedRef?.kind || rhCurrentKind(node);
-    const selectedId = selectedRef?.id || (mode === 'workflow' ? (node.workflowId || '') : (node.webappId || ''));
     const selectedKey = selectedRef ? runningHubEntryKey(selectedRef.kind, selectedRef.id) : '';
-    const entryNote = entry?.note || entry?.description || '';
     wrap.innerHTML = `
         <div class="rh-top">
             <label class="field rh-webapp-field">
@@ -16509,13 +16907,12 @@ async function runRhNode(nodeId, opts={}){
         return;
     }
     const media = rhMediaSources(node);
-    let out = outputForNode(node, 500);
     const pendingId = uid('p');
     const run = runSnapshot(node, media.prompt || 'RunningHub', media.refs);
     run.taskLabel = 'RunningHub';
-    if(out) out._pending = [...(out._pending || []), makePending(pendingId, run)];
+    const host = pushNodePending(node, [makePending(pendingId, run)]);
     syncAppendableNodeRunState(node);
-    refreshRunNodes(node, out);
+    refreshRunNodes(node, host);
     const execute = async () => {
     try {
         const nodeInfoList = await rhBuildNodeInfoList(node, media);
@@ -16538,9 +16935,9 @@ async function runRhNode(nodeId, opts={}){
         run.request = {task_id:taskId, webappId:node.webappId, workflowId:node.workflowId, backend:'runninghub', mode};
         let result = null;
         for(let i = 0; i < 720; i++){
-            if(!isOutputPendingActive(out, pendingId)) return;
+            if(!isPendingActive(host, pendingId)) return;
             await sleep(2500);
-            if(!isOutputPendingActive(out, pendingId)) return;
+            if(!isPendingActive(host, pendingId)) return;
             const data = await apiFetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}`).then(async r => {
                 const json = await r.json();
                 if(!r.ok || json.success === false) throw new Error(json.detail || json.error || tr('canvas.rhFailed'));
@@ -16553,29 +16950,28 @@ async function runRhNode(nodeId, opts={}){
             if(data.status === 'FAILED') throw new Error(rhSummarizeTaskFail(data.failReason || data.raw));
         }
         if(!result) throw new Error(tr('canvas.rhTimeout'));
-        if(!isOutputPendingActive(out, pendingId)) return;
+        if(!isPendingActive(host, pendingId)) return;
         const outputs = result.urls || [];
         if(!outputs.length) throw new Error(tr('canvas.rhOutputsEmpty'));
-        const meta = collectRunMeta(out, pendingId);
-        if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
-        appendOutputImages(out, outputs, media.refs[0], [meta]);
-        mergeGeneratedOutputs(node, outputs, Boolean(opts.cascade));
+        const meta = collectRunMeta(host, pendingId);
+        clearNodePending(host, [pendingId]);
+        commitMediaOutputs(host, node, outputs, media.refs[0], [meta], {cascade:opts.cascade});
         addGenerationLog({run, outputs, runMs:meta.runMs || 0});
         syncAgentRunStatusAfterTask(node, {completed:agentPendingCount(node.id) === 0});
-        refreshRunNodes(node, out);
+        refreshRunNodes(node, host);
         scheduleSave();
     } catch(err) {
-        if(!isOutputPendingActive(out, pendingId)){
+        if(!isPendingActive(host, pendingId)){
             reconcileAgentRunStateFromPending(node.id);
-            refreshRunNodes(node, out);
+            refreshRunNodes(node, host);
             if(opts.cascade) throw err;
             return;
         }
-        const meta = collectRunMeta(out, pendingId);
+        const meta = collectRunMeta(host, pendingId);
         addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:err.message || String(err)});
-        if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
+        clearNodePending(host, [pendingId]);
         syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
-        refreshRunNodes(node, out);
+        refreshRunNodes(node, host);
         if(opts.cascade) throw err;
     }
     };
@@ -16745,7 +17141,86 @@ function updateComfyField(node, input, event){
 
 const CANVAS_GENERATOR_TYPES = ['generator','msgen','comfy','ltxDirector','video','rh','replicaAgent','imageRepairAgent'];
 const CANVAS_IMAGE_OUTPUT_TYPES = ['generator','msgen','comfy','ltxDirector','rh','replicaAgent','imageRepairAgent'];
-const CANVAS_MEDIA_OUTPUT_TYPES = ['generator','msgen','comfy','ltxDirector','video','rh','replicaAgent'];
+const CANVAS_MEDIA_OUTPUT_TYPES = ['generator','msgen','comfy','ltxDirector','video','rh','replicaAgent','imageRepairAgent'];
+function agentResultPreviewUrls(node){
+    return (node?.generatedOutputs || []).map(outputUrlValue).filter(Boolean);
+}
+function renderAgentResultStageHtml(node){
+    if(!node || isGenConsoleNode(node)) return '';
+    if(!CANVAS_GENERATOR_TYPES.includes(node.type)) return '';
+    const urls = agentResultPreviewUrls(node);
+    const pendingN = (node._pending || []).length;
+    if(!urls.length){
+        if(!pendingN) return '';
+        return `<div class="agent-result-stage is-pending" aria-live="polite">
+            <div class="agent-result-frame is-empty">
+                <span class="agent-result-pending-label">${langIsEn() ? 'Generating…' : '生成中…'}</span>
+            </div>
+        </div>`;
+    }
+    const idx = Math.max(0, Math.min(urls.length - 1, Number(node.previewIndex ?? urls.length - 1)));
+    node.previewIndex = idx;
+    const primary = urls[idx];
+    const video = isVideoUrl(primary);
+    return `<div class="agent-result-stage has-images">
+        <div class="agent-result-frame">
+            ${video
+                ? `<video class="agent-result-hero" src="${escapeAttr(primary)}" data-preview-url="${escapeAttr(primary)}" muted playsinline preload="metadata"></video>`
+                : `<img class="agent-result-hero" src="${escapeAttr(primary)}" data-preview-url="${escapeAttr(primary)}" alt="" draggable="false">`}
+        </div>
+        ${urls.length > 1 ? `<div class="agent-result-nav">
+            <button type="button" class="agent-result-prev" aria-label="prev">‹</button>
+            <span class="agent-result-count">${idx + 1}/${urls.length}</span>
+            <button type="button" class="agent-result-next" aria-label="next">›</button>
+        </div>` : ''}
+    </div>`;
+}
+function bindAgentResultStage(wrap, node){
+    const stage = wrap?.querySelector?.('.agent-result-stage');
+    if(!stage || !node) return;
+    const urls = agentResultPreviewUrls(node);
+    const setIdx = (next) => {
+        if(!urls.length) return;
+        node.previewIndex = ((next % urls.length) + urls.length) % urls.length;
+        scheduleSave();
+        refreshNodes([node.id]);
+    };
+    stage.querySelector('.agent-result-prev')?.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIdx(Number(node.previewIndex || 0) - 1);
+    });
+    stage.querySelector('.agent-result-next')?.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIdx(Number(node.previewIndex || urls.length - 1) + 1);
+    });
+    const media = stage.querySelector('.agent-result-hero');
+    if(!media) return;
+    const url = media.getAttribute('data-preview-url') || media.getAttribute('src') || '';
+    if(media.tagName === 'IMG' && url){
+        bindCanvasImageDragCopy(media, url, '');
+        media.ondblclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            openOutputLightbox(url, node);
+        };
+    } else if(media.tagName === 'VIDEO' && url){
+        media.onclick = e => {
+            e.stopPropagation();
+            openOutputLightbox(url, node);
+        };
+    }
+}
+function mountAgentResultStage(body, node){
+    if(!body || !node || isGenConsoleNode(node)) return;
+    if(!CANVAS_GENERATOR_TYPES.includes(node.type)) return;
+    const host = body.querySelector('.generator-body') || body;
+    const html = renderAgentResultStageHtml(node);
+    if(!html) return;
+    host.insertAdjacentHTML('afterbegin', html);
+    bindAgentResultStage(host, node);
+}
 function hasExplicitOutputConnection(nodeId){
     return connections.some(c => {
         if(c.from !== nodeId) return false;
@@ -16770,8 +17245,8 @@ function hasDownstreamGenerator(nodeId){
 function shouldCreateOutputForNode(node){
     if(!node) return false;
     if(hasExplicitOutputConnection(node.id)) return true;
-    // Gen Console：结果落在原节点预览，不自动建 Output（仅手连 Output 时写入）
-    if(node.type === 'generator') return false;
+    // 轻量 Gen Console：媒体生成类结果落本节点，不自动建 Output（仅手连才双写）
+    if(CANVAS_GENERATOR_TYPES.includes(node.type)) return false;
     return !hasDownstreamGenerator(node.id);
 }
 function outputForNode(node, dx=460){
@@ -16798,9 +17273,27 @@ function pushNodePending(node, pendings){
     host._pending = [...(host._pending || []), ...pendings];
     return host;
 }
+function isPendingActive(host, pendingId){
+    return Boolean(pendingId) && (host?._pending || []).some(p => p.id === pendingId);
+}
+function clearNodePending(host, pendingIds){
+    if(!host || !pendingIds?.length) return;
+    const drop = new Set(Array.isArray(pendingIds) ? pendingIds : [pendingIds]);
+    host._pending = (host._pending || []).filter(p => !drop.has(p.id));
+}
+/** Output 宿主写入画廊；否则只落源节点 generatedOutputs（不自动建 Output） */
+function commitMediaOutputs(host, sourceNode, urls, compareRef, metas, opts={}){
+    if(host?.type === 'output'){
+        appendOutputImages(host, urls, compareRef, metas, opts.layout || null);
+    }
+    mergeGeneratedOutputs(sourceNode, urls, Boolean(opts.cascade || opts.appendGenerated));
+}
+/** 生成中：若「节点结果」已打开则刷新 pending；不自动弹窗抢焦点 */
 function revealGeneratorResultsWhileRunning(gen){
     if(!isGenConsoleNode(gen)) return;
-    openGenHistoryPanel(gen);
+    if(genHistoryPanelEl && genHistoryPanelNodeId === gen.id){
+        openGenHistoryPanel(gen, {reuse:true});
+    }
     refreshOutputTimer();
 }
 function generatedImageRefs(node){
@@ -16839,15 +17332,19 @@ function mediaRefsFromNode(node){
             return {url, name:outputImageName(url) || `output-${i + 1}`, kind};
         }).filter(Boolean);
     }
-    // Generator：右端口吐当前舞台主图（与预览一致）
-    if(node.type === 'generator'){
-        const urls = generatorPreviewUrls(node);
+    // 媒体生成类：右端口吐当前结果台主图（与预览一致）
+    if(CANVAS_MEDIA_OUTPUT_TYPES.includes(node.type)){
+        const urls = isGenConsoleNode(node)
+            ? generatorPreviewUrls(node)
+            : agentResultPreviewUrls(node);
         if(!urls.length) return [];
         const idx = Math.max(0, Math.min(urls.length - 1, Number(node.previewIndex ?? urls.length - 1)));
         const url = urls[idx];
-        return [{url, name:outputImageName(url) || 'generated-1', kind:'image'}];
+        const kind = ['rh','ltxDirector','video'].includes(node.type) && isVideoUrl(url)
+            ? 'video'
+            : (isVideoUrl(url) ? 'video' : 'image');
+        return [{url, name:outputImageName(url) || 'generated-1', kind}];
     }
-    if(CANVAS_MEDIA_OUTPUT_TYPES.includes(node.type)) return generatedImageRefs(node);
     return [];
 }
 function generatorSources(gen, ctx=loopContext){
@@ -16858,7 +17355,7 @@ function generatorSources(gen, ctx=loopContext){
             const last = [...n.images].reverse().map(outputUrlValue).find(Boolean);
             if(last) return {id:n.id, type:'outputImage', label:'上游输出', preview:last, refs:[{url:last, name:'output.png'}], prompt:''};
         }
-        if(n.type === 'generator'){
+        if(CANVAS_MEDIA_OUTPUT_TYPES.includes(n.type)){
             const refs = mediaRefsFromNode(n);
             if(refs.length){
                 return {
@@ -16869,19 +17366,6 @@ function generatorSources(gen, ctx=loopContext){
                     refs,
                     prompt:''
                 };
-            }
-        }
-        if(CANVAS_MEDIA_OUTPUT_TYPES.includes(n.type)){
-            const refs = generatedImageRefs(n);
-            if(refs.length){
-                return refs.map((ref, i) => ({
-                    id:`${n.id}:generated:${i}:${ref.url}`,
-                    type:'generatedImage',
-                    label:`上游生成 ${i + 1}`,
-                    preview:ref.url,
-                    refs:[ref],
-                    prompt:''
-                }));
             }
         }
         if(isImageStackNode(n) && (n.images || []).length){
@@ -16969,6 +17453,134 @@ function orderedSources(gen, sources){
     sources.forEach(s => { if(!gen.inputs.includes(s.id)) gen.inputs.push(s.id); });
     return gen.inputs.map(id => sources.find(s => s.id === id)).filter(Boolean);
 }
+function imageSourceIdsFor(gen){
+    return generatorSources(gen).filter(s => s.refs?.length).map(s => s.id);
+}
+function reorderInputByIndex(gen, fromIndex, toIndex){
+    if(!gen || fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return false;
+    orderedSources(gen, generatorSources(gen));
+    const imageIds = new Set(imageSourceIdsFor(gen));
+    const promptIds = (gen.inputs || []).filter(id => !imageIds.has(id));
+    const ids = (gen.inputs || []).filter(id => imageIds.has(id));
+    if(fromIndex >= ids.length || toIndex >= ids.length) return false;
+    const [moved] = ids.splice(fromIndex, 1);
+    ids.splice(toIndex, 0, moved);
+    gen.inputs = [...ids, ...promptIds];
+    return true;
+}
+function softRefreshGeneratorInputLists(gen){
+    if(!gen) return;
+    const sources = orderedSources(gen, generatorSources(gen));
+    const imageInputs = sources
+        .map(src => ({...src, refs:imageRefsOnly(src.refs || [])}))
+        .filter(src => src.refs?.length);
+    const mediaInputs = sources.filter(src => src.refs?.length);
+    const fill = (list, mode='image') => {
+        if(!list) return;
+        if(mode === 'video') renderVideoImageInputs(list, gen, imageInputs);
+        else if(mode === 'comfy') renderComfyImages(list, gen, mediaInputs);
+        else renderImageInputList(list, gen, imageInputs);
+    };
+    if(imageGenDockNodeId === gen.id && imageGenDockEl){
+        if(gen.type === 'video') fill(imageGenDockEl.querySelector('.video-img-list'), 'video');
+        else if(gen.type === 'msgen') fill(imageGenDockEl.querySelector('.ms-img-list') || imageGenDockEl.querySelector('.input-list'));
+        else fill(imageGenDockEl.querySelector('.gen-dock-refs .input-list') || imageGenDockEl.querySelector('.input-list'));
+    }
+    const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(gen.id)}"]`);
+    if(!el) return;
+    if(gen.type === 'video') fill(el.querySelector('.video-img-list'), 'video');
+    else if(gen.type === 'comfy' || gen.type === 'ltxDirector') fill(el.querySelector('.input-list'), 'comfy');
+    else if(gen.type === 'batchPosterAgent') fill(el.querySelector('.batch-poster-input-list'));
+    else if(gen.type === 'slotsLoopVideoAgent') fill(el.querySelector('.slots-loop-input-list'));
+    else fill(el.querySelector('.input-list'));
+}
+/** 参考图列表：指针拖拽换位（跟手 + 邻项让位），松手后局部刷新，避免整页 render */
+function bindInputListPointerReorder(list, node){
+    if(!list || !node) return;
+    list.classList.add('input-list-reorderable');
+    const itemEls = () => [...list.querySelectorAll(':scope > .input-item[data-source-id]')];
+    itemEls().forEach(item => {
+        item.draggable = false;
+        item.style.touchAction = 'none';
+        item.onpointerdown = e => {
+            if(e.button !== 0) return;
+            if(e.target.closest('button, input, textarea, select, a')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const startItems = itemEls();
+            const fromIndex = startItems.indexOf(item);
+            if(fromIndex < 0) return;
+            const originRects = startItems.map(el => el.getBoundingClientRect());
+            const startX = e.clientX;
+            const gap = parseFloat(getComputedStyle(list).columnGap || getComputedStyle(list).gap) || 8;
+            const step = (originRects[fromIndex]?.width || 72) + gap;
+            let dragging = false;
+            let toIndex = fromIndex;
+            const clearShifts = () => {
+                startItems.forEach(el => {
+                    if(el === item) return;
+                    el.style.transition = '';
+                    el.style.transform = '';
+                });
+            };
+            const applyShifts = insertAt => {
+                startItems.forEach((el, i) => {
+                    if(el === item) return;
+                    let shift = 0;
+                    if(fromIndex < insertAt && i > fromIndex && i <= insertAt) shift = -step;
+                    else if(fromIndex > insertAt && i >= insertAt && i < fromIndex) shift = step;
+                    el.style.transition = 'transform .22s cubic-bezier(.22,.61,.36,1)';
+                    el.style.transform = shift ? `translate3d(${shift}px,0,0)` : '';
+                });
+            };
+            const onMove = ev => {
+                const dx = ev.clientX - startX;
+                if(!dragging){
+                    // 仅左右：纵向滑动不进入拖拽
+                    if(Math.abs(dx) < 5) return;
+                    dragging = true;
+                    internalDrag = true;
+                    list.classList.add('is-reordering');
+                    item.classList.add('is-dragging');
+                    try { item.setPointerCapture(ev.pointerId); } catch(_) {}
+                }
+                item.style.transition = 'none';
+                item.style.zIndex = '40';
+                item.style.transform = `translate3d(${dx}px, 0, 0) scale(1.06)`;
+                let nearest = fromIndex;
+                let best = Infinity;
+                originRects.forEach((r, i) => {
+                    const dist = Math.abs(ev.clientX - (r.left + r.width / 2));
+                    if(dist < best){ best = dist; nearest = i; }
+                });
+                if(nearest !== toIndex){
+                    toIndex = nearest;
+                    applyShifts(toIndex);
+                }
+            };
+            const finish = ev => {
+                item.removeEventListener('pointermove', onMove);
+                item.removeEventListener('pointerup', finish);
+                item.removeEventListener('pointercancel', finish);
+                try { item.releasePointerCapture(ev.pointerId); } catch(_) {}
+                item.style.transform = '';
+                item.style.zIndex = '';
+                item.style.transition = '';
+                item.classList.remove('is-dragging');
+                list.classList.remove('is-reordering');
+                clearShifts();
+                internalDrag = false;
+                if(dragging && toIndex !== fromIndex && reorderInputByIndex(node, fromIndex, toIndex)){
+                    softRefreshGeneratorInputLists(node);
+                    scheduleSave();
+                }
+            };
+            item.addEventListener('pointermove', onMove);
+            item.addEventListener('pointerup', finish);
+            item.addEventListener('pointercancel', finish);
+        };
+    });
+}
 function reorderInput(gen, movedId, targetId){
     if(!movedId || movedId === targetId) return;
     const sources = generatorSources(gen);
@@ -16980,7 +17592,7 @@ function reorderInput(gen, movedId, targetId){
     if(from < 0 || to < 0) return;
     ids.splice(to, 0, ids.splice(from, 1)[0]);
     gen.inputs = [...ids, ...promptIds];
-    render();
+    softRefreshGeneratorInputLists(gen);
     scheduleSave();
 }
 function isBatchPosterAgentType(type){
@@ -17046,13 +17658,33 @@ function refreshGeneratorInputViews(){
             refreshGenStage(el, gen);
             if(imageGenDockNodeId === gen.id) syncImageGenDock();
         }
-        if(gen.type === 'msgen') renderImageInputList(el.querySelector('.ms-img-list'), gen, imageInputs);
+        if(gen.type === 'msgen'){
+            refreshGenStage(el, gen);
+            if(imageGenDockNodeId === gen.id){
+                const dock = imageGenDockEl;
+                const imgList = dock?.querySelector?.('.ms-img-list');
+                if(imgList) renderImageInputList(imgList, gen, imageInputs);
+                const promptList = dock?.querySelector?.('.prompt-list');
+                if(promptList) renderPromptPreview(promptList, sources.filter(src => src.prompt && !src.refs?.length));
+                else remountImageGenDock(gen);
+            }
+        }
+        if(gen.type === 'video'){
+            refreshGenStage(el, gen);
+            if(imageGenDockNodeId === gen.id){
+                const dock = imageGenDockEl;
+                const imgList = dock?.querySelector?.('.video-img-list');
+                if(imgList) renderVideoImageInputs(imgList, gen, imageInputs);
+                const promptList = dock?.querySelector?.('.prompt-list');
+                if(promptList) renderPromptPreview(promptList, sources.filter(src => src.prompt && !src.refs?.length));
+                else remountImageGenDock(gen);
+            }
+        }
         if(gen.type === 'comfy') renderComfyImages(el.querySelector('.input-list'), gen, imageInputs);
         if(gen.type === 'ltxDirector'){
             ltxSyncConnectedImagesToTimeline(gen);
             renderComfyImages(el.querySelector('.input-list'), gen, imageInputs);
         }
-        if(gen.type === 'video') renderVideoImageInputs(el.querySelector('.video-img-list'), gen, imageInputs);
         if(gen.type === 'rh'){
             const fields = rhActiveFields(gen);
             const media = rhMediaSources(gen);
@@ -17341,19 +17973,19 @@ async function runVideoNode(nodeId, opts={}){
     if(!node || isNodeDisabled(node)) return;
     const loopCtx = opts.loopContext !== undefined ? opts.loopContext : loopContext;
     const sources = orderedSources(node, generatorSources(node, loopCtx));
-    const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
+    const prompt = composeGeneratorPrompt(node, sources);
     const allRefs = sources.flatMap(s => s.refs || []);
     const refs = imageRefsOnly(allRefs);
     const videoRefs = videoRefsOnly(allRefs);
     if(node.useFrameRoles && refs[0]) refs[0] = {...refs[0], role:'first_frame'};
     if(node.useFrameRoles && refs[1]) refs[1] = {...refs[1], role:'last_frame'};
     if(!prompt){ softAlert(tr('canvas.videoNeedsPrompt')); return; }
-    let out = outputForNode(node, 460);
     const pendingId = uid('p');
     const run = runSnapshot(node, prompt, refs);
-    if(out) out._pending = [...(out._pending || []), makePending(pendingId, run)];
+    const host = pushNodePending(node, [makePending(pendingId, run)]);
     syncAppendableNodeRunState(node);
-    refreshRunNodes(node, out);
+    refreshRunNodes(node, host);
+    revealGeneratorResultsWhileRunning(node);
     const execute = async () => {
     try {
         const result = await apiFetch('/api/canvas-video', {
@@ -17375,26 +18007,34 @@ async function runVideoNode(nodeId, opts={}){
                 generate_audio:Boolean(node.generateAudio)
             })
         }).then(async r => { if(!r.ok) throw new Error(await responseErrorMessage(r, tr('canvas.videoFailed'))); return r.json(); });
-        const meta = collectRunMeta(out, pendingId);
-        if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
+        const meta = collectRunMeta(host, pendingId);
+        clearNodePending(host, [pendingId]);
         const outputUrls = resultMediaUrls(result).map(item => {
             const url = outputUrlValue(item);
             return item && typeof item === 'object' ? {...item, url, kind:item.kind || 'video'} : {url, kind:'video'};
         }).filter(item => item.url);
         if(!outputUrls.length) throw new Error(tr('canvas.videoFailed'));
         run.request = requestMetaFromResult(result);
-        appendOutputImages(out, outputUrls, refs[0], [{...meta, kind:'video'}]);
-        mergeGeneratedOutputs(node, outputUrls, Boolean(opts.cascade));
+        commitMediaOutputs(host, node, outputUrls, refs[0], [{...meta, kind:'video'}], {cascade:opts.cascade});
+        appendGeneratorPreviewRound(node, outputUrls, {
+            ...meta,
+            kind:'video',
+            run,
+            runMs:meta.runMs || 0,
+            model: node.model || '',
+            prompt,
+        });
         addGenerationLog({run, outputs:outputUrls, runMs:meta.runMs || 0});
         syncAgentRunStatusAfterTask(node, {completed:agentPendingCount(node.id) === 0});
-        refreshRunNodes(node, out);
+        refreshRunNodes(node, host);
+        if(imageGenDockNodeId === node.id) syncImageGenDock();
         scheduleSave();
     } catch(err) {
-        const meta = collectRunMeta(out, pendingId);
+        const meta = collectRunMeta(host, pendingId);
         addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:err.message || String(err)});
-        if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
+        clearNodePending(host, [pendingId]);
         syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
-        refreshRunNodes(node, out);
+        refreshRunNodes(node, host);
         if(opts.cascade) throw err;
     }
     };
@@ -17834,15 +18474,14 @@ async function runLTXDirectorNode(nodeId, opts={}){
         return;
     }
     ltxDirectorSyncSeconds(node);
-    let out = outputForNode(node, 520);
     const pendingId = uid('p');
     const refs = sources.flatMap(s => s.refs || []);
     const run = runSnapshot(node, globalPrompt || segments.map(s => s.prompt).join(' | '), refs);
     run.taskLabel = tr('canvas.ltxDirector');
-    if(out) out._pending = [...(out._pending || []), makePending(pendingId, run)];
+    const host = pushNodePending(node, [makePending(pendingId, run)]);
     syncAppendableNodeRunState(node);
     if(!opts.cascade) setStatus(tr('canvas.ltxRunning'));
-    refreshRunNodes(node, out);
+    refreshRunNodes(node, host);
     const execute = async () => {
     try {
         const directorInputs = await ltxDirectorBuildTimelinePayload(node, globalPrompt);
@@ -17868,20 +18507,19 @@ async function runLTXDirectorNode(nodeId, opts={}){
         if(result.error) throw new Error(result.error);
         const outputs = comfyResultOutputs(result);
         if(!outputs.length) throw new Error(tr('canvas.ltxNoOutput'));
-        const meta = collectRunMeta(out, pendingId);
-        if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
-        appendOutputImages(out, outputs, refs[0], [meta]);
-        mergeGeneratedOutputs(node, outputs, Boolean(opts.cascade));
+        const meta = collectRunMeta(host, pendingId);
+        clearNodePending(host, [pendingId]);
+        commitMediaOutputs(host, node, outputs, refs[0], [meta], {cascade:opts.cascade});
         addGenerationLog({run, outputs, runMs:meta.runMs || 0});
         syncAgentRunStatusAfterTask(node, {completed:agentPendingCount(node.id) === 0});
-        refreshRunNodes(node, out);
+        refreshRunNodes(node, host);
         scheduleSave();
     } catch(err) {
-        const meta = collectRunMeta(out, pendingId);
-        if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
+        const meta = collectRunMeta(host, pendingId);
+        clearNodePending(host, [pendingId]);
         addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:err.message || String(err)});
         syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
-        refreshRunNodes(node, out);
+        refreshRunNodes(node, host);
         if(opts.cascade) throw err;
         showErrorModal(err.message || tr('canvas.ltxFailed'), tr('canvas.ltxFailed'));
     }
@@ -17906,13 +18544,12 @@ async function runComfyNode(nodeId, opts={}){
     if((mode !== 'text' && mode !== 'custom' && !refs.length) || (mode === 'custom' && refs.length < customImageFields.length)){ softAlert(tr('canvas.needImage')); return; }
     if(mode === 'custom' && videoRefsOnly(allRefs).length < customVideoFields.length){ softAlert(langIsEn() ? 'Please connect enough video inputs for this ComfyUI workflow.' : '请为这个 ComfyUI 工作流连接足够的视频输入'); return; }
     if(mode === 'custom' && audioRefsOnly(allRefs).length < customAudioFields.length){ softAlert(langIsEn() ? 'Please connect enough audio inputs for this ComfyUI workflow.' : '请为这个 ComfyUI 工作流连接足够的音频输入'); return; }
-    let out = outputForNode(node, 480);
     const pendingId = uid('p');
     const run = runSnapshot(node, prompt, refs);
     run.taskLabel = comfyRunLabel(node);
-    if(out) out._pending = [...(out._pending||[]), makePending(pendingId, run)];
+    const host = pushNodePending(node, [makePending(pendingId, run)]);
     syncAppendableNodeRunState(node);
-    refreshRunNodes(node, out);
+    refreshRunNodes(node, host);
     const execute = async () => {
     try {
         let images = [];
@@ -18038,20 +18675,19 @@ async function runComfyNode(nodeId, opts={}){
             if(!result.images?.length) throw new Error(noReturnedImage('canvas.comfyEdit'));
             images = node.editUpscale ? await runComfyUpscale(result.images?.[0], node.editUpscaleRes || 2048) : result.images || [];
         }
-        const meta = collectRunMeta(out, pendingId);
-        if(out) out._pending = (out._pending||[]).filter(p => p.id !== pendingId);
-        appendOutputImages(out, images, refs[0], [meta]);
-        mergeGeneratedOutputs(node, images, Boolean(opts.cascade));
+        const meta = collectRunMeta(host, pendingId);
+        clearNodePending(host, [pendingId]);
+        commitMediaOutputs(host, node, images, refs[0], [meta], {cascade:opts.cascade});
         addGenerationLog({run, outputs:images, runMs:meta.runMs || 0});
         syncAgentRunStatusAfterTask(node, {completed:agentPendingCount(node.id) === 0});
-        refreshRunNodes(node, out);
+        refreshRunNodes(node, host);
         scheduleSave();
     } catch(err) {
-        const meta = collectRunMeta(out, pendingId);
+        const meta = collectRunMeta(host, pendingId);
         addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:err.message || String(err)});
-        if(out) out._pending = (out._pending||[]).filter(p => p.id !== pendingId);
+        clearNodePending(host, [pendingId]);
         syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
-        refreshRunNodes(node, out);
+        refreshRunNodes(node, host);
         if(opts.cascade) throw err;
     }
     };
@@ -18257,10 +18893,8 @@ function canvasWorkflowEdges(){
         const from = nodes.find(n => n.id === c.from);
         const to = nodes.find(n => n.id === c.to);
         if(!from || !to || !runTypes.includes(from.type)) return;
-        if(runTypes.includes(to.type)){
-            direct.push([from.id, to.id]);
-            return;
-        }
+        // gen→gen 只作参考图连线，不进工作流级联（避免「一键运行 2 个节点」）
+        if(runTypes.includes(to.type)) return;
         if(to.type === 'output'){
             connections.filter(cc => cc.from === to.id).forEach(cc => {
                 const next = nodes.find(n => n.id === cc.to);
@@ -18323,14 +18957,15 @@ function computeCascadeOrder(targetId){
         visited.add(id);
         const node = nodes.find(n => n.id === id);
         if(!node) return;
-        // 找该节点的上游
+        // 找该节点的上游：跳过 gen→gen 参考连线，只把经 Output/非生成节点桥接的当真工作流依赖
         connections.filter(c => c.to === id).forEach(c => {
             const from = nodes.find(n => n.id === c.from);
             if(!from) return;
             if(GEN_TYPES.includes(from.type)){
-                dfs(from.id);
-            } else if(from.type === 'output'){
-                // output 节点的上游是生成器
+                // 上游生成节点 → 本生成节点：参考图，不级联重跑
+                return;
+            }
+            if(from.type === 'output'){
                 connections.filter(cc => cc.to === from.id).forEach(cc => {
                     const ff = nodes.find(n => n.id === cc.from);
                     if(ff && GEN_TYPES.includes(ff.type)) dfs(ff.id);
@@ -18643,15 +19278,7 @@ function deleteNode(id, event){
 function clearNodeContentBeforeDelete(id){
     const node = nodes.find(n => n.id === id);
     if(!node) return false;
-    if(node.type === 'image' && node.url){
-        pushUndo();
-        node.url = '';
-        node.mediaKind = 'image';
-        node.name = '上传卡片';
-        commitCanvasStructureEdit();
-        scheduleSave();
-        return true;
-    }
+    // image：点 X 直接删节点（不再先清空图留下空壳）
     if(node.type === 'output' && ((node.images || []).length || (node._pending || []).length)){
         pushUndo();
         node.images = [];
@@ -19079,7 +19706,7 @@ function reconcileAgentRunStateFromPending(nodeId){
     if(node.runStatus === 'running') node.runStatus = 'idle';
 }
 function isOutputPendingActive(out, pendingId){
-    return Boolean(pendingId) && (out?._pending || []).some(p => p.id === pendingId);
+    return isPendingActive(out, pendingId);
 }
 function agentStopAllBtnHtml(nodeId){
     const pendingN = agentPendingCount(nodeId);
@@ -19299,11 +19926,10 @@ function collectRunMeta(out, id){
     return collectRunMetas(out, [id])[0] || {runMs:0, run:{}};
 }
 function findOutputByPendingId(pendingId){
-    return nodes.find(n => (n.type === 'output' || n.type === 'generator') && (n._pending || []).some(p => p.id === pendingId));
+    return nodes.find(n => (n._pending || []).some(p => p.id === pendingId));
 }
 function findPendingTask(taskId){
     for(const host of nodes){
-        if(host.type !== 'output' && host.type !== 'generator') continue;
         const pending = (host._pending || []).find(p => p.canvasTaskId === taskId);
         if(pending) return {out: host, pending};
     }
@@ -19368,10 +19994,11 @@ function completeReplicaAgentTask(taskId, data){
     };
     const images = data.final_image_url ? [data.final_image_url] : [];
     out._pending = (out._pending || []).filter(p => p.id !== pending.id);
-    appendOutputImages(out, images, meta.run?.refs?.[0], [meta]);
     const gen = nodes.find(n => n.id === meta.run?.node?.id);
+    commitMediaOutputs(out, gen || (out.type !== 'output' ? out : null), images, meta.run?.refs?.[0], [meta], {
+        appendGenerated:Boolean(pending.appendGenerated),
+    });
     if(gen){
-        mergeGeneratedOutputs(gen, images, Boolean(pending.appendGenerated));
         syncAgentRunStatusAfterTask(gen, {completed:true});
     }
     addGenerationLog({run:meta.run, outputs:images, runMs:meta.runMs || 0});
@@ -19394,10 +20021,11 @@ function completeImageRepairAgentTask(taskId, data){
     };
     const images = data.final_image_url ? [data.final_image_url] : [];
     out._pending = (out._pending || []).filter(p => p.id !== pending.id);
-    appendOutputImages(out, images, meta.run?.refs?.[0], [meta]);
     const gen = nodes.find(n => n.id === meta.run?.node?.id);
+    commitMediaOutputs(out, gen || (out.type !== 'output' ? out : null), images, meta.run?.refs?.[0], [meta], {
+        appendGenerated:Boolean(pending.appendGenerated),
+    });
     if(gen){
-        mergeGeneratedOutputs(gen, images, Boolean(pending.appendGenerated));
         syncAgentRunStatusAfterTask(gen, {completed:true});
     }
     addGenerationLog({run:meta.run, outputs:images, runMs:meta.runMs || 0});
@@ -20723,6 +21351,13 @@ function cloneNode(n, dx, dy){
     copy.x = n.x + dx;
     copy.y = n.y + dy;
     copy.running = false;
+    delete copy._pending;
+    delete copy.runStatus;
+    delete copy.runError;
+    delete copy._cascadeIdx;
+    delete copy._cascadeFailed;
+    delete copy._agentStopRequested;
+    delete copy._batchProgress;
     return copy;
 }
 function isGroupNodeType(type){
@@ -20821,29 +21456,57 @@ function createAltDuplicateDragPayload(primaryNode, sx, sy){
         duplicateCreated: true,
     };
 }
+function clipboardNodes(){
+    if(!clipboard) return [];
+    if(Array.isArray(clipboard)) return clipboard;
+    return Array.isArray(clipboard.nodes) ? clipboard.nodes : [];
+}
+function clipboardConnections(){
+    if(!clipboard || Array.isArray(clipboard)) return [];
+    return Array.isArray(clipboard.connections) ? clipboard.connections : [];
+}
 function copySelectedNodes(){
     if(!canvas || !selected.size) return;
     const el = document.activeElement;
     if(el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT')) return;
-    const toCopy = [...selected].map(id => nodes.find(n => n.id === id)).filter(Boolean);
-    if(!toCopy.length) return;
-    clipboard = JSON.parse(JSON.stringify(serializableCanvasNodes(toCopy)));
+    const roots = [...selected].map(id => nodes.find(n => n.id === id)).filter(Boolean);
+    if(!roots.length) return;
+    const toCopy = expandWithGroupMembers(roots);
+    const idSet = new Set(toCopy.map(n => n.id));
+    clipboard = {
+        nodes: JSON.parse(JSON.stringify(serializableCanvasNodes(toCopy))),
+        connections: connections
+            .filter(c => idSet.has(c.from) && idSet.has(c.to))
+            .map(c => ({from:c.from, to:c.to})),
+    };
 }
 function pasteNodes(){
-    if(!canvas || !clipboard?.length) return;
+    if(!canvas) return;
+    const sourceNodes = clipboardNodes();
+    if(!sourceNodes.length) return;
     pushUndo();
-    const xs = clipboard.map(n => n.x), ys = clipboard.map(n => n.y);
+    const xs = sourceNodes.map(n => n.x), ys = sourceNodes.map(n => n.y);
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
     const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
     const dx = lastMouseBoard.x - cx;
     const dy = lastMouseBoard.y - cy;
     const idMap = new Map();
-    const copies = clipboard.map(n => { const c = cloneNode(n, dx, dy); idMap.set(n.id, c.id); return c; });
+    const copies = sourceNodes.map(n => {
+        const c = cloneNode(n, dx, dy);
+        idMap.set(n.id, c.id);
+        return c;
+    });
     copies.forEach(c => {
-        if((c.type === 'group' || c.type === 'promptGroup' || c.type === 'imageBatch') && c.items)
-            c.items = c.items.map(id => idMap.get(id) || id);
+        if(isGroupNodeType(c.type) && c.items){
+            c.items = c.items.map(id => idMap.get(id)).filter(Boolean);
+        }
     });
     nodes.push(...copies);
+    clipboardConnections().forEach(conn => {
+        const from = idMap.get(conn.from);
+        const to = idMap.get(conn.to);
+        if(from && to) connections.push({id:uid('c'), from, to});
+    });
     selected.clear();
     copies.forEach(c => selected.add(c.id));
     render();
@@ -21002,15 +21665,20 @@ function finishTempLink(e){
     if(e?.type === 'mouseup' && e.button !== 0) return;
     if(e?.type === 'pointerup' && e.button !== 0) return;
     const {from: originId, originKind} = tempLink;
-    const source = nodes.find(n => n.id === originId);
-    cancelTempLink();
     const clientX = e?.clientX ?? 0;
     const clientY = e?.clientY ?? 0;
+    const drop = screenToWorld(clientX, clientY);
+    tempLink.x2 = drop.x;
+    tempLink.y2 = drop.y;
+    refreshTempLinkDom();
+    // 先结束拖拽监听，菜单打开期间保留预览线
+    endLinkDragListeners();
     const targetKind = originKind === 'out' ? 'in' : 'out';
     const targetPort = nearestPort(clientX, clientY, targetKind);
     const target = targetPort?.closest('.node');
     let needsRender = false;
     if(target){
+        cancelTempLink();
         const targetId = target.dataset.id;
         const fromId = originKind === 'out' ? originId : targetId;
         const toId = originKind === 'out' ? targetId : originId;
@@ -21029,27 +21697,24 @@ function finishTempLink(e){
             scheduleSave();
             needsRender = true;
         }
-    } else if(originKind === 'out'){
-        if(source && CANVAS_GENERATOR_TYPES.includes(source.type)){
-            const p = screenToWorld(clientX, clientY);
-            try { pushUndo(); } catch(err) { console.warn('[infinite-canvas] undo snapshot failed', err); }
-            const out = {id:uid('out'), type:'output', x:p.x, y:p.y - 63, images:[]};
-            nodes.push(out);
-            connections.push({id:uid('c'), from:source.id, to:out.id});
-            syncGeneratorInputs();
-            scheduleSave();
-            needsRender = true;
+    } else if(originKind === 'out' || originKind === 'in'){
+        tempLink.pendingMenu = true;
+        const opened = openLinkCreateMenu(originId, originKind, clientX, clientY);
+        if(!opened){
+            cancelTempLink();
         } else {
-            openLinkCreateMenu(originId, originKind, clientX, clientY);
+            refreshTempLinkDom();
         }
-    } else if(originKind === 'in'){
-        openLinkCreateMenu(originId, originKind, clientX, clientY);
+    } else {
+        cancelTempLink();
     }
     if(needsRender){
         syncCanvasModelFromState();
         render({ force: true });
         syncLinkDomToConnections();
         refreshGeometryAfterLayout();
+    } else if(tempLink){
+        refreshTempLinkDom();
     } else {
         renderLinks();
     }
@@ -21248,7 +21913,7 @@ function canConnect(fromId, toId){
         if(CANVAS_GENERATOR_TYPES.includes(to.type)) return !wouldCreateGeneratorCycle(fromId, toId);
         return false;
     }
-    if(from.type === 'replicaAgent') return to.type === 'output';
+    // replica / repair 与其它媒体生成类一样：可手连 Output，或直连下游生成节点
     if(from.type === 'batchPosterAgent') return to.type === 'output';
     if(from.type === 'nineGridAgent') return to.type === 'output' || to.type === 'imageBatch';
     if(from.type === 'slotsLoopVideoAgent') return to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm';
@@ -21572,24 +22237,48 @@ function pruneOrphanLinkDom(){
     });
 }
 function isNodeLinkFlowing(node){
-    return node && !isNodeDisabled(node) && (node.running === true || node.runStatus === 'running');
+    if(!node || isNodeDisabled(node)) return false;
+    if(node.running === true) return true;
+    if(node.runStatus === 'running' || node.runStatus === 'queued') return true;
+    if((node._pending || []).length > 0) return true;
+    if(agentPendingCount(node.id) > 0) return true;
+    return false;
 }
 function linkClassForConnection(fromNode, toNode){
     if(isNodeDisabled(fromNode) || isNodeDisabled(toNode)) return 'link link-inactive';
     if(isNodeLinkFlowing(fromNode) || isNodeLinkFlowing(toNode)) return 'link link-flowing';
     return 'link';
 }
+function syncLinkEnergyOverlay(connectionId, d, flowing){
+    if(!linksEl || !connectionId) return;
+    let energy = linksEl.querySelector(`path.link-flow-energy[data-connection-id="${CSS.escape(connectionId)}"]`);
+    if(!flowing){
+        energy?.remove();
+        return;
+    }
+    if(!energy){
+        energy = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        energy.setAttribute('class', 'link-flow-energy');
+        energy.dataset.connectionId = connectionId;
+        const base = linksEl.querySelector(`path.link[data-connection-id="${CSS.escape(connectionId)}"]:not(.link-hit)`);
+        if(base?.nextSibling) linksEl.insertBefore(energy, base.nextSibling);
+        else if(base) base.after(energy);
+        else linksEl.appendChild(energy);
+    }
+    energy.setAttribute('d', d);
+}
 function syncLinkFlowForNodes(nodeIds){
     if(!linksEl || !nodeIds?.length) return;
     const touch = new Set(nodeIds);
     connections.forEach(c => {
         if(!touch.has(c.from) && !touch.has(c.to)) return;
-        const visible = linksEl.querySelector(`path.link[data-connection-id="${CSS.escape(c.id)}"]`);
+        const visible = linksEl.querySelector(`path.link[data-connection-id="${CSS.escape(c.id)}"]:not(.link-hit)`);
         if(!visible) return;
         const fromNode = nodes.find(n => n.id === c.from);
         const toNode = nodes.find(n => n.id === c.to);
         const cls = linkClassForConnection(fromNode, toNode);
         if(visible.getAttribute('class') !== cls) visible.setAttribute('class', cls);
+        syncLinkEnergyOverlay(c.id, visible.getAttribute('d') || '', cls.includes('link-flowing'));
     });
 }
 function ensureConnectionLinkDom(c){
@@ -21600,7 +22289,7 @@ function ensureConnectionLinkDom(c){
     const fromNode = nodes.find(n => n.id === c.from);
     const toNode = nodes.find(n => n.id === c.to);
     const cls = linkClassForConnection(fromNode, toNode);
-    let visible = linksEl.querySelector(`path.link[data-connection-id="${CSS.escape(c.id)}"]`);
+    let visible = linksEl.querySelector(`path.link[data-connection-id="${CSS.escape(c.id)}"]:not(.link-hit)`);
     let hit = linksEl.querySelector(`path.link-hit[data-connection-id="${CSS.escape(c.id)}"]`);
     if(!visible){
         visible = pathEl(a.x, a.y, b.x, b.y, cls, c.id);
@@ -21609,6 +22298,7 @@ function ensureConnectionLinkDom(c){
         visible.setAttribute('d', d);
         if(visible.getAttribute('class') !== cls) visible.setAttribute('class', cls);
     }
+    syncLinkEnergyOverlay(c.id, d, cls.includes('link-flowing'));
     if(!hit){
         linksEl.appendChild(linkHitEl(a.x, a.y, b.x, b.y, c.id));
     } else {
@@ -21619,11 +22309,12 @@ function ensureConnectionLinkDom(c){
         btn = linkDeleteButton(c, a, b);
         linkControlsEl.appendChild(btn);
     } else {
-        const mid = cubicPoint(a, b, 0.5);
-        btn.style.left = `${mid.x}px`;
-        btn.style.top = `${mid.y}px`;
-        const inv = 1 / Math.max(0.08, Number(viewport.scale || 1));
-        btn.style.setProperty('--link-delete-inv', String(inv));
+        // 悬停中跟鼠标；否则回中点（选中态可见）
+        if(!(hoveredConnectionId === c.id && linkDeleteHoverPos)){
+            const mid = cubicPoint(a, b, 0.5);
+            btn.style.left = `${mid.x}px`;
+            btn.style.top = `${mid.y}px`;
+        }
         btn.classList.toggle('visible', isConnectionSelected(c));
         btn.classList.toggle('hover', hoveredConnectionId === c.id);
     }
@@ -21693,8 +22384,10 @@ function renderLinks(){
         const a = portPoint(c.from, 'out'), b = portPoint(c.to, 'in');
         const fromNode = nodes.find(n => n.id === c.from);
         const toNode = nodes.find(n => n.id === c.to);
-        const line = pathEl(a.x, a.y, b.x, b.y, linkClassForConnection(fromNode, toNode), c.id);
+        const cls = linkClassForConnection(fromNode, toNode);
+        const line = pathEl(a.x, a.y, b.x, b.y, cls, c.id);
         linksEl.appendChild(line);
+        syncLinkEnergyOverlay(c.id, line.getAttribute('d') || '', cls.includes('link-flowing'));
         const btn = linkDeleteButton(c, a, b);
         linkControlsEl.appendChild(btn);
         linksEl.appendChild(linkHitEl(a.x, a.y, b.x, b.y, c.id));
@@ -21722,11 +22415,9 @@ function linkDeleteButton(connection, a, b){
     btn.title = tr('canvas.deleteLink');
     btn.setAttribute('aria-label', tr('canvas.deleteLink'));
     btn.dataset.connectionId = connection.id;
-    btn.style.left = `${mid.x}px`;
-    btn.style.top = `${mid.y}px`;
-    // 抵消世界缩放，保证屏幕上可点区域约 32px
-    const inv = 1 / Math.max(0.08, Number(viewport.scale || 1));
-    btn.style.setProperty('--link-delete-inv', String(inv));
+    const pos = (hoveredConnectionId === connection.id && linkDeleteHoverPos) ? linkDeleteHoverPos : mid;
+    btn.style.left = `${pos.x}px`;
+    btn.style.top = `${pos.y}px`;
     btn.textContent = '×';
     btn.onmousedown = e => {
         e.preventDefault();
@@ -21748,30 +22439,90 @@ function linkHitEl(x1,y1,x2,y2,id){
     p.dataset.connectionId = id;
     return p;
 }
-function setHoveredConnection(id){
-    if(hoveredConnectionId === id) return;
-    const oldId = hoveredConnectionId;
-    hoveredConnectionId = id || '';
-    if(oldId){
-        const oldBtn = linkControlsEl.querySelector(`[data-connection-id="${CSS.escape(oldId)}"]`);
+function restoreLinkDeleteToMidpoint(connectionId){
+    if(!linkControlsEl || !connectionId) return;
+    const btn = linkControlsEl.querySelector(`.link-delete[data-connection-id="${CSS.escape(connectionId)}"]`);
+    const conn = connections.find(c => c.id === connectionId);
+    if(!btn || !conn) return;
+    const a = portPoint(conn.from, 'out');
+    const b = portPoint(conn.to, 'in');
+    const mid = cubicPoint(a, b, 0.5);
+    btn.style.left = `${mid.x}px`;
+    btn.style.top = `${mid.y}px`;
+}
+function setHoveredConnection(id, pos=null){
+    const nextId = id || '';
+    const prevId = hoveredConnectionId;
+    if(prevId && prevId !== nextId){
+        const oldBtn = linkControlsEl?.querySelector(`[data-connection-id="${CSS.escape(prevId)}"]`);
         if(oldBtn) oldBtn.classList.remove('hover');
+        restoreLinkDeleteToMidpoint(prevId);
     }
-    if(hoveredConnectionId){
-        const btn = linkControlsEl.querySelector(`[data-connection-id="${CSS.escape(hoveredConnectionId)}"]`);
-        if(btn) btn.classList.add('hover');
+    hoveredConnectionId = nextId;
+    if(!nextId){
+        linkDeleteHoverPos = null;
+        return;
+    }
+    const btn = linkControlsEl?.querySelector(`[data-connection-id="${CSS.escape(nextId)}"]`);
+    if(btn){
+        btn.classList.add('hover');
+        if(pos){
+            linkDeleteHoverPos = pos;
+            btn.style.left = `${pos.x}px`;
+            btn.style.top = `${pos.y}px`;
+        }
     }
 }
 function connectionDistanceToPoint(connection, point, from=null, to=null){
     from = from || portPoint(connection.from, 'out');
     to = to || portPoint(connection.to, 'in');
-    let min = Infinity;
+    return nearestCubicPointOnLink(from, to, point).dist;
+}
+/** 曲线上离指针最近的一点（含参数 t∈[0,1]） */
+function nearestCubicPointOnLink(from, to, point){
+    let best = {x:from.x, y:from.y, t:0, dist:Infinity};
     let prev = cubicPoint(from, to, 0);
-    for(let i = 1; i <= 28; i++){
-        const cur = cubicPoint(from, to, i / 28);
-        min = Math.min(min, pointSegmentDistance(point, prev, cur));
+    const steps = 36;
+    for(let i = 1; i <= steps; i++){
+        const t1 = i / steps;
+        const cur = cubicPoint(from, to, t1);
+        const dx = cur.x - prev.x, dy = cur.y - prev.y;
+        const len2 = dx * dx + dy * dy;
+        let u = 0;
+        if(len2 > 1e-6){
+            u = Math.max(0, Math.min(1, ((point.x - prev.x) * dx + (point.y - prev.y) * dy) / len2));
+        }
+        const px = prev.x + dx * u;
+        const py = prev.y + dy * u;
+        const dist = Math.hypot(point.x - px, point.y - py);
+        const t = (i - 1 + u) / steps;
+        if(dist < best.dist) best = {x:px, y:py, t, dist};
         prev = cur;
     }
-    return min;
+    return best;
+}
+const LINK_DELETE_END_T = 0.14;
+const LINK_DELETE_END_DIST = 40;
+function isLinkDeleteBlockedNearPort(from, to, hit){
+    if(!hit) return true;
+    if(hit.t < LINK_DELETE_END_T || hit.t > 1 - LINK_DELETE_END_T) return true;
+    if(Math.hypot(hit.x - from.x, hit.y - from.y) < LINK_DELETE_END_DIST) return true;
+    if(Math.hypot(hit.x - to.x, hit.y - to.y) < LINK_DELETE_END_DIST) return true;
+    return false;
+}
+function isPointerOverLinkUiChrome(el){
+    return Boolean(el?.closest?.(
+        '.image-gen-dock-host, .gen-dock, .gen-history-panel, .node, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #selectionMenu, .minimap, .bottombar, .toolbar, .canvas-custom-select-panel'
+    ));
+}
+/** 命中测试时跳过连线 X 自身，避免「X 挡指针 → 下一帧又判定离开」来回闪 */
+function pointerElIgnoringLinkDelete(clientX, clientY){
+    const stack = document.elementsFromPoint(clientX, clientY) || [];
+    return stack.find(el => !el.closest?.('.link-delete, .link-controls, .links, .link-hit, .link-flow-energy')) || null;
+}
+function linkDeleteFollowPos(from, to, hit){
+    if(!hit) return null;
+    return {x: hit.x, y: hit.y};
 }
 function scheduleConnectionHoverUpdate(e){
     connHoverPendingEvent = e;
@@ -21782,7 +22533,7 @@ function scheduleConnectionHoverUpdate(e){
         connHoverPendingEvent = null;
         if(!event) return;
         const now = Date.now();
-        if(now - connHoverLastAt < CONN_HOVER_MIN_MS){
+        if(CONN_HOVER_MIN_MS > 0 && now - connHoverLastAt < CONN_HOVER_MIN_MS){
             scheduleConnectionHoverUpdate(event);
             return;
         }
@@ -21795,28 +22546,52 @@ function updateConnectionHoverFromMouse(e){
         setHoveredConnection('');
         return;
     }
-    const button = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.link-delete');
-    if(button?.dataset.connectionId){
-        setHoveredConnection(button.dataset.connectionId);
+    const topEl = pointerElIgnoringLinkDelete(e.clientX, e.clientY);
+    // 指针在控制台/节点等 UI 上时不吸连线（避免 X 叠在控制台上）
+    if(isPointerOverLinkUiChrome(topEl)){
+        setHoveredConnection('');
         return;
     }
     const point = screenToWorld(e.clientX, e.clientY);
-    const threshold = Math.max(18, 22 / Math.max(0.08, viewport.scale || 1));
+    const enter = Math.max(18, 22 / Math.max(0.08, viewport.scale || 1));
+    const leave = enter * 1.8;
+    // 已悬停：用更大离开阈值稳住，并持续更新位置（勿因命中 X 自身而冻住）
+    if(hoveredConnectionId){
+        const cur = connections.find(c => c.id === hoveredConnectionId);
+        if(cur){
+            const from = portPoint(cur.from, 'out');
+            const to = portPoint(cur.to, 'in');
+            const hit = nearestCubicPointOnLink(from, to, point);
+            if(!isLinkDeleteBlockedNearPort(from, to, hit) && hit.dist <= leave){
+                setHoveredConnection(cur.id, linkDeleteFollowPos(from, to, hit));
+                return;
+            }
+        }
+    }
     let bestId = '';
-    let best = Infinity;
+    let bestHit = null;
+    let bestFrom = null;
+    let bestTo = null;
     connections.forEach(c => {
         const from = portPoint(c.from, 'out');
         const to = portPoint(c.to, 'in');
-        const pad = threshold;
+        const pad = enter;
         if(point.x < Math.min(from.x, to.x) - pad || point.x > Math.max(from.x, to.x) + pad ||
             point.y < Math.min(from.y, to.y) - pad || point.y > Math.max(from.y, to.y) + pad) return;
-        // 曲线中点附近放宽命中，方便点到删除钮
-        const mid = cubicPoint(from, to, 0.5);
-        const midDist = Math.hypot(point.x - mid.x, point.y - mid.y);
-        const d = Math.min(connectionDistanceToPoint(c, point, from, to), midDist * 0.85);
-        if(d < best){ best = d; bestId = c.id; }
+        const hit = nearestCubicPointOnLink(from, to, point);
+        if(isLinkDeleteBlockedNearPort(from, to, hit)) return;
+        if(hit.dist < (bestHit?.dist ?? Infinity)){
+            bestHit = hit;
+            bestId = c.id;
+            bestFrom = from;
+            bestTo = to;
+        }
     });
-    setHoveredConnection(best <= threshold ? bestId : '');
+    if(bestId && bestHit && bestHit.dist <= enter){
+        setHoveredConnection(bestId, linkDeleteFollowPos(bestFrom, bestTo, bestHit));
+    } else {
+        setHoveredConnection('');
+    }
 }
 function isConnectionSelected(connection){
     return selected.has(connection.from) || selected.has(connection.to);
@@ -22346,7 +23121,7 @@ on(window, 'keydown', e => {
     if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
         const tag = document.activeElement?.tagName;
         if(tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
-        if(clipboard?.length) {
+        if(clipboardNodes().length) {
             const pasteRequestedAt = Date.now();
             setTimeout(() => {
                 if(!canvas) return;
