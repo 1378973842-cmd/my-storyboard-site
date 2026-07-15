@@ -373,7 +373,7 @@ export const CanvasLeftDock = memo(function CanvasLeftDock({
         <button
           type="button"
           className="canvas-left-dock-zoom"
-          title="滚轮缩放画布 · 点击重置为 100%"
+          title="Ctrl + 滚轮缩放 · 点击重置为 100%"
           aria-label={`画布缩放 ${zoomPct}%，点击重置为 100%`}
           onClick={() => resetCanvasViewportZoom()}
         >

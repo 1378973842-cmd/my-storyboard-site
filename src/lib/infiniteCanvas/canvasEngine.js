@@ -306,7 +306,7 @@ let gateViewMode = 'grid';
 let workflowTemplateModal, workflowTemplateList, workflowTemplateBtn;
 let outputLightbox, outputPreview, outputLightboxImg, outputCompareContainer, outputCompareResult;
 let outputCompareOriginal, outputCompareOriginalWrap, outputCompareSlider, outputResolution;
-let outputDownloadBtn, outputLightboxVideo, outputPromptPanel, outputPromptText, outputCopyPromptBtn;
+let outputDownloadBtn, outputFavoriteBtn, outputLightboxVideo, outputPromptPanel, outputPromptText, outputCopyPromptBtn;
 let outputRerunBtn, logModal, logList, logSearchInput, logModalCount, logClearBar, logClearBtn, logClearCancel, logClearConfirm, errorModal, errorTitle, errorMessage;
 let workflowTemplateSearchInput, workflowTemplateTitleInput, workflowTemplateDescInput;
 let workflowTemplateSaveForm, workflowTemplateSaveCancel, workflowTemplateSaveConfirm;
@@ -485,6 +485,7 @@ function bindDomElements(root) {
   outputCompareSlider = g('outputCompareSlider');
   outputResolution = g('outputResolution');
   outputDownloadBtn = g('outputDownloadBtn');
+  outputFavoriteBtn = g('outputFavoriteBtn');
   outputLightboxVideo = g('outputLightboxVideo');
   outputPromptPanel = g('outputPromptPanel');
   outputPromptText = g('outputPromptText');
@@ -1272,6 +1273,17 @@ export function zoomCanvasViewport(factor){
     applyViewport();
     scheduleViewportSave();
 }
+/** Ctrl/Cmd+滚轮：以指针为锚缩放画布（须配合 preventDefault，否则会缩浏览器页） */
+function zoomViewportAtClient(clientX, clientY, deltaY){
+    if(!canvas || !board) return;
+    const before = screenToWorld(clientX, clientY);
+    viewport.scale = Math.min(3, Math.max(0.08, viewport.scale * (deltaY > 0 ? .92 : 1.08)));
+    const rect = board.getBoundingClientRect();
+    viewport.x = clientX - rect.left - before.x * viewport.scale;
+    viewport.y = clientY - rect.top - before.y * viewport.scale;
+    applyViewport();
+    scheduleViewportSave();
+}
 export function fitCanvasViewportAll(){
     if(!canvas || !board) return;
     const rects = (nodes || []).map(estimatedNodeRect);
@@ -1961,10 +1973,43 @@ function normalizeApiNodeLayout(node){
     if(!node || node.type !== 'generator') return;
     const w = Number(node.w || 0);
     if(w === 418 || w === 380 || w === 420) node.w = 260;
+    // 网格展开曾误把加宽写入 node.w 并被标成手改，导致 UI 被 scale 放大成「竖向巨图」
+    if(!node.h && w > GENERATOR_BASE_W + 1){
+        node.w = GENERATOR_BASE_W;
+        delete node._userSized;
+        return;
+    }
     if(node.h || Math.abs(Number(node.w || 260) - 260) > 1) node._userSized = true;
 }
 const GENERATOR_BASE_W = 260;
-const GENERATOR_MIN_W = 180;
+const GENERATOR_MIN_W = 96;
+/** 对齐上游参考图时的展示宽度上限，避免撑爆画布 */
+const GEN_MATCH_MAX_W = 960;
+/**
+ * 画布媒体标准最长边（world px）。
+ * 对标常见创作台在 ~43% 缩放下的体量：260 过小 → 520 仍偏小 → 680。
+ */
+const CANVAS_MEDIA_MAX_EDGE = 680;
+function canvasFitByMaxEdge(nw, nh, maxEdge = CANVAS_MEDIA_MAX_EDGE){
+    const W = Math.max(1, Number(nw) || 1);
+    const H = Math.max(1, Number(nh) || 1);
+    const edge = Math.max(48, Number(maxEdge) || CANVAS_MEDIA_MAX_EDGE);
+    const scale = edge / Math.max(W, H);
+    return {
+        w: Math.max(48, Math.round(W * scale)),
+        h: Math.max(48, Math.round(H * scale)),
+    };
+}
+function parseAspectRatioParts(ar){
+    if(typeof ar === 'number' && ar > 0) return {nw: ar, nh: 1};
+    const m = String(ar || '').trim().match(/^([\d.]+)\s*\/\s*([\d.]+)$/);
+    if(m) return {nw: Number(m[1]) || 1, nh: Number(m[2]) || 1};
+    return {nw: 1, nh: 1};
+}
+function canvasFitFromAspect(ar, maxEdge = CANVAS_MEDIA_MAX_EDGE){
+    const {nw, nh} = parseAspectRatioParts(ar);
+    return canvasFitByMaxEdge(nw, nh, maxEdge);
+}
 let imageGenDockEl = null;
 let imageGenDockNodeId = null;
 function generatorUiScale(node){
@@ -1981,37 +2026,138 @@ function syncGeneratorNodeScale(node, el){
     el.style.setProperty('--generator-ui-scale', String(scale));
     return scale;
 }
+function nodeCanvasSize(node){
+    if(!node) return {w:0, h:0};
+    const w = Number(node.w || 0);
+    const h = Number(node.h || 0);
+    if(w > 0 && h > 0) return {w: Math.round(w), h: Math.round(h)};
+    const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
+    return {
+        w: Math.round(Number(el?.offsetWidth || w || 0)),
+        h: Math.round(Number(el?.offsetHeight || h || 0)),
+    };
+}
+function nodeCanvasWidth(node){
+    return nodeCanvasSize(node).w;
+}
+function firstEnabledImageChildSize(parent){
+    for(const id of (parent?.items || [])){
+        const child = nodes.find(n => n.id === id);
+        if(!child || child.type !== 'image' || !child.url || !isNodeEnabled(child)) continue;
+        const size = nodeCanvasSize(child);
+        if(size.w > 0) return size;
+    }
+    return {w:0, h:0};
+}
+function firstEnabledImageChildWidth(parent){
+    return firstEnabledImageChildSize(parent).w;
+}
+/** 上游参考图节点画布尺寸；无可用参考返回 {w:0,h:0} */
+function upstreamReferenceNodeSize(gen){
+    if(!gen || !isGenConsoleNode(gen)) return {w:0, h:0};
+    const ups = connections
+        .filter(c => c.to === gen.id)
+        .map(c => nodes.find(n => n.id === c.from))
+        .filter(Boolean);
+    for(const n of ups){
+        if(n.type === 'image' && n.url){
+            const size = nodeCanvasSize(n);
+            if(size.w > 0) return size;
+        }
+        if(n.type === 'imageBatch' || n.type === 'group'){
+            const size = firstEnabledImageChildSize(n);
+            if(size.w > 0) return size;
+        }
+    }
+    return {w:0, h:0};
+}
+/** 上游参考图节点画布宽度；无可用参考返回 0 */
+function upstreamReferenceNodeWidth(gen){
+    return upstreamReferenceNodeSize(gen).w;
+}
 function genStageGridCols(count){
     const n = Math.max(1, Number(count) || 1);
+    if(n <= 1) return 1;
     if(n <= 4) return 2;
-    // 多图：按接近方形加列，避免只剩两列竖向长条
+    if(n <= 9) return 3;
+    if(n <= 16) return 4;
     return Math.min(6, Math.max(3, Math.ceil(Math.sqrt(n))));
+}
+/** 展开：每格按比例最长边归一，整体按列数铺开 */
+function genStageGridCellWidth(node){
+    return canvasFitFromAspect(genStageTileAspectCss(node), CANVAS_MEDIA_MAX_EDGE).w;
+}
+function genStageGridLayoutWidth(count, node=null){
+    const cols = genStageGridCols(count);
+    const gap = 10;
+    const cellW = node ? genStageGridCellWidth(node) : GENERATOR_BASE_W;
+    return cols * cellW + Math.max(0, cols - 1) * gap;
+}
+function genStageDisplayWidth(node, urls){
+    const list = urls || generatorPreviewUrls(node);
+    const pendings = isGenConsoleNode(node) ? generatorPendingList(node) : [];
+    const showGrid = genStageShowsGrid(node, list, pendings);
+    // 展开/生成中网格：格宽随比例归一，计入 pending 占位
+    if(showGrid && (list.length + pendings.length) > 0){
+        return genStageGridLayoutWidth(Math.max(1, list.length + pendings.length), node);
+    }
+    if(!node._userSized){
+        const up = upstreamReferenceNodeSize(node);
+        const maxEdge = (up.w > 0)
+            ? Math.max(48, Math.min(GEN_MATCH_MAX_W, Math.max(up.w, up.h || 0)))
+            : CANVAS_MEDIA_MAX_EDGE;
+        // 有结果图自然比例时优先；否则用控制台比例设定
+        if(node._stageAspect?.nw && node._stageAspect?.nh){
+            return canvasFitByMaxEdge(node._stageAspect.nw, node._stageAspect.nh, maxEdge).w;
+        }
+        return canvasFitFromAspect(genStageTileAspectCss(node), maxEdge).w;
+    }
+    return GENERATOR_BASE_W;
 }
 function syncGeneratorNodeFrame(node, el){
     if(!el || !isGenConsoleNode(node)) return;
-    const scale = syncGeneratorNodeScale(node, el);
-    if(!node._baseFrameH) node._baseFrameH = measureGeneratorBaseFrame(node, el);
-    const isManual = Boolean(node._userSized || Math.abs(scale - 1) > 0.01);
     const urls = generatorPreviewUrls(node);
-    const gridOpen = Boolean(node.historyOpen) && urls.length > 1;
-    if(!isManual){
-        // 网格展开时按列数加宽，收起叠卡回到基础宽度
-        const cols = gridOpen ? genStageGridCols(urls.length) : 2;
-        const w = gridOpen
-            ? Math.round(GENERATOR_BASE_W * Math.max(1, cols / 2))
-            : GENERATOR_BASE_W;
-        node.w = w;
+    if(!node._baseFrameH) node._baseFrameH = measureGeneratorBaseFrame(node, el);
+    // 自动尺寸：数据层宽仍为基础宽；展示宽对齐上游参考（或标准单卡）
+    if(!node._userSized){
+        el.style.setProperty('--generator-ui-scale', '1');
+        node.w = GENERATOR_BASE_W;
         delete node.h;
-        el.style.width = `${w}px`;
+        const displayW = genStageDisplayWidth(node, urls);
+        el.style.width = `${displayW}px`;
         el.style.height = '';
         el.classList.remove('sized');
         return;
     }
+    const scale = syncGeneratorNodeScale(node, el);
     node.w = Math.max(GENERATOR_MIN_W, Math.round(Number(node.w || GENERATOR_BASE_W)));
-    node.h = Math.max(96, Math.round(Number(node._baseFrameH || 320) * generatorUiScale(node)));
+    node.h = Math.max(96, Math.round(Number(node._baseFrameH || 320) * scale));
     el.classList.add('sized');
     el.style.width = `${node.w}px`;
     el.style.height = `${node.h}px`;
+}
+/** 参考图尺寸变化后，刷新以其为上游的生成节点展示宽 */
+function resyncGensMatchingUpstreamImage(imageNode){
+    if(!imageNode?.id) return;
+    const fromIds = new Set([imageNode.id]);
+    nodes.forEach(n => {
+        if((n.type === 'imageBatch' || n.type === 'group') && (n.items || []).includes(imageNode.id)){
+            fromIds.add(n.id);
+        }
+    });
+    connections.forEach(c => {
+        if(!fromIds.has(c.from)) return;
+        const gen = nodes.find(n => n.id === c.to);
+        if(!gen || !isGenConsoleNode(gen) || gen._userSized) return;
+        delete gen._baseFrameH;
+        fitGeneratorNodeHeight(gen);
+    });
+}
+function resyncGenFrameAfterLinkChange(genId){
+    const gen = nodes.find(n => n.id === genId);
+    if(!gen || !isGenConsoleNode(gen) || gen._userSized) return;
+    delete gen._baseFrameH;
+    fitGeneratorNodeHeight(gen);
 }
 function rebaseGeneratorFrame(node){
     const el = nodesEl?.querySelector(`.node[data-id="${node.id}"]`);
@@ -2377,8 +2523,22 @@ function schedulePortMagnetUpdate(clientX, clientY){
 function nodeLayoutSize(n, el){
     const size = defaultNodeSize(n.type);
     const useFast = isCanvasInteracting() || Date.now() - lastBoardInteractionAt < 1200;
-    const w = Math.max(1, n.w || (!useFast && el?.offsetWidth) || size.w || 260);
-    let h = n.h || (!useFast && el?.offsetHeight) || size.h || 0;
+    // 多图叠卡缩小 / 网格展开加宽：展示尺寸以 DOM 为准
+    const preferDom = isGenConsoleNode(n) && el && (
+        Boolean(n.historyOpen)
+        || (Array.isArray(n._pending) && n._pending.length > 0)
+        || (Array.isArray(n.previewRoundUrls) && n.previewRoundUrls.length > 1)
+        || (Array.isArray(n.history) && n.history.length > 1)
+    );
+    const w = Math.max(
+        1,
+        preferDom
+            ? (el.offsetWidth || n.w || size.w || 260)
+            : (n.w || (!useFast && el?.offsetWidth) || size.w || 260)
+    );
+    let h = preferDom
+        ? (el.offsetHeight || n.h || size.h || 0)
+        : (n.h || (!useFast && el?.offsetHeight) || size.h || 0);
     if(!h || h < 1) h = 160;
     return { w, h: Math.max(1, h) };
 }
@@ -2892,7 +3052,7 @@ async function loadCanvasList(openFirst=true){
     }
 }
 let workflowTemplates = [];
-const WORKFLOW_RUNTIME_DROP = ['running','runStatus','runError','_cascadeIdx','_cascadeFailed','_cascadeIdx','generatedOutputs','outputText','frameOutputId','history','previewRoundUrls','previewIndex','historyOpen','_pending'];
+const WORKFLOW_RUNTIME_DROP = ['running','runStatus','runError','_cascadeIdx','_cascadeFailed','_cascadeIdx','generatedOutputs','outputText','frameOutputId','history','previewRoundUrls','previewIndex','historyOpen','_pending','_stageAspect'];
 function stripNodeForWorkflowTemplate(node){
     const copy = {...(node || {})};
     WORKFLOW_RUNTIME_DROP.forEach(key => delete copy[key]);
@@ -4471,7 +4631,7 @@ function canStartBoardPanFromTarget(target){
     if(!board || !target) return false;
     if(isEditableTarget(target)) return false;
     if(target.closest?.(
-        '.node, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls'
+        '.node, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .image-gen-dock-host, .gen-dock, .canvas-custom-select-panel, .canvas-custom-select-menu'
     )) return false;
     return board.contains(target);
 }
@@ -4480,7 +4640,7 @@ function canStartForcedPanFromTarget(target){
     if(!board || !target) return false;
     if(isEditableTarget(target)) return false;
     if(target.closest?.(
-        'button, select, textarea, input, .port, .resize-handle, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .canvas-custom-select'
+        'button, select, textarea, input, .port, .resize-handle, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .canvas-custom-select, .image-gen-dock-host, .gen-dock, .canvas-custom-select-panel, .canvas-custom-select-menu'
     )) return false;
     return board.contains(target);
 }
@@ -6506,6 +6666,7 @@ function createLinkedNode(type){
         syncGeneratorInputs();
         scheduleSave();
         render();
+        resyncGenFrameAfterLinkChange(toId);
     }
 }
 function createNodeByType(type, point){
@@ -9310,6 +9471,10 @@ async function toggleFavoriteForUrl(url, meta={}, node=null, btn=null){
         if(btn) refreshIcons(btn.parentElement || btn);
         // 同步节点结果面板与 Output 卡上的星标
         syncOutputFavoriteButtons();
+        if(outputFavoriteBtn && currentOutputLightboxUrl){
+            syncOutputFavoriteBtn(outputFavoriteBtn, currentOutputLightboxUrl);
+            refreshIcons(outputFavoriteBtn);
+        }
         if(genHistoryPanelEl){
             genHistoryPanelEl.querySelectorAll(`.gen-history-action-fav[data-url], .output-fav-btn`).forEach(el => {
                 const u = el.dataset.url || el.closest('[data-url]')?.dataset.url || '';
@@ -9574,7 +9739,7 @@ function syncOutputNodeThumbVars(el, node){
     el.style.setProperty('--output-thumb-min', `${thumbMin}px`);
 }
 function defaultNodeSize(type){
-    if(type === 'image') return {w:260, h:336};
+    if(type === 'image') return {w:260, h:260};
     if(type === 'prompt') return {w:310, h:0};
     if(type === 'loop') return {w:336, h:0};
     if(type === 'llm') return {w:420, h:590};
@@ -14275,6 +14440,7 @@ function resetGeneratorPreviewRound(gen){
     if(!isGenConsoleNode(gen)) return;
     // 新一轮生成不清空整库 history，只重置本轮预览指针由 append 接管
     gen.historyOpen = false;
+    delete gen._stageAspect;
 }
 function appendGeneratorHistory(gen, outputs, meta={}){
     if(!isGenConsoleNode(gen)) return;
@@ -14355,10 +14521,10 @@ function fitImageNodeToNaturalAspect(node, el, img){
     const nw = img.naturalWidth || 0;
     const nh = img.naturalHeight || 0;
     if(!nw || !nh) return;
-    // 手动拉过大小则只保留框内 contain，不改写比例驱动的高
+    // 手动拉过大小则只保留框内 contain，不改写比例驱动尺寸
     if(node._userSized) return;
-    const w = Math.max(48, Number(node.w || el?.offsetWidth || defaultNodeSize('image').w || 260));
-    const h = Math.max(48, Math.round(w * nh / nw));
+    // 最长边 = CANVAS_MEDIA_MAX_EDGE：9:16 / 16:9 只差方向，忽略源图像素分辨率
+    const {w, h} = canvasFitByMaxEdge(nw, nh, CANVAS_MEDIA_MAX_EDGE);
     node.w = w;
     node.h = h;
     if(el){
@@ -14366,6 +14532,7 @@ function fitImageNodeToNaturalAspect(node, el, img){
         el.style.height = `${h}px`;
         el.classList.add('sized');
     }
+    resyncGensMatchingUpstreamImage(node);
 }
 function applyNaturalAspectFromImg(img, frameEl, node){
     if(!img || !frameEl) return;
@@ -14375,6 +14542,7 @@ function applyNaturalAspectFromImg(img, frameEl, node){
         if(!nw || !nh) return;
         frameEl.style.aspectRatio = `${nw} / ${nh}`;
         if(isGenConsoleNode(node) && !node._userSized){
+            node._stageAspect = {nw, nh};
             delete node._baseFrameH;
             fitGeneratorNodeHeight(node);
             if(selected.has(node.id)) requestAnimationFrame(() => positionImageGenDock(node));
@@ -14736,10 +14904,11 @@ function bindGenStageInteractions(root, node){
             openResultsMenu(e.clientX, e.clientY);
         };
         const media = hero.querySelector('video, img');
-        const frame = hero.closest('.gen-stage-frame');
-        if(!root.querySelector('.gen-stage-stack')){
-            applyNaturalAspectFromImg(media, frame, node);
-        }
+        // 叠卡/单图都跟真实图像比例，避免用生成参数比例把竖图硬拉成大方块
+        const frame = hero.classList.contains('gen-stage-stack-hero')
+            ? hero
+            : (hero.closest('.gen-stage-frame') || hero);
+        applyNaturalAspectFromImg(media, frame, node);
         if(media) media.draggable = false;
     }
     const badge = root?.querySelector?.('.gen-stage-badge');
@@ -14870,6 +15039,25 @@ function renderGenStageTileHtml(node, url, previewIndex, primaryUrl){
         </div>
     </div>`;
 }
+function renderGenStagePendingTileHtml(pending, index){
+    const label = pending?.stageLabel
+        || (langIsEn() ? `Generating ${index + 1}` : `生成中 ${index + 1}`);
+    return `<div class="gen-stage-tile is-pending" data-pending-id="${escapeAttr(pending?.id || '')}" aria-busy="true" role="status">
+        <div class="gen-stage-tile-media">
+            <div class="gen-stage-pending-fill">
+                <div class="output-pending-waves" aria-hidden="true"><span></span><span></span><span></span></div>
+                <span class="gen-stage-pending-label">${escapeHtml(label)}</span>
+            </div>
+        </div>
+    </div>`;
+}
+/** 有在途任务时用网格占位，避免整层蒙层把已出图压灰 */
+function genStageShowsGrid(node, urls, pendings){
+    const list = urls || [];
+    const waiting = pendings || [];
+    if(waiting.length) return true;
+    return Boolean(node?.historyOpen) && list.length > 1;
+}
 function renderGenStageStackHtml(node, urls, primary, busyOverlay){
     const count = urls.length;
     const peeks = urls.filter(u => u !== primary).slice(-3);
@@ -14880,10 +15068,10 @@ function renderGenStageStackHtml(node, urls, primary, busyOverlay){
     const ar = genStageTileAspectCss(node);
     const expandTitle = langIsEn() ? `View all ${count} results` : `展开查看全部 ${count} 张`;
     return `<div class="gen-stage has-images is-stack">
-        <div class="gen-stage-frame is-stack" style="--gen-tile-ar:${ar}">
+        <div class="gen-stage-frame is-stack">
             <div class="gen-stage-stack">
                 ${peekHtml}
-                <div class="gen-stage-stack-hero" data-preview-url="${escapeAttr(primary)}" role="img">
+                <div class="gen-stage-stack-hero" data-preview-url="${escapeAttr(primary)}" role="img" style="--gen-tile-ar:${ar}">
                     ${genStageMediaHtml(primary)}
                     <button type="button" class="gen-stage-stack-expand" data-action="expand-grid" title="${escapeAttr(expandTitle)}">
                         <i data-lucide="layers" class="w-3 h-3"></i>
@@ -14904,23 +15092,43 @@ function renderGenStageHtml(node){
         node.previewRoundUrls = node.previewRoundUrls.slice(-MAX_GEN_PREVIEW);
     }
     const urls = generatorPreviewUrls(node);
-    const pendingN = agentPendingCount(node.id);
+    const pendings = generatorPendingList(node);
+    const pendingN = pendings.length || agentPendingCount(node.id);
     const isBusy = pendingN > 0 || Boolean(node.running) || node.runStatus === 'running' || node.runStatus === 'queued';
+    const showGrid = genStageShowsGrid(node, urls, pendings);
+    // 网格内已有 pending 占位时，不再盖整层半透明蒙层（会把已出图变灰）
     const busyLabel = node._batchProgress
         ? (langIsEn() ? `Generating ${node._batchProgress}…` : `生成中 ${node._batchProgress}…`)
         : (pendingN > 1
             ? (langIsEn() ? `Generating (${pendingN})…` : `生成中 (${pendingN})…`)
             : (langIsEn() ? 'Generating…' : '生成中…'));
-    const busyOverlay = isBusy
-        ? `<div class="gen-stage-busy" aria-live="polite">
+    const busyOverlay = (isBusy && !showGrid)
+        ? `<div class="gen-stage-busy gen-stage-busy-lite" aria-live="polite">
             <div class="output-pending-waves" aria-hidden="true"><span></span><span></span><span></span></div>
             <span class="gen-stage-busy-label">${escapeHtml(busyLabel)}</span>
         </div>`
         : '';
     const emptyIcon = node.type === 'video' ? 'clapperboard' : 'image';
+    if(showGrid){
+        clampGeneratorPreviewIndex(node);
+        const primary = urls.length
+            ? urls[Math.max(0, Math.min(urls.length - 1, Number(node.previewIndex ?? urls.length - 1)))]
+            : '';
+        const readyTiles = urls.map((url, i) => renderGenStageTileHtml(node, url, i, primary)).join('');
+        const pendingTiles = pendings.map((p, i) => renderGenStagePendingTileHtml(p, i)).join('');
+        const total = urls.length + pendings.length;
+        const cols = genStageGridCols(Math.max(1, total));
+        const ar = genStageTileAspectCss(node);
+        return `<div class="gen-stage has-images history-open is-grid ${isBusy ? 'is-busy' : ''}">
+            <div class="gen-stage-frame is-grid" style="--gen-tile-ar:${ar}; --gen-grid-cols:${cols}">
+                <div class="gen-stage-grid" role="listbox">${readyTiles}${pendingTiles}</div>
+            </div>
+        </div>`;
+    }
     if(!urls.length){
+        const ar = genStageTileAspectCss(node);
         return `<div class="gen-stage is-empty ${isBusy ? 'is-busy' : ''}">
-            <div class="gen-stage-frame">
+            <div class="gen-stage-frame" style="aspect-ratio:${ar}">
                 <div class="gen-stage-empty"><i data-lucide="${emptyIcon}" class="w-10 h-10"></i></div>
                 ${busyOverlay}
             </div>
@@ -14928,19 +15136,6 @@ function renderGenStageHtml(node){
     }
     clampGeneratorPreviewIndex(node);
     const primary = urls[Math.max(0, Math.min(urls.length - 1, Number(node.previewIndex ?? urls.length - 1)))];
-    const open = Boolean(node.historyOpen) && urls.length > 1;
-    if(open){
-        // 展开网格：全部预览；列数按数量接近方形排布（避免两列竖向长条）
-        const cols = genStageGridCols(urls.length);
-        const tiles = urls.map((url, i) => renderGenStageTileHtml(node, url, i, primary)).join('');
-        const ar = genStageTileAspectCss(node);
-        return `<div class="gen-stage has-images history-open is-grid ${isBusy ? 'is-busy' : ''}">
-            <div class="gen-stage-frame is-grid" style="--gen-tile-ar:${ar}; --gen-grid-cols:${cols}">
-                <div class="gen-stage-grid" role="listbox">${tiles}</div>
-                ${busyOverlay}
-            </div>
-        </div>`;
-    }
     if(urls.length > 1){
         return renderGenStageStackHtml(node, urls, primary, busyOverlay);
     }
@@ -14962,7 +15157,12 @@ function refreshGenStage(root, node){
     // 叠卡↔网格内容高度/宽度变化，非手改尺寸时重测
     if(!node._userSized) delete node._baseFrameH;
     fitGeneratorNodeHeight(node);
-    if(selected.has(node.id)) requestAnimationFrame(() => positionImageGenDock(node));
+    // 展开后节点变高：下一帧重算端口/连线，保证锚在展开块垂直中心
+    requestAnimationFrame(() => {
+        fitGeneratorNodeHeight(node);
+        try { refreshGeometryAfterLayout(); } catch(_){ /* ignore */ }
+        if(selected.has(node.id)) positionImageGenDock(node);
+    });
 }
 /** 右键结果图：展开为多个独立图片生成节点（图2/3） */
 function openGenStageResultMenu(nodeId, clientX, clientY){
@@ -15136,53 +15336,21 @@ function genSizeSummaryText(node){
     return `${ratio} · ${genResShortLabel(node?.resolution || '1k')}`;
 }
 function genDockSizePanelHtml(node){
-    const ratios = [
-        {key:'source', label: langIsEn() ? 'Auto' : '自适应', ar:'1 / 1'},
-        {key:'square', label:'1:1', ar:'1 / 1'},
-        {key:'story', label:'9:16', ar:'9 / 16'},
-        {key:'wide', label:'16:9', ar:'16 / 9'},
-        {key:'portrait43', label:'3:4', ar:'3 / 4'},
-        {key:'landscape43', label:'4:3', ar:'4 / 3'},
-        {key:'landscape', label:'3:2', ar:'3 / 2'},
-        {key:'portrait', label:'2:3', ar:'2 / 3'},
-        {key:'custom', label: langIsEn() ? 'Custom' : '自定义', ar:'1 / 1'},
-    ];
-    const ratioBtns = ratios.map(r => `
-        <button type="button" class="gen-dock-ratio-btn" data-ratio="${r.key}" title="${escapeAttr(r.label)}">
-            <span class="gen-dock-ratio-icon" style="aspect-ratio:${r.ar}"></span>
-            <span class="gen-dock-ratio-label">${escapeHtml(r.label)}</span>
-        </button>
-    `).join('');
+    // ponytail: 与模型下拉同一套 custom-select，避免弹层被 textarea/隐藏 select 挡点击
     return `
         <div class="gen-dock-size">
-            <button type="button" class="gen-dock-size-summary" aria-expanded="false">
+            <label class="gen-dock-chip gen-dock-chip-ratio" title="${escapeAttr(langIsEn() ? 'Aspect ratio' : '比例')}">
                 <i data-lucide="rectangle-vertical" class="w-3.5 h-3.5 gen-dock-chip-icon"></i>
-                <span class="gen-dock-size-summary-text">${escapeHtml(genSizeSummaryText(node))}</span>
-                <i data-lucide="chevron-up" class="w-3.5 h-3.5 gen-dock-size-chevron"></i>
-            </button>
-            <div class="gen-dock-size-panel" hidden>
-                <div class="gen-dock-size-section">
-                    <div class="gen-dock-size-section-title">${langIsEn() ? 'Resolution' : '分辨率'}</div>
-                    <div class="gen-dock-res-row">
-                        <button type="button" class="gen-dock-res-btn" data-resolution="1k">1K</button>
-                        <button type="button" class="gen-dock-res-btn" data-resolution="2k">2K</button>
-                        <button type="button" class="gen-dock-res-btn" data-resolution="4k">4K</button>
-                    </div>
-                </div>
-                <div class="gen-dock-size-section">
-                    <div class="gen-dock-size-section-title">${langIsEn() ? 'Aspect ratio' : '比例'}</div>
-                    <div class="gen-dock-ratio-grid">${ratioBtns}</div>
-                </div>
-            </div>
-            <select class="select-lite ratio compact-select gen-dock-hidden-select" data-field="ratio" hidden aria-hidden="true">
-                ${genDockRatioOptions(node)}
-            </select>
-            <select class="select-lite resolution compact-select gen-dock-hidden-select" data-field="resolution" hidden aria-hidden="true">
-                <option value="1k">1K</option>
-                <option value="2k">2K</option>
-                <option value="4k">4K</option>
-                <option value="custom">${tr('canvas.custom')}</option>
-            </select>
+                <select class="select-lite ratio compact-select gen-dock-select" data-field="ratio">${genDockRatioOptions(node)}</select>
+            </label>
+            <label class="gen-dock-chip gen-dock-chip-resolution" title="${escapeAttr(langIsEn() ? 'Resolution' : '分辨率')}">
+                <select class="select-lite resolution compact-select gen-dock-select" data-field="resolution">
+                    <option value="1k">1K</option>
+                    <option value="2k">2K</option>
+                    <option value="4k">4K</option>
+                    <option value="custom">${tr('canvas.custom')}</option>
+                </select>
+            </label>
         </div>
     `;
 }
@@ -15279,7 +15447,7 @@ function genDockShellHtml(node, opts={}){
     const cascade = opts.showCascade ? cascadeBtnHtml(node) : '';
     const upstream = opts.showUpstream !== false ? `<div class="prompt-list gen-dock-upstream"></div>` : '';
     const refs = opts.showRefs
-        ? `<div class="gen-dock-refs"><div class="input-list"></div></div>`
+        ? `<div class="gen-dock-refs"></div>`
         : '';
     return `
         <div class="gen-dock ${opts.floating ? 'is-floating' : 'is-embedded'}">
@@ -15337,37 +15505,43 @@ function renderGeneratorBody(node){
     return wrap;
 }
 function removeImageGenDock(){
+    if(imageGenDockEl?.__sizeOutsideClose){
+        document.removeEventListener('pointerdown', imageGenDockEl.__sizeOutsideClose, true);
+        imageGenDockEl.__sizeOutsideClose = null;
+    }
     imageGenDockEl?.remove();
     imageGenDockEl = null;
     imageGenDockNodeId = null;
+    // 清掉遗留宿主（旧版挂在 #nodes、HMR 残留、双挂载）
+    const roots = [canvasRoot, board, nodesEl, document].filter(Boolean);
+    const seen = new Set();
+    roots.forEach(root => {
+        root.querySelectorAll?.('.image-gen-dock-host, .gen-dock-size-panel.is-ported').forEach(el => {
+            if(seen.has(el)) return;
+            seen.add(el);
+            el.remove();
+        });
+    });
 }
 function positionImageGenDock(node){
-    if(!imageGenDockEl || !node) return;
+    if(!imageGenDockEl || !node || !board) return;
     const nodeEl = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
-    const nodeW = Number(node.w || (isGenConsoleNode(node) ? GENERATOR_BASE_W : defaultNodeSize('image').w) || 260);
-    let nodeH = Number(node.h || 0);
-    if(!nodeH && nodeEl){
-        const rect = nodeEl.getBoundingClientRect();
-        nodeH = Math.max(nodeEl.offsetHeight || 0, rect.height / Math.max(viewport?.scale || 1, 0.01));
-    }
-    if(!nodeH) nodeH = Number(defaultNodeSize('image').h || 336);
-    const scale = Math.max(0.01, Number(viewport?.scale || 1));
-    const inv = 1 / scale;
-    // 控制台反缩放：画布 zoom 时保持屏幕像素尺寸不变
+    if(!nodeEl) return;
+    if(imageGenDockEl.parentElement !== board) board.appendChild(imageGenDockEl);
+    const nodeRect = nodeEl.getBoundingClientRect();
+    const boardRect = board.getBoundingClientRect();
+    const gap = 16;
+    // 屏幕空间定位：不受 world scale 影响，比例/分辨率面板可正常点击
+    imageGenDockEl.style.position = 'absolute';
+    imageGenDockEl.style.left = `${nodeRect.left - boardRect.left + nodeRect.width / 2}px`;
+    imageGenDockEl.style.top = `${nodeRect.bottom - boardRect.top + gap}px`;
+    imageGenDockEl.style.transform = 'translateX(-50%)';
     imageGenDockEl.style.transformOrigin = 'top center';
-    imageGenDockEl.style.transform = `scale(${inv})`;
     imageGenDockEl.style.width = 'max-content';
-    imageGenDockEl.style.minWidth = `${Math.max(360, nodeW)}px`;
+    imageGenDockEl.style.minWidth = '360px';
     imageGenDockEl.style.maxWidth = 'min(96vw, 980px)';
-    const place = () => {
-        if(!imageGenDockEl || imageGenDockNodeId !== node.id) return;
-        const dockW = Math.max(imageGenDockEl.offsetWidth || 0, nodeW);
-        const gapWorld = 16 / scale;
-        imageGenDockEl.style.left = `${node.x + (nodeW - dockW) / 2}px`;
-        imageGenDockEl.style.top = `${node.y + nodeH + gapWorld}px`;
-    };
-    place();
-    requestAnimationFrame(place);
+    imageGenDockEl.style.zIndex = '80';
+    imageGenDockEl.style.pointerEvents = 'auto';
 }
 function bindImageGenDockControls(wrap, node){
     if(!node || node.type !== 'generator') return;
@@ -15383,31 +15557,20 @@ function bindImageGenDockControls(wrap, node){
     const modelSelect = wrap.querySelector('.model-select');
     const gearBtn = wrap.querySelector('.gen-dock-gear');
     const advancedEl = wrap.querySelector('.gen-dock-advanced');
-    const sizeSummary = wrap.querySelector('.gen-dock-size-summary');
-    const sizePanel = wrap.querySelector('.gen-dock-size-panel');
-    const sizeSummaryText = wrap.querySelector('.gen-dock-size-summary-text');
+    const ratioSelect = wrap.querySelector('.ratio');
+    const resolutionSelect = wrap.querySelector('.resolution');
     if(gearBtn && advancedEl){
         gearBtn.onclick = e => {
             e.stopPropagation();
-            if(sizePanel) sizePanel.hidden = true;
-            if(sizeSummary) sizeSummary.setAttribute('aria-expanded', 'false');
             advancedEl.hidden = !advancedEl.hidden;
             gearBtn.classList.toggle('is-open', !advancedEl.hidden);
         };
     }
-    if(sizeSummary && sizePanel){
-        sizeSummary.onclick = e => {
-            e.stopPropagation();
-            if(advancedEl){
-                advancedEl.hidden = true;
-                gearBtn?.classList.remove('is-open');
-            }
-            const open = sizePanel.hidden;
-            sizePanel.hidden = !open;
-            sizeSummary.setAttribute('aria-expanded', open ? 'true' : 'false');
-            sizeSummary.classList.toggle('is-open', open);
-        };
+    if(wrap.__sizeOutsideClose){
+        document.removeEventListener('pointerdown', wrap.__sizeOutsideClose, true);
+        wrap.__sizeOutsideClose = null;
     }
+    delete wrap.__placeSizePanel;
     const promptEl = wrap.querySelector('.gen-dock-prompt');
     if(promptEl){
         bindScrollableText(promptEl);
@@ -15416,14 +15579,17 @@ function bindImageGenDockControls(wrap, node){
             scheduleSave();
         };
     }
+    const refreshSizeSelectUi = (selectEl) => {
+        selectEl?.__canvasCustomSelect?.refresh?.();
+    };
     const syncSizeControlsLite = () => {
         normalizeApiNodeSizeChoice(node);
         const caps = generatorModelCaps(node.model);
-        const ratioSelect = wrap.querySelector('.ratio');
-        const resolutionSelect = wrap.querySelector('.resolution');
         const qualitySelect = wrap.querySelector('.quality-select');
         const mjQualitySelect = wrap.querySelector('.mj-quality-select');
         const genMjPanel = wrap.querySelector('.gen-mj-panel');
+        const ratioChip = wrap.querySelector('.gen-dock-chip-ratio');
+        const resolutionChip = wrap.querySelector('.gen-dock-chip-resolution');
         if(ratioSelect){
             [...ratioSelect.options].forEach(opt => {
                 const allowed = caps.ratioKeys.includes(opt.value);
@@ -15435,38 +15601,28 @@ function bindImageGenDockControls(wrap, node){
                 : (caps.ratioKeys.includes('square') ? 'square' : caps.ratioKeys[0]);
             ratioSelect.value = ratioValue;
             node.ratio = ratioValue;
+            refreshSizeSelectUi(ratioSelect);
         }
         if(resolutionSelect){
             const showResolution = caps.resolutionKeys.length > 0;
+            // 整颗分辨率 chip 隐藏；select 本身保持可挂 custom-select，勿反复 toggle hidden 属性
+            if(resolutionChip) resolutionChip.hidden = !showResolution;
             resolutionSelect.classList.toggle('is-hidden', !showResolution);
-            resolutionSelect.toggleAttribute('hidden', !showResolution);
             if(showResolution){
+                [...resolutionSelect.options].forEach(opt => {
+                    const allowed = caps.resolutionKeys.includes(opt.value);
+                    opt.disabled = !allowed;
+                    opt.hidden = !allowed;
+                });
                 const resolutionValue = node.resolution && caps.resolutionKeys.includes(node.resolution)
                     ? node.resolution
                     : (caps.resolutionKeys[0] || '1k');
                 resolutionSelect.value = resolutionValue;
                 node.resolution = resolutionValue;
+                refreshSizeSelectUi(resolutionSelect);
             }
         }
-        wrap.querySelectorAll('.gen-dock-res-btn').forEach(btn => {
-            const key = btn.getAttribute('data-resolution');
-            const allowed = !caps.resolutionKeys.length || caps.resolutionKeys.includes(key);
-            btn.hidden = !allowed;
-            btn.disabled = !allowed;
-            btn.classList.toggle('is-active', allowed && key === String(node.resolution || '').toLowerCase());
-        });
-        wrap.querySelectorAll('.gen-dock-ratio-btn').forEach(btn => {
-            const key = btn.getAttribute('data-ratio');
-            const allowed = caps.ratioKeys.includes(key);
-            btn.hidden = !allowed;
-            btn.disabled = !allowed;
-            btn.classList.toggle('is-active', allowed && key === node.ratio);
-        });
-        const resRow = wrap.querySelector('.gen-dock-res-row');
-        const resSection = resRow?.closest?.('.gen-dock-size-section');
-        if(resRow) resRow.hidden = !(caps.resolutionKeys.length > 0);
-        if(resSection) resSection.hidden = !(caps.resolutionKeys.length > 0);
-        if(sizeSummaryText) sizeSummaryText.textContent = genSizeSummaryText(node);
+        if(ratioChip) ratioChip.hidden = !(caps.ratioKeys.length > 0);
         if(advancedEl) advancedEl.dataset.modelProfile = caps.profile || 'standard';
         const qualityRow = wrap.querySelector('.gen-dock-quality-row');
         if(qualitySelect){
@@ -15529,26 +15685,28 @@ function bindImageGenDockControls(wrap, node){
             positionImageGenDock(node);
         };
     }
-    wrap.querySelectorAll('.gen-dock-res-btn').forEach(btn => {
-        btn.onmousedown = e => e.stopPropagation();
-        btn.onclick = e => {
+    if(ratioSelect){
+        ratioSelect.onmousedown = e => e.stopPropagation();
+        ratioSelect.onclick = e => e.stopPropagation();
+        ratioSelect.onchange = e => {
             e.stopPropagation();
-            node.resolution = btn.getAttribute('data-resolution') || '1k';
+            node.ratio = e.target.value || 'square';
             syncSizeControlsLite();
             scheduleSave();
             positionImageGenDock(node);
         };
-    });
-    wrap.querySelectorAll('.gen-dock-ratio-btn').forEach(btn => {
-        btn.onmousedown = e => e.stopPropagation();
-        btn.onclick = e => {
+    }
+    if(resolutionSelect){
+        resolutionSelect.onmousedown = e => e.stopPropagation();
+        resolutionSelect.onclick = e => e.stopPropagation();
+        resolutionSelect.onchange = e => {
             e.stopPropagation();
-            node.ratio = btn.getAttribute('data-ratio') || 'square';
+            node.resolution = e.target.value || '1k';
             syncSizeControlsLite();
             scheduleSave();
             positionImageGenDock(node);
         };
-    });
+    }
     const qualitySelect = wrap.querySelector('.quality-select');
     if(qualitySelect){
         qualitySelect.onmousedown = e => e.stopPropagation();
@@ -15654,7 +15812,7 @@ function bindImageGenDockControls(wrap, node){
         .filter(src => src.refs?.length);
     const promptInputs = sources.filter(src => src.prompt && !src.refs?.length);
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
-    renderImageInputList(wrap.querySelector('.input-list'), node, imageInputs);
+    renderGenDockImageInputs(wrap.querySelector('.gen-dock-refs'), node, imageInputs);
     const genBtn = wrap.querySelector('.gen-btn');
     if(genBtn) genBtn.onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
     bindCascadeButtons(wrap, node.id);
@@ -15663,10 +15821,22 @@ function bindImageGenDockControls(wrap, node){
 }
 function remountImageGenDock(node){
     removeImageGenDock();
-    if(!nodesEl || !node || !isGenConsoleNode(node)) return;
+    if(!board || !node || !isGenConsoleNode(node)) return;
     const host = document.createElement('div');
     host.className = 'image-gen-dock-host';
     host.dataset.imageDockFor = node.id;
+    // 阻止画布拖拽/框选抢走控制台点击
+    host.onpointerdown = e => e.stopPropagation();
+    host.onmousedown = e => e.stopPropagation();
+    host.onclick = e => e.stopPropagation();
+    // 普通滚轮：留给控制台内部滚动，不平移画布；Ctrl+滚轮由 board capture 统一缩画布
+    on(host, 'wheel', e => {
+        if(e.ctrlKey || e.metaKey){
+            e.preventDefault();
+            return;
+        }
+        e.stopPropagation();
+    }, { passive: false });
     if(node.type === 'msgen'){
         const shell = document.createElement('div');
         shell.className = 'gen-dock is-floating msgen-dock';
@@ -15688,7 +15858,8 @@ function remountImageGenDock(node){
         bindImageGenDockControls(host, node);
     }
     mountCanvasCustomSelects(host);
-    nodesEl.appendChild(host);
+    // 挂在 board（world 外），不随画布缩放，避免 transform 反缩放导致点击失灵
+    board.appendChild(host);
     imageGenDockEl = host;
     imageGenDockNodeId = node.id;
     requestAnimationFrame(() => positionImageGenDock(node));
@@ -15702,7 +15873,10 @@ function syncImageGenDock(){
         removeImageGenDock();
         return;
     }
-    if(imageGenDockNodeId !== only.id || !imageGenDockEl?.isConnected) remountImageGenDock(only);
+    const orphanCount = canvasRoot
+        ? canvasRoot.querySelectorAll('.image-gen-dock-host').length
+        : (board?.querySelectorAll('.image-gen-dock-host').length || 0);
+    if(orphanCount > 1 || imageGenDockNodeId !== only.id || !imageGenDockEl?.isConnected) remountImageGenDock(only);
     else positionImageGenDock(only);
 }
 function renderVideoBody(node){
@@ -15842,7 +16016,7 @@ function renderPromptPreview(container, promptInputs){
         ? `<div class="canvas-prompt-preview-label">Prompts</div>${promptInputs.map(src => `<div class="canvas-prompt-preview-item line-clamp-2">${escapeHtml(src.label)}</div>`).join('')}`
         : '';
 }
-function renderImageInputList(list, node, imageInputs, emptyText=null){
+function renderImageInputList(list, node, imageInputs, emptyText=null, opts={}){
     if(!list) return;
     list.innerHTML = imageInputs.length ? '' : `<div class="text-[11px] text-gray-300 py-2">${escapeHtml(emptyText || tr('canvas.inputImagesEmpty'))}</div>`;
     imageInputs.forEach((src, i) => {
@@ -15853,8 +16027,47 @@ function renderImageInputList(list, node, imageInputs, emptyText=null){
         item.innerHTML = `<span class="input-index">${i + 1}</span>${previewHtml}<span class="input-label">${escapeHtml(src.label)}</span>`;
         list.appendChild(item);
     });
-    bindInputListPointerReorder(list, node);
+    bindInputListPointerReorder(list, node, opts);
     refreshIcons();
+}
+const PER_ITEM_GROUP_IMAGE_TYPES = new Set(['batch-image', 'group-image']);
+/** 控制台：图片组逐张 vs 共享参考分开展示，避免混编成同一队列序号 */
+function partitionGenDockImageInputs(imageInputs){
+    const inputs = imageInputs || [];
+    const itemSources = inputs.filter(s => PER_ITEM_GROUP_IMAGE_TYPES.has(s.type) && s.groupId);
+    if(!itemSources.length) return { mode:'flat', batch:[], shared:[], all:inputs };
+    const primaryGroupId = itemSources[0].groupId;
+    const batch = inputs.filter(s => PER_ITEM_GROUP_IMAGE_TYPES.has(s.type) && s.groupId === primaryGroupId);
+    const shared = inputs.filter(s => !(PER_ITEM_GROUP_IMAGE_TYPES.has(s.type) && s.groupId === primaryGroupId));
+    if(batch.length && shared.length) return { mode:'split', batch, shared, all:inputs };
+    return { mode:'flat', batch, shared:[], all:inputs };
+}
+function renderGenDockImageInputs(container, node, imageInputs){
+    if(!container) return;
+    const part = partitionGenDockImageInputs(imageInputs);
+    if(part.mode !== 'split'){
+        container.innerHTML = `<div class="input-list"></div>`;
+        renderImageInputList(container.querySelector('.input-list'), node, part.all);
+        return;
+    }
+    const batchLabel = langIsEn() ? 'Per-item queue' : '逐张队列';
+    const sharedLabel = langIsEn() ? 'Shared refs (every run)' : '共享参考（每次附带）';
+    container.innerHTML = `
+        <div class="gen-dock-refs-section gen-dock-refs-batch">
+            <div class="gen-dock-refs-label">${escapeHtml(batchLabel)}</div>
+            <div class="input-list gen-dock-batch-list"></div>
+        </div>
+        <div class="gen-dock-refs-section gen-dock-refs-shared">
+            <div class="gen-dock-refs-label">${escapeHtml(sharedLabel)}</div>
+            <div class="input-list gen-dock-shared-list"></div>
+        </div>
+    `;
+    renderImageInputList(container.querySelector('.gen-dock-batch-list'), node, part.batch, null, {
+        subsetIds: part.batch.map(s => s.id)
+    });
+    renderImageInputList(container.querySelector('.gen-dock-shared-list'), node, part.shared, null, {
+        subsetIds: part.shared.map(s => s.id)
+    });
 }
 function renderVideoImageInputs(list, node, imageInputs){
     if(!list) return;
@@ -17456,12 +17669,22 @@ function orderedSources(gen, sources){
 function imageSourceIdsFor(gen){
     return generatorSources(gen).filter(s => s.refs?.length).map(s => s.id);
 }
-function reorderInputByIndex(gen, fromIndex, toIndex){
+function reorderInputByIndex(gen, fromIndex, toIndex, subsetIds=null){
     if(!gen || fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return false;
     orderedSources(gen, generatorSources(gen));
     const imageIds = new Set(imageSourceIdsFor(gen));
     const promptIds = (gen.inputs || []).filter(id => !imageIds.has(id));
     const ids = (gen.inputs || []).filter(id => imageIds.has(id));
+    if(subsetIds?.length){
+        const subsetSet = new Set(subsetIds);
+        const subset = ids.filter(id => subsetSet.has(id));
+        if(fromIndex >= subset.length || toIndex >= subset.length) return false;
+        const [moved] = subset.splice(fromIndex, 1);
+        subset.splice(toIndex, 0, moved);
+        let si = 0;
+        gen.inputs = [...ids.map(id => subsetSet.has(id) ? subset[si++] : id), ...promptIds];
+        return true;
+    }
     if(fromIndex >= ids.length || toIndex >= ids.length) return false;
     const [moved] = ids.splice(fromIndex, 1);
     ids.splice(toIndex, 0, moved);
@@ -17479,12 +17702,13 @@ function softRefreshGeneratorInputLists(gen){
         if(!list) return;
         if(mode === 'video') renderVideoImageInputs(list, gen, imageInputs);
         else if(mode === 'comfy') renderComfyImages(list, gen, mediaInputs);
+        else if(mode === 'dock') renderGenDockImageInputs(list, gen, imageInputs);
         else renderImageInputList(list, gen, imageInputs);
     };
     if(imageGenDockNodeId === gen.id && imageGenDockEl){
         if(gen.type === 'video') fill(imageGenDockEl.querySelector('.video-img-list'), 'video');
         else if(gen.type === 'msgen') fill(imageGenDockEl.querySelector('.ms-img-list') || imageGenDockEl.querySelector('.input-list'));
-        else fill(imageGenDockEl.querySelector('.gen-dock-refs .input-list') || imageGenDockEl.querySelector('.input-list'));
+        else fill(imageGenDockEl.querySelector('.gen-dock-refs'), 'dock');
     }
     const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(gen.id)}"]`);
     if(!el) return;
@@ -17495,9 +17719,10 @@ function softRefreshGeneratorInputLists(gen){
     else fill(el.querySelector('.input-list'));
 }
 /** 参考图列表：指针拖拽换位（跟手 + 邻项让位），松手后局部刷新，避免整页 render */
-function bindInputListPointerReorder(list, node){
+function bindInputListPointerReorder(list, node, opts={}){
     if(!list || !node) return;
     list.classList.add('input-list-reorderable');
+    const subsetIds = opts.subsetIds || null;
     const itemEls = () => [...list.querySelectorAll(':scope > .input-item[data-source-id]')];
     itemEls().forEach(item => {
         item.draggable = false;
@@ -17570,7 +17795,7 @@ function bindInputListPointerReorder(list, node){
                 list.classList.remove('is-reordering');
                 clearShifts();
                 internalDrag = false;
-                if(dragging && toIndex !== fromIndex && reorderInputByIndex(node, fromIndex, toIndex)){
+                if(dragging && toIndex !== fromIndex && reorderInputByIndex(node, fromIndex, toIndex, subsetIds)){
                     softRefreshGeneratorInputLists(node);
                     scheduleSave();
                 }
@@ -17704,16 +17929,56 @@ function refreshLoopImageInputViews(){
         if(hint) hint.textContent = loopImageOutputHint(loop, {index:Math.max(1, Number(loop.loopStart) || 1)});
     });
 }
-const PER_ITEM_GROUP_IMAGE_TYPES = new Set(['batch-image', 'group-image']);
+function dedupeImageRefsByUrl(refs){
+    const seen = new Set();
+    return imageRefsOnly(refs).filter(ref => {
+        const key = String(ref.url || '');
+        if(!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
 
-function perItemGroupImageRefs(sources, loopCtx){
+/**
+ * 图片组逐张生成：每张组内图 + 共享参考图。
+ * 返回 { jobRefs: Ref[][] }；不触发逐张则 null。
+ */
+function resolvePerItemGroupBatch(sources, loopCtx){
     if(loopCtx) return null;
     const imageSources = (sources || []).filter(s => s.refs?.length);
-    if(imageSources.length < 2) return null;
-    if(!imageSources.every(s => PER_ITEM_GROUP_IMAGE_TYPES.has(s.type))) return null;
-    const groupIds = new Set(imageSources.map(s => s.groupId).filter(Boolean));
-    if(groupIds.size !== 1) return null;
-    return imageSources.map(s => s.refs[0]).filter(ref => ref?.url);
+    if(!imageSources.length) return null;
+
+    const itemSources = imageSources.filter(s => PER_ITEM_GROUP_IMAGE_TYPES.has(s.type) && s.groupId);
+    if(!itemSources.length) return null;
+
+    // 多组同时连入：只取第一个出现的 groupId
+    const primaryGroupId = itemSources[0].groupId;
+    const primaryItems = itemSources.filter(s => s.groupId === primaryGroupId);
+    const itemRefs = primaryItems.map(s => s.refs?.[0]).filter(ref => ref?.url);
+    if(!itemRefs.length) return null;
+
+    const sharedFromNonGroup = imageSources
+        .filter(s => !PER_ITEM_GROUP_IMAGE_TYPES.has(s.type))
+        .flatMap(s => s.refs || []);
+    const sharedFromOtherGroups = itemSources
+        .filter(s => s.groupId !== primaryGroupId)
+        .flatMap(s => s.refs || []);
+    const sharedRefs = dedupeImageRefsByUrl([...sharedFromNonGroup, ...sharedFromOtherGroups]);
+
+    // ≥2 张组内图，或 ≥1 张组内图 + 共享参考
+    if(itemRefs.length < 2 && !sharedRefs.length) return null;
+
+    const jobRefs = itemRefs.map(item => {
+        const rest = sharedRefs.filter(r => String(r.url) !== String(item.url));
+        return dedupeImageRefsByUrl([item, ...rest]);
+    });
+    return { jobRefs, itemRefs, sharedRefs };
+}
+
+/** @deprecated 仅兼容旧调用；新逻辑用 resolvePerItemGroupBatch */
+function perItemGroupImageRefs(sources, loopCtx){
+    const batch = resolvePerItemGroupBatch(sources, loopCtx);
+    return batch?.itemRefs?.length >= 2 && !batch.sharedRefs?.length ? batch.itemRefs : null;
 }
 async function buildGeneratorTaskPayload(gen, prompt, refs){
     const rawPrompt = prompt || 'Edit the reference images.';
@@ -17786,12 +18051,21 @@ async function runGeneratorSingle(gen, prompt, refs, opts={}){
     }
     return out;
 }
-async function runGeneratorBatchParallel(gen, prompt, perItemRefs, opts={}){
+async function runGeneratorBatchParallel(gen, prompt, perItemJobs, opts={}){
     const out = outputForNode(gen, 460);
     const promptText = prompt || 'Edit the reference images.';
     const count = Math.max(1, Math.min(8, Number(gen.count || 1)));
     resetGeneratorPreviewRound(gen);
-    const jobs = perItemRefs.flatMap(ref => Array.from({length:count}, () => imageRefsOnly([ref])));
+    // perItemJobs: Ref[][]（每项完整参考列表）或旧版 Ref[]（每项单图）
+    const normalizeJob = (job) => {
+        if(Array.isArray(job)){
+            if(job.length && Array.isArray(job[0])) return imageRefsOnly(job);
+            if(job.length && job[0]?.url) return imageRefsOnly(job);
+            return imageRefsOnly(job);
+        }
+        return imageRefsOnly([job]);
+    };
+    const jobs = perItemJobs.flatMap(job => Array.from({length:count}, () => normalizeJob(job)));
     const totalJobs = jobs.length;
     if(opts.cascade){
         gen.running = true;
@@ -17844,11 +18118,11 @@ async function runGenerator(genId, opts={}){
     const refs = imageRefsOnly(sources.flatMap(s => s.refs || []));
     if(!prompt && !refs.length){ softAlert(tr('canvas.needPromptOrImage')); return; }
     if(isYouchuanRhModel(gen.model) && !prompt){ softAlert(tr('canvas.youchuanNeedPrompt')); return; }
-    const perItemRefs = perItemGroupImageRefs(sources, loopCtx);
-    if(perItemRefs?.length >= 2){
+    const batchPlan = resolvePerItemGroupBatch(sources, loopCtx);
+    if(batchPlan?.jobRefs?.length){
         let out = outputForNode(gen, 460);
         try {
-            out = await runGeneratorBatchParallel(gen, prompt, perItemRefs, opts);
+            out = await runGeneratorBatchParallel(gen, prompt, batchPlan.jobRefs, opts);
             if(opts.cascade){
                 gen.runStatus = 'done';
                 gen.runError = '';
@@ -19299,7 +19573,8 @@ function deleteNodeFromButton(id, event){
 function deleteConnection(id, event){
     event?.preventDefault();
     event?.stopPropagation();
-    if(!connections.some(c => c.id === id)) return;
+    const removed = connections.find(c => c.id === id);
+    if(!removed) return;
     try { pushUndo(); } catch(err) { console.warn('[infinite-canvas] undo snapshot failed', err); }
     connections = connections.filter(c => c.id !== id);
     if(hoveredConnectionId === id) hoveredConnectionId = '';
@@ -19309,6 +19584,7 @@ function deleteConnection(id, event){
     syncLinkDomToConnections();
     render({ force: true });
     refreshGeometryAfterLayout();
+    if(removed.to) resyncGenFrameAfterLinkChange(removed.to);
     scheduleSave();
 }
 function outputDownloadName(url){
@@ -19346,7 +19622,13 @@ function missingAssetHtml(url, compact=false){
     return `<div class="missing-asset ${compact ? 'compact' : ''}" title="${escapeAttr(url || '')}"><i data-lucide="image-off" class="${compact ? 'w-4 h-4' : 'w-6 h-6'}"></i><span>${langIsEn() ? 'Missing file' : '文件缺失'}</span></div>`;
 }
 function outputMetaFor(url, out){
-    const item = (out?.images || []).find(x => outputUrlValue(x) === url);
+    const node = out?.id ? nodes.find(n => n.id === out.id) || out : out;
+    if(isGenConsoleNode(node)){
+        const hist = generatorHistoryItems(node).find(x => outputUrlValue(x) === url);
+        return hist && typeof hist === 'object' ? hist : {};
+    }
+    const list = node?.images || out?.images || [];
+    const item = list.find(x => outputUrlValue(x) === url);
     return item && typeof item === 'object' ? item : {};
 }
 function runSnapshot(node, prompt, refs=[]){
@@ -20554,6 +20836,12 @@ function markOutputViewed(out, url){
         scheduleSave();
     }
 }
+function outputLightboxSourceList(out){
+    const node = out?.id ? nodes.find(n => n.id === out.id) || out : out;
+    if(!node) return [];
+    if(isGenConsoleNode(node)) return generatorHistoryItems(node);
+    return node.images || [];
+}
 function outputLightboxItems(out=null){
     const normalize = (item, sourceOut=null) => {
         const url = outputUrlValue(item);
@@ -20562,7 +20850,7 @@ function outputLightboxItems(out=null){
     };
     const sourceOut = out?.id ? nodes.find(n => n.id === out.id) || out : null;
     if(sourceOut){
-        return (sourceOut.images || []).map(item => normalize(item, sourceOut)).filter(Boolean);
+        return outputLightboxSourceList(sourceOut).map(item => normalize(item, sourceOut)).filter(Boolean);
     }
     const outputNodeItems = nodes
         .filter(n => n.type === 'output' || n.type === 'frameStack')
@@ -20580,8 +20868,24 @@ function navigateOutputLightbox(direction){
     if(idx < 0) idx = 0;
     const next = items[(idx + direction + items.length) % items.length];
     const nextOut = next.outId ? nodes.find(n => n.id === next.outId) : null;
-    openOutputLightbox(next.url, nextOut);
+    if(nextOut && isGenConsoleNode(nextOut)) openGeneratorHistoryLightbox(nextOut, next.url);
+    else openOutputLightbox(next.url, nextOut);
     return true;
+}
+function bindOutputLightboxFavorite(url, out, meta){
+    if(!outputFavoriteBtn) return;
+    const imageOk = !!url && !isVideoUrl(url) && !isMissingAssetUrl(url);
+    outputFavoriteBtn.style.display = imageOk ? '' : 'none';
+    if(!imageOk){
+        outputFavoriteBtn.onclick = null;
+        return;
+    }
+    syncOutputFavoriteBtn(outputFavoriteBtn, url);
+    outputFavoriteBtn.onclick = e => {
+        e.stopPropagation();
+        const node = out?.id ? nodes.find(n => n.id === out.id) || out : out;
+        void toggleFavoriteForUrl(url, meta || outputMetaFor(url, node), node, outputFavoriteBtn);
+    };
 }
 function createImageCardFromOutput(url, point){
     if(!ensureCanvas() || !url) return;
@@ -20807,10 +21111,12 @@ function openOutputLightbox(url, out){
     resetOutputPreviewZoom();
     currentOutputLightboxOutId = out?.id || '';
     currentOutputLightboxUrl = url;
-    const meta = outputMetaFor(url, out);
+    const liveOut = out?.id ? nodes.find(n => n.id === out.id) || out : out;
+    const meta = outputMetaFor(url, liveOut || out);
     setupOutputPromptPanel(meta);
+    bindOutputLightboxFavorite(url, liveOut || out, meta);
     outputResolutionText('--', meta);
-    currentOutputCompareUrl = outputCompareUrlFor(url, out);
+    currentOutputCompareUrl = outputCompareUrlFor(url, liveOut || out);
     setOutputCompareMode(false);
     const videoMode = isVideoUrl(url);
     outputLightboxImg.style.display = videoMode ? 'none' : 'block';
@@ -20875,6 +21181,12 @@ function closeOutputLightbox(){
     outputCompareResult.src = '';
     outputCompareOriginal.src = '';
     outputPreview.ondblclick = null;
+    if(outputFavoriteBtn){
+        outputFavoriteBtn.onclick = null;
+        outputFavoriteBtn.style.display = '';
+        outputFavoriteBtn.classList.remove('is-active');
+        outputFavoriteBtn.setAttribute('aria-pressed', 'false');
+    }
     resetOutputPreviewZoom();
     currentOutputCompareUrl = '';
     currentOutputMeta = null;
@@ -21313,6 +21625,7 @@ function connectSelectionToGenerator(kind, genId){
     selected.clear();
     selected.add(source.id);
     syncGeneratorInputs();
+    resyncGenFrameAfterLinkChange(genId);
 }
 
 function pushUndo(){
@@ -21692,6 +22005,7 @@ function finishTempLink(e){
                 if(fromNode?.type === 'promptGroup' && toNode?.type === 'loop') syncLoopCountFromPromptGroup(toNode, fromNode);
                 if(fromNode?.type === 'imageBatch' && toNode?.type === 'loop') syncLoopCountFromImageBatch(toNode, fromNode);
                 if(toNode?.type === 'loop') syncLoopImageBatchSize(toNode);
+                resyncGenFrameAfterLinkChange(toId);
             }
             syncGeneratorInputs();
             scheduleSave();
@@ -21961,7 +22275,10 @@ function endDrag(event=null){
         const draggedGroup = moved.some(n => n.type === 'group' || n.type === 'promptGroup' || n.type === 'imageBatch');
         if(!draggedGroup) deferredMembership = moved;
     }
-    if(resizeMoved && resizeState?.node) resizeState.node._userSized = true;
+    if(resizeMoved && resizeState?.node){
+        resizeState.node._userSized = true;
+        if(resizeState.node.type === 'image') resyncGensMatchingUpstreamImage(resizeState.node);
+    }
     pendingNodeDrag = null;
     dragNode = null;
     dragBoard = null;
@@ -22950,17 +23267,26 @@ on(board, 'mousedown', e => {
 on(board, 'auxclick', e => {
     if(e.button === 1) e.preventDefault();
 });
+// 捕获阶段先吃掉 Ctrl/Cmd+滚轮，避免生成节点/浮动控制台 stopPropagation 后浏览器缩放整个页面
+on(board, 'wheel', e => {
+    if(!canvas || !board) return;
+    if(!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    lastBoardInteractionAt = Date.now();
+    zoomViewportAtClient(e.clientX, e.clientY, e.deltaY);
+}, { passive: false, capture: true });
 on(board, "wheel", e => {
     if(!canvas || !board) return;
+    if(e.ctrlKey || e.metaKey) return; // 已由 capture 处理
+    if(e.target.closest?.('.image-gen-dock-host, .gen-dock, .canvas-custom-select-panel, .canvas-custom-select-menu')) return;
     if(isOpenScrollableCanvasMenu(e.target)) return;
     if(e.target.closest('.error-message, .node-retry-msg')) return;
     e.preventDefault();
     lastBoardInteractionAt = Date.now();
-    const before = screenToWorld(e.clientX, e.clientY);
-    viewport.scale = Math.min(3, Math.max(0.08, viewport.scale * (e.deltaY > 0 ? .92 : 1.08)));
-    const rect = board.getBoundingClientRect();
-    viewport.x = e.clientX - rect.left - before.x * viewport.scale;
-    viewport.y = e.clientY - rect.top - before.y * viewport.scale;
+    // 单独滚轮：平移画布（触控板保留横向）
+    viewport.x -= e.deltaX || 0;
+    viewport.y -= e.deltaY || 0;
     applyViewport();
     scheduleViewportSave();
 }, { passive: false });

@@ -267,5 +267,9 @@ export function mountCanvasCustomSelect(selectEl) {
 
 export function mountCanvasCustomSelects(root, selector = 'select.select-lite') {
     if(!root) return;
-    root.querySelectorAll(selector).forEach(el => mountCanvasCustomSelect(el));
+    root.querySelectorAll(selector).forEach(el => {
+        // 跳过刻意隐藏的备份 select，避免幽灵下拉挡住点击
+        if(el.hidden || el.classList.contains('is-hidden') || el.classList.contains('gen-dock-hidden-select')) return;
+        mountCanvasCustomSelect(el);
+    });
 }

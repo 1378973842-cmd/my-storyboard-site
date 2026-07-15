@@ -676,7 +676,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                       </div>
                   </div>
               </div>
-              <div className="hint editor-only" data-i18n="canvas.hint">拖拽空白处或按住空格拖动画布；滚轮缩放；中键平移。Ctrl 框选多选，拖动节点标题栏可移动节点。</div>
+              <div className="hint editor-only" data-i18n="canvas.hint">拖拽空白处或按住空格拖动画布；滚轮平移；Ctrl + 滚轮缩放；中键平移。Ctrl 框选多选，拖动节点标题栏可移动节点。</div>
               <div id="outputLightbox" className="output-lightbox">
                   <div id="outputLightboxShell" className="output-lightbox-shell">
                   <div id="outputPreview" className="output-preview">
@@ -694,6 +694,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                       <div className="output-preview-bar">
                           <div id="outputResolution" className="output-resolution">--</div>
                           <div className="output-preview-actions">
+                              <button id="outputFavoriteBtn" className="preview-icon-btn output-lightbox-fav" type="button" title="收藏" aria-label="收藏" aria-pressed="false"><i data-lucide="star" className="w-4 h-4"></i></button>
                               <button id="outputDownloadBtn" className="preview-icon-btn" type="button" title="下载" aria-label="下载" data-i18n-title="canvas.download"><i data-lucide="download" className="w-4 h-4"></i></button>
                               <button id="outputLightboxCloseBtn" className="preview-icon-btn" type="button" title="关闭" aria-label="关闭" data-i18n-title="common.close"><i data-lucide="x" className="w-4 h-4"></i></button>
                           </div>
