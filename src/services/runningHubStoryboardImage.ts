@@ -24,20 +24,20 @@ export function getNineGridG2Path(): string {
 
 export const RUNNINGHUB_G2_RATIOS = [
   "1:1",
-  "1:2",
-  "2:1",
-  "1:3",
-  "3:1",
   "2:3",
   "3:2",
-  "3:4",
-  "4:3",
   "4:5",
   "5:4",
-  "9:16",
+  "4:3",
+  "3:4",
   "16:9",
+  "9:16",
   "21:9",
   "9:21",
+  "2:1",
+  "1:2",
+  "3:1",
+  "1:3",
 ] as const;
 
 export type RunningHubG2AspectRatio = (typeof RUNNINGHUB_G2_RATIOS)[number];
