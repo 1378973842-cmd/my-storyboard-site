@@ -138,6 +138,16 @@
         { "desc": "RunningHub 字段编辑器新增「参数说明」文本框（写入 field.note，自定义工作流字段无描述时可手填），测试面板与画布 RH 节点参数/提示词卡片下方均展示该说明", "status": "done" },
         { "desc": "修复 RunningHub 管理页保存/新增/删除后未广播 BroadcastChannel('studio-api')，导致常驻后台的画布 canvasEngine 拿着过期配置（含 note）不刷新的问题", "status": "done" }
       ]
+    },
+    {
+      "id": "F009",
+      "name": "故事动画分镜 Agent",
+      "tasks": [
+        { "desc": "Skill：去品牌、多场景、弹性时长/宫格、资产提示词与线稿锁定", "status": "done" },
+        { "desc": "后端：story_script/asset_prompts JSON 契约、时长与宫格校验、图N bindings、线稿约束", "status": "done" },
+        { "desc": "画布：时长选择、资产参考图、双按钮、textOutput 分流与生图连线", "status": "done" },
+        { "desc": "验证：自检脚本、TypeScript、node init.mjs", "status": "done" }
+      ]
     }
   ]
 }

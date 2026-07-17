@@ -24,6 +24,7 @@ import { registerCanvasMxShellPromptRoutes } from "./canvasMxShellPromptBridge.j
 import { registerCanvasDeepWhiteShotRoutes } from "./canvasDeepWhiteShotBridge.js";
 import { registerCanvasDeepWhiteExportRoutes } from "./canvasDeepWhiteExportBridge.js";
 import { registerCanvasScreenwritingRoutes } from "./canvasScreenwritingBridge.js";
+import { registerCanvasPixarAdScriptRoutes } from "./canvasPixarAdScriptBridge.js";
 import { registerCanvasReplicaAgentRoutes } from "./canvasReplicaAgentBridge.js";
 import { registerCanvasImageRepairAgentRoutes } from "./canvasImageRepairAgentBridge.js";
 import {
@@ -424,6 +425,7 @@ export function registerInfiniteCanvasRoutes(
   registerCanvasDeepWhiteShotRoutes(app, projectRoot, gate);
   registerCanvasDeepWhiteExportRoutes(app, projectRoot, gate);
   registerCanvasScreenwritingRoutes(app, projectRoot, gate);
+  registerCanvasPixarAdScriptRoutes(app, projectRoot, gate);
   registerRunningHubWorkflowRoutes(app, {
     projectRoot,
     requireGate: gate,

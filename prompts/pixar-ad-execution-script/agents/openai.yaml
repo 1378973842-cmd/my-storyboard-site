@@ -1,0 +1,4 @@
+interface:
+  display_name: "Story Animation Storyboard"
+  short_description: "Turn story ideas into Pixar-style multi-scene storyboard scripts with line-art prompts."
+  default_prompt: "Use $pixar-ad-execution-script to turn this story idea, duration, and optional asset refs into a Pixar-style story animation script (anchors, flexible storyboard sheets, pencil line-art prompts with 图N locks, Seedance video prompts) — or asset_prompts mode when images are missing."

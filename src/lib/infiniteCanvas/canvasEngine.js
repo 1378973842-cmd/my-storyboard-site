@@ -3475,6 +3475,29 @@ function instantiateWorkflowTemplate(template, offset={x:0, y:0}){
             node.runStatus = node.runStatus || 'idle';
             node.runError = '';
         }
+        if(node.type === 'pixarAdScriptAgent'){
+            node.inputs = [];
+            node.model = clampAgentTextModel(node.model);
+            if(!node.refNames || typeof node.refNames !== 'object') node.refNames = {};
+            if(!node.refKinds || typeof node.refKinds !== 'object') node.refKinds = {};
+            node.durationPreset = normalizeStoryAnimDurationPreset(node.durationPreset, node.durationSec);
+            node.durationSec = resolveStoryAnimDurationSec(node);
+            node.story = String(node.story || node.raw_script || '').slice(0, 24000);
+            node.raw_script = node.story;
+            node.style_description = String(node.style_description || '迪士尼皮克斯3D动画风格').slice(0, 500);
+            node.outputText = String(node.outputText || '');
+            node.assetOutputNodeIds = node.assetOutputNodeIds && typeof node.assetOutputNodeIds === 'object' ? node.assetOutputNodeIds : {};
+            node.running = false;
+            node.runStatus = node.runStatus || 'idle';
+            node.runError = '';
+        }
+        if(node.type === 'textOutput' && isStoryAnimTextKind(node.kind)){
+            node.text = String(node.text || '');
+            node.mode_label = String(node.mode_label || '');
+            node.sourceAgentId = String(node.sourceAgentId || '');
+            node.sections = Array.isArray(node.sections) ? node.sections : null;
+            if(!Array.isArray(node.expandedSections)) node.expandedSections = [];
+        }
         if(node.type === 'textOutput' && !node.kind){
             node.text = String(node.text || '');
             node.sections = Array.isArray(node.sections) ? node.sections : null;
@@ -5151,11 +5174,36 @@ function migrateLegacyTextViewNodes(){
 function isTextOutputNode(node){
     return Boolean(node && node.type === 'textOutput');
 }
+function isStoryAnimTextKind(kind){
+    const k = String(kind || '');
+    return k.startsWith('pixar-') || k.startsWith('story-');
+}
+function normalizeStoryAnimDurationPreset(preset, durationSec){
+    const p = String(preset || '').trim();
+    if(['15','20','25','30','custom'].includes(p)) return p;
+    const n = Math.round(Number(durationSec) || 30);
+    if([15,20,25,30].includes(n)) return String(n);
+    if(n > 30) return 'custom';
+    return '30';
+}
+function resolveStoryAnimDurationSec(node){
+    const preset = normalizeStoryAnimDurationPreset(node?.durationPreset, node?.durationSec);
+    if(preset !== 'custom') return Number(preset);
+    const n = Math.round(Number(node?.durationSec) || 45);
+    return Math.min(180, Math.max(31, n));
+}
 function textOutputKindLabel(kind){
     if(kind === 'mxShell') return langIsEn() ? 'Mx-Shell Output' : 'Mx-Shell 输出';
     if(kind === 'deepWhite') return langIsEn() ? 'DeepWhite Output' : 'DeepWhite 输出';
     if(kind === 'seedance') return langIsEn() ? 'Seedance Export' : 'Seedance 导出';
     if(kind === 'screenwriting') return langIsEn() ? 'Screenwriting Output' : '编剧输出';
+    if(kind === 'pixar-keys' || kind === 'story-keys') return langIsEn() ? 'Story Node Keys' : '故事节点锚点';
+    if(kind === 'pixar-global' || kind === 'story-global') return langIsEn() ? 'Story Global Config' : '故事全局设定';
+    if(kind === 'pixar-storyboard' || kind === 'story-storyboard') return langIsEn() ? 'Story Storyboard' : '故事分镜表';
+    if(kind === 'pixar-sketch' || kind === 'story-sketch') return langIsEn() ? 'Story Sketch Prompts' : '分镜线稿提示词';
+    if(kind === 'pixar-video' || kind === 'story-video') return langIsEn() ? 'Story Video Prompts' : '故事视频提示词';
+    if(kind === 'pixar-audio' || kind === 'story-audio') return langIsEn() ? 'Story Audio Config' : '故事配乐配置';
+    if(String(kind || '').startsWith('story-asset')) return langIsEn() ? 'Asset Image Prompt' : '资产生图提示词';
     return langIsEn() ? 'Text Output' : '文本输出';
 }
 function normalizeScreenwritingMode(mode){
@@ -5174,6 +5222,88 @@ function textOutputSectionSummary(body){
     const line = String(body || '').replace(/\s+/g, ' ').trim();
     if(!line) return langIsEn() ? '(empty)' : '（空）';
     return line.length > 72 ? line.slice(0, 72) + '…' : line;
+}
+function isMarkdownTableRow(line){
+    const t = String(line || '').trim();
+    return t.startsWith('|') && t.includes('|', 1);
+}
+function isMarkdownTableSeparator(line){
+    const t = String(line || '').trim();
+    if(!t.startsWith('|')) return false;
+    return /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(t);
+}
+function parseMarkdownTableCells(line){
+    let t = String(line || '').trim();
+    if(t.startsWith('|')) t = t.slice(1);
+    if(t.endsWith('|')) t = t.slice(0, -1);
+    return t.split('|').map(cell => cell.trim());
+}
+function splitTextOutputDocSections(markdown, kind=''){
+    const raw = String(markdown || '').trim();
+    if(!raw) return [];
+    if(kind === 'pixar-storyboard' || isStoryAnimTextKind(kind)){
+        const re = /^(#{2,3})\s+(.+)$/gm;
+        const hits = [];
+        let m;
+        while((m = re.exec(raw))){
+            hits.push({title:m[2].trim(), start:m.index, headEnd:m.index + m[0].length});
+        }
+        if(hits.length){
+            return hits.map((h, i) => {
+                const end = i + 1 < hits.length ? hits[i + 1].start : raw.length;
+                return {title:h.title, body:raw.slice(h.headEnd, end).replace(/^\s*\n?/, '').trim()};
+            });
+        }
+    }
+    return kind === 'deepWhite' ? splitDeepWhiteDocSections(raw) : splitMxShellPromptSections(raw);
+}
+/** Render markdown tables + headings as HTML; leave other text as preformatted blocks. */
+function renderTextOutputRichHtml(text, kind=''){
+    const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+    const chunks = [];
+    let i = 0;
+    const flushPlain = (buf) => {
+        const plain = buf.join('\n').replace(/^\n+|\n+$/g, '');
+        if(!plain) return;
+        chunks.push(`<pre class="text-output-plain">${escapeHtml(plain)}</pre>`);
+    };
+    let plainBuf = [];
+    while(i < lines.length){
+        const line = lines[i];
+        const heading = /^(#{2,3})\s+(.+)\s*$/.exec(line.trim());
+        if(heading){
+            flushPlain(plainBuf);
+            plainBuf = [];
+            const level = heading[1].length;
+            chunks.push(`<h${level} class="text-output-md-heading">${escapeHtml(heading[2].trim())}</h${level}>`);
+            i += 1;
+            continue;
+        }
+        if(isMarkdownTableRow(line) && i + 1 < lines.length && isMarkdownTableSeparator(lines[i + 1])){
+            flushPlain(plainBuf);
+            plainBuf = [];
+            const rows = [];
+            while(i < lines.length && isMarkdownTableRow(lines[i])){
+                if(!isMarkdownTableSeparator(lines[i])) rows.push(parseMarkdownTableCells(lines[i]));
+                i += 1;
+            }
+            if(rows.length){
+                const head = rows[0];
+                const body = rows.slice(1);
+                const colCount = Math.max(head.length, ...body.map(r => r.length), 1);
+                const isStoryboard = kind === 'pixar-storyboard' || head.some(c => /编号|镜头描述|镜头|引用锚点|拍什么/.test(c));
+                const thead = `<thead><tr>${Array.from({length:colCount}, (_, ci) => `<th>${escapeHtml(head[ci] || '')}</th>`).join('')}</tr></thead>`;
+                const tbody = `<tbody>${body.map(row => `<tr>${Array.from({length:colCount}, (_, ci) => `<td>${escapeHtml(row[ci] || '')}</td>`).join('')}</tr>`).join('')}</tbody>`;
+                chunks.push(`<div class="text-output-table-wrap ${isStoryboard ? 'is-storyboard' : ''}"><table class="text-output-md-table">${thead}${tbody}</table></div>`);
+            }
+            continue;
+        }
+        plainBuf.push(line);
+        i += 1;
+    }
+    flushPlain(plainBuf);
+    if(!chunks.length) return `<pre class="text-output-section-body">${escapeHtml(text || '')}</pre>`;
+    return `<div class="text-output-rich">${chunks.join('')}</div>`;
 }
 function addTextOutputNode(point, kind=''){
     const p = point || defaultPoint(680, 0);
@@ -5356,6 +5486,31 @@ function addScreenwritingAgentNode(point){
         running:false,
     });
 }
+function addPixarAdScriptAgentNode(point){
+    const p = point || defaultPoint(280, 0);
+    return addNode({
+        id:uid('pixarad'),
+        type:'pixarAdScriptAgent',
+        x:p.x,
+        y:p.y,
+        w:420,
+        h:580,
+        model:defaultAgentChatModel(),
+        durationPreset:'30',
+        durationSec:30,
+        story:'',
+        raw_script:'',
+        style_description:'迪士尼皮克斯3D动画风格',
+        refNames:{},
+        refKinds:{},
+        outputText:'',
+        outputData:null,
+        assetOutputNodeIds:{},
+        runStatus:'idle',
+        runError:'',
+        running:false,
+    });
+}
 function syncScreenwritingToTextOutput(agent, data){
     const out = ensureAgentTextOutputNode(agent, 'screenwriting');
     if(!out) return null;
@@ -5367,6 +5522,75 @@ function syncScreenwritingToTextOutput(agent, data){
     out.sections = splitDeepWhiteDocSections(markdown);
     out.sourceAgentId = agent.id;
     return out;
+}
+function syncStoryAssetPromptsToTextOutputs(agent, data){
+    if(!agent || !data) return [];
+    const list = Array.isArray(data.asset_prompts) ? data.asset_prompts : [];
+    if(!agent.assetOutputNodeIds || typeof agent.assetOutputNodeIds !== 'object') agent.assetOutputNodeIds = {};
+    return list.map((item, index) => {
+        const kindBase = String(item?.kind || 'character').trim().toLowerCase();
+        const kind = `story-asset-${['character','prop','scene'].includes(kindBase) ? kindBase : 'character'}`;
+        const assetKey = `asset-${index}`;
+        let out = nodes.find(n => n.id === agent.assetOutputNodeIds[assetKey] && isTextOutputNode(n)) || null;
+        if(!out){
+            out = addTextOutputNode({x:agent.x + 500, y:agent.y + index * 420}, kind);
+            connections.push({id:uid('c'), from:agent.id, to:out.id});
+            agent.assetOutputNodeIds[assetKey] = out.id;
+        }
+        const title = String(item?.name || '').trim() || (langIsEn() ? `Asset ${index + 1}` : `资产 ${index + 1}`);
+        out.kind = kind;
+        out.text = `## ${title}\n\n${String(item?.prompt || '').trim()}`;
+        out.mode_label = textOutputKindLabel(kind);
+        out.sections = splitTextOutputDocSections(out.text, kind);
+        out.sourceAgentId = agent.id;
+        return out;
+    });
+}
+function syncPixarAdAssetsToTextOutputs(agent, data){
+    if(!agent || !data) return [];
+    if(data.mode === 'asset_prompts') return syncStoryAssetPromptsToTextOutputs(agent, data);
+    const sketchSheets = Array.isArray(data.sketch_sheets) ? data.sketch_sheets : [];
+    const videoSegments = Array.isArray(data.video_segments) ? data.video_segments : [];
+    const sketchText = sketchSheets.length
+        ? sketchSheets.map(s => `## 第${s.sheet_index}张（${s.grid_count}宫格 · 镜${s.shot_from}-${s.shot_to}）\n\n${s.prompt || ''}`).join('\n\n')
+        : [
+            '## 第1张（分镜1-9）',
+            data.sketch_prompts?.sketch_1 || '',
+            '## 第2张（分镜10-18）',
+            data.sketch_prompts?.sketch_2 || '',
+        ].join('\n\n');
+    const videoText = videoSegments.length
+        ? videoSegments.map(v => `## 视频段${v.segment_index}${v.duration_sec ? `（${v.duration_sec}s）` : ''}\n\n${v.prompt || ''}`).join('\n\n')
+        : [
+            '## 视频段1（分镜1-9）',
+            data.video_prompts?.video_1 || '',
+            '## 视频段2（分镜10-18）',
+            data.video_prompts?.video_2 || '',
+        ].join('\n\n');
+    const assets = [
+        ['keys', JSON.stringify(data.node_keys || {}, null, 2)],
+        ['global', data.global_config_md],
+        ['storyboard', data.storyboard_table_md],
+        ['sketch', sketchText],
+        ['video', videoText],
+        ['audio', JSON.stringify(data.audio_config || {}, null, 2)],
+    ];
+    if(!agent.assetOutputNodeIds || typeof agent.assetOutputNodeIds !== 'object') agent.assetOutputNodeIds = {};
+    return assets.map(([asset, raw], index) => {
+        const kind = `pixar-${asset}`;
+        let out = nodes.find(n => n.id === agent.assetOutputNodeIds[asset] && isTextOutputNode(n)) || null;
+        if(!out){
+            out = addTextOutputNode({x:agent.x + 500 + Math.floor(index / 3) * 640, y:agent.y + (index % 3) * 600}, kind);
+            connections.push({id:uid('c'), from:agent.id, to:out.id});
+            agent.assetOutputNodeIds[asset] = out.id;
+        }
+        out.kind = kind;
+        out.text = String(raw || '').trim();
+        out.mode_label = textOutputKindLabel(kind);
+        out.sections = splitTextOutputDocSections(out.text, kind);
+        out.sourceAgentId = agent.id;
+        return out;
+    });
 }
 function ensureSeedanceTextOutput(agent){
     if(!agent) return null;
@@ -6587,6 +6811,7 @@ function linkCreateOptions(state){
                 {type:'mxShellPromptAgent', label:langIsEn() ? 'Mx-Shell Prompt Agent' : 'Mx-Shell 提示词 Agent', icon:'film'},
                 {type:'deepWhiteShotAgent', label:langIsEn() ? 'DeepWhite Shot Agent' : 'DeepWhite 导演分镜 Agent', icon:'clapperboard'},
                 {type:'screenwritingAgent', label:langIsEn() ? 'Screenwriting Agent' : '编剧 Agent', icon:'pen-line'},
+                {type:'pixarAdScriptAgent', label:langIsEn() ? 'Story Anim Storyboard Agent' : '故事动画分镜 Agent', icon:'sparkles'},
                 {type:'videoReverse', label:'视频反推', icon:'scan-search'},
                 {type:'llm', label:'LLM', icon:'message-square-text'},
                 {type:'loop', label:tr('canvas.loopNode'), icon:'repeat-2'}
@@ -6638,7 +6863,7 @@ function openLinkCreateMenu(originId, originKind, clientX, clientY){
 }
 function openGeneratorNodeMenu(nodeId, clientX, clientY){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || (!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent' && node.type !== 'slotsLoopVideoAgent' && node.type !== 'mxShellPromptAgent' && node.type !== 'deepWhiteShotAgent' && node.type !== 'screenwritingAgent')) return false;
+    if(!node || (!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent' && node.type !== 'slotsLoopVideoAgent' && node.type !== 'mxShellPromptAgent' && node.type !== 'deepWhiteShotAgent' && node.type !== 'screenwritingAgent' && node.type !== 'pixarAdScriptAgent')) return false;
     const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(nodeId)}"]`);
     const rect = el?.getBoundingClientRect();
     const point = screenToWorld(clientX, clientY);
@@ -6955,6 +7180,7 @@ function createNodeByType(type, point){
     if(type === 'deepWhiteShotAgent') return addDeepWhiteShotAgentNode(point);
     if(type === 'deepWhiteShotView') return addTextOutputNode(point, 'deepWhite');
     if(type === 'screenwritingAgent') return addScreenwritingAgentNode(point);
+    if(type === 'pixarAdScriptAgent') return addPixarAdScriptAgentNode(point);
     if(type === 'textOutput') return addTextOutputNode(point);
     if(type === 'videoReverse') return addVideoReverseNode(point);
     if(type === 'msgen') return addMsGenNode(point);
@@ -6984,6 +7210,7 @@ function menuAdd(type){
     if(type === 'deepWhiteShotAgent') addDeepWhiteShotAgentNode(menuPoint);
     if(type === 'deepWhiteShotView') addTextOutputNode(menuPoint, 'deepWhite');
     if(type === 'screenwritingAgent') addScreenwritingAgentNode(menuPoint);
+    if(type === 'pixarAdScriptAgent') addPixarAdScriptAgentNode(menuPoint);
     if(type === 'textOutput') addTextOutputNode(menuPoint);
     if(type === 'videoReverse') addVideoReverseNode(menuPoint);
     if(type === 'msgen') addMsGenNode(menuPoint);
@@ -9154,7 +9381,7 @@ function refreshNodes(ids=[]){
 }
 /** 运行态徽章 HTML（与 renderNode 一致） */
 function nodeRunStatusHtml(node){
-    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent','videoReverse'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent','videoReverse'].includes(node.type) && node.runStatus
         && node.runStatus !== 'idle';
     if(!showStatus) return '';
     const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -9322,7 +9549,7 @@ const NODE_TYPE_ICON = {
     image:'image', prompt:'type', loop:'repeat', promptGroup:'layers', group:'folder',
     imageBatch:'images', frameStack:'images', llm:'brain', replicaAgent:'copy',
     imageRepairAgent:'wrench', batchPosterAgent:'layout-grid', nineGridAgent:'grid-3x3',
-    slotsLoopVideoAgent:'clapperboard', mxShellPromptAgent:'film', mxShellPromptView:'file-text', textOutput:'file-output', deepWhiteShotAgent:'clapperboard', deepWhiteShotView:'book-open', screenwritingAgent:'pen-line', videoReverse:'rewind', comfy:'workflow',
+    slotsLoopVideoAgent:'clapperboard', mxShellPromptAgent:'film', mxShellPromptView:'file-text', textOutput:'file-output', deepWhiteShotAgent:'clapperboard', deepWhiteShotView:'book-open', screenwritingAgent:'pen-line', pixarAdScriptAgent:'sparkles', videoReverse:'rewind', comfy:'workflow',
     ltxDirector:'film', rh:'cloud', msgen:'sparkles', video:'video', output:'layout-grid'
 };
 function renderNode(node){
@@ -9347,7 +9574,7 @@ function renderNode(node){
         applyNodeSelection(node.id, e);
     };
     el.oncontextmenu = e => {
-        if(!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'output' && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent' && node.type !== 'slotsLoopVideoAgent' && node.type !== 'mxShellPromptAgent' && node.type !== 'deepWhiteShotAgent' && node.type !== 'screenwritingAgent' && node.type !== 'textOutput') return;
+        if(!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'output' && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent' && node.type !== 'slotsLoopVideoAgent' && node.type !== 'mxShellPromptAgent' && node.type !== 'deepWhiteShotAgent' && node.type !== 'screenwritingAgent' && node.type !== 'pixarAdScriptAgent' && node.type !== 'textOutput') return;
         e.preventDefault();
         e.stopPropagation();
         if(node.type === 'output'){
@@ -9356,10 +9583,10 @@ function renderNode(node){
         }
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'imageBatch' ? (langIsEn() ? 'Image batch' : '图片组') : node.type === 'frameStack' ? (langIsEn() ? 'Frame Stack' : '截帧集') : node.type === 'llm' ? 'LLM' : node.type === 'replicaAgent' ? '复刻 Agent' : node.type === 'imageRepairAgent' ? (langIsEn() ? 'Repair Agent' : '修图 Agent') : node.type === 'batchPosterAgent' ? 'Batch Poster Agent' : node.type === 'nineGridAgent' ? (langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent') : node.type === 'slotsLoopVideoAgent' ? (langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent') : node.type === 'mxShellPromptAgent' ? (langIsEn() ? 'Mx-Shell Prompt Agent' : 'Mx-Shell 提示词 Agent') : node.type === 'textOutput' ? textOutputKindLabel(node.kind) : node.type === 'mxShellPromptView' ? textOutputKindLabel('mxShell') : node.type === 'deepWhiteShotAgent' ? (langIsEn() ? 'DeepWhite Shot Agent' : 'DeepWhite 导演分镜 Agent') : node.type === 'deepWhiteShotView' ? textOutputKindLabel('deepWhite') : node.type === 'screenwritingAgent' ? (langIsEn() ? 'Screenwriting Agent' : '编剧 Agent') : node.type === 'videoReverse' ? '视频反推' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'imageBatch' ? (langIsEn() ? 'Image batch' : '图片组') : node.type === 'frameStack' ? (langIsEn() ? 'Frame Stack' : '截帧集') : node.type === 'llm' ? 'LLM' : node.type === 'replicaAgent' ? '复刻 Agent' : node.type === 'imageRepairAgent' ? (langIsEn() ? 'Repair Agent' : '修图 Agent') : node.type === 'batchPosterAgent' ? 'Batch Poster Agent' : node.type === 'nineGridAgent' ? (langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent') : node.type === 'slotsLoopVideoAgent' ? (langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent') : node.type === 'mxShellPromptAgent' ? (langIsEn() ? 'Mx-Shell Prompt Agent' : 'Mx-Shell 提示词 Agent') : node.type === 'textOutput' ? textOutputKindLabel(node.kind) : node.type === 'mxShellPromptView' ? textOutputKindLabel('mxShell') : node.type === 'deepWhiteShotAgent' ? (langIsEn() ? 'DeepWhite Shot Agent' : 'DeepWhite 导演分镜 Agent') : node.type === 'deepWhiteShotView' ? textOutputKindLabel('deepWhite') : node.type === 'screenwritingAgent' ? (langIsEn() ? 'Screenwriting Agent' : '编剧 Agent') : node.type === 'pixarAdScriptAgent' ? (langIsEn() ? 'Story Anim Storyboard Agent' : '故事动画分镜 Agent') : node.type === 'videoReverse' ? '视频反推' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 运行状态徽章：含单节点失败与级联失败
-    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent','videoReverse'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent','videoReverse'].includes(node.type) && node.runStatus
         && node.runStatus !== 'idle';
     const statusHtml = showStatus ? (() => {
         const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -9477,6 +9704,7 @@ function renderNode(node){
             refreshDownstreamSlotsLoopVideoNodes(node.id);
             refreshDownstreamMxShellPromptNodes(node.id);
             refreshDownstreamDeepWhiteShotNodes(node.id);
+            refreshDownstreamPixarAdScriptNodes(node.id);
             scheduleLinkGeometryRefresh([node.id]);
         };
     }
@@ -9558,6 +9786,7 @@ function renderNode(node){
     if(node.type === 'mxShellPromptView' || node.type === 'deepWhiteShotView' || node.type === 'textOutput') body.appendChild(renderTextOutputBody(node));
     if(node.type === 'deepWhiteShotAgent') body.appendChild(renderDeepWhiteShotAgentBody(node));
     if(node.type === 'screenwritingAgent') body.appendChild(renderScreenwritingAgentBody(node));
+    if(node.type === 'pixarAdScriptAgent') body.appendChild(renderPixarAdScriptAgentBody(node));
     if(node.type === 'videoReverse') body.appendChild(renderVideoReverseBody(node));
     if(node.type === 'msgen') body.appendChild(renderMsGenBody(node));
     if(node.type === 'video') body.appendChild(renderVideoBody(node));
@@ -9636,8 +9865,8 @@ function renderNode(node){
         if(!isNodeDragSurface(e.target)) return;
         startNodeDrag(e, node);
     };
-    const canInput = ['generator','comfy','ltxDirector','output','llm','msgen','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent','textOutput','videoReverse','frameStack','loop','imageBatch'].includes(node.type);
-    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','replicaAgent','imageRepairAgent','videoReverse','slotsLoopVideoAgent','mxShellPromptAgent','textOutput','mxShellPromptView','deepWhiteShotAgent','deepWhiteShotView','screenwritingAgent','frameStack','imageBatch'].includes(node.type);
+    const canInput = ['generator','comfy','ltxDirector','output','llm','msgen','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent','textOutput','videoReverse','frameStack','loop','imageBatch'].includes(node.type);
+    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','replicaAgent','imageRepairAgent','videoReverse','slotsLoopVideoAgent','mxShellPromptAgent','textOutput','mxShellPromptView','deepWhiteShotAgent','deepWhiteShotView','screenwritingAgent','pixarAdScriptAgent','frameStack','imageBatch'].includes(node.type);
     if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"><span class="port-dot"></span></div>`);
     if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"><span class="port-dot"></span></div>`);
     el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
@@ -10031,6 +10260,7 @@ function defaultNodeSize(type){
     if(type === 'mxShellPromptAgent') return {w:400, h:400};
     if(type === 'mxShellPromptView' || type === 'deepWhiteShotView' || type === 'textOutput') return {w:600, h:560};
     if(type === 'deepWhiteShotAgent') return {w:400, h:400};
+    if(type === 'pixarAdScriptAgent') return {w:420, h:580};
     if(type === 'videoReverse') return {w:380, h:460};
     if(type === 'msgen') return {w:260, h:0};
     if(type === 'video') return {w:260, h:0};
@@ -11134,7 +11364,7 @@ function mxShellPromptAgentStory(node){
     return upstream || inline;
 }
 function collectMxShellRefEntries(node){
-    if(!node || (node.type !== 'mxShellPromptAgent' && node.type !== 'deepWhiteShotAgent')) return [];
+    if(!node || (node.type !== 'mxShellPromptAgent' && node.type !== 'deepWhiteShotAgent' && node.type !== 'pixarAdScriptAgent')) return [];
     if(!node.refNames || typeof node.refNames !== 'object') node.refNames = {};
     if(!node.refKinds || typeof node.refKinds !== 'object') node.refKinds = {};
     const sources = orderedSources(node, generatorSources(node));
@@ -11248,6 +11478,13 @@ function refreshDownstreamDeepWhiteShotNodes(fromNodeId){
         .filter(c => c.from === fromNodeId)
         .map(c => c.to)
         .filter(id => nodes.find(n => n.id === id)?.type === 'deepWhiteShotAgent');
+    if(targetIds.length) refreshNodes(targetIds);
+}
+function refreshDownstreamPixarAdScriptNodes(fromNodeId){
+    const targetIds = connections
+        .filter(c => c.from === fromNodeId)
+        .map(c => c.to)
+        .filter(id => nodes.find(n => n.id === id)?.type === 'pixarAdScriptAgent');
     if(targetIds.length) refreshNodes(targetIds);
 }
 function renderMxShellPromptAgentBody(node){
@@ -11397,10 +11634,14 @@ function renderTextOutputBody(node){
     const kind = node.kind || (node.mode ? 'mxShell' : (node.scene_name || node.primary_director ? 'deepWhite' : ''));
     if(kind && !node.kind) node.kind = kind;
     const text = String(node.text || '').trim();
-    let sections = Array.isArray(node.sections) && node.sections.length ? node.sections : null;
+    // Pixar assets: always re-split so markdown tables / ### chapters render correctly after skill updates.
+    let sections = isStoryAnimTextKind(kind)
+        ? splitTextOutputDocSections(text, kind)
+        : (Array.isArray(node.sections) && node.sections.length ? node.sections : null);
     if(!sections){
-        sections = kind === 'deepWhite' ? splitDeepWhiteDocSections(text) : splitMxShellPromptSections(text);
+        sections = splitTextOutputDocSections(text, kind);
     }
+    if(isStoryAnimTextKind(kind)) node.sections = sections;
     if(!Array.isArray(node.expandedSections)) node.expandedSections = [];
     const expanded = new Set(node.expandedSections.map(Number).filter(n => Number.isFinite(n)));
     const allExpanded = sections.length > 0 && sections.every((_, i) => expanded.has(i));
@@ -11419,18 +11660,26 @@ function renderTextOutputBody(node){
     }
     const pill = kind === 'deepWhite'
         ? 'DeepWhite v3'
-        : (String(node.mode_label || mxShellPromptModeLabel(node.mode) || 'Mx-Shell'));
+        : (String(node.mode_label || (isStoryAnimTextKind(kind) ? textOutputKindLabel(kind) : mxShellPromptModeLabel(node.mode)) || 'Mx-Shell'));
     const metaBits = [];
     if(kind === 'deepWhite'){
         if(node.scene_name) metaBits.push(escapeHtml(node.scene_name));
         if(node.primary_director) metaBits.push(escapeHtml(node.primary_director));
         if(node.image_shot_count) metaBits.push(`${node.image_shot_count}${langIsEn() ? ' shots' : ' 镜'}`);
+    } else if(kind === 'pixar-storyboard'){
+        metaBits.push(langIsEn() ? 'Storyboard table view' : '分镜表视图');
+    } else if(isStoryAnimTextKind(kind)){
+        metaBits.push(langIsEn() ? 'Story asset' : '故事资产');
     } else {
         metaBits.push(langIsEn() ? 'Seedance-ready TXT' : 'Seedance 可用 TXT');
     }
+    const useRich = kind === 'pixar-storyboard' || isStoryAnimTextKind(kind) || kind === 'deepWhite' || kind === 'screenwriting';
     const sectionsHtml = sections.map((sec, i) => {
         const open = expanded.has(i);
         const title = kind === 'deepWhite' ? `## ${sec.title}` : sec.title;
+        const bodyHtml = useRich
+            ? renderTextOutputRichHtml(sec.body || '', kind)
+            : `<pre class="text-output-section-body">${escapeHtml(sec.body || '')}</pre>`;
         return `
         <section class="text-output-section ${open ? 'is-open' : ''}" data-sec="${i}">
             <button type="button" class="text-output-section-toggle" data-sec="${i}">
@@ -11442,7 +11691,7 @@ function renderTextOutputBody(node){
             <div class="text-output-section-actions">
                 <button type="button" class="gen-btn text-output-sec-copy" data-sec="${i}" title="${langIsEn() ? 'Copy section' : '复制本章'}"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button>
             </div>
-            <pre class="text-output-section-body">${escapeHtml(sec.body || '')}</pre>` : ''}
+            ${bodyHtml}` : ''}
         </section>`;
     }).join('');
     wrap.innerHTML = `
@@ -11459,7 +11708,7 @@ function renderTextOutputBody(node){
         </div>
         <div class="text-output-sections">${sectionsHtml}</div>
     `;
-    wrap.querySelectorAll('.text-output-section-body').forEach(el => bindScrollableText(el));
+    wrap.querySelectorAll('.text-output-section-body, .text-output-plain, .text-output-table-wrap').forEach(el => bindScrollableText(el));
     wrap.querySelectorAll('.text-output-section-toggle').forEach(btn => {
         btn.onclick = e => {
             e.stopPropagation();
@@ -11542,7 +11791,7 @@ function openTextOutputReader(nodeId){
     const text = String(node.text || '').trim();
     let sections = Array.isArray(node.sections) && node.sections.length ? node.sections : null;
     if(!sections){
-        sections = kind === 'deepWhite' ? splitDeepWhiteDocSections(text) : splitMxShellPromptSections(text);
+        sections = splitTextOutputDocSections(text, kind);
     }
     textOutputReaderNodeId = node.id;
     if(els.title) els.title.textContent = textOutputKindLabel(kind);
@@ -11551,6 +11800,10 @@ function openTextOutputReader(nodeId){
         if(node.scene_name) metaBits.push(node.scene_name);
         if(node.primary_director) metaBits.push(node.primary_director);
         if(node.image_shot_count) metaBits.push(`${node.image_shot_count}${langIsEn() ? ' shots' : ' 镜'}`);
+    } else if(kind === 'pixar-storyboard'){
+        metaBits.push(langIsEn() ? 'Storyboard table view' : '分镜表视图');
+    } else if(isStoryAnimTextKind(kind)){
+        metaBits.push(String(node.mode_label || textOutputKindLabel(kind)));
     } else {
         metaBits.push(String(node.mode_label || mxShellPromptModeLabel(node.mode) || 'Mx-Shell'));
         metaBits.push(langIsEn() ? 'Seedance-ready TXT' : 'Seedance 可用 TXT');
@@ -11572,13 +11825,16 @@ function openTextOutputReader(nodeId){
         els.toc.querySelector('.text-output-reader-toc-item')?.classList.add('is-active');
     }
     if(els.content){
+        const useRich = kind === 'pixar-storyboard' || isStoryAnimTextKind(kind) || kind === 'deepWhite' || kind === 'screenwriting';
         els.content.innerHTML = sections.map((sec, i) => `
             <section class="text-output-reader-section" data-sec="${i}" id="text-output-reader-sec-${i}">
                 <div class="text-output-reader-section-head">
                     <h3 class="text-output-reader-section-title">${escapeHtml(kind === 'deepWhite' ? String(sec.title || '') : sec.title)}</h3>
                     <button type="button" class="text-output-reader-icon-btn text-output-reader-sec-copy" data-sec="${i}" title="${langIsEn() ? 'Copy section' : '复制本章'}"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button>
                 </div>
-                <pre class="text-output-reader-section-body">${escapeHtml(sec.body || '')}</pre>
+                ${useRich
+                    ? renderTextOutputRichHtml(sec.body || '', kind)
+                    : `<pre class="text-output-reader-section-body">${escapeHtml(sec.body || '')}</pre>`}
             </section>
         `).join('') || `<div class="mx-shell-view-empty-hint">${langIsEn() ? 'Empty document' : '文档为空'}</div>`;
         els.content.querySelectorAll('.text-output-reader-sec-copy').forEach(btn => {
@@ -12236,6 +12492,238 @@ async function runScreenwritingAgent(nodeId, opts={}){
     if(opts.cascade) await execute();
     else void execute();
 }
+function pixarAdAgentScript(node){
+    const source = orderedSources(node, generatorSources(node)).find(item => item.prompt && !item.refs?.length);
+    const upstream = String(source?.prompt || '').trim();
+    const inline = String(node.story || node.raw_script || '').trim();
+    return upstream && inline ? `${upstream}\n\n${inline}` : (upstream || inline);
+}
+function storyAnimMissingKinds(node){
+    const bindings = mxShellPromptAgentImageBindings(node);
+    const kinds = new Set(bindings.map(b => b.kind).filter(k => k && k !== 'auto'));
+    const missing = [];
+    if(!kinds.has('character') && !bindings.length) missing.push('character');
+    if(!kinds.has('prop')) missing.push('prop');
+    if(!kinds.has('scene')) missing.push('scene');
+    return missing;
+}
+function renderPixarAdScriptAgentBody(node){
+    node.model = clampAgentTextModel(node.model);
+    node.durationPreset = normalizeStoryAnimDurationPreset(node.durationPreset, node.durationSec);
+    node.durationSec = resolveStoryAnimDurationSec(node);
+    if(!node.refNames || typeof node.refNames !== 'object') node.refNames = {};
+    if(!node.refKinds || typeof node.refKinds !== 'object') node.refKinds = {};
+    const script = pixarAdAgentScript(node);
+    const outputText = String(node.outputText || '').trim();
+    const imageUrls = mxShellPromptAgentImageUrls(node);
+    const missing = storyAnimMissingKinds(node);
+    const ready = script.length >= 20;
+    const wrap = document.createElement('div');
+    wrap.className = 'generator-body pixar-ad-script-body agent-console-body';
+    const flowHint = langIsEn()
+        ? 'Flow: ① asset prompts → gen images (done) ② story script (no need to rewire images here) ③ sketch textOutput + assets → image gen (图N = wire order)'
+        : '推荐：①资产提示词→手连生图（资产结束）②直接生成分镜脚本（不必回连图）③线稿提示词+资产图一起接生图（图N=连线顺序）';
+    wrap.innerHTML = `
+        <div class="agent-status-bar ${ready ? 'ok' : 'warn'}">${escapeHtml([
+            `${node.durationSec}s`,
+            clampAgentTextModel(node.model),
+            outputText ? (langIsEn() ? 'outputs ready' : '已有输出') : (ready ? (langIsEn() ? 'Ready' : '可生成') : (langIsEn() ? 'Need story (≥20 chars)' : '需故事创意（≥20字）')),
+        ].join(' · '))}</div>
+        <div class="mx-shell-result-compact-hint pixar-flow-hint">${escapeHtml(flowHint)}</div>
+        ${outputText ? `
+        <div class="mx-shell-result-compact">
+            <div class="mx-shell-result-compact-title">${langIsEn() ? 'Outputs ready' : '输出已生成'}</div>
+            <button type="button" class="gen-btn pixar-focus-assets-btn"><i data-lucide="panel-right" class="w-4 h-4"></i><span>${langIsEn() ? 'Open outputs' : '打开输出节点'}</span></button>
+        </div>` : node.runStatus === 'failed' && node.runError ? `
+        <div class="mx-shell-result-compact is-error-panel"><div class="mx-shell-result-compact-hint">${escapeHtml(node.runError)}</div></div>` : ''}
+        <div class="agent-console-grid">
+            <label class="field">
+                <div class="setting-title">${langIsEn() ? 'Duration' : '时长'}</div>
+                <select class="select-lite pixar-duration-preset">
+                    ${['15','20','25','30'].map(v => `<option value="${v}" ${node.durationPreset === v ? 'selected' : ''}>${v}s</option>`).join('')}
+                    <option value="custom" ${node.durationPreset === 'custom' ? 'selected' : ''}>${langIsEn() ? 'Custom (>30s)' : '自定义 (>30s)'}</option>
+                </select>
+            </label>
+            <label class="field pixar-custom-duration-field" style="${node.durationPreset === 'custom' ? '' : 'display:none'}">
+                <div class="setting-title">${langIsEn() ? 'Seconds' : '秒数'}</div>
+                <input class="setting-input pixar-duration-sec" type="number" min="31" max="180" value="${escapeAttr(String(node.durationSec || 45))}">
+            </label>
+        </div>
+        <label class="field">
+            <div class="setting-title">${langIsEn() ? 'Visual style' : '画面风格基调'}</div>
+            <input class="setting-input pixar-style-description" type="text" maxlength="500" value="${escapeHtml(node.style_description || '')}">
+        </label>
+        <label class="field">
+            <div class="setting-title">${langIsEn() ? 'Story / idea' : '故事创意 / 剧本'}</div>
+            ${script && !String(node.story || node.raw_script || '').trim() ? `<div class="mx-shell-upstream-preview">${escapeHtml(script.slice(0, 220))}${script.length > 220 ? '…' : ''}</div>` : ''}
+            <textarea class="pixar-raw-script" placeholder="${langIsEn() ? 'Paste the story idea or connect an upstream text node…' : '粘贴故事创意，或连接上游文本节点…'}">${escapeHtml(node.story || node.raw_script || '')}</textarea>
+        </label>
+        <details class="agent-refs-fold" ${imageUrls.length ? 'open' : ''}>
+            <summary>${langIsEn() ? 'Refs on Agent (optional, not required)' : '连到 Agent 的参考图（可选，不必为出脚本而回连）'}</summary>
+            <div class="mx-shell-ref-list"></div>
+        </details>
+        <label class="field">
+            <div class="setting-title">${langIsEn() ? 'Model' : '模型'}</div>
+            <select class="select-lite pixar-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
+        </label>
+        ${node.runError && !(node.runStatus === 'failed' && !outputText) ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
+        <div class="gen-run-row gen-run-row-split">
+            <button class="gen-btn pixar-asset-prompt-btn ${node.running ? 'running' : ''}" ${!ready || node.running ? 'disabled' : ''} title="${escapeAttr(missing.length ? (langIsEn() ? 'When assets missing' : '缺彩图资产时用') : (langIsEn() ? 'Regenerate asset prompts' : '可重生成资产提示词'))}"><i data-lucide="image-plus" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Working…' : '生成中…') : (langIsEn() ? 'Asset prompts' : '生成资产提示词')}</span></button>
+            <button class="gen-btn pixar-run-btn ${node.running ? 'running' : ''}" ${!ready || node.running ? 'disabled' : ''} title="${escapeAttr(langIsEn() ? 'No need to rewire asset images here' : '不必先把资产图连回本节点')}"><i data-lucide="sparkles" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Directing…' : '导演生成中…') : (langIsEn() ? 'Story script' : '生成分镜脚本')}</span></button>
+        </div>
+    `;
+    const bindText = (selector, key, max) => {
+        const input = wrap.querySelector(selector);
+        if(!input) return;
+        input.onmousedown = e => e.stopPropagation();
+        input.oninput = e => {
+            node[key] = String(e.target.value || '').slice(0, max);
+            if(key === 'story' || key === 'raw_script'){
+                node.story = node[key];
+                node.raw_script = node[key];
+            }
+            scheduleSave();
+        };
+        if(input.tagName === 'TEXTAREA') bindScrollableText(input);
+    };
+    bindText('.pixar-style-description', 'style_description', 500);
+    bindText('.pixar-raw-script', 'story', 24000);
+    const presetSel = wrap.querySelector('.pixar-duration-preset');
+    presetSel.onmousedown = e => e.stopPropagation();
+    presetSel.onchange = e => {
+        node.durationPreset = normalizeStoryAnimDurationPreset(e.target.value, node.durationSec);
+        node.durationSec = resolveStoryAnimDurationSec(node);
+        scheduleSave();
+        refreshNodes([node.id]);
+    };
+    const durInput = wrap.querySelector('.pixar-duration-sec');
+    if(durInput){
+        durInput.onmousedown = e => e.stopPropagation();
+        durInput.oninput = e => {
+            node.durationPreset = 'custom';
+            node.durationSec = Math.min(180, Math.max(31, Math.round(Number(e.target.value) || 45)));
+            scheduleSave();
+        };
+    }
+    const modelSelect = wrap.querySelector('.pixar-text-model');
+    modelSelect.onmousedown = e => e.stopPropagation();
+    modelSelect.onchange = e => {
+        node.model = clampAgentTextModel(e.target.value);
+        scheduleSave();
+        refreshNodes([node.id]);
+    };
+    const focusBtn = wrap.querySelector('.pixar-focus-assets-btn');
+    if(focusBtn){
+        focusBtn.onclick = e => {
+            e.stopPropagation();
+            const outputs = syncPixarAdAssetsToTextOutputs(node, node.outputData || {});
+            if(!outputs.length) return;
+            selected.clear();
+            selected.add(outputs[0].id);
+            refreshNodes([node.id, ...outputs.map(out => out.id)]);
+            scheduleSave();
+            requestAnimationFrame(() => document.querySelector(`.node[data-id="${outputs[0].id}"]`)?.scrollIntoView?.({block:'nearest', behavior:'smooth'}));
+        };
+    }
+    wrap.querySelector('.pixar-asset-prompt-btn').onclick = e => {
+        e.stopPropagation();
+        void runPixarAdScriptAgent(node.id, {mode:'asset_prompts'});
+    };
+    wrap.querySelector('.pixar-run-btn').onclick = e => {
+        e.stopPropagation();
+        void runPixarAdScriptAgent(node.id, {mode:'story_script'});
+    };
+    renderMxShellRefList(wrap.querySelector('.mx-shell-ref-list'), node, langIsEn()
+        ? 'Optional vision boost only. Prefer wiring assets to the image gen node with sketch prompts.'
+        : '仅可选视觉增强。更推荐：资产图与线稿提示词一起接到生图节点，不必回连本 Agent。');
+    return wrap;
+}
+async function runPixarAdScriptAgent(nodeId, opts={}){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || node.type !== 'pixarAdScriptAgent' || isNodeDisabled(node)) return;
+    const mode = String(opts.mode || 'story_script') === 'asset_prompts' ? 'asset_prompts' : 'story_script';
+    const story = pixarAdAgentScript(node);
+    if(story.length < 20){
+        node.runStatus = 'failed';
+        node.runError = langIsEn() ? 'Please provide a story of at least 20 characters.' : '请提供至少 20 字的故事创意或剧本。';
+        refreshNodes([nodeId]);
+        return;
+    }
+    node.durationPreset = normalizeStoryAnimDurationPreset(node.durationPreset, node.durationSec);
+    const durationSec = resolveStoryAnimDurationSec(node);
+    node.durationSec = durationSec;
+    if(!opts.cascade){
+        node.running = true;
+        node.runStatus = 'running';
+        node.runError = '';
+        refreshNodes([nodeId]);
+    }
+    setStatus(mode === 'asset_prompts'
+        ? (langIsEn() ? 'Story Anim Agent: asset prompts…' : '故事动画分镜 Agent：正在生成资产提示词…')
+        : (langIsEn() ? 'Story Anim Agent: storyboard script…' : '故事动画分镜 Agent：正在生成分镜脚本…'));
+    const execute = async () => {
+        try {
+            const bindings = mxShellPromptAgentImageBindings(node);
+            const resolvedUrls = [];
+            const resolvedBindings = [];
+            for(const binding of bindings){
+                const url = await resolveMxShellImageUrlForApi(binding.url);
+                if(!url) continue;
+                resolvedUrls.push(url);
+                resolvedBindings.push({index:resolvedUrls.length, name:binding.name, kind:binding.kind});
+            }
+            const missing = storyAnimMissingKinds(node);
+            const res = await apiFetch('/api/canvas/story-anim-script', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({
+                    mode,
+                    story,
+                    raw_script:story,
+                    durationSec,
+                    duration_sec:durationSec,
+                    style_description:String(node.style_description || '').trim(),
+                    model:clampAgentTextModel(node.model),
+                    imageUrls:resolvedUrls,
+                    imageBindings:resolvedBindings,
+                    missing_kinds: mode === 'asset_prompts' ? (missing.length ? missing : ['character','prop','scene']) : undefined,
+                }),
+            });
+            if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Story animation script failed' : '故事动画脚本生成失败'));
+            const data = await res.json();
+            const displayText = String(data.display_text || '').trim();
+            if(!displayText) throw new Error(langIsEn() ? 'Empty response' : '输出为空');
+            if(mode === 'story_script' && (!data.storyboard_table_md || !(data.sketch_sheets?.length || data.sketch_prompts))){
+                throw new Error(langIsEn() ? 'Incomplete storyboard response' : '分镜脚本输出不完整');
+            }
+            if(mode === 'asset_prompts' && !(data.asset_prompts?.length)){
+                throw new Error(langIsEn() ? 'No asset prompts returned' : '未返回资产提示词');
+            }
+            node.outputData = data;
+            node.outputText = displayText;
+            const outputs = syncPixarAdAssetsToTextOutputs(node, data);
+            if(!opts.cascade) node.running = false;
+            node.runStatus = 'done';
+            node.runError = '';
+            refreshNodes([nodeId, ...outputs.map(out => out.id)]);
+            scheduleSave();
+            setStatus(mode === 'asset_prompts'
+                ? (langIsEn() ? `Asset prompts ready — ${outputs.length} outputs` : `资产提示词已生成 — ${outputs.length} 个输出`)
+                : (langIsEn() ? 'Story script ready — outputs created' : '分镜脚本已生成 — 已分流输出节点'));
+            if(outputs[0]) requestAnimationFrame(() => document.querySelector(`.node[data-id="${outputs[0].id}"]`)?.scrollIntoView?.({block:'nearest', behavior:'smooth'}));
+        } catch(err) {
+            if(!opts.cascade) node.running = false;
+            node.runStatus = 'failed';
+            node.runError = err.message || String(err);
+            refreshNodes([nodeId]);
+            scheduleSave();
+            if(opts.cascade) throw err;
+        }
+    };
+    if(opts.cascade) await execute();
+    else void execute();
+}
+
 function runScreenwritingFromButton(nodeId, event){
     event?.preventDefault?.();
     event?.stopPropagation?.();
@@ -18221,6 +18709,7 @@ function generatorSources(gen, ctx=loopContext){
         if((n.type === 'textOutput' || n.type === 'mxShellPromptView' || n.type === 'deepWhiteShotView') && n.text) return {id:n.id, type:'textOutput', label:(n.text || textOutputKindLabel(n.kind)).slice(0, 32), refs:[], prompt:n.text || ''};
         if(n.type === 'deepWhiteShotAgent' && n.outputText) return {id:n.id, type:'deepWhiteShotAgent', label:(n.outputText || 'DeepWhite').slice(0, 32), refs:[], prompt:n.outputText || ''};
         if(n.type === 'screenwritingAgent' && n.outputText) return {id:n.id, type:'screenwritingAgent', label:(n.outputText || '编剧').slice(0, 32), refs:[], prompt:n.outputText || ''};
+        if(n.type === 'pixarAdScriptAgent' && n.outputText) return {id:n.id, type:'pixarAdScriptAgent', label:(n.outputText || 'Story Anim').slice(0, 32), refs:[], prompt:n.outputText || ''};
         return null;
     }).flat().filter(Boolean);
 }
@@ -19726,6 +20215,7 @@ function runCascadeNodeByType(node, opts={}){
     if(node.type === 'mxShellPromptAgent') return runMxShellPromptAgent(node.id, runOpts);
     if(node.type === 'deepWhiteShotAgent') return runDeepWhiteShotAgent(node.id, runOpts);
     if(node.type === 'screenwritingAgent') return runScreenwritingAgent(node.id, runOpts);
+    if(node.type === 'pixarAdScriptAgent') return runPixarAdScriptAgent(node.id, runOpts);
     if(node.type === 'msgen') return runMsGenNode(node.id, runOpts);
     if(node.type === 'comfy') return runComfyNode(node.id, runOpts);
     if(node.type === 'ltxDirector') return runLTXDirectorNode(node.id, runOpts);
@@ -19753,7 +20243,7 @@ async function runLimitedCascadeRounds(rounds, limit, runner){
     return Promise.allSettled(workers);
 }
 function canvasRunTypes(){
-    return ['generator','msgen','comfy','ltxDirector','llm','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent'];
+    return ['generator','msgen','comfy','ltxDirector','llm','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent'];
 }
 function canvasWorkflowEdges(){
     const runTypes = canvasRunTypes();
@@ -21919,7 +22409,7 @@ function nodeBounds(ids){
     const y2 = Math.max(...rects.map(r => r.y + r.h));
     return {x:x1, y:y1, w:x2 - x1, h:y2 - y1};
 }
-const FLOW_NODE_ORDER = {image:0, prompt:1, group:2, promptGroup:2, loop:3, llm:4, generator:5, replicaAgent:5, imageRepairAgent:5, videoReverse:5, slotsLoopVideoAgent:5, mxShellPromptAgent:5, deepWhiteShotAgent:5, screenwritingAgent:5, textOutput:6, mxShellPromptView:6, deepWhiteShotView:6, msgen:5, video:5, rh:5, comfy:5, ltxDirector:5, output:6, frameStack:6, imageBatch:6};
+const FLOW_NODE_ORDER = {image:0, prompt:1, group:2, promptGroup:2, loop:3, llm:4, generator:5, replicaAgent:5, imageRepairAgent:5, videoReverse:5, slotsLoopVideoAgent:5, mxShellPromptAgent:5, deepWhiteShotAgent:5, screenwritingAgent:5, pixarAdScriptAgent:5, textOutput:6, mxShellPromptView:6, deepWhiteShotView:6, msgen:5, video:5, rh:5, comfy:5, ltxDirector:5, output:6, frameStack:6, imageBatch:6};
 function moveNodeWithChildren(node, newX, newY){
     if(!node) return;
     const dx = newX - Number(node.x || 0);
@@ -22048,7 +22538,7 @@ function canvasNodeSearchLabel(node){
         image:'Image', prompt:'Prompt', loop:'Loop', promptGroup:'Prompts', group:'Group',
         output:'Output', imageBatch:'Image batch', frameStack:'Frame Stack', llm:'LLM',
         replicaAgent:'Replica Agent', imageRepairAgent:'Repair Agent', batchPosterAgent:'Batch Poster',
-        nineGridAgent:'Nine Grid', slotsLoopVideoAgent:'Slots Loop', mxShellPromptAgent:'Mx-Shell', textOutput:'Text Output', mxShellPromptView:'Mx-Shell View', deepWhiteShotAgent:'DeepWhite', deepWhiteShotView:'DeepWhite Doc', screenwritingAgent:'Screenwriting', videoReverse:'Video Reverse',
+        nineGridAgent:'Nine Grid', slotsLoopVideoAgent:'Slots Loop', mxShellPromptAgent:'Mx-Shell', textOutput:'Text Output', mxShellPromptView:'Mx-Shell View', deepWhiteShotAgent:'DeepWhite', deepWhiteShotView:'DeepWhite Doc', screenwritingAgent:'Screenwriting', pixarAdScriptAgent:'Story Anim', videoReverse:'Video Reverse',
         comfy:'ComfyUI', ltxDirector:'LTX Director', rh:'RunningHub', msgen:'ModelScope',
         video:'Video', generator:'Generator',
     }[node.type] || node.type || 'Node';
@@ -22799,6 +23289,7 @@ function canConnect(fromId, toId){
         if(from.type === 'mxShellPromptAgent') return !to.kind || to.kind === 'mxShell' || to.type === 'mxShellPromptView';
         if(from.type === 'deepWhiteShotAgent') return !to.kind || to.kind === 'deepWhite' || to.kind === 'seedance' || to.type === 'deepWhiteShotView';
         if(from.type === 'screenwritingAgent') return !to.kind || to.kind === 'screenwriting';
+        if(from.type === 'pixarAdScriptAgent') return !to.kind || isStoryAnimTextKind(to.kind);
         return false;
     }
     if(to.type === 'deepWhiteShotAgent'){
@@ -22809,6 +23300,11 @@ function canConnect(fromId, toId){
     if(to.type === 'screenwritingAgent'){
         if(['prompt','promptGroup','loop','llm'].includes(from.type)) return true;
         return false;
+    }
+    if(to.type === 'pixarAdScriptAgent'){
+        if(['prompt','promptGroup','loop','llm','screenwritingAgent','textOutput'].includes(from.type)) return true;
+        if(['image','group','output','frameStack','imageBatch'].includes(from.type)) return true;
+        return CANVAS_MEDIA_OUTPUT_TYPES.includes(from.type);
     }
     if(to.type === 'videoReverse') return ['image','prompt'].includes(from.type);
     if(to.type === 'frameStack'){
@@ -22832,10 +23328,12 @@ function canConnect(fromId, toId){
     if(from.type === 'slotsLoopVideoAgent') return to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm';
     if(from.type === 'mxShellPromptAgent') return to.type === 'textOutput' || to.type === 'mxShellPromptView' || to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'video';
     if(from.type === 'screenwritingAgent') return to.type === 'textOutput' || to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'deepWhiteShotAgent';
+    if(from.type === 'pixarAdScriptAgent') return to.type === 'textOutput' || to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || CANVAS_GENERATOR_TYPES.includes(to.type) || to.type === 'msgen' || to.type === 'nineGridAgent';
     if(from.type === 'textOutput' || from.type === 'mxShellPromptView' || from.type === 'deepWhiteShotView'){
         if(from.kind === 'deepWhite' || from.type === 'deepWhiteShotView') return to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'nineGridAgent';
         if(from.kind === 'screenwriting') return to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'deepWhiteShotAgent';
         if(from.kind === 'seedance') return to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'video';
+        if(isStoryAnimTextKind(from.kind)) return to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'video' || to.type === 'nineGridAgent' || CANVAS_GENERATOR_TYPES.includes(to.type) || to.type === 'msgen';
         return to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'video';
     }
     if(from.type === 'deepWhiteShotAgent') return to.type === 'textOutput' || to.type === 'deepWhiteShotView' || to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'nineGridAgent';

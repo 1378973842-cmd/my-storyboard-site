@@ -656,6 +656,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('slotsLoopVideoAgent')}><i data-lucide="repeat-2" className="w-4 h-4"></i><span>Slots 循环视频 Agent</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('mxShellPromptAgent')}><i data-lucide="film" className="w-4 h-4"></i><span>Mx-Shell 提示词 Agent</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('deepWhiteShotAgent')}><i data-lucide="clapperboard" className="w-4 h-4"></i><span>DeepWhite 导演分镜 Agent</span></button>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('pixarAdScriptAgent')}><i data-lucide="sparkles" className="w-4 h-4"></i><span>故事动画分镜 Agent</span></button>
                       <div className="menu-section-title">输出</div>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('output')}><i data-lucide="circle-dot" className="w-4 h-4"></i><span>Output</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('textOutput')}><i data-lucide="file-output" className="w-4 h-4"></i><span>文本输出</span></button>

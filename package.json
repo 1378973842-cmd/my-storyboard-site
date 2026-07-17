@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit",
     "log:daily": "node scripts/daily-log.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
+    "check:pixar-ad": "tsx scripts/check-pixar-ad-script.ts",
     "recover:canvas-output": "node scripts/recover-canvas-output-from-logs.mjs",
     "backup:remote": "node scripts/backup-remote-once.mjs",
     "deploy:safe": "node scripts/backup-remote-once.mjs && node scripts/deploy-remote-once.mjs"
@@ -33,6 +34,7 @@
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "multer": "^2.1.1",
+    "pinyin-pro": "^3.28.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sharp": "^0.34.5",
