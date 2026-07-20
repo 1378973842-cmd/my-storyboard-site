@@ -576,17 +576,67 @@ function isNodeEnabled(node){
 }
 function toggleSelectedNodesDisabled(){
     if(!selected.size) return;
-    const ids = [...selected];
-    const refreshIds = new Set(ids);
-    ids.forEach(id => {
+    toggleNodesDisabled([...selected]);
+}
+/** 组本身禁用，或组内全部子图都禁用 → 视为整组关闭 */
+function imageBatchEffectivelyDisabled(batch){
+    if(!batch || batch.type !== 'imageBatch') return false;
+    if(isNodeDisabled(batch)) return true;
+    const all = imageBatchAllChildImages(batch);
+    return all.length > 0 && all.every(img => isNodeDisabled(img));
+}
+/** 禁用/恢复整组：级联全部子图（恢复时全部重新启用） */
+function setImageBatchCascadeDisabled(batch, disabled){
+    if(!batch || batch.type !== 'imageBatch') return [];
+    if(disabled) batch.disabled = true;
+    else delete batch.disabled;
+    const touched = [batch.id];
+    imageBatchAllChildImages(batch).forEach(img => {
+        if(disabled) img.disabled = true;
+        else delete img.disabled;
+        touched.push(img.id);
+    });
+    return touched;
+}
+/** 切换禁用：图片组整组级联；单张禁用后不参与出图，可再恢复 */
+function toggleNodesDisabled(ids){
+    const list = [...new Set((ids || []).filter(Boolean))];
+    if(!list.length) return;
+    pushUndo();
+    const refreshIds = new Set();
+    const handled = new Set();
+    // 先处理图片组：禁用=关掉全部子图；恢复=全部子图重新启用
+    list.forEach(id => {
         const node = nodes.find(n => n.id === id);
-        if(!node) return;
-        if(isNodeDisabled(node)) delete node.disabled;
-        else node.disabled = true;
+        if(!node || node.type !== 'imageBatch') return;
+        const nextDisabled = !imageBatchEffectivelyDisabled(node);
+        setImageBatchCascadeDisabled(node, nextDisabled).forEach(tid => {
+            refreshIds.add(tid);
+            handled.add(tid);
+        });
+    });
+    list.forEach(id => {
+        if(handled.has(id)) return;
+        const node = nodes.find(n => n.id === id);
+        if(!node || node.type === 'imageBatch') return;
+        if(isNodeDisabled(node)){
+            delete node.disabled;
+            // 单张恢复时，若整组仍标禁用则解开组标，避免组锁死输出
+            const batch = imageBatchOwningImage(id);
+            if(batch && isNodeDisabled(batch)){
+                delete batch.disabled;
+                refreshIds.add(batch.id);
+            }
+        } else {
+            node.disabled = true;
+        }
+        refreshIds.add(id);
         parentPromptGroupIdsForChild(id).forEach(gid => refreshIds.add(gid));
+        const batch = imageBatchOwningImage(id);
+        if(batch) refreshIds.add(batch.id);
     });
     refreshNodes([...refreshIds]);
-    ids.forEach(id => syncLoopsForUpstreamNode(id));
+    [...refreshIds].forEach(id => syncLoopsForUpstreamNode(id));
     syncGeneratorInputs();
     refreshGeneratorInputViews();
     renderLinks();
@@ -2067,7 +2117,7 @@ function canvasFitFromAspect(ar, maxEdge = CANVAS_MEDIA_MAX_EDGE){
 let imageGenDockEl = null;
 let imageGenDockNodeId = null;
 /** 展开结果「加入图片组」选图态（不进持久化） */
-let genBatchPick = null; // { nodeId, urls: Set<string> }
+let genBatchPick = null; // { nodeId, urls: Set<string>, targetBatchId: 'new'|string }
 let genBatchPickBarEl = null;
 function isGenBatchPicking(node){
     return Boolean(genBatchPick && node?.id && genBatchPick.nodeId === node.id);
@@ -2084,13 +2134,32 @@ function clearGenBatchPick(opts={}){
     }
     if(opts.refresh && id) refreshNodes([id]);
 }
+/** 本生成节点已连出的图片组（优先作加入目标） */
+function imageBatchesLinkedFromGen(genId){
+    if(!genId) return [];
+    return connections
+        .filter(c => c.from === genId)
+        .map(c => nodes.find(n => n.id === c.to))
+        .filter(n => n?.type === 'imageBatch');
+}
+/** 加入目标列表：已连线组在前，其余画布图片组在后 */
+function imageBatchJoinTargets(genId){
+    const linked = imageBatchesLinkedFromGen(genId);
+    const linkedIds = new Set(linked.map(b => b.id));
+    const rest = nodes.filter(n => n.type === 'imageBatch' && !linkedIds.has(n.id));
+    return [...linked, ...rest];
+}
+function defaultGenBatchPickTargetId(genId){
+    const linked = imageBatchesLinkedFromGen(genId);
+    return linked[0]?.id || 'new';
+}
 function startGenBatchPick(nodeId, seedUrl=''){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || !isGenConsoleNode(node)) return;
     const urls = new Set();
     const seed = String(seedUrl || '').trim();
     if(seed) urls.add(seed);
-    genBatchPick = { nodeId, urls };
+    genBatchPick = { nodeId, urls, targetBatchId: defaultGenBatchPickTargetId(nodeId) };
     if(generatorPreviewUrls(node).length > 1) node.historyOpen = true;
     selected.clear();
     selected.add(nodeId);
@@ -2121,6 +2190,22 @@ function positionGenBatchPickBar(node){
     genBatchPickBarEl.style.zIndex = '85';
     genBatchPickBarEl.style.pointerEvents = 'auto';
 }
+function genBatchPickTargetOptionsHtml(genId, selectedId){
+    const en = langIsEn();
+    const targets = imageBatchJoinTargets(genId);
+    const linkedIds = new Set(imageBatchesLinkedFromGen(genId).map(b => b.id));
+    const cur = selectedId || 'new';
+    const opts = [`<option value="new"${cur === 'new' ? ' selected' : ''}>${en ? 'New image group' : '新建图片组'}</option>`];
+    targets.forEach((batch, i) => {
+        const n = imageBatchAllChildImages(batch).length;
+        const linked = linkedIds.has(batch.id);
+        const label = en
+            ? `${linked ? 'Linked' : 'Board'} group ${i + 1} · ${n} images`
+            : `${linked ? '已连线' : '画布'}图片组 ${i + 1} · ${n} 张`;
+        opts.push(`<option value="${escapeAttr(batch.id)}"${cur === batch.id ? ' selected' : ''}>${escapeHtml(label)}</option>`);
+    });
+    return opts.join('');
+}
 function syncGenBatchPickBar(){
     if(!genBatchPick){
         if(genBatchPickBarEl){
@@ -2136,6 +2221,11 @@ function syncGenBatchPickBar(){
     }
     const count = genBatchPick.urls.size;
     const en = langIsEn();
+    const targetId = genBatchPick.targetBatchId || 'new';
+    // 目标组被删时回退
+    if(targetId !== 'new' && !nodes.some(n => n.id === targetId && n.type === 'imageBatch')){
+        genBatchPick.targetBatchId = defaultGenBatchPickTargetId(node.id);
+    }
     if(!genBatchPickBarEl){
         genBatchPickBarEl = document.createElement('div');
         genBatchPickBarEl.className = 'gen-batch-pick-bar';
@@ -2143,11 +2233,26 @@ function syncGenBatchPickBar(){
         genBatchPickBarEl.onmousedown = e => e.stopPropagation();
         board.appendChild(genBatchPickBarEl);
     }
+    const confirmLabel = (genBatchPick.targetBatchId || 'new') === 'new'
+        ? (en ? 'Create' : '新建')
+        : (en ? 'Add' : '加入');
     genBatchPickBarEl.innerHTML = `
         <span class="gen-batch-pick-label">${en ? `Join image group · ${count} selected` : `加入图片组 · 已选 ${count} 张`}</span>
+        <label class="gen-batch-pick-target-wrap">
+            <span class="gen-batch-pick-target-label">${en ? 'Target' : '目标'}</span>
+            <select class="gen-batch-pick-target">${genBatchPickTargetOptionsHtml(node.id, genBatchPick.targetBatchId || 'new')}</select>
+        </label>
         <button type="button" class="gen-batch-pick-cancel">${en ? 'Cancel' : '取消'}</button>
-        <button type="button" class="gen-batch-pick-confirm" ${count < 1 ? 'disabled' : ''}>${en ? 'Confirm' : '确定'}</button>
+        <button type="button" class="gen-batch-pick-confirm" ${count < 1 ? 'disabled' : ''}>${confirmLabel}</button>
     `;
+    const targetSelect = genBatchPickBarEl.querySelector('.gen-batch-pick-target');
+    if(targetSelect){
+        targetSelect.onchange = e => {
+            e.stopPropagation();
+            genBatchPick.targetBatchId = String(targetSelect.value || 'new');
+            syncGenBatchPickBar();
+        };
+    }
     genBatchPickBarEl.querySelector('.gen-batch-pick-cancel').onclick = e => {
         e.stopPropagation();
         clearGenBatchPick({refresh:true});
@@ -2165,6 +2270,25 @@ function buildImageBatchFromUrls(urls, point){
     layoutGroupChildren(batch, { resizeGroup: true, layoutAllItems: true, updateDom: false });
     return batch;
 }
+/** 把 URL 追加进已有图片组（跳过已有同 URL）；返回新增张数 */
+function appendUrlsToImageBatch(batch, urls){
+    if(!batch || batch.type !== 'imageBatch') return 0;
+    const existing = new Set(imageBatchAllChildImages(batch).map(img => String(img.url || '')));
+    let added = 0;
+    const base = imageBatchAllChildImages(batch).length;
+    (urls || []).forEach(url => {
+        const u = String(url || '').trim();
+        if(!u || existing.has(u)) return;
+        createImageBatchChild(batch, u, outputImageName(u), base + added);
+        existing.add(u);
+        added += 1;
+    });
+    if(added){
+        layoutGroupChildren(batch, { resizeGroup: 'auto', layoutAllItems: true, updateDom: true });
+        scheduleImageBatchRelayout(batch.id, 'auto');
+    }
+    return added;
+}
 function confirmGenBatchPick(){
     if(!genBatchPick?.nodeId) return;
     const gen = nodes.find(n => n.id === genBatchPick.nodeId);
@@ -2177,21 +2301,36 @@ function confirmGenBatchPick(){
         softAlert(langIsEn() ? 'Select at least one image' : '请至少选择一张图片');
         return;
     }
+    const targetId = genBatchPick.targetBatchId || 'new';
+    let batch = targetId !== 'new' ? nodes.find(n => n.id === targetId && n.type === 'imageBatch') : null;
+    if(batch){
+        const existing = new Set(imageBatchAllChildImages(batch).map(img => String(img.url || '')));
+        if(!urls.some(u => !existing.has(String(u)))){
+            softAlert(langIsEn() ? 'These images are already in the group' : '所选图片已在该组中');
+            return;
+        }
+    }
     try { pushUndo(); } catch(_){ /* ignore */ }
-    const size = nodeCanvasSize(gen);
-    const gap = 96;
-    const batch = buildImageBatchFromUrls(urls, {
-        x: Number(gen.x || 0) + Number(size.w || gen.w || 260) + gap,
-        y: Number(gen.y || 0),
-    });
-    if(canConnect(gen.id, batch.id) && !connections.some(c => c.from === gen.id && c.to === batch.id)){
+    let added = 0;
+    if(batch){
+        added = appendUrlsToImageBatch(batch, urls);
+    } else {
+        const size = nodeCanvasSize(gen);
+        const gap = 96;
+        batch = buildImageBatchFromUrls(urls, {
+            x: Number(gen.x || 0) + Number(size.w || gen.w || 260) + gap,
+            y: Number(gen.y || 0),
+        });
+        added = urls.length;
+    }
+    if(batch && canConnect(gen.id, batch.id) && !connections.some(c => c.from === gen.id && c.to === batch.id)){
         connections.push({id:uid('c'), from:gen.id, to:batch.id});
     }
     clearGenBatchPick();
     finalizeGroupSelection([batch.id]);
     setStatus(langIsEn()
-        ? `Image group created · ${urls.length}`
-        : `已创建图片组 · ${urls.length} 张`);
+        ? (targetId === 'new' ? `Image group created · ${added}` : `Added to image group · ${added}`)
+        : (targetId === 'new' ? `已创建图片组 · ${added} 张` : `已加入图片组 · ${added} 张`));
 }
 function generatorUiScale(node){
     return Number(node.w || GENERATOR_BASE_W) / GENERATOR_BASE_W;
@@ -3402,7 +3541,7 @@ function instantiateWorkflowTemplate(template, offset={x:0, y:0}){
             node.runStatus = node.runStatus || 'idle';
             node.runError = '';
         }
-        if(node.type === 'mxShellPromptAgent'){
+        if(isMxShellFamilyAgent(node)){
             node.inputs = [];
             node.model = clampAgentTextModel(node.model);
             node.mode = normalizeMxShellPromptMode(node.mode);
@@ -3487,6 +3626,7 @@ function instantiateWorkflowTemplate(template, offset={x:0, y:0}){
             node.style_description = String(node.style_description || '迪士尼皮克斯3D动画风格').slice(0, 500);
             node.outputText = String(node.outputText || '');
             node.assetOutputNodeIds = node.assetOutputNodeIds && typeof node.assetOutputNodeIds === 'object' ? node.assetOutputNodeIds : {};
+            node.lastAssetPrompts = Array.isArray(node.lastAssetPrompts) ? node.lastAssetPrompts : [];
             node.running = false;
             node.runStatus = node.runStatus || 'idle';
             node.runError = '';
@@ -4979,7 +5119,7 @@ function addLLMNode(point){
 function addGeneratorNode(point){
     const p = point || defaultPoint(120, 0);
     const providerId = imageApiProviders()[0]?.id || '';
-    const node = addNode({id:uid('gen'), type:'generator', x:p.x, y:p.y, w:260, apiProvider:providerId, model:allImageModels(providerId)[0] || '', prompt:'', previewRoundUrls:[], history:[], ratio:'square', resolution:'1k', customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'', customWidth:'', customHeight:'', inputs:[]});
+    const node = addNode({id:uid('gen'), type:'generator', x:p.x, y:p.y, w:260, apiProvider:providerId, model:allImageModels(providerId)[0] || '', prompt:'', previewRoundUrls:[], history:[], previewLayout:'time', ratio:'square', resolution:'1k', customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'', customWidth:'', customHeight:'', inputs:[]});
     selected.clear();
     if(node?.id) selected.add(node.id);
     refreshSelectionVisuals();
@@ -5121,6 +5261,14 @@ function normalizeMxShellCameraIntensity(value){
     if(raw === 'flashy' || raw === '炫技' || raw === 'high') return 'flashy';
     return 'standard';
 }
+function isMxShellFamilyAgent(nodeOrType){
+    const t = typeof nodeOrType === 'string' ? nodeOrType : nodeOrType?.type;
+    return t === 'mxShellPromptAgent' || t === 'mxShellPolishAgent';
+}
+function isMxShellPolishAgent(nodeOrType){
+    const t = typeof nodeOrType === 'string' ? nodeOrType : nodeOrType?.type;
+    return t === 'mxShellPolishAgent';
+}
 function mxShellPromptModeLabel(mode){
     return normalizeMxShellPromptMode(mode) === 'one_shot'
         ? (langIsEn() ? 'One continuous shot' : '一镜到底')
@@ -5203,7 +5351,7 @@ function textOutputKindLabel(kind){
     if(kind === 'pixar-sketch' || kind === 'story-sketch') return langIsEn() ? 'Story Sketch Prompts' : '分镜线稿提示词';
     if(kind === 'pixar-video' || kind === 'story-video') return langIsEn() ? 'Story Video Prompts' : '故事视频提示词';
     if(kind === 'pixar-audio' || kind === 'story-audio') return langIsEn() ? 'Story Audio Config' : '故事配乐配置';
-    if(String(kind || '').startsWith('story-asset')) return langIsEn() ? 'Asset Image Prompt' : '资产生图提示词';
+    if(kind === 'story-asset' || String(kind || '').startsWith('story-asset')) return langIsEn() ? 'Asset Image Prompts' : '资产生图提示词';
     return langIsEn() ? 'Text Output' : '文本输出';
 }
 function normalizeScreenwritingMode(mode){
@@ -5418,6 +5566,30 @@ function addMxShellPromptAgentNode(point){
         running:false,
     });
 }
+function addMxShellPolishAgentNode(point){
+    const p = point || defaultPoint(220, 0);
+    return addNode({
+        id:uid('mxpolish'),
+        type:'mxShellPolishAgent',
+        x:p.x,
+        y:p.y,
+        w:400,
+        h:400,
+        model:defaultAgentChatModel(),
+        mode:'multi_cam',
+        cameraIntensity:'standard',
+        story:'',
+        atmosphere:'',
+        outputText:'',
+        outputData:null,
+        viewNodeId:'',
+        refNames:{},
+        refKinds:{},
+        runStatus:'idle',
+        runError:'',
+        running:false,
+    });
+}
 function addMxShellPromptViewNode(point){
     // legacy alias → textOutput
     return addTextOutputNode(point, 'mxShell');
@@ -5506,10 +5678,32 @@ function addPixarAdScriptAgentNode(point){
         outputText:'',
         outputData:null,
         assetOutputNodeIds:{},
+        lastAssetPrompts:[],
         runStatus:'idle',
         runError:'',
         running:false,
     });
+}
+function collectStoryAnimPriorAssetPrompts(agent){
+    if(!agent) return [];
+    if(Array.isArray(agent.lastAssetPrompts) && agent.lastAssetPrompts.length){
+        return agent.lastAssetPrompts.map(item => ({
+            kind:String(item?.kind || 'character'),
+            name:String(item?.name || '').trim(),
+            prompt:String(item?.prompt || '').trim(),
+            node_key:String(item?.node_key || '').trim() || undefined,
+        })).filter(item => item.name && item.prompt.length >= 20);
+    }
+    const fromData = Array.isArray(agent.outputData?.asset_prompts) ? agent.outputData.asset_prompts : [];
+    if(fromData.length){
+        return fromData.map(item => ({
+            kind:String(item?.kind || 'character'),
+            name:String(item?.name || '').trim(),
+            prompt:String(item?.prompt || '').trim(),
+            node_key:String(item?.node_key || '').trim() || undefined,
+        })).filter(item => item.name && item.prompt.length >= 20);
+    }
+    return [];
 }
 function syncScreenwritingToTextOutput(agent, data){
     const out = ensureAgentTextOutputNode(agent, 'screenwriting');
@@ -5527,24 +5721,25 @@ function syncStoryAssetPromptsToTextOutputs(agent, data){
     if(!agent || !data) return [];
     const list = Array.isArray(data.asset_prompts) ? data.asset_prompts : [];
     if(!agent.assetOutputNodeIds || typeof agent.assetOutputNodeIds !== 'object') agent.assetOutputNodeIds = {};
-    return list.map((item, index) => {
+    const kind = 'story-asset';
+    const assetKey = 'assets';
+    let out = nodes.find(n => n.id === agent.assetOutputNodeIds[assetKey] && isTextOutputNode(n)) || null;
+    if(!out){
+        out = addTextOutputNode({x:agent.x + 500, y:agent.y}, kind);
+        connections.push({id:uid('c'), from:agent.id, to:out.id});
+        agent.assetOutputNodeIds[assetKey] = out.id;
+    }
+    const kindLabel = (k) => ({character:'角色', prop:'道具', scene:'场景'})[k] || k;
+    out.kind = kind;
+    out.text = list.map((item, index) => {
         const kindBase = String(item?.kind || 'character').trim().toLowerCase();
-        const kind = `story-asset-${['character','prop','scene'].includes(kindBase) ? kindBase : 'character'}`;
-        const assetKey = `asset-${index}`;
-        let out = nodes.find(n => n.id === agent.assetOutputNodeIds[assetKey] && isTextOutputNode(n)) || null;
-        if(!out){
-            out = addTextOutputNode({x:agent.x + 500, y:agent.y + index * 420}, kind);
-            connections.push({id:uid('c'), from:agent.id, to:out.id});
-            agent.assetOutputNodeIds[assetKey] = out.id;
-        }
         const title = String(item?.name || '').trim() || (langIsEn() ? `Asset ${index + 1}` : `资产 ${index + 1}`);
-        out.kind = kind;
-        out.text = `## ${title}\n\n${String(item?.prompt || '').trim()}`;
-        out.mode_label = textOutputKindLabel(kind);
-        out.sections = splitTextOutputDocSections(out.text, kind);
-        out.sourceAgentId = agent.id;
-        return out;
-    });
+        return `## ${kindLabel(kindBase)} · ${title}\n\n${String(item?.prompt || '').trim()}`;
+    }).join('\n\n');
+    out.mode_label = textOutputKindLabel(kind);
+    out.sections = splitTextOutputDocSections(out.text, kind);
+    out.sourceAgentId = agent.id;
+    return [out];
 }
 function syncPixarAdAssetsToTextOutputs(agent, data){
     if(!agent || !data) return [];
@@ -5642,6 +5837,7 @@ function addMsGenNode(point){
         prompt:'',
         history:[],
         previewRoundUrls:[],
+        previewLayout:'time',
         inputs:[],
         running:false
     });
@@ -5668,6 +5864,7 @@ function addVideoNode(point){
         prompt:'',
         history:[],
         previewRoundUrls:[],
+        previewLayout:'time',
         inputs:[],
         running:false
     });
@@ -6430,7 +6627,9 @@ function layoutGroupChildren(group, opts={}){
         group.w = Math.max(minGroup.w || 260, Math.round(needW));
         group.h = fitH;
     } else if(resizeMode === false){
+        // 至少保证内容不被裁切：高度按网格，宽度只增不缩
         group.h = fitH;
+        group.w = Math.max(Number(group.w) || 0, Math.max(minGroup.w || 260, Math.round(needW)));
     }
     if(opts.updateDom !== false){
         children.forEach(child => {
@@ -6454,7 +6653,9 @@ function organizeGroupChildren(groupId){
     const group = nodes.find(n => n.id === groupId);
     if(!group || !['group','imageBatch','promptGroup'].includes(group.type)) return;
     pushUndo();
-    layoutGroupChildren(group, { resizeGroup: false, layoutAllItems: true, updateDom: true });
+    // 图片组/提示词组：整理时同步扩宽，避免只加高仍横向装不下
+    const resizeMode = (group.type === 'imageBatch' || group.type === 'promptGroup') ? 'auto' : false;
+    layoutGroupChildren(group, { resizeGroup: resizeMode, layoutAllItems: true, updateDom: true });
     scheduleLinkGeometryRefresh(new Set([group.id, ...(group.items || [])]));
     if(minimapState) updateMinimapNodePositions();
     scheduleSave();
@@ -6490,8 +6691,12 @@ function reflowGroupsForMovedChildren(movedNodes, resizeGroup='auto'){
         })));
     }
 }
+function imageBatchAllChildImages(batch){
+    return (batch?.items || []).map(id => nodes.find(n => n.id === id)).filter(n => n?.type === 'image' && n?.url && mediaKindForNode(n) === 'image');
+}
+/** 仅启用中的组内图（禁用的不参与生图/引用输出） */
 function imageBatchChildImages(batch){
-    return (batch?.items || []).map(id => nodes.find(n => n.id === id)).filter(n => isNodeEnabled(n) && n?.type === 'image' && n?.url && mediaKindForNode(n) === 'image');
+    return imageBatchAllChildImages(batch).filter(isNodeEnabled);
 }
 function imageBatchOwningImage(imageNodeId){
     if(!imageNodeId) return null;
@@ -6504,7 +6709,7 @@ function openImageNodeLightbox(imageNode){
     openOutputLightbox(url, batch || null);
 }
 function createImageBatchChild(batch, url, name, index){
-    const i = index ?? imageBatchChildImages(batch).length;
+    const i = index ?? imageBatchAllChildImages(batch).length;
     const child = {
         id:uid('img'),
         type:'image',
@@ -6569,10 +6774,11 @@ async function uploadImagesToImageBatch(batchId, files){
     const uploaded = (data.files || []).filter(file => file?.url);
     if(!uploaded.length) throw new Error(langIsEn() ? 'Upload returned no image URL' : '上传未返回图片地址');
     pushUndo();
-    const base = imageBatchChildImages(batch).length;
+    const base = imageBatchAllChildImages(batch).length;
     uploaded.forEach((file, i) => createImageBatchChild(batch, file.url, file.name, base + i));
     layoutGroupChildren(batch, { resizeGroup: 'auto', layoutAllItems: true, updateDom: true });
     refreshNodes([batch.id]);
+    scheduleImageBatchRelayout(batch.id, 'auto');
     scheduleLinkGeometryRefresh(new Set([batch.id, ...(batch.items || [])]));
     scheduleSave();
 }
@@ -6809,6 +7015,7 @@ function linkCreateOptions(state){
                 {type:'nineGridAgent', label:langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent', icon:'grid-3x3'},
                 {type:'slotsLoopVideoAgent', label:langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent', icon:'repeat-2'},
                 {type:'mxShellPromptAgent', label:langIsEn() ? 'Mx-Shell Prompt Agent' : 'Mx-Shell 提示词 Agent', icon:'film'},
+                {type:'mxShellPolishAgent', label:langIsEn() ? 'Mx-Shell Polish Agent' : 'Mx-Shell 润色 Agent', icon:'wand-sparkles'},
                 {type:'deepWhiteShotAgent', label:langIsEn() ? 'DeepWhite Shot Agent' : 'DeepWhite 导演分镜 Agent', icon:'clapperboard'},
                 {type:'screenwritingAgent', label:langIsEn() ? 'Screenwriting Agent' : '编剧 Agent', icon:'pen-line'},
                 {type:'pixarAdScriptAgent', label:langIsEn() ? 'Story Anim Storyboard Agent' : '故事动画分镜 Agent', icon:'sparkles'},
@@ -6863,7 +7070,7 @@ function openLinkCreateMenu(originId, originKind, clientX, clientY){
 }
 function openGeneratorNodeMenu(nodeId, clientX, clientY){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || (!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent' && node.type !== 'slotsLoopVideoAgent' && node.type !== 'mxShellPromptAgent' && node.type !== 'deepWhiteShotAgent' && node.type !== 'screenwritingAgent' && node.type !== 'pixarAdScriptAgent')) return false;
+    if(!node || (!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent' && node.type !== 'slotsLoopVideoAgent' && !isMxShellFamilyAgent(node) && node.type !== 'deepWhiteShotAgent' && node.type !== 'screenwritingAgent' && node.type !== 'pixarAdScriptAgent')) return false;
     const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(nodeId)}"]`);
     const rect = el?.getBoundingClientRect();
     const point = screenToWorld(clientX, clientY);
@@ -6923,7 +7130,11 @@ function openImageNodeMenu(nodeId, clientX, clientY){
     const canPreview = url && mediaKindForNode(node) === 'image' && !isMissingAssetUrl(url);
     const canEdit = canPreview;
     const canDownload = url && !isMissingAssetUrl(url);
+    const skipped = isNodeDisabled(node);
+    const skipLabel = skipped ? tr('canvas.enableImageSkip') : tr('canvas.disableImageSkip');
+    const skipIcon = skipped ? 'circle-check' : 'circle-off';
     imageNodeMenu.innerHTML = `
+        <button class="menu-btn" data-image-skip="${escapeAttr(nodeId)}" title="${escapeAttr(tr('canvas.nodeDisableHint'))}"><i data-lucide="${skipIcon}" class="w-4 h-4"></i><span>${escapeHtml(skipLabel)}</span></button>
         ${canPreview ? `<button class="menu-btn" data-image-preview="${escapeAttr(nodeId)}"><i data-lucide="maximize-2" class="w-4 h-4"></i><span>${langIsEn() ? 'Enlarge' : '放大查看'}</span></button>` : ''}
         ${canEdit ? `<button class="menu-btn" data-image-edit="${escapeAttr(nodeId)}"><i data-lucide="image" class="w-4 h-4"></i><span>${escapeHtml(tr('canvas.editImage'))}</span></button>` : ''}
         ${canDownload ? `<button class="menu-btn" data-image-download="${escapeAttr(nodeId)}"><i data-lucide="download" class="w-4 h-4"></i><span>${tr('canvas.outputDownloadImage')}</span></button>` : ''}
@@ -6932,6 +7143,16 @@ function openImageNodeMenu(nodeId, clientX, clientY){
     imageNodeMenu.style.left = `${clientX}px`;
     imageNodeMenu.style.top = `${clientY}px`;
     imageNodeMenu.classList.add('open');
+    const skipBtn = imageNodeMenu.querySelector('[data-image-skip]');
+    if(skipBtn){
+        skipBtn.onclick = e => {
+            e.stopPropagation();
+            closeImageNodeMenu();
+            // 多选时一并切换；否则只动右键这张
+            const ids = selected.has(nodeId) && selected.size > 1 ? [...selected] : [nodeId];
+            toggleNodesDisabled(ids);
+        };
+    }
     const previewBtn = imageNodeMenu.querySelector('[data-image-preview]');
     if(previewBtn){
         previewBtn.onclick = e => {
@@ -7176,6 +7397,7 @@ function createNodeByType(type, point){
     if(type === 'nineGridAgent') return addNineGridAgentNode(point);
     if(type === 'slotsLoopVideoAgent') return addSlotsLoopVideoAgentNode(point);
     if(type === 'mxShellPromptAgent') return addMxShellPromptAgentNode(point);
+    if(type === 'mxShellPolishAgent') return addMxShellPolishAgentNode(point);
     if(type === 'mxShellPromptView') return addTextOutputNode(point, 'mxShell');
     if(type === 'deepWhiteShotAgent') return addDeepWhiteShotAgentNode(point);
     if(type === 'deepWhiteShotView') return addTextOutputNode(point, 'deepWhite');
@@ -7206,6 +7428,7 @@ function menuAdd(type){
     if(type === 'nineGridAgent') addNineGridAgentNode(menuPoint);
     if(type === 'slotsLoopVideoAgent') addSlotsLoopVideoAgentNode(menuPoint);
     if(type === 'mxShellPromptAgent') addMxShellPromptAgentNode(menuPoint);
+    if(type === 'mxShellPolishAgent') addMxShellPolishAgentNode(menuPoint);
     if(type === 'mxShellPromptView') addTextOutputNode(menuPoint, 'mxShell');
     if(type === 'deepWhiteShotAgent') addDeepWhiteShotAgentNode(menuPoint);
     if(type === 'deepWhiteShotView') addTextOutputNode(menuPoint, 'deepWhite');
@@ -7470,6 +7693,11 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
     render();
     if(created.batch?.id){
         relayoutGroupsWithMeasuredChrome([created.batch.id], 'auto');
+        // 子图 onload 后还会再撑开；再排一次兜底首帧测量不准
+        requestAnimationFrame(() => {
+            relayoutGroupsWithMeasuredChrome([created.batch.id], 'auto');
+            scheduleImageBatchRelayout(created.batch.id, 'auto');
+        });
     }
     scheduleSave();
     return created;
@@ -9381,7 +9609,7 @@ function refreshNodes(ids=[]){
 }
 /** 运行态徽章 HTML（与 renderNode 一致） */
 function nodeRunStatusHtml(node){
-    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent','videoReverse'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent','videoReverse'].includes(node.type) && node.runStatus
         && node.runStatus !== 'idle';
     if(!showStatus) return '';
     const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -9535,7 +9763,7 @@ function isNodeControl(target){
     // 图台/轻量结果台主媒体：允许拖节点与 Alt 复制（含 video 结果）
     if(target?.closest?.('.gen-stage-hero, .gen-stage-frame, .agent-result-hero, .agent-result-frame')) return false;
     // 注意：.gen-stage / 图台主图不计入控件，单击需选中节点以唤出下方控制台
-    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs, .gen-stage-tile, .gen-stage-tile-actions, .gen-stage-grid, .gen-stage-stack-expand, .gen-stage-stack');
+    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs, .gen-stage-tile, .gen-stage-tile-actions, .gen-stage-grid, .gen-stage-stack-expand, .gen-stage-grid-collapse, .gen-stage-stack');
 }
 function destroyLTXEditor(node){
     if(!node?._ltxEditor) return;
@@ -9549,7 +9777,7 @@ const NODE_TYPE_ICON = {
     image:'image', prompt:'type', loop:'repeat', promptGroup:'layers', group:'folder',
     imageBatch:'images', frameStack:'images', llm:'brain', replicaAgent:'copy',
     imageRepairAgent:'wrench', batchPosterAgent:'layout-grid', nineGridAgent:'grid-3x3',
-    slotsLoopVideoAgent:'clapperboard', mxShellPromptAgent:'film', mxShellPromptView:'file-text', textOutput:'file-output', deepWhiteShotAgent:'clapperboard', deepWhiteShotView:'book-open', screenwritingAgent:'pen-line', pixarAdScriptAgent:'sparkles', videoReverse:'rewind', comfy:'workflow',
+    slotsLoopVideoAgent:'clapperboard', mxShellPromptAgent:'film', mxShellPolishAgent:'wand-sparkles', mxShellPromptView:'file-text', textOutput:'file-output', deepWhiteShotAgent:'clapperboard', deepWhiteShotView:'book-open', screenwritingAgent:'pen-line', pixarAdScriptAgent:'sparkles', videoReverse:'rewind', comfy:'workflow',
     ltxDirector:'film', rh:'cloud', msgen:'sparkles', video:'video', output:'layout-grid'
 };
 function renderNode(node){
@@ -9574,7 +9802,7 @@ function renderNode(node){
         applyNodeSelection(node.id, e);
     };
     el.oncontextmenu = e => {
-        if(!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'output' && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent' && node.type !== 'slotsLoopVideoAgent' && node.type !== 'mxShellPromptAgent' && node.type !== 'deepWhiteShotAgent' && node.type !== 'screenwritingAgent' && node.type !== 'pixarAdScriptAgent' && node.type !== 'textOutput') return;
+        if(!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'output' && node.type !== 'videoReverse' && node.type !== 'batchPosterAgent' && node.type !== 'nineGridAgent' && node.type !== 'imageRepairAgent' && node.type !== 'slotsLoopVideoAgent' && !isMxShellFamilyAgent(node) && node.type !== 'deepWhiteShotAgent' && node.type !== 'screenwritingAgent' && node.type !== 'pixarAdScriptAgent' && node.type !== 'textOutput') return;
         e.preventDefault();
         e.stopPropagation();
         if(node.type === 'output'){
@@ -9583,10 +9811,10 @@ function renderNode(node){
         }
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'imageBatch' ? (langIsEn() ? 'Image batch' : '图片组') : node.type === 'frameStack' ? (langIsEn() ? 'Frame Stack' : '截帧集') : node.type === 'llm' ? 'LLM' : node.type === 'replicaAgent' ? '复刻 Agent' : node.type === 'imageRepairAgent' ? (langIsEn() ? 'Repair Agent' : '修图 Agent') : node.type === 'batchPosterAgent' ? 'Batch Poster Agent' : node.type === 'nineGridAgent' ? (langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent') : node.type === 'slotsLoopVideoAgent' ? (langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent') : node.type === 'mxShellPromptAgent' ? (langIsEn() ? 'Mx-Shell Prompt Agent' : 'Mx-Shell 提示词 Agent') : node.type === 'textOutput' ? textOutputKindLabel(node.kind) : node.type === 'mxShellPromptView' ? textOutputKindLabel('mxShell') : node.type === 'deepWhiteShotAgent' ? (langIsEn() ? 'DeepWhite Shot Agent' : 'DeepWhite 导演分镜 Agent') : node.type === 'deepWhiteShotView' ? textOutputKindLabel('deepWhite') : node.type === 'screenwritingAgent' ? (langIsEn() ? 'Screenwriting Agent' : '编剧 Agent') : node.type === 'pixarAdScriptAgent' ? (langIsEn() ? 'Story Anim Storyboard Agent' : '故事动画分镜 Agent') : node.type === 'videoReverse' ? '视频反推' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'imageBatch' ? (langIsEn() ? 'Image batch' : '图片组') : node.type === 'frameStack' ? (langIsEn() ? 'Frame Stack' : '截帧集') : node.type === 'llm' ? 'LLM' : node.type === 'replicaAgent' ? '复刻 Agent' : node.type === 'imageRepairAgent' ? (langIsEn() ? 'Repair Agent' : '修图 Agent') : node.type === 'batchPosterAgent' ? 'Batch Poster Agent' : node.type === 'nineGridAgent' ? (langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent') : node.type === 'slotsLoopVideoAgent' ? (langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent') : node.type === 'mxShellPromptAgent' ? (langIsEn() ? 'Mx-Shell Prompt Agent' : 'Mx-Shell 提示词 Agent') : node.type === 'mxShellPolishAgent' ? (langIsEn() ? 'Mx-Shell Polish Agent' : 'Mx-Shell 润色 Agent') : node.type === 'textOutput' ? textOutputKindLabel(node.kind) : node.type === 'mxShellPromptView' ? textOutputKindLabel('mxShell') : node.type === 'deepWhiteShotAgent' ? (langIsEn() ? 'DeepWhite Shot Agent' : 'DeepWhite 导演分镜 Agent') : node.type === 'deepWhiteShotView' ? textOutputKindLabel('deepWhite') : node.type === 'screenwritingAgent' ? (langIsEn() ? 'Screenwriting Agent' : '编剧 Agent') : node.type === 'pixarAdScriptAgent' ? (langIsEn() ? 'Story Anim Storyboard Agent' : '故事动画分镜 Agent') : node.type === 'videoReverse' ? '视频反推' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 运行状态徽章：含单节点失败与级联失败
-    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent','videoReverse'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent','videoReverse'].includes(node.type) && node.runStatus
         && node.runStatus !== 'idle';
     const statusHtml = showStatus ? (() => {
         const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -9596,8 +9824,9 @@ function renderNode(node){
         ? `<span class="node-disabled-badge" title="${escapeAttr(tr('canvas.nodeDisableHint'))}">${escapeHtml(tr('canvas.nodeDisabled'))}</span>`
         : '';
     const promptGroupHeadToggle = node.type === 'promptGroup' ? promptGroupHeadToggleHtml(node) : '';
+    const imageBatchHeadToggle = node.type === 'imageBatch' ? imageBatchHeadToggleHtml(node) : '';
     const headIcon = NODE_TYPE_ICON[node.type] || 'zap';
-    el.innerHTML = `<div class="node-head"><span class="node-head-icon"><i data-lucide="${headIcon}" class="w-3 h-3"></i></span><span class="node-title">${displayTitle}</span><div style="display:flex;align-items:center;gap:8px;margin-left:auto">${promptGroupHeadToggle}${disabledBadge}${statusHtml}<button type="button" class="node-delete-btn text-gray-300 hover:text-red-500" aria-label="${escapeAttr(tr('common.delete'))}"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
+    el.innerHTML = `<div class="node-head"><span class="node-head-icon"><i data-lucide="${headIcon}" class="w-3 h-3"></i></span><span class="node-title">${displayTitle}</span><div style="display:flex;align-items:center;gap:8px;margin-left:auto">${promptGroupHeadToggle}${imageBatchHeadToggle}${disabledBadge}${statusHtml}<button type="button" class="node-delete-btn text-gray-300 hover:text-red-500" aria-label="${escapeAttr(tr('common.delete'))}"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
     const deleteBtn = el.querySelector('.node-delete-btn');
     if(deleteBtn){
         deleteBtn.onmousedown = e => e.stopPropagation();
@@ -9612,6 +9841,16 @@ function renderNode(node){
             };
         }
     }
+    if(node.type === 'imageBatch'){
+        const headToggle = el.querySelector('[data-ibatch-head-toggle]');
+        if(headToggle){
+            headToggle.onmousedown = e => e.stopPropagation();
+            headToggle.onclick = e => {
+                e.stopPropagation();
+                toggleNodesDisabled([node.id]);
+            };
+        }
+    }
     const body = document.createElement('div');
     body.className = 'node-body';
     if(node.type === 'image') {
@@ -9623,7 +9862,10 @@ function renderNode(node){
             const stillCaption = missing
                 ? `<div class="image-caption text-[11px] text-gray-400 truncate">${escapeHtml(node.name || 'image')} · ${langIsEn() ? 'missing' : '文件缺失'}</div>`
                 : '';
-            body.innerHTML = `<div class="image-preview-wrap" title="${escapeAttr(node.name || 'image')}">${missing ? missingAssetHtml(node.url) : `<img src="${escapeAttr(node.url)}" draggable="false" alt="">`}</div>${stillCaption}`;
+            const skipBadge = isNodeDisabled(node)
+                ? `<span class="image-skip-badge" title="${escapeAttr(tr('canvas.nodeDisableHint'))}">${escapeHtml(tr('canvas.imageSkipBadge'))}</span>`
+                : '';
+            body.innerHTML = `<div class="image-preview-wrap" title="${escapeAttr(node.name || 'image')}">${missing ? missingAssetHtml(node.url) : `<img src="${escapeAttr(node.url)}" draggable="false" alt="">`}${skipBadge}</div>${stillCaption}`;
             if(!missing && mediaKind !== 'image'){
                 const mediaHtml = mediaKind === 'video'
                     ? `<div class="media-card video-card"><div class="video-player-wrap"><video src="${escapeAttr(node.url)}" data-url="${escapeAttr(node.url)}" controls preload="auto" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video><button type="button" class="btn-capture-frame">${langIsEn() ? 'Capture frame' : '截取当前帧'}</button></div></div>`
@@ -9782,7 +10024,7 @@ function renderNode(node){
     if(node.type === 'batchPosterAgent') body.appendChild(renderBatchPosterAgentBody(node));
     if(node.type === 'nineGridAgent') body.appendChild(renderNineGridAgentBody(node));
     if(node.type === 'slotsLoopVideoAgent') body.appendChild(renderSlotsLoopVideoAgentBody(node));
-    if(node.type === 'mxShellPromptAgent') body.appendChild(renderMxShellPromptAgentBody(node));
+    if(isMxShellFamilyAgent(node)) body.appendChild(renderMxShellPromptAgentBody(node));
     if(node.type === 'mxShellPromptView' || node.type === 'deepWhiteShotView' || node.type === 'textOutput') body.appendChild(renderTextOutputBody(node));
     if(node.type === 'deepWhiteShotAgent') body.appendChild(renderDeepWhiteShotAgentBody(node));
     if(node.type === 'screenwritingAgent') body.appendChild(renderScreenwritingAgentBody(node));
@@ -9821,19 +10063,24 @@ function renderNode(node){
         bindFrameStackUpload(body, node);
     }
     if(node.type === 'imageBatch') {
-        const imgNodes = imageBatchChildImages(node);
-        const text = imgNodes.length
-            ? `${imgNodes.length} ${tr('canvas.imageCount')} ${tr('canvas.grouped')}`
-            : tr('canvas.groupEmpty');
+        const allImgs = imageBatchAllChildImages(node);
+        const activeImgs = allImgs.filter(isNodeEnabled);
+        const skippedN = allImgs.length - activeImgs.length;
+        let text = tr('canvas.groupEmpty');
+        if(allImgs.length){
+            text = `${activeImgs.length} ${tr('canvas.imageCount')} ${tr('canvas.grouped')}`;
+            if(skippedN > 0) text += ` · ${trf('canvas.imageBatchSkippedMeta', {n: skippedN})}`;
+        }
         body.innerHTML = `
             <div class="image-batch-body">
                 <div class="group-panel-chrome">
-                    <div class="image-batch-meta text-[11px] text-gray-400">${text}</div>
+                    <div class="image-batch-meta text-[11px] text-gray-400">${escapeHtml(text)}</div>
                     <div class="image-batch-actions">
                         <button type="button" class="secondary-btn image-batch-upload-btn"><i data-lucide="image-plus" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Upload' : '上传图片'}</span></button>
                         <button type="button" class="secondary-btn group-tidy-btn" title="${escapeAttr(tr('canvas.organizeGroupChildrenHint'))}"><i data-lucide="layout-grid" class="w-3.5 h-3.5"></i><span>${escapeHtml(tr('canvas.organizeGroupChildren'))}</span></button>
                     </div>
                     <div class="image-batch-hint text-[10px] text-gray-500">${escapeHtml(tr('canvas.imageBatchConnectHint'))}</div>
+                    <div class="image-batch-hint text-[10px] text-gray-500">${escapeHtml(tr('canvas.imageBatchSkipHint'))}</div>
                 </div>
             </div>
         `;
@@ -9865,8 +10112,8 @@ function renderNode(node){
         if(!isNodeDragSurface(e.target)) return;
         startNodeDrag(e, node);
     };
-    const canInput = ['generator','comfy','ltxDirector','output','llm','msgen','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent','textOutput','videoReverse','frameStack','loop','imageBatch'].includes(node.type);
-    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','replicaAgent','imageRepairAgent','videoReverse','slotsLoopVideoAgent','mxShellPromptAgent','textOutput','mxShellPromptView','deepWhiteShotAgent','deepWhiteShotView','screenwritingAgent','pixarAdScriptAgent','frameStack','imageBatch'].includes(node.type);
+    const canInput = ['generator','comfy','ltxDirector','output','llm','msgen','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent','textOutput','videoReverse','frameStack','loop','imageBatch'].includes(node.type);
+    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','replicaAgent','imageRepairAgent','videoReverse','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','textOutput','mxShellPromptView','deepWhiteShotAgent','deepWhiteShotView','screenwritingAgent','pixarAdScriptAgent','frameStack','imageBatch'].includes(node.type);
     if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"><span class="port-dot"></span></div>`);
     if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"><span class="port-dot"></span></div>`);
     el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
@@ -10257,7 +10504,7 @@ function defaultNodeSize(type){
     if(type === 'batchPosterAgent') return {w:340, h:520};
     if(type === 'nineGridAgent') return {w:360, h:560};
     if(type === 'slotsLoopVideoAgent') return {w:380, h:520};
-    if(type === 'mxShellPromptAgent') return {w:400, h:400};
+    if(isMxShellFamilyAgent(type)) return {w:400, h:400};
     if(type === 'mxShellPromptView' || type === 'deepWhiteShotView' || type === 'textOutput') return {w:600, h:560};
     if(type === 'deepWhiteShotAgent') return {w:400, h:400};
     if(type === 'pixarAdScriptAgent') return {w:420, h:580};
@@ -10367,6 +10614,26 @@ function promptGroupHeadToggleHtml(node){
     const title = promptGroupHeadToggleTitle(node, state);
     const icon = state === 'off' ? 'toggle-left' : 'toggle-right';
     return `<button type="button" class="node-enable-toggle ${state}" data-pg-head-toggle="${escapeAttr(node.id)}" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}" ${state === 'empty' ? 'disabled' : ''}><i data-lucide="${icon}" class="w-4 h-4"></i></button>`;
+}
+function imageBatchHeadToggleState(batch){
+    const all = imageBatchAllChildImages(batch);
+    if(!all.length) return 'empty';
+    if(imageBatchEffectivelyDisabled(batch)) return 'off';
+    const active = all.filter(isNodeEnabled).length;
+    if(active === all.length) return 'on';
+    return 'mixed';
+}
+function imageBatchHeadToggleTitle(batch, state){
+    if(state === 'empty') return langIsEn() ? 'No images inside group' : '组内无图片';
+    if(state === 'off') return langIsEn() ? 'Enable image group (restore all)' : '恢复图片组（全部子图启用）';
+    if(state === 'mixed') return langIsEn() ? 'Disable all images in group' : '禁用整组（全部子图）';
+    return langIsEn() ? 'Disable image group (all images)' : '禁用图片组（全部子图）';
+}
+function imageBatchHeadToggleHtml(node){
+    const state = imageBatchHeadToggleState(node);
+    const title = imageBatchHeadToggleTitle(node, state);
+    const icon = state === 'off' ? 'toggle-left' : 'toggle-right';
+    return `<button type="button" class="node-enable-toggle ${state}" data-ibatch-head-toggle="${escapeAttr(node.id)}" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}" ${state === 'empty' ? 'disabled' : ''}><i data-lucide="${icon}" class="w-4 h-4"></i></button>`;
 }
 function setPromptGroupChildEnabled(prompt, enabled){
     if(!prompt || prompt.type !== 'prompt') return;
@@ -11364,7 +11631,7 @@ function mxShellPromptAgentStory(node){
     return upstream || inline;
 }
 function collectMxShellRefEntries(node){
-    if(!node || (node.type !== 'mxShellPromptAgent' && node.type !== 'deepWhiteShotAgent' && node.type !== 'pixarAdScriptAgent')) return [];
+    if(!node || (!isMxShellFamilyAgent(node) && node.type !== 'deepWhiteShotAgent' && node.type !== 'pixarAdScriptAgent')) return [];
     if(!node.refNames || typeof node.refNames !== 'object') node.refNames = {};
     if(!node.refKinds || typeof node.refKinds !== 'object') node.refKinds = {};
     const sources = orderedSources(node, generatorSources(node));
@@ -11470,7 +11737,7 @@ function refreshDownstreamMxShellPromptNodes(fromNodeId){
     const targetIds = connections
         .filter(c => c.from === fromNodeId)
         .map(c => c.to)
-        .filter(id => nodes.find(n => n.id === id)?.type === 'mxShellPromptAgent');
+        .filter(id => isMxShellFamilyAgent(nodes.find(n => n.id === id)));
     if(targetIds.length) refreshNodes(targetIds);
 }
 function refreshDownstreamDeepWhiteShotNodes(fromNodeId){
@@ -11488,6 +11755,7 @@ function refreshDownstreamPixarAdScriptNodes(fromNodeId){
     if(targetIds.length) refreshNodes(targetIds);
 }
 function renderMxShellPromptAgentBody(node){
+    const polish = isMxShellPolishAgent(node);
     node.model = clampAgentTextModel(node.model);
     node.mode = normalizeMxShellPromptMode(node.mode);
     node.cameraIntensity = normalizeMxShellCameraIntensity(node.cameraIntensity);
@@ -11511,16 +11779,31 @@ function renderMxShellPromptAgentBody(node){
         ? (langIsEn() ? `${imageUrls.length} refs · ${namedRefs} named` : `${imageUrls.length} 张参考 · 已命名 ${namedRefs}`)
         : (langIsEn() ? 'No refs' : '无参考图'));
     statusBits.push(story.length >= 10
-        ? (upstreamStory && !String(node.story || '').trim() ? (langIsEn() ? 'Upstream story' : '上游故事') : (langIsEn() ? 'Story ready' : '故事就绪'))
-        : (langIsEn() ? 'Need story' : '需故事'));
+        ? (upstreamStory && !String(node.story || '').trim()
+            ? (polish ? (langIsEn() ? 'Upstream draft' : '上游原稿') : (langIsEn() ? 'Upstream story' : '上游故事'))
+            : (polish ? (langIsEn() ? 'Draft ready' : '原稿就绪') : (langIsEn() ? 'Story ready' : '故事就绪')))
+        : (polish ? (langIsEn() ? 'Need draft' : '需原稿') : (langIsEn() ? 'Need story' : '需故事')));
     statusBits.push(modelName);
     const wrap = document.createElement('div');
     wrap.className = 'generator-body mx-shell-prompt-body agent-console-body';
+    const readyLabel = polish
+        ? (langIsEn() ? 'Polished' : '已润色')
+        : (langIsEn() ? 'Ready' : '已生成');
+    const storyTitle = polish
+        ? (langIsEn() ? 'Your video prompt draft' : '视频提示词原稿')
+        : (langIsEn() ? 'Story / draft' : '故事 / 草稿');
+    const storyPh = polish
+        ? (langIsEn() ? 'Paste the prompt to polish…' : '粘贴要润色的视频提示词…')
+        : (langIsEn() ? 'Paste outline / script…' : '粘贴故事大纲 / 剧本…');
+    const runIcon = polish ? 'wand-sparkles' : 'film';
+    const runLabel = node.running
+        ? (polish ? (langIsEn() ? 'Polishing…' : '润色中…') : (langIsEn() ? 'Generating…' : '生成中…'))
+        : (polish ? (langIsEn() ? 'Polish prompt' : '润色提示词') : (langIsEn() ? 'Generate' : '生成提示词'));
     wrap.innerHTML = `
         <div class="agent-status-bar ${story.length >= 10 ? 'ok' : 'warn'}">${escapeHtml(statusBits.join(' · '))}</div>
         ${outputText ? `
         <div class="mx-shell-result-compact">
-            <div class="mx-shell-result-compact-title">${langIsEn() ? 'Ready' : '已生成'} · ${escapeHtml(modeLabel)}</div>
+            <div class="mx-shell-result-compact-title">${escapeHtml(readyLabel)} · ${escapeHtml(modeLabel)}</div>
             <button type="button" class="gen-btn mx-shell-focus-view-btn"><i data-lucide="panel-right" class="w-4 h-4"></i><span>${langIsEn() ? 'Open text output' : '打开文本输出'}</span></button>
         </div>` : node.runStatus === 'failed' && node.runError ? `
         <div class="mx-shell-result-compact is-error-panel">
@@ -11548,9 +11831,9 @@ function renderMxShellPromptAgentBody(node){
             </label>
         </div>
         <label class="field">
-            <div class="setting-title">${langIsEn() ? 'Story / draft' : '故事 / 草稿'}</div>
+            <div class="setting-title">${escapeHtml(storyTitle)}</div>
             ${upstreamStory && !String(node.story || '').trim() ? `<div class="mx-shell-upstream-preview">${escapeHtml(upstreamStory.slice(0, 220))}${upstreamStory.length > 220 ? '…' : ''}</div>` : ''}
-            <textarea class="mx-shell-story" placeholder="${langIsEn() ? 'Paste outline / script…' : '粘贴故事大纲 / 剧本…'}">${escapeHtml(node.story || '')}</textarea>
+            <textarea class="mx-shell-story" placeholder="${escapeHtml(storyPh)}">${escapeHtml(node.story || '')}</textarea>
         </label>
         <label class="field">
             <div class="setting-title">${langIsEn() ? 'Atmosphere (optional)' : '氛围（可选）'}</div>
@@ -11562,7 +11845,7 @@ function renderMxShellPromptAgentBody(node){
         </details>
         ${node.runError && !(node.runStatus === 'failed' && !outputText) ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
         <div class="gen-run-row">
-            <button class="gen-btn mx-shell-run-btn ${node.running ? 'running' : ''}"><i data-lucide="film" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Generating…' : '生成中…') : (langIsEn() ? 'Generate' : '生成提示词')}</span></button>
+            <button class="gen-btn mx-shell-run-btn ${node.running ? 'running' : ''}"><i data-lucide="${runIcon}" class="w-4 h-4"></i><span>${escapeHtml(runLabel)}</span></button>
         </div>
     `;
     const modeSelect = wrap.querySelector('.mx-shell-mode');
@@ -11882,12 +12165,17 @@ window.closeTextOutputReader = closeTextOutputReader;
 
 async function runMxShellPromptAgent(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || node.type !== 'mxShellPromptAgent' || isNodeDisabled(node)) return;
+    if(!node || !isMxShellFamilyAgent(node) || isNodeDisabled(node)) return;
+    const polish = isMxShellPolishAgent(node);
     const story = mxShellPromptAgentStory(node);
     if(story.trim().length < 10){
-        const msg = langIsEn()
-            ? 'Provide a story/script/storyboard draft (≥10 chars), or connect a Prompt node.'
-            : '请提供故事大纲/剧本/分镜草稿（至少 10 字），或连接提示词节点。';
+        const msg = polish
+            ? (langIsEn()
+                ? 'Paste a video prompt draft to polish (≥10 chars), or connect a Prompt node.'
+                : '请粘贴要润色的视频提示词原稿（至少 10 字），或连接提示词节点。')
+            : (langIsEn()
+                ? 'Provide a story/script/storyboard draft (≥10 chars), or connect a Prompt node.'
+                : '请提供故事大纲/剧本/分镜草稿（至少 10 字），或连接提示词节点。');
         node.runStatus = 'failed';
         node.runError = msg;
         refreshNodes([nodeId]);
@@ -11899,7 +12187,9 @@ async function runMxShellPromptAgent(nodeId, opts={}){
         node.running = true;
         refreshNodes([nodeId]);
     }
-    setStatus(langIsEn() ? 'Mx-Shell Prompt Agent: generating…' : 'Mx-Shell 提示词 Agent：正在生成…');
+    setStatus(polish
+        ? (langIsEn() ? 'Mx-Shell Polish Agent: polishing…' : 'Mx-Shell 润色 Agent：正在润色…')
+        : (langIsEn() ? 'Mx-Shell Prompt Agent: generating…' : 'Mx-Shell 提示词 Agent：正在生成…'));
     const execute = async () => {
     try {
         const bindings = mxShellPromptAgentImageBindings(node);
@@ -11921,6 +12211,7 @@ async function runMxShellPromptAgent(nodeId, opts={}){
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
+                task: polish ? 'polish' : 'generate',
                 mode:normalizeMxShellPromptMode(node.mode),
                 cameraIntensity:normalizeMxShellCameraIntensity(node.cameraIntensity),
                 story,
@@ -11930,7 +12221,9 @@ async function runMxShellPromptAgent(nodeId, opts={}){
                 model:clampAgentTextModel(node.model),
             }),
         });
-        if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Mx-Shell prompt failed' : 'Mx-Shell 提示词生成失败'));
+        if(!res.ok) throw new Error(await responseErrorMessage(res, polish
+            ? (langIsEn() ? 'Mx-Shell polish failed' : 'Mx-Shell 提示词润色失败')
+            : (langIsEn() ? 'Mx-Shell prompt failed' : 'Mx-Shell 提示词生成失败')));
         const data = await res.json();
         const promptText = String(data.display_text || data.prompt || '').trim();
         if(!promptText){
@@ -11947,7 +12240,9 @@ async function runMxShellPromptAgent(nodeId, opts={}){
         const refreshIds = [nodeId];
         if(view) refreshIds.push(view.id);
         refreshNodes(refreshIds);
-        setStatus(langIsEn() ? 'Mx-Shell prompt ready — see Prompt View on the right' : 'Mx-Shell 提示词已生成 — 见右侧「提示词展示」节点');
+        setStatus(polish
+            ? (langIsEn() ? 'Mx-Shell polish ready — see text output on the right' : 'Mx-Shell 润色完成 — 见右侧文本输出')
+            : (langIsEn() ? 'Mx-Shell prompt ready — see Prompt View on the right' : 'Mx-Shell 提示词已生成 — 见右侧「提示词展示」节点'));
         scheduleSave();
         if(view){
             requestAnimationFrame(() => {
@@ -12520,9 +12815,10 @@ function renderPixarAdScriptAgentBody(node){
     const ready = script.length >= 20;
     const wrap = document.createElement('div');
     wrap.className = 'generator-body pixar-ad-script-body agent-console-body';
+    const priorAssets = collectStoryAnimPriorAssetPrompts(node);
     const flowHint = langIsEn()
-        ? 'Flow: ① asset prompts → gen images (done) ② story script (no need to rewire images here) ③ sketch textOutput + assets → image gen (图N = wire order)'
-        : '推荐：①资产提示词→手连生图（资产结束）②直接生成分镜脚本（不必回连图）③线稿提示词+资产图一起接生图（图N=连线顺序）';
+        ? `Flow: ① asset prompts → gen images (done) ② story script (locks to ${priorAssets.length ? priorAssets.length + ' asset prompts' : 'story keywords if no assets yet'}) ③ sketch + assets → image gen`
+        : `推荐：①资产提示词→手连生图（结束）②分镜脚本${priorAssets.length ? `（已锁定 ${priorAssets.length} 条资产造型）` : '（尚未生成资产提示词时可先写造型）'}③线稿+资产图一起接生图`;
     wrap.innerHTML = `
         <div class="agent-status-bar ${ready ? 'ok' : 'warn'}">${escapeHtml([
             `${node.durationSec}s`,
@@ -12567,9 +12863,9 @@ function renderPixarAdScriptAgentBody(node){
             <select class="select-lite pixar-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
         </label>
         ${node.runError && !(node.runStatus === 'failed' && !outputText) ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
-        <div class="gen-run-row gen-run-row-split">
-            <button class="gen-btn pixar-asset-prompt-btn ${node.running ? 'running' : ''}" ${!ready || node.running ? 'disabled' : ''} title="${escapeAttr(missing.length ? (langIsEn() ? 'When assets missing' : '缺彩图资产时用') : (langIsEn() ? 'Regenerate asset prompts' : '可重生成资产提示词'))}"><i data-lucide="image-plus" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Working…' : '生成中…') : (langIsEn() ? 'Asset prompts' : '生成资产提示词')}</span></button>
-            <button class="gen-btn pixar-run-btn ${node.running ? 'running' : ''}" ${!ready || node.running ? 'disabled' : ''} title="${escapeAttr(langIsEn() ? 'No need to rewire asset images here' : '不必先把资产图连回本节点')}"><i data-lucide="sparkles" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Directing…' : '导演生成中…') : (langIsEn() ? 'Story script' : '生成分镜脚本')}</span></button>
+        <div class="gen-run-row pixar-run-actions">
+            <button type="button" class="pixar-action-btn is-secondary pixar-asset-prompt-btn ${node.running ? 'running' : ''}" ${!ready || node.running ? 'disabled' : ''} title="${escapeAttr(missing.length ? (langIsEn() ? 'When assets missing' : '缺彩图资产时用') : (langIsEn() ? 'Regenerate asset prompts' : '可重生成资产提示词'))}"><i data-lucide="image-plus" class="w-3.5 h-3.5"></i><span>${node.running ? (langIsEn() ? 'Working…' : '生成中…') : (langIsEn() ? 'Asset prompts' : '资产提示词')}</span></button>
+            <button type="button" class="pixar-action-btn is-primary pixar-run-btn ${node.running ? 'running' : ''}" ${!ready || node.running ? 'disabled' : ''} title="${escapeAttr(langIsEn() ? 'No need to rewire asset images here' : '不必先把资产图连回本节点')}"><i data-lucide="sparkles" class="w-3.5 h-3.5"></i><span>${node.running ? (langIsEn() ? 'Directing…' : '导演生成中…') : (langIsEn() ? 'Story script' : '分镜脚本')}</span></button>
         </div>
     `;
     const bindText = (selector, key, max) => {
@@ -12673,6 +12969,7 @@ async function runPixarAdScriptAgent(nodeId, opts={}){
                 resolvedBindings.push({index:resolvedUrls.length, name:binding.name, kind:binding.kind});
             }
             const missing = storyAnimMissingKinds(node);
+            const priorAssetPrompts = mode === 'story_script' ? collectStoryAnimPriorAssetPrompts(node) : [];
             const res = await apiFetch('/api/canvas/story-anim-script', {
                 method:'POST',
                 headers:{'Content-Type':'application/json'},
@@ -12687,6 +12984,8 @@ async function runPixarAdScriptAgent(nodeId, opts={}){
                     imageUrls:resolvedUrls,
                     imageBindings:resolvedBindings,
                     missing_kinds: mode === 'asset_prompts' ? (missing.length ? missing : ['character','prop','scene']) : undefined,
+                    asset_prompts: priorAssetPrompts.length ? priorAssetPrompts : undefined,
+                    prior_asset_prompts: priorAssetPrompts.length ? priorAssetPrompts : undefined,
                 }),
             });
             if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Story animation script failed' : '故事动画脚本生成失败'));
@@ -12699,7 +12998,15 @@ async function runPixarAdScriptAgent(nodeId, opts={}){
             if(mode === 'asset_prompts' && !(data.asset_prompts?.length)){
                 throw new Error(langIsEn() ? 'No asset prompts returned' : '未返回资产提示词');
             }
-            node.outputData = data;
+            if(mode === 'asset_prompts'){
+                node.lastAssetPrompts = Array.isArray(data.asset_prompts) ? data.asset_prompts : [];
+                node.outputData = {...(node.outputData && typeof node.outputData === 'object' ? node.outputData : {}), ...data, asset_prompts:node.lastAssetPrompts};
+            } else {
+                node.outputData = {
+                    ...data,
+                    asset_prompts: priorAssetPrompts.length ? priorAssetPrompts : (node.lastAssetPrompts || []),
+                };
+            }
             node.outputText = displayText;
             const outputs = syncPixarAdAssetsToTextOutputs(node, data);
             if(!opts.cascade) node.running = false;
@@ -15197,13 +15504,23 @@ function syncGeneratorPreviewFromHistory(gen){
     }
     if(order.length > MAX_GEN_PREVIEW){
         const primaryUrl = order[Math.max(0, Math.min(order.length - 1, Number(gen.previewIndex ?? 0)))] || order[0];
-        const rest = order.filter(u => u !== primaryUrl).slice(-(MAX_GEN_PREVIEW - 1));
-        const a = genStagePrimaryAnchorIndex(rest.length + 1);
-        rest.splice(a, 0, primaryUrl);
-        order = rest;
+        if(generatorUsesTimeLayout(gen)){
+            // 时间序：只保留最新窗口，绝不把主图插回最前（会跳格）
+            order = order.slice(-MAX_GEN_PREVIEW);
+            if(primaryUrl && !order.includes(primaryUrl)) delete gen.primaryPinned;
+        } else {
+            const rest = order.filter(u => u !== primaryUrl).slice(-(MAX_GEN_PREVIEW - 1));
+            const a = genStagePrimaryAnchorIndex(rest.length + 1);
+            rest.splice(a, 0, primaryUrl);
+            order = rest;
+        }
     }
     gen.previewRoundUrls = order;
     ensureGeneratorPrimaryAtAnchor(gen);
+}
+/** 默认时间序（旧→新）；仅显式 previewLayout==='anchor' 才走主图锚点跳格 */
+function generatorUsesTimeLayout(gen){
+    return isGenConsoleNode(gen) && gen.previewLayout !== 'anchor';
 }
 function clampGeneratorPreviewIndex(gen){
     if(!gen) return;
@@ -15212,8 +15529,14 @@ function clampGeneratorPreviewIndex(gen){
         delete gen.previewIndex;
         return;
     }
-    const anchor = genStagePrimaryAnchorIndex(urls.length);
     const idx = Number(gen.previewIndex);
+    if(generatorUsesTimeLayout(gen)){
+        gen.previewIndex = Number.isFinite(idx)
+            ? Math.max(0, Math.min(urls.length - 1, idx))
+            : Math.max(0, urls.length - 1);
+        return;
+    }
+    const anchor = genStagePrimaryAnchorIndex(urls.length);
     if(!Number.isFinite(idx) || idx !== anchor){
         // 主图固定在连线锚点格
         ensureGeneratorPrimaryAtAnchor(gen);
@@ -15226,6 +15549,18 @@ function resetGeneratorPreviewRound(gen){
     // 新一轮生成不清空整库 history，只重置本轮预览指针由 append 接管
     gen.historyOpen = false;
     delete gen._stageAspect;
+    delete gen.primaryPinned;
+}
+/** 收起态封面：未钉主图 → 最新一张；已「设为主图」→ 主图 */
+function genStageCollapsedDisplayUrl(node, urls){
+    const list = urls || [];
+    if(!list.length) return '';
+    if(node?.primaryPinned){
+        const idx = Number(node.previewIndex);
+        const i = Number.isFinite(idx) ? Math.max(0, Math.min(list.length - 1, idx)) : 0;
+        return list[i] || list[list.length - 1];
+    }
+    return list[list.length - 1];
 }
 /** 展开网格中主图所在格：左列、垂直居中行（与端口连线高度对齐） */
 function genStagePrimaryAnchorIndex(count){
@@ -15242,6 +15577,17 @@ function ensureGeneratorPrimaryAtAnchor(gen){
         delete gen.previewIndex;
         return;
     }
+    // 时间序布局：格子左→右、上→下 = 旧→新；主图只改标记，不挪格
+    if(generatorUsesTimeLayout(gen)){
+        const idx = Number(gen.previewIndex);
+        if(Number.isFinite(idx) && idx >= 0 && idx < urls.length){
+            gen.previewIndex = idx;
+        } else {
+            // 未指定时指向最新一张（末格），避免默认标在最旧
+            gen.previewIndex = Math.max(0, urls.length - 1);
+        }
+        return;
+    }
     const anchor = genStagePrimaryAnchorIndex(urls.length);
     let pIdx = Number(gen.previewIndex);
     if(!Number.isFinite(pIdx) || pIdx < 0 || pIdx >= urls.length) pIdx = urls.length - 1;
@@ -15253,18 +15599,51 @@ function ensureGeneratorPrimaryAtAnchor(gen){
     }
     gen.previewIndex = anchor;
 }
-/** 点击某格设为主图：与锚点格互换位置，主图始终留在连线位 */
+/** 按 history.createdAt 升序：网格阅读序左→右、上→下 = 旧→新；主图标记跟图走 */
+function sortGeneratorPreviewsByTime(gen){
+    if(!isGenConsoleNode(gen)) return false;
+    const items = generatorHistoryItems(gen);
+    if(items.length < 2) return false;
+    const byUrl = new Map(items.map((item, i) => [item.url, { item, i }]));
+    let urls = generatorPreviewUrls(gen).filter(Boolean);
+    if(urls.length < 2) return false;
+    let pIdx = Number(gen.previewIndex);
+    if(!Number.isFinite(pIdx) || pIdx < 0 || pIdx >= urls.length) pIdx = 0;
+    const primaryUrl = urls[pIdx] || urls[0];
+    urls = urls.slice().sort((a, b) => {
+        const ta = Number(byUrl.get(a)?.item?.createdAt) || 0;
+        const tb = Number(byUrl.get(b)?.item?.createdAt) || 0;
+        if(ta !== tb) return ta - tb;
+        return (byUrl.get(a)?.i ?? 0) - (byUrl.get(b)?.i ?? 0);
+    });
+    gen.previewRoundUrls = urls;
+    gen.previewLayout = 'time';
+    const nextPrimary = primaryUrl && urls.includes(primaryUrl) ? urls.indexOf(primaryUrl) : 0;
+    gen.previewIndex = nextPrimary;
+    return true;
+}
+/** 设为主图：时间序布局只改标记；否则与锚点格互换，主图留在连线位；并钉住收起态封面 */
 function setGeneratorPrimaryByDisplaySwap(gen, displayIndex){
     if(!isGenConsoleNode(gen)) return false;
     const urls = (gen.previewRoundUrls || []).map(outputUrlValue).filter(Boolean);
     if(urls.length < 2){
-        if(urls.length === 1) gen.previewIndex = 0;
+        if(urls.length === 1){
+            gen.previewIndex = 0;
+            gen.primaryPinned = true;
+        }
         return false;
     }
-    const anchor = genStagePrimaryAnchorIndex(urls.length);
     const from = Math.max(0, Math.min(urls.length - 1, Number(displayIndex)));
+    if(generatorUsesTimeLayout(gen)){
+        gen.primaryPinned = true;
+        if(Number(gen.previewIndex) === from) return false;
+        gen.previewIndex = from;
+        return true;
+    }
+    const anchor = genStagePrimaryAnchorIndex(urls.length);
     if(from === anchor){
         gen.previewIndex = anchor;
+        gen.primaryPinned = true;
         return false;
     }
     const next = urls.slice();
@@ -15273,6 +15652,7 @@ function setGeneratorPrimaryByDisplaySwap(gen, displayIndex){
     next[from] = tmp;
     gen.previewRoundUrls = next;
     gen.previewIndex = anchor;
+    gen.primaryPinned = true;
     return true;
 }
 function appendGeneratorHistory(gen, outputs, meta={}){
@@ -15303,25 +15683,54 @@ function appendGeneratorHistory(gen, outputs, meta={}){
     });
     gen.history = next.length > MAX_GEN_HISTORY ? next.slice(-MAX_GEN_HISTORY) : next;
     syncGeneratorPreviewFromHistory(gen);
-    // 新出图成为主图：插入连线锚点格
+    // 新图排在后面；默认时间序不挪格；主图仍由右键/按钮设置
     if(added.length){
+        if(gen.previewLayout !== 'anchor') gen.previewLayout = 'time';
         let order = (gen.previewRoundUrls || []).map(outputUrlValue).filter(Boolean);
-        const newest = added[added.length - 1];
-        order = order.filter(u => u !== newest);
-        const anchor = genStagePrimaryAnchorIndex(order.length + 1);
-        order.splice(anchor, 0, newest);
-        if(order.length > MAX_GEN_PREVIEW){
-            const primary = order[anchor] || newest;
-            const rest = order.filter(u => u !== primary).slice(-(MAX_GEN_PREVIEW - 1));
-            const a = genStagePrimaryAnchorIndex(rest.length + 1);
-            rest.splice(a, 0, primary);
-            order = rest;
+        let primaryUrl = null;
+        if(order.length){
+            let pIdx = Number(gen.previewIndex);
+            if(!Number.isFinite(pIdx) || pIdx < 0 || pIdx >= order.length){
+                pIdx = generatorUsesTimeLayout(gen)
+                    ? Math.max(0, order.length - 1)
+                    : genStagePrimaryAnchorIndex(order.length);
+            }
+            primaryUrl = order[pIdx] || null;
         }
-        gen.previewRoundUrls = order;
-        gen.previewIndex = genStagePrimaryAnchorIndex(order.length);
+        const addSet = new Set(added);
+        order = order.filter(u => !addSet.has(u));
+        order.push(...added);
+        if(generatorUsesTimeLayout(gen)){
+            // 时间序：末尾追加；溢出只切尾，禁止把主图插回最前
+            if(order.length > MAX_GEN_PREVIEW){
+                order = order.slice(-MAX_GEN_PREVIEW);
+                if(primaryUrl && !order.includes(primaryUrl)){
+                    delete gen.primaryPinned;
+                    primaryUrl = null;
+                }
+            }
+            gen.previewRoundUrls = order;
+            if(gen.primaryPinned && primaryUrl && order.includes(primaryUrl)){
+                gen.previewIndex = order.indexOf(primaryUrl);
+            } else {
+                gen.previewIndex = Math.max(0, order.length - 1);
+            }
+        } else if(primaryUrl && order.includes(primaryUrl)){
+            const rest = order.filter(u => u !== primaryUrl);
+            const trimmed = rest.length > MAX_GEN_PREVIEW - 1
+                ? rest.slice(-(MAX_GEN_PREVIEW - 1))
+                : rest;
+            const a = genStagePrimaryAnchorIndex(trimmed.length + 1);
+            trimmed.splice(a, 0, primaryUrl);
+            order = trimmed;
+            gen.previewRoundUrls = order;
+            gen.previewIndex = a;
+        } else {
+            gen.previewRoundUrls = order.slice(-MAX_GEN_PREVIEW);
+            gen.previewIndex = Math.max(0, gen.previewRoundUrls.length - 1);
+        }
     }
-    // 一次出多张：默认叠卡（图1）；「展开」拆成独立节点（图2）
-    if(urls.length > 1) gen.historyOpen = false;
+    // 一次出多张默认叠卡由 resetGeneratorPreviewRound 负责；已展开（图片组批量等）不强制收起
     refreshDownstreamGenConsumers(gen.id);
 }
 function appendGeneratorPreviewRound(gen, outputs, meta={}){
@@ -15345,11 +15754,15 @@ function generatorPreviewUrls(node){
         order = (node?.generatedOutputs || []).map(outputUrlValue).filter(Boolean);
     }
     if(order.length > MAX_GEN_PREVIEW){
-        const primaryUrl = order[Math.max(0, Math.min(order.length - 1, Number(node?.previewIndex ?? 0)))] || order[0];
-        const rest = order.filter(u => u !== primaryUrl).slice(-(MAX_GEN_PREVIEW - 1));
-        const a = genStagePrimaryAnchorIndex(rest.length + 1);
-        rest.splice(a, 0, primaryUrl);
-        order = rest;
+        if(generatorUsesTimeLayout(node)){
+            order = order.slice(-MAX_GEN_PREVIEW);
+        } else {
+            const primaryUrl = order[Math.max(0, Math.min(order.length - 1, Number(node?.previewIndex ?? 0)))] || order[0];
+            const rest = order.filter(u => u !== primaryUrl).slice(-(MAX_GEN_PREVIEW - 1));
+            const a = genStagePrimaryAnchorIndex(rest.length + 1);
+            rest.splice(a, 0, primaryUrl);
+            order = rest;
+        }
     }
     return order;
 }
@@ -15397,6 +15810,29 @@ function setGeneratorPrimaryFromHistory(gen, historyIndex){
     gen.historyIndex = idx;
     refreshDownstreamGenConsumers(gen.id);
 }
+const _imageBatchRelayoutTimers = new Map();
+/** 图片自然尺寸落地后，防抖重排所属图片组（否则默认 380×300 装不下 680 边长的子图） */
+function scheduleImageBatchRelayout(batchId, resizeGroup='auto'){
+    if(!batchId) return;
+    const prev = _imageBatchRelayoutTimers.get(batchId);
+    if(prev) clearTimeout(prev);
+    const timer = setTimeout(() => {
+        _imageBatchRelayoutTimers.delete(batchId);
+        const g = nodes.find(n => n.id === batchId);
+        if(!g || g.type !== 'imageBatch') return;
+        layoutGroupChildren(g, { resizeGroup, layoutAllItems: true, updateDom: true });
+        const groupEl = nodesEl?.querySelector?.(`.node[data-id="${CSS.escape(g.id)}"]`);
+        if(groupEl && g.w && g.h){
+            groupEl.classList.add('sized');
+            groupEl.style.width = `${g.w}px`;
+            groupEl.style.height = `${g.h}px`;
+        }
+        scheduleLinkGeometryRefresh(new Set([g.id, ...(g.items || [])]));
+        if(minimapState) updateMinimapNodePositions();
+        scheduleSave();
+    }, 64);
+    _imageBatchRelayoutTimers.set(batchId, timer);
+}
 function fitImageNodeToNaturalAspect(node, el, img){
     if(!node || node.type !== 'image' || !img) return;
     if(mediaKindForNode(node) !== 'image') return;
@@ -15407,6 +15843,8 @@ function fitImageNodeToNaturalAspect(node, el, img){
     if(node._userSized) return;
     // 最长边 = CANVAS_MEDIA_MAX_EDGE：9:16 / 16:9 只差方向，忽略源图像素分辨率
     const {w, h} = canvasFitByMaxEdge(nw, nh, CANVAS_MEDIA_MAX_EDGE);
+    const prevW = Number(node.w) || 0;
+    const prevH = Number(node.h) || 0;
     node.w = w;
     node.h = h;
     if(el){
@@ -15415,6 +15853,10 @@ function fitImageNodeToNaturalAspect(node, el, img){
         el.classList.add('sized');
     }
     resyncGensMatchingUpstreamImage(node);
+    if(Math.abs(prevW - w) > 1 || Math.abs(prevH - h) > 1){
+        const batch = imageBatchOwningImage(node.id);
+        if(batch) scheduleImageBatchRelayout(batch.id, 'auto');
+    }
 }
 function applyNaturalAspectFromImg(img, frameEl, node){
     if(!img || !frameEl) return;
@@ -15819,8 +16261,19 @@ function bindGenStageInteractions(root, node){
             e.preventDefault();
             e.stopPropagation();
             applyNodeSelection(node.id, e);
-            // 角标展开：节点内查看全部结果（图1网格）
+            // 角标展开：节点内查看全部结果（图1网格）；生成中也可展开看 pending 占位
             node.historyOpen = true;
+            refresh();
+        };
+    }
+    const collapseGridBtn = root?.querySelector?.('.gen-stage-grid-collapse, [data-action="collapse-grid"]');
+    if(collapseGridBtn){
+        collapseGridBtn.onmousedown = e => e.stopPropagation();
+        collapseGridBtn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            applyNodeSelection(node.id, e);
+            node.historyOpen = false;
             refresh();
         };
     }
@@ -15848,18 +16301,12 @@ function bindGenStageInteractions(root, node){
             e.stopPropagation();
             applyNodeSelection(node.id, e);
             const url = tile.getAttribute('data-preview-url') || '';
+            // 单击不设主图；设主图仅右键菜单 / 「设为主图」按钮
             if(isGenBatchPicking(node)){
                 if(toggleGenBatchPickUrl(url)){
                     refresh();
                     syncGenBatchPickBar();
                 }
-                return;
-            }
-            const idx = Number(tile.dataset.previewIndex || 0);
-            if(setGeneratorPrimaryByDisplaySwap(node, idx)){
-                refresh();
-                refreshDownstreamGenConsumers(node.id);
-                scheduleSave();
             }
         };
         const media = tile.querySelector('img, video');
@@ -15955,23 +16402,34 @@ function renderGenStagePendingTileHtml(pending, index){
         </div>
     </div>`;
 }
-/** 有在途任务时用网格占位，避免整层蒙层把已出图压灰 */
+/** 用户展开或批量生图主动打开时用网格；叠卡收起时角标可再展开看进度 */
 function genStageShowsGrid(node, urls, pendings){
+    if(!node?.historyOpen) return false;
     const list = urls || [];
     const waiting = pendings || [];
-    if(waiting.length) return true;
-    return Boolean(node?.historyOpen) && list.length > 1;
+    if(waiting.length > 0) return true;
+    // 图片组批量：任务创建前已有进度标记，先出网格避免闪一下叠卡
+    if(node._batchProgress) return true;
+    return list.length > 1;
 }
-function renderGenStageStackHtml(node, urls, primary, busyOverlay){
+function renderGenStageStackHtml(node, urls, primary, busyOverlay, pendingCount = 0){
     const count = urls.length;
+    const waiting = Math.max(0, Number(pendingCount) || 0);
+    const badgeCount = count + waiting;
     const peeks = urls.filter(u => u !== primary).slice(-3);
     const peekHtml = peeks.map((_, i) => {
         const depth = peeks.length - i;
         return `<div class="gen-stage-stack-peek" style="--peek:${depth}" aria-hidden="true"></div>`;
     }).join('');
     const ar = genStageTileAspectCss(node);
-    const expandTitle = langIsEn() ? `View all ${count} results` : `展开查看全部 ${count} 张`;
-    return `<div class="gen-stage has-images is-stack">
+    const expandTitle = waiting
+        ? (langIsEn()
+            ? `Expand · ${count} ready, ${waiting} generating`
+            : `展开 · ${count} 张已出 · ${waiting} 张生成中`)
+        : (langIsEn() ? `View all ${count} results` : `展开查看全部 ${count} 张`);
+    const badgeText = waiting ? `${count}+${waiting}` : String(count);
+    const busyClass = waiting || busyOverlay ? ' is-busy' : '';
+    return `<div class="gen-stage has-images is-stack${busyClass}">
         <div class="gen-stage-frame is-stack">
             <div class="gen-stage-stack">
                 ${peekHtml}
@@ -15979,7 +16437,7 @@ function renderGenStageStackHtml(node, urls, primary, busyOverlay){
                     ${genStageMediaHtml(primary)}
                     <button type="button" class="gen-stage-stack-expand" data-action="expand-grid" title="${escapeAttr(expandTitle)}">
                         <i data-lucide="layers" class="w-3 h-3"></i>
-                        <span>${count}</span>
+                        <span>${escapeHtml(badgeText)}</span>
                     </button>
                 </div>
             </div>
@@ -16006,8 +16464,9 @@ function renderGenStageHtml(node){
         : (pendingN > 1
             ? (langIsEn() ? `Generating (${pendingN})…` : `生成中 (${pendingN})…`)
             : (langIsEn() ? 'Generating…' : '生成中…'));
+    // 收起态：底图模糊 + 律动波纹（不用 lite 空胶囊）
     const busyOverlay = (isBusy && !showGrid)
-        ? `<div class="gen-stage-busy gen-stage-busy-lite" aria-live="polite">
+        ? `<div class="gen-stage-busy gen-stage-busy-collapsed" aria-live="polite">
             <div class="output-pending-waves" aria-hidden="true"><span></span><span></span><span></span></div>
             <span class="gen-stage-busy-label">${escapeHtml(busyLabel)}</span>
         </div>`
@@ -16024,8 +16483,13 @@ function renderGenStageHtml(node){
         const total = list.length + pendings.length;
         const cols = genStageGridCols(Math.max(1, total));
         const ar = genStageTileAspectCss(node);
+        const collapseTitle = langIsEn() ? 'Collapse' : '收起';
         return `<div class="gen-stage has-images history-open is-grid ${isBusy ? 'is-busy' : ''}${isGenBatchPicking(node) ? ' is-batch-picking' : ''}">
             <div class="gen-stage-frame is-grid" style="--gen-tile-ar:${ar}; --gen-grid-cols:${cols}">
+                <button type="button" class="gen-stage-grid-collapse" data-action="collapse-grid" title="${escapeAttr(collapseTitle)}">
+                    <i data-lucide="minimize-2" class="w-3 h-3"></i>
+                    <span>${escapeHtml(collapseTitle)}</span>
+                </button>
                 <div class="gen-stage-grid" role="listbox">${readyTiles}${pendingTiles}</div>
             </div>
         </div>`;
@@ -16040,9 +16504,10 @@ function renderGenStageHtml(node){
         </div>`;
     }
     clampGeneratorPreviewIndex(node);
-    const primary = urls[Math.max(0, Math.min(urls.length - 1, Number(node.previewIndex ?? urls.length - 1)))];
-    if(urls.length > 1){
-        return renderGenStageStackHtml(node, urls, primary, busyOverlay);
+    const primary = genStageCollapsedDisplayUrl(node, urls);
+    // 多图，或单图但有在途任务：叠卡/单卡 + 角标（生成中可展开看进度）
+    if(urls.length > 1 || pendings.length > 0){
+        return renderGenStageStackHtml(node, urls, primary, busyOverlay, pendings.length);
     }
     return `<div class="gen-stage has-images ${isBusy ? 'is-busy' : ''}">
         <div class="gen-stage-frame">
@@ -16131,6 +16596,7 @@ function deleteOtherGeneratorPreviews(gen, keepUrl){
     const drop = new Set(previewBefore.filter(u => u !== keepUrl));
     gen.previewRoundUrls = [keepUrl];
     gen.previewIndex = 0;
+    gen.primaryPinned = true;
     gen.historyOpen = false;
     const hist = generatorHistoryItems(gen);
     if(hist.length){
@@ -16161,8 +16627,11 @@ function openGenStageResultMenu(nodeId, clientX, clientY, opts={}){
         previewIndex = urls.indexOf(url);
     }
     const multi = urls.length > 1;
-    const anchor = genStagePrimaryAnchorIndex(urls.length);
-    const isPrimary = multi ? previewIndex === anchor : true;
+    const pinnedIdx = Number(node.previewIndex);
+    // 未钉主图时收起态跟最新图走，「设为主图」应对任意张可见（含当前连线位）
+    const isPrimary = !multi
+        ? true
+        : Boolean(node.primaryPinned && Number.isFinite(pinnedIdx) && previewIndex === pinnedIdx);
     const favorited = isOutputUrlFavorited(url);
     const histItem = generatorHistoryItems(node).find(x => x.url === url) || {url};
     const en = langIsEn();
@@ -16176,16 +16645,21 @@ function openGenStageResultMenu(nodeId, clientX, clientY, opts={}){
         <button class="menu-btn" type="button" data-gen-join-batch="1"><i data-lucide="images" class="w-4 h-4"></i><span>${en ? 'Add to image group' : '加入图片组'}</span></button>
         ${multi ? `<button class="menu-btn" type="button" data-gen-delete-others="1"><i data-lucide="trash-2" class="w-4 h-4"></i><span>${en ? 'Delete other images' : '删除其他图片'}</span></button>` : ''}
         <div class="menu-sep" aria-hidden="true"></div>
+        ${multi ? `<button class="menu-btn" type="button" data-gen-sort-time="1"><i data-lucide="arrow-down-up" class="w-4 h-4"></i><span>${en ? 'Sort by time' : '按时间顺序整理'}</span></button>` : ''}
         ${multi ? `<button class="menu-btn" type="button" data-gen-expand-all="1"><i data-lucide="layout-grid" class="w-4 h-4"></i><span>${en ? 'Expand all nodes' : '展开所有节点'}</span></button>` : ''}
         ${multi ? `<button class="menu-btn" type="button" data-gen-download-all="1"><i data-lucide="download" class="w-4 h-4"></i><span>${en ? 'Download all' : '下载全部'}</span></button>` : ''}
     `;
     const menuWidth = 240;
-    imageNodeMenu.style.left = `${Math.max(10, Math.min(window.innerWidth - menuWidth - 10, clientX))}px`;
-    imageNodeMenu.style.top = `${Math.max(10, clientY)}px`;
     imageNodeMenu.style.visibility = 'hidden';
     imageNodeMenu.classList.add('open');
     const menuHeight = imageNodeMenu.offsetHeight || 300;
-    imageNodeMenu.style.top = `${Math.max(10, Math.min(window.innerHeight - menuHeight - 10, clientY))}px`;
+    // 优先显示在指针上方，避免被底部 gen-dock 挡住
+    let left = Math.max(10, Math.min(window.innerWidth - menuWidth - 10, clientX));
+    let top = clientY - menuHeight - 8;
+    if(top < 10) top = Math.min(window.innerHeight - menuHeight - 10, clientY + 8);
+    top = Math.max(10, Math.min(window.innerHeight - menuHeight - 10, top));
+    imageNodeMenu.style.left = `${left}px`;
+    imageNodeMenu.style.top = `${top}px`;
     imageNodeMenu.style.visibility = '';
     const refreshAfter = () => {
         refreshNodes([node.id]);
@@ -16233,6 +16707,16 @@ function openGenStageResultMenu(nodeId, clientX, clientY, opts={}){
         if(deleteOtherGeneratorPreviews(node, url)){
             refreshAfter();
             setStatus(en ? 'Kept this image only' : '已删除其他图片');
+        }
+    });
+    imageNodeMenu.querySelector('[data-gen-sort-time]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        closeImageNodeMenu();
+        try { pushUndo(); } catch(_){ /* ignore */ }
+        if(sortGeneratorPreviewsByTime(node)){
+            refreshAfter();
+            refreshDownstreamGenConsumers(node.id);
+            setStatus(en ? 'Sorted by time (oldest → newest)' : '已按时间顺序整理（旧→新）');
         }
     });
     imageNodeMenu.querySelector('[data-gen-expand-all]')?.addEventListener('click', e => {
@@ -17070,12 +17554,17 @@ function renderPromptPreview(container, promptInputs){
 function renderImageInputList(list, node, imageInputs, emptyText=null, opts={}){
     if(!list) return;
     list.innerHTML = imageInputs.length ? '' : `<div class="text-[11px] text-gray-300 py-2">${escapeHtml(emptyText || tr('canvas.inputImagesEmpty'))}</div>`;
+    const startIndex = Math.max(1, Number(opts.startIndex) || 1);
+    const asFigure = Boolean(opts.figureIndex);
     imageInputs.forEach((src, i) => {
         const item = document.createElement('div');
         item.className = 'input-item';
         item.dataset.sourceId = src.id;
+        const n = startIndex + i;
+        const indexText = asFigure ? trf('canvas.figureIndex', {n}) : String(n);
+        const indexCls = asFigure ? 'input-index is-figure' : 'input-index';
         const previewHtml = src.preview && !isMissingAssetUrl(src.preview) ? `<img src="${escapeAttr(src.preview)}" draggable="false">` : (src.preview ? missingAssetHtml(src.preview, true) : '<i data-lucide="image" class="w-6 h-6 text-slate-400"></i>');
-        item.innerHTML = `<span class="input-index">${i + 1}</span>${previewHtml}<span class="input-label">${escapeHtml(src.label)}</span>`;
+        item.innerHTML = `<span class="${indexCls}">${escapeHtml(indexText)}</span>${previewHtml}<span class="input-label">${escapeHtml(src.label)}</span>`;
         list.appendChild(item);
     });
     bindInputListPointerReorder(list, node, opts);
@@ -17101,8 +17590,10 @@ function renderGenDockImageInputs(container, node, imageInputs){
         renderImageInputList(container.querySelector('.input-list'), node, part.all);
         return;
     }
-    const batchLabel = langIsEn() ? 'Per-item queue' : '逐张队列';
-    const sharedLabel = langIsEn() ? 'Shared refs (every run)' : '共享参考（每次附带）';
+    // 与 jobRefs=[队列当前张, ...共享] 对齐：队列序≠图N；共享从 图2 起
+    const batchLabel = tr('canvas.genDockBatchQueueLabel');
+    const sharedLabel = tr('canvas.genDockSharedRefsLabel');
+    const figureHint = tr('canvas.genDockFigureHint');
     container.innerHTML = `
         <div class="gen-dock-refs-section gen-dock-refs-batch">
             <div class="gen-dock-refs-label">${escapeHtml(batchLabel)}</div>
@@ -17111,13 +17602,17 @@ function renderGenDockImageInputs(container, node, imageInputs){
         <div class="gen-dock-refs-section gen-dock-refs-shared">
             <div class="gen-dock-refs-label">${escapeHtml(sharedLabel)}</div>
             <div class="input-list gen-dock-shared-list"></div>
+            <div class="gen-dock-refs-hint">${escapeHtml(figureHint)}</div>
         </div>
     `;
     renderImageInputList(container.querySelector('.gen-dock-batch-list'), node, part.batch, null, {
-        subsetIds: part.batch.map(s => s.id)
+        subsetIds: part.batch.map(s => s.id),
+        startIndex: 1,
     });
     renderImageInputList(container.querySelector('.gen-dock-shared-list'), node, part.shared, null, {
-        subsetIds: part.shared.map(s => s.id)
+        subsetIds: part.shared.map(s => s.id),
+        startIndex: 2,
+        figureIndex: true,
     });
 }
 function renderVideoImageInputs(list, node, imageInputs){
@@ -18705,7 +19200,7 @@ function generatorSources(gen, ctx=loopContext){
         if(n.type === 'llm' && (n.mode || 'node') === 'node' && n.outputText) return {id:n.id, type:'llm', label:(n.outputText || 'LLM').slice(0, 32), refs:[], prompt:n.outputText || ''};
         if(n.type === 'videoReverse' && n.outputText) return {id:n.id, type:'videoReverse', label:(n.outputText || '视频反推').slice(0, 32), refs:[], prompt:n.outputText || ''};
         if(n.type === 'slotsLoopVideoAgent' && n.outputText) return {id:n.id, type:'slotsLoopVideoAgent', label:(n.outputText || 'Slots 循环视频').slice(0, 32), refs:[], prompt:n.outputText || ''};
-        if(n.type === 'mxShellPromptAgent' && n.outputText) return {id:n.id, type:'mxShellPromptAgent', label:(n.outputText || 'Mx-Shell').slice(0, 32), refs:[], prompt:n.outputText || ''};
+        if(isMxShellFamilyAgent(n) && n.outputText) return {id:n.id, type:n.type, label:(n.outputText || 'Mx-Shell').slice(0, 32), refs:[], prompt:n.outputText || ''};
         if((n.type === 'textOutput' || n.type === 'mxShellPromptView' || n.type === 'deepWhiteShotView') && n.text) return {id:n.id, type:'textOutput', label:(n.text || textOutputKindLabel(n.kind)).slice(0, 32), refs:[], prompt:n.text || ''};
         if(n.type === 'deepWhiteShotAgent' && n.outputText) return {id:n.id, type:'deepWhiteShotAgent', label:(n.outputText || 'DeepWhite').slice(0, 32), refs:[], prompt:n.outputText || ''};
         if(n.type === 'screenwritingAgent' && n.outputText) return {id:n.id, type:'screenwritingAgent', label:(n.outputText || '编剧').slice(0, 32), refs:[], prompt:n.outputText || ''};
@@ -19098,6 +19593,8 @@ async function runGeneratorSingle(gen, prompt, refs, opts={}){
     const count = Math.max(1, Math.min(8, Number(gen.count || 1)));
     const out = outputForNode(gen, 460);
     resetGeneratorPreviewRound(gen);
+    // 一次多张：点生成即展开网格看进度/结果
+    if(count > 1) gen.historyOpen = true;
     const run = runSnapshot(gen, prompt || 'Edit the reference images.', refs);
     const payload = await buildGeneratorTaskPayload(gen, prompt || 'Edit the reference images.', refs);
     const taskInfos = await Promise.all(Array.from({length:count}, () => createCanvasImageTask(payload)));
@@ -19126,6 +19623,8 @@ async function runGeneratorBatchParallel(gen, prompt, perItemJobs, opts={}){
     const promptText = prompt || 'Edit the reference images.';
     const count = Math.max(1, Math.min(8, Number(gen.count || 1)));
     resetGeneratorPreviewRound(gen);
+    // 图片组逐张/批量：点生成即展开网格，边出边看（不要默认叠卡）
+    gen.historyOpen = true;
     // perItemJobs: Ref[][]（每项完整参考列表）或旧版 Ref[]（每项单图）
     const normalizeJob = (job) => {
         if(Array.isArray(job)){
@@ -20212,7 +20711,7 @@ function runCascadeNodeByType(node, opts={}){
     if(node.type === 'batchPosterAgent') return runBatchPosterAgent(node.id, runOpts);
     if(node.type === 'nineGridAgent') return runNineGridFull(node.id);
     if(node.type === 'slotsLoopVideoAgent') return runSlotsLoopVideoAgent(node.id, runOpts);
-    if(node.type === 'mxShellPromptAgent') return runMxShellPromptAgent(node.id, runOpts);
+    if(isMxShellFamilyAgent(node)) return runMxShellPromptAgent(node.id, runOpts);
     if(node.type === 'deepWhiteShotAgent') return runDeepWhiteShotAgent(node.id, runOpts);
     if(node.type === 'screenwritingAgent') return runScreenwritingAgent(node.id, runOpts);
     if(node.type === 'pixarAdScriptAgent') return runPixarAdScriptAgent(node.id, runOpts);
@@ -20243,7 +20742,7 @@ async function runLimitedCascadeRounds(rounds, limit, runner){
     return Promise.allSettled(workers);
 }
 function canvasRunTypes(){
-    return ['generator','msgen','comfy','ltxDirector','llm','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent'];
+    return ['generator','msgen','comfy','ltxDirector','llm','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent'];
 }
 function canvasWorkflowEdges(){
     const runTypes = canvasRunTypes();
@@ -22409,7 +22908,7 @@ function nodeBounds(ids){
     const y2 = Math.max(...rects.map(r => r.y + r.h));
     return {x:x1, y:y1, w:x2 - x1, h:y2 - y1};
 }
-const FLOW_NODE_ORDER = {image:0, prompt:1, group:2, promptGroup:2, loop:3, llm:4, generator:5, replicaAgent:5, imageRepairAgent:5, videoReverse:5, slotsLoopVideoAgent:5, mxShellPromptAgent:5, deepWhiteShotAgent:5, screenwritingAgent:5, pixarAdScriptAgent:5, textOutput:6, mxShellPromptView:6, deepWhiteShotView:6, msgen:5, video:5, rh:5, comfy:5, ltxDirector:5, output:6, frameStack:6, imageBatch:6};
+const FLOW_NODE_ORDER = {image:0, prompt:1, group:2, promptGroup:2, loop:3, llm:4, generator:5, replicaAgent:5, imageRepairAgent:5, videoReverse:5, slotsLoopVideoAgent:5, mxShellPromptAgent:5, mxShellPolishAgent:5, deepWhiteShotAgent:5, screenwritingAgent:5, pixarAdScriptAgent:5, textOutput:6, mxShellPromptView:6, deepWhiteShotView:6, msgen:5, video:5, rh:5, comfy:5, ltxDirector:5, output:6, frameStack:6, imageBatch:6};
 function moveNodeWithChildren(node, newX, newY){
     if(!node) return;
     const dx = newX - Number(node.x || 0);
@@ -22538,7 +23037,7 @@ function canvasNodeSearchLabel(node){
         image:'Image', prompt:'Prompt', loop:'Loop', promptGroup:'Prompts', group:'Group',
         output:'Output', imageBatch:'Image batch', frameStack:'Frame Stack', llm:'LLM',
         replicaAgent:'Replica Agent', imageRepairAgent:'Repair Agent', batchPosterAgent:'Batch Poster',
-        nineGridAgent:'Nine Grid', slotsLoopVideoAgent:'Slots Loop', mxShellPromptAgent:'Mx-Shell', textOutput:'Text Output', mxShellPromptView:'Mx-Shell View', deepWhiteShotAgent:'DeepWhite', deepWhiteShotView:'DeepWhite Doc', screenwritingAgent:'Screenwriting', pixarAdScriptAgent:'Story Anim', videoReverse:'Video Reverse',
+        nineGridAgent:'Nine Grid', slotsLoopVideoAgent:'Slots Loop', mxShellPromptAgent:'Mx-Shell', mxShellPolishAgent:'Mx-Shell Polish', textOutput:'Text Output', mxShellPromptView:'Mx-Shell View', deepWhiteShotAgent:'DeepWhite', deepWhiteShotView:'DeepWhite Doc', screenwritingAgent:'Screenwriting', pixarAdScriptAgent:'Story Anim', videoReverse:'Video Reverse',
         comfy:'ComfyUI', ltxDirector:'LTX Director', rh:'RunningHub', msgen:'ModelScope',
         video:'Video', generator:'Generator',
     }[node.type] || node.type || 'Node';
@@ -23280,13 +23779,13 @@ function canConnect(fromId, toId){
         if(['image','group','output','frameStack','imageBatch'].includes(from.type)) return true;
         return CANVAS_MEDIA_OUTPUT_TYPES.includes(from.type);
     }
-    if(to.type === 'mxShellPromptAgent'){
+    if(isMxShellFamilyAgent(to)){
         if(['prompt','promptGroup','loop','llm'].includes(from.type)) return true;
         if(['image','group','output','frameStack','imageBatch'].includes(from.type)) return true;
         return CANVAS_MEDIA_OUTPUT_TYPES.includes(from.type);
     }
     if(to.type === 'textOutput' || to.type === 'mxShellPromptView' || to.type === 'deepWhiteShotView'){
-        if(from.type === 'mxShellPromptAgent') return !to.kind || to.kind === 'mxShell' || to.type === 'mxShellPromptView';
+        if(isMxShellFamilyAgent(from)) return !to.kind || to.kind === 'mxShell' || to.type === 'mxShellPromptView';
         if(from.type === 'deepWhiteShotAgent') return !to.kind || to.kind === 'deepWhite' || to.kind === 'seedance' || to.type === 'deepWhiteShotView';
         if(from.type === 'screenwritingAgent') return !to.kind || to.kind === 'screenwriting';
         if(from.type === 'pixarAdScriptAgent') return !to.kind || isStoryAnimTextKind(to.kind);
@@ -23326,7 +23825,7 @@ function canConnect(fromId, toId){
     if(from.type === 'batchPosterAgent') return to.type === 'output';
     if(from.type === 'nineGridAgent') return to.type === 'output' || to.type === 'imageBatch';
     if(from.type === 'slotsLoopVideoAgent') return to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm';
-    if(from.type === 'mxShellPromptAgent') return to.type === 'textOutput' || to.type === 'mxShellPromptView' || to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'video';
+    if(isMxShellFamilyAgent(from)) return to.type === 'textOutput' || to.type === 'mxShellPromptView' || to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'video';
     if(from.type === 'screenwritingAgent') return to.type === 'textOutput' || to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || to.type === 'deepWhiteShotAgent';
     if(from.type === 'pixarAdScriptAgent') return to.type === 'textOutput' || to.type === 'prompt' || to.type === 'promptGroup' || to.type === 'llm' || CANVAS_GENERATOR_TYPES.includes(to.type) || to.type === 'msgen' || to.type === 'nineGridAgent';
     if(from.type === 'textOutput' || from.type === 'mxShellPromptView' || from.type === 'deepWhiteShotView'){
@@ -24878,7 +25377,7 @@ async function mountInfiniteCanvasEngineInner(root) {
 
 function exposeCanvasGlobals() {
   const map = {
-    addImageNode, addPromptNode, addLoopNode, addLLMNode, addGeneratorNode, addReplicaAgentNode, addImageRepairAgentNode, addBatchPosterAgentNode, addNineGridAgentNode, addSlotsLoopVideoAgentNode, addMxShellPromptAgentNode, addMxShellPromptViewNode, addDeepWhiteShotAgentNode, addDeepWhiteShotViewNode, addTextOutputNode, addVideoReverseNode, addMsGenNode, addImageBatchNode, runReplicaAgentFromButton, runImageRepairAgentFromButton, runBatchPosterFromButton, runNineGridFromButton, runSlotsLoopVideoFromButton, runMxShellPromptFromButton, runDeepWhiteShotFromButton,
+    addImageNode, addPromptNode, addLoopNode, addLLMNode, addGeneratorNode, addReplicaAgentNode, addImageRepairAgentNode, addBatchPosterAgentNode, addNineGridAgentNode, addSlotsLoopVideoAgentNode, addMxShellPromptAgentNode, addMxShellPolishAgentNode, addMxShellPromptViewNode, addDeepWhiteShotAgentNode, addDeepWhiteShotViewNode, addTextOutputNode, addVideoReverseNode, addMsGenNode, addImageBatchNode, runReplicaAgentFromButton, runImageRepairAgentFromButton, runBatchPosterFromButton, runNineGridFromButton, runSlotsLoopVideoFromButton, runMxShellPromptFromButton, runDeepWhiteShotFromButton,
     addVideoNode, addRhNode, addComfyNode, addLTXDirectorNode, addOutputNode, addPromptGroupNode, groupSelectedImages, createImageBatchFromSelection, createPromptGroupFromSelection, organizeSelectedNodes,
     openCanvasNodeSearch, performUndo, performRedo,
     openCanvasHistoryHub, openCanvasGenerationBrowser, placeImageUrlOnCanvas, downloadAllCanvasOutputImages,

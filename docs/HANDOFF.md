@@ -1,16 +1,16 @@
 ﻿# 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  1. **故事动画分镜 Agent** 三步流程已定：资产图不必回连 Agent。
-  2. **线稿提示词格式**：`场景：` / `本段剧情：` / 非末张动作进行中与禁止收尾 / 夸张浮夸迪士尼四肢 / 大特写与近景交替 / **禁止连续相同景别** / **禁止荷兰角倾斜构图** / 全局连续镜号与运镜图表；**第1张强制9宫格**；禁英文 Panel 重启编号。
-- **验证状态**：`npm run check:pixar-ad` 已通过；请重新点「生成分镜脚本」以应用新格式。
-- **明日焦点**：重新生成确认线稿格式；随后 AG25。
+  1. **Mx-Shell 润色 Agent（AG39）**：新节点 `mxShellPolishAgent`（菜单「Mx-Shell 润色 Agent」）。贴原稿 → 选一镜到底/多机位 → 润色；API `task=polish`。原「Mx-Shell 提示词 Agent」不变（`task=generate`）。
+  2. AG37/AG38：多机位示例B、一镜到底示例A 对齐仍在。
+- **验证状态**：`npm run check:mx-shell` 与 `node init.mjs` 通过。
+- **明日焦点**：AG25（完整 Gen Console）。
 - **Blockers**：无。
-- **未提交 Git**：故事动画 Agent 相关改动；勿提交 `.env`。提醒导演 Git Commit。
+- **未提交 Git**：含 AG37–AG39 与此前画布改动；勿提交 `.env`。提醒导演 Git Commit。
 
 ## 新对话开场白（复制给 Agent）
 
 ```
 继续 gemini-deploy。先读 docs/HANDOFF.md。
-故事动画分镜按三步：资产提示词→生图；分镜脚本不必回连；线稿+资产图一起接生图。下一决策 AG25。
+Mx-Shell 有两个节点：生成 / 润色。下一决策 AG25。
 ```

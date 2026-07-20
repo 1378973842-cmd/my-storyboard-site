@@ -102,6 +102,9 @@
         { "id": "AG5", "desc": "DeepWhite 导演分镜 Agent：独立节点（与 Mx-Shell 分开体验后再决定是否串联）", "status": "done", "priority": 26 },
         { "id": "AG6", "desc": "文本 Output UX：统一 textOutput（kind=mxShell/deepWhite 折叠阅读）+ Agent 控制台化 + 修复制条遮挡", "status": "done", "priority": 27 },
         { "id": "AG7", "desc": "Mx-Shell 运镜强化：camera-moves 词典 + 四件套校验 + 节点运镜强度（克制/标准/炫技）", "status": "done", "priority": 28 },
+        { "id": "AG37", "desc": "Mx-Shell 多机位对齐示例B：节拍标题四段结构 + API约束/user锚点 + 行级校验（保留运镜词典质检）", "status": "done", "priority": 58 },
+        { "id": "AG38", "desc": "Mx-Shell 一镜到底对齐示例A：补角度/按秒分段 + 修正范文矛盾运镜 + API/user锚点与校验", "status": "done", "priority": 59 },
+        { "id": "AG39", "desc": "Mx-Shell 润色 Agent 独立节点：task=polish 保留原稿意图，原生成节点不变", "status": "done", "priority": 60 },
         { "id": "AG8", "desc": "DeepWhite P0：运镜/构图质量门 + 视觉装置≥50% + 空词禁令", "status": "done", "priority": 29 },
         { "id": "AG9", "desc": "DeepWhite P1：静帧生图提示词章（image-prompt-builder）+ 参考图 {@图N} 绑定", "status": "done", "priority": 30 },
         { "id": "AG10", "desc": "DeepWhite P2：推送到九宫格改写 + Seedance 四段画风导出", "status": "done", "priority": 31 },
@@ -123,7 +126,15 @@
         { "id": "AG25", "desc": "完整 Gen Console：复刻/修图壳优先（无框结果台+浮动控制）", "status": "todo", "priority": 46 },
         { "id": "AG26", "desc": "节点结果改为图台内 2×2 网格（角标展开/收起；下载/设主图；日常不弹全屏库）", "status": "done", "priority": 47 },
         { "id": "AG27", "desc": "多图双路径：角标展开=节点内网格查看；右键展开所有节点=拆成独立图片生成节点并上游扇出", "status": "done", "priority": 48 },
-        { "id": "AG28", "desc": "叠卡角标合并；生成节点拖线自选下游；gen→gen 仅参考不级联一键运行", "status": "done", "priority": 49 }
+        { "id": "AG28", "desc": "叠卡角标合并；生成节点拖线自选下游；gen→gen 仅参考不级联一键运行", "status": "done", "priority": 49 },
+        { "id": "AG29", "desc": "展开结果右键：按时间顺序整理；菜单 z-index/定位避开 gen-dock 遮挡", "status": "done", "priority": 50 },
+        { "id": "AG30", "desc": "图片组：子图自然尺寸落地后防抖重排扩容，避免默认框装不下", "status": "done", "priority": 51 },
+        { "id": "AG31", "desc": "图片组/一次多张生图：点生成即展开结果网格（非默认叠卡）", "status": "done", "priority": 52 },
+        { "id": "AG32", "desc": "图片组内右键禁用/恢复单张（不参与生图；角标+组计数）", "status": "done", "priority": 53 },
+        { "id": "AG33", "desc": "加入图片组：可选已连线/画布已有组，不必总新建", "status": "done", "priority": 54 },
+        { "id": "AG34", "desc": "禁用/恢复图片组级联全部子图；组头开关", "status": "done", "priority": 55 },
+        { "id": "AG35", "desc": "图片组共享参考图N：UI角标从2起+提示（对齐jobRefs）", "status": "done", "priority": 56 },
+        { "id": "AG36", "desc": "生图结果默认时间序（旧→新）追加，禁止锚点跳格", "status": "done", "priority": 57 }
       ]
     },
     {
@@ -146,6 +157,11 @@
         { "desc": "Skill：去品牌、多场景、弹性时长/宫格、资产提示词与线稿锁定", "status": "done" },
         { "desc": "后端：story_script/asset_prompts JSON 契约、时长与宫格校验、图N bindings、线稿约束", "status": "done" },
         { "desc": "画布：时长选择、资产参考图、双按钮、textOutput 分流与生图连线", "status": "done" },
+        { "desc": "分镜脚本锁定：沿用 lastAssetPrompts，锚点名/造型与资产提示词对齐校验", "status": "done" },
+        { "desc": "镜头质量升级：句式/运镜四件套/节拍+装置/表→线稿→视频统一校验", "status": "done" },
+        { "desc": "线稿逐格静帧改编：禁视频运动句；视频仍按分镜表串联", "status": "done" },
+        { "desc": "每格构图名词：融入 DeepWhite 构图词库并校验", "status": "done" },
+        { "desc": "线稿去掉「运镜图表」：格上仅镜号；运镜只在分镜表/视频段", "status": "done" },
         { "desc": "验证：自检脚本、TypeScript、node init.mjs", "status": "done" }
       ]
     }

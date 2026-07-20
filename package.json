@@ -17,6 +17,7 @@
     "log:daily": "node scripts/daily-log.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "check:pixar-ad": "tsx scripts/check-pixar-ad-script.ts",
+    "check:mx-shell": "tsx scripts/check-mx-shell-prompt.ts",
     "recover:canvas-output": "node scripts/recover-canvas-output-from-logs.mjs",
     "backup:remote": "node scripts/backup-remote-once.mjs",
     "deploy:safe": "node scripts/backup-remote-once.mjs && node scripts/deploy-remote-once.mjs"

@@ -19,8 +19,12 @@ export type MxShellRefBinding = {
   url?: string;
 };
 
+export type MxShellTask = "generate" | "polish";
+
 export type MxShellPromptBody = {
   mode?: string;
+  /** generate=从素材生成；polish=润色用户原稿（默认 generate） */
+  task?: string;
   story?: string;
   atmosphere?: string;
   /** 运镜强度：restrained / standard / flashy */
@@ -62,10 +66,14 @@ const MX_SHELL_API_CONSTRAINT = `
 }
 3. \`prompt\` 必须严格遵循本 SKILL 的输出模板顺序：
    【基础设定】→【氛围与画质】→【声音】→【画面内容】
-4. 若用户选择一镜到底，\`prompt\` 使用「一镜到底模式模板」。
-5. 若用户选择多机位分镜，\`prompt\` 使用「多机位分镜模式模板」，每个分镜含时间段、景别+角度+运镜四件套、动作描述。
+4. 若用户选择一镜到底，\`prompt\` 必须以本 SKILL「示例输出A」为事实源：【画面内容】含
+   \`分镜：单镜头一镜到底\`、\`景别：\`、\`角度：\`、\`构图：\`、\`运镜手法：\`、\`画面内容：\`，
+   且画面内容按秒分段（如 \`0-2秒：\`），至少两段；禁止省略角度；运镜勿写固定+跟随/推进。
+5. 若用户选择多机位分镜，\`prompt\` 必须以本 SKILL「示例输出B」为事实源：每行
+   \`分镜N丨[节拍标题]丨[时间段]丨[景别+角度+主运镜设计句]：[动作描述]\`
+   节拍标题必填（如开场入画）；禁止三槽骨架 \`分镜N丨时间段丨运镜：动作\`。
 6. 强制执行本 SKILL 核心原则：禁止文学化修辞（对白/画外音除外）、物理优先、时间轴精确到秒。
-7. 运镜强制：每镜写「手法名 + 方向/路径 + 速度质感 + 戏剧动机」；景别/角度/运镜分开；禁止空词与矛盾组合（见 references/camera-moves.md）。
+7. 运镜：一镜到底写在「运镜手法」行、多机位写在镜头设计句；须含词典手法名，并自然带上方向/路径/速度/动机；语感对齐 camera-moves.md「正确示例」；禁止空词与矛盾组合。
 8. 按用户指定的运镜强度（restrained / standard / flashy）选词；默认 standard。
 9. 有参考图时：基础设定每个元素不超过 20 字简短描述，并用 {@图1} {@图2} … 标注（按用户给出的图序号）。
 10. 若用户提供了【参考图绑定】表：必须严格按表把故事中的同名角色/道具/场景绑定到对应 {@图N}；禁止把角色参考图当成场景，也禁止把场景参考图当成角色。
@@ -282,6 +290,15 @@ export function normalizeMxShellCameraIntensity(value: unknown): MxShellCameraIn
   return "standard";
 }
 
+export function normalizeMxShellTask(value: unknown): MxShellTask {
+  const raw = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+  if (raw === "polish" || raw === "润色" || raw === "revise" || raw === "edit") return "polish";
+  return "generate";
+}
+
 function mxShellCameraIntensityLabel(intensity: MxShellCameraIntensity): string {
   if (intensity === "restrained") return "克制";
   if (intensity === "flashy") return "炫技";
@@ -356,6 +373,7 @@ export function normalizeImageBindings(
 
 function buildMxShellUserMessage(opts: {
   mode: MxShellMode;
+  task: MxShellTask;
   story: string;
   atmosphere: string;
   cameraIntensity: MxShellCameraIntensity;
@@ -364,13 +382,27 @@ function buildMxShellUserMessage(opts: {
 }): string {
   const modeLabel = mxShellModeLabel(opts.mode);
   const intensityLabel = mxShellCameraIntensityLabel(opts.cameraIntensity);
+  const isPolish = opts.task === "polish";
   const lines = [
+    `任务：${isPolish ? "润色原稿（polish）" : "从素材生成（generate）"}`,
     `模式（必须严格使用）：${modeLabel}（mode=${opts.mode}）`,
     `运镜强度（必须遵守）：${intensityLabel}（camera_intensity=${opts.cameraIntensity}）`,
     "",
-    "【用户素材】",
-    opts.story,
   ];
+  if (isPolish) {
+    lines.push(
+      "【润色硬性规则】",
+      "1. 以下【用户原稿】是权威意图：保留镜头/事件顺序、角色行为、关键对白与总时长意图。",
+      "2. 禁止另编支线、禁止新增原稿没有的角色/道具/重大情节；允许补全 Mx-Shell 必填字段与专业表述。",
+      "3. 把模糊写法改成物理可拍、时间轴精确到秒；运镜对齐词典，去掉空词与矛盾组合。",
+      "4. 输出仍须是完整 Mx-Shell 模板纯文本（非批注、非对照表）。",
+      "",
+      "【用户原稿】",
+      opts.story
+    );
+  } else {
+    lines.push("【用户素材】", opts.story);
+  }
   if (opts.atmosphere) {
     lines.push("", "【氛围与画质偏好（用户可改，未提供则按素材推断）】", opts.atmosphere);
   }
@@ -409,10 +441,35 @@ function buildMxShellUserMessage(opts: {
   lines.push(
     "",
     "【运镜要求】",
-    "每镜运镜必须写四件套：手法名 + 方向/路径 + 速度质感 + 戏剧动机。",
-    "景别、角度、运镜分开写；禁止空词与矛盾组合；词库见 system 中的运镜词典。",
-    "",
-    "请按 Mx-Shell_Prompts SKILL 执行：收集/推断参数 → 填入对应模式模板 → 仅输出 JSON（含完整 prompt 纯文本）。"
+    "镜头设计句语感对齐 system 中运镜词典「正确示例」：手法名 + 方向/路径 + 速度/动机写进自然句，勿空喊「电影感运镜」。",
+    "禁止空词与矛盾组合（固定+推进、手持+稳定器等）。",
+    ""
+  );
+  if (opts.mode === "multi_cam") {
+    lines.push(
+      "【多机位结构示范（必须同构，勿省略节拍标题）】",
+      "分镜1丨开场入画丨0-1.5s丨广角低角度固定机位，等待主体入画后切镜：……",
+      "分镜3丨冲突升级丨3-5s丨过肩视角跟拍，随主体侧移匀速横移，枪口压在画面右三分：……",
+      "完整写法以 SKILL「示例输出B」为准（镜头句勿写固定+推进等矛盾组合）。",
+      ""
+    );
+  } else {
+    lines.push(
+      "【一镜到底结构示范（必须同构，字段齐全）】",
+      "分镜：单镜头一镜到底。",
+      "景别：近景。角度：平视。构图：前景…；背景…。",
+      "运镜手法：跟拍，机位贴主体侧前方保持相对距离匀速后退跟随，动机是压迫逃亡感。",
+      "画面内容：",
+      "0-2秒：……",
+      "2-4秒：……",
+      "完整写法以 SKILL「示例输出A」为准（勿写固定机位+跟随）。",
+      ""
+    );
+  }
+  lines.push(
+    isPolish
+      ? "请按 Mx-Shell_Prompts SKILL 润色【用户原稿】→ 填入对应模式模板 → 仅输出 JSON（含完整 prompt 纯文本）。"
+      : "请按 Mx-Shell_Prompts SKILL 执行：收集/推断参数 → 填入对应模式模板 → 仅输出 JSON（含完整 prompt 纯文本）。"
   );
   return lines.join("\n");
 }
@@ -469,8 +526,59 @@ function extractPictureContent(prompt: string): string {
   return prompt.slice(idx);
 }
 
+/** 多机位单行：分镜N丨节拍标题丨时间段丨镜头设计句：动作（对齐示例B） */
+const MX_SHELL_MULTI_SHOT_LINE_RE =
+  /^分镜\s*(\d+)\s*丨\s*([^丨\n]+?)\s*丨\s*(\d+(?:\.\d+)?)\s*[-–~]\s*(\d+(?:\.\d+)?)\s*s\s*丨\s*([^：:\n]+)\s*[：:]\s*(.+)$/i;
+
+function parseMxShellMultiShotLines(picture: string): Array<{
+  n: number;
+  title: string;
+  start: number;
+  end: number;
+  camera: string;
+  action: string;
+}> {
+  const lines = String(picture || "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => /^分镜\s*\d+/.test(l));
+  const out: Array<{
+    n: number;
+    title: string;
+    start: number;
+    end: number;
+    camera: string;
+    action: string;
+  }> = [];
+  for (const line of lines) {
+    const m = line.match(MX_SHELL_MULTI_SHOT_LINE_RE);
+    if (!m) {
+      throw new Error(
+        `多机位分镜行须为「分镜N丨节拍标题丨时间段丨镜头设计句：动作」（对齐示例输出B），不合规：${line.slice(0, 48)}`
+      );
+    }
+    const n = Number(m[1]);
+    const title = String(m[2] || "").trim();
+    const start = Number(m[3]);
+    const end = Number(m[4]);
+    const camera = String(m[5] || "").trim();
+    const action = String(m[6] || "").trim();
+    if (!title || /^\d+(?:\.\d+)?\s*[-–~]/.test(title) || /\ds$/i.test(title)) {
+      throw new Error(`分镜${n}缺少节拍标题（第二段不能是时间段）`);
+    }
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      throw new Error(`分镜${n}时间段无效：${start}-${end}s`);
+    }
+    if (!camera || !action) {
+      throw new Error(`分镜${n}缺少镜头设计句或动作描述`);
+    }
+    out.push({ n, title, start, end, camera, action });
+  }
+  return out;
+}
+
 /** 按 Mx-Shell skill 输出模板硬校验四段结构 + 模式形态 + 运镜质量 */
-function assertMxShellPromptShape(
+export function assertMxShellPromptShape(
   prompt: string,
   mode: MxShellMode,
   cameraIntensity: MxShellCameraIntensity = "standard"
@@ -482,18 +590,29 @@ function assertMxShellPromptShape(
   }
   const picture = extractPictureContent(prompt);
   if (mode === "one_shot") {
-    const hasOneShot =
-      /一镜到底/.test(prompt) || /分镜\s*[:：]\s*单镜头/.test(prompt) || /景别\s*[:：]/.test(prompt);
-    if (!hasOneShot) {
-      throw new Error("一镜到底模式的 prompt 缺少「一镜到底 / 景别」等模板字段");
+    if (!/分镜\s*[:：]\s*单镜头\s*一镜到底/.test(picture) && !/单镜头\s*一镜到底/.test(picture)) {
+      throw new Error("一镜到底模式须含「分镜：单镜头一镜到底」（对齐示例输出A）");
     }
-    if (!/运镜手法\s*[:：]/.test(picture) && !/运镜\s*[:：]/.test(picture)) {
-      throw new Error("一镜到底模式的 prompt 缺少「运镜手法」字段");
+    for (const field of ["景别", "角度", "构图", "运镜手法", "画面内容"] as const) {
+      if (!new RegExp(`${field}\\s*[:：]`).test(picture)) {
+        throw new Error(`一镜到底模式缺少「${field}：」字段（对齐示例输出A）`);
+      }
+    }
+    const timeHits = picture.match(/\d+(?:\.\d+)?\s*[-–~]\s*\d+(?:\.\d+)?\s*(?:秒|s)\s*[:：]/gi) || [];
+    if (timeHits.length < 2) {
+      throw new Error("一镜到底「画面内容」须按秒分段至少两段（如 0-2秒：… / 2-4秒：…）");
     }
   } else {
-    const shotHits = prompt.match(/分镜\s*\d+/g) || [];
-    if (shotHits.length < 2) {
-      throw new Error("多机位分镜模式的 prompt 至少需要 2 个「分镜N」段落");
+    const shots = parseMxShellMultiShotLines(picture);
+    if (shots.length < 2) {
+      throw new Error("多机位分镜模式的 prompt 至少需要 2 个合规「分镜N」行（含节拍标题）");
+    }
+    for (let i = 1; i < shots.length; i += 1) {
+      if (shots[i].start + 1e-6 < shots[i - 1].start) {
+        throw new Error(
+          `分镜时间轴倒退：分镜${shots[i - 1].n} 起点 ${shots[i - 1].start}s → 分镜${shots[i].n} 起点 ${shots[i].start}s`
+        );
+      }
     }
   }
 
@@ -620,9 +739,14 @@ export async function generateMxShellPromptOnServer(
   body: MxShellPromptBody
 ): Promise<MxShellPromptResult> {
   const mode = normalizeMxShellMode(body.mode);
+  const task = normalizeMxShellTask(body.task);
   const story = normalizeStory(body.story);
   if (story.length < MX_SHELL_STORY_MIN) {
-    throw new Error(`素材过短（至少 ${MX_SHELL_STORY_MIN} 字）：请提供故事大纲、剧本片段或分镜草稿`);
+    throw new Error(
+      task === "polish"
+        ? `原稿过短（至少 ${MX_SHELL_STORY_MIN} 字）：请粘贴要润色的视频提示词或分镜草稿`
+        : `素材过短（至少 ${MX_SHELL_STORY_MIN} 字）：请提供故事大纲、剧本片段或分镜草稿`
+    );
   }
   const atmosphere = normalizeAtmosphere(body.atmosphere);
   const cameraIntensity = normalizeMxShellCameraIntensity(
@@ -638,6 +762,7 @@ export async function generateMxShellPromptOnServer(
   const systemPrompt = loadMxShellSystemPrompt(projectRoot);
   const baseUser = buildMxShellUserMessage({
     mode,
+    task,
     story,
     atmosphere,
     cameraIntensity,
@@ -649,10 +774,14 @@ export async function generateMxShellPromptOnServer(
   let lastError = "";
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
+      const retryHint =
+        task === "polish"
+          ? "硬性：润色不得另编剧情；一镜到底对齐示例A；多机位对齐示例B；镜头含词典手法名；禁止固定+位移等矛盾组合与空词。"
+          : "硬性：一镜到底对齐示例A（景别/角度/构图/运镜手法/按秒画面内容）；多机位对齐示例B四段行；镜头含词典手法名；禁止固定+位移等矛盾组合与空词。";
       const userMessage =
         attempt === 0 || !lastError
           ? baseUser
-          : `${baseUser}\n\n【上次输出未通过校验，请整份重写】\n${lastError}\n硬性：每镜运镜四件套完整；禁止固定+位移等矛盾组合与空词。`;
+          : `${baseUser}\n\n【上次输出未通过校验，请整份重写】\n${lastError}\n${retryHint}`;
       const text = await callMxShellLlm({
         systemPrompt,
         userMessage,
@@ -666,13 +795,13 @@ export async function generateMxShellPromptOnServer(
       return result;
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
-      console.warn("[mx-shell-prompt] parse/generate failed:", { attempt, lastError });
+      console.warn("[mx-shell-prompt] parse/generate failed:", { attempt, task, lastError });
       if (attempt < maxAttempts - 1) {
         await sleep(Math.min(8000, 1500 * Math.pow(2, attempt)));
       }
     }
   }
-  throw new Error(lastError || "Mx-Shell 提示词生成失败");
+  throw new Error(lastError || (task === "polish" ? "Mx-Shell 提示词润色失败" : "Mx-Shell 提示词生成失败"));
 }
 
 export function registerCanvasMxShellPromptRoutes(
