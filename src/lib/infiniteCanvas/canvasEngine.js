@@ -3384,6 +3384,25 @@ function refreshOutputTimer(){
         outputTimer = null;
     }
 }
+function slimHistoryEntryForSave(entry){
+    if(!entry || typeof entry !== 'object') return entry;
+    const item = {...entry};
+    if(item.run && typeof item.run === 'object'){
+        const run = {...item.run};
+        // 历史里嵌入整颗 node 快照会把画布撑到百兆，刷新极慢
+        delete run.node;
+        if(run.request && typeof run.request === 'object'){
+            const req = {...run.request};
+            const wf = req.workflow_json;
+            if(typeof wf === 'string' && wf.length > 240 && String(wf).trim().startsWith('{')){
+                req.workflow_json = 'embedded.json';
+            }
+            run.request = req;
+        }
+        item.run = run;
+    }
+    return item;
+}
 function serializableCanvasNode(node){
     const copy = {...(node || {})};
     // 运行时字段禁止落盘，否则重开会出现假「运行中」/编辑态残留
@@ -3399,6 +3418,9 @@ function serializableCanvasNode(node){
     delete copy._agentStopRequested;
     delete copy._layoutW;
     delete copy._layoutH;
+    if(Array.isArray(copy.history)){
+        copy.history = copy.history.map(slimHistoryEntryForSave);
+    }
     return copy;
 }
 function serializableCanvasNodes(list=nodes){

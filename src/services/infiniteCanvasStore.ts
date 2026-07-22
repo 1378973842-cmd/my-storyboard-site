@@ -200,8 +200,48 @@ function readDoc(id: string): CanvasDocument {
   return JSON.parse(readFileSync(fp, "utf8")) as CanvasDocument;
 }
 
-function writeDoc(doc: CanvasDocument) {
-  doc.updated_at = nowMs();
+/** 历史里曾嵌入整颗节点快照 (run.node)，单板可膨胀到百兆，拖垮刷新 */
+function slimHistoryEntry(entry: unknown): unknown {
+  if (!entry || typeof entry !== "object") return entry;
+  const item = { ...(entry as Record<string, unknown>) };
+  const runRaw = item.run;
+  if (!runRaw || typeof runRaw !== "object") return item;
+  const run = { ...(runRaw as Record<string, unknown>) };
+  delete run.node;
+  const reqRaw = run.request;
+  if (reqRaw && typeof reqRaw === "object") {
+    const req = { ...(reqRaw as Record<string, unknown>) };
+    const wf = req.workflow_json;
+    if (typeof wf === "string" && wf.length > 240 && wf.trim().startsWith("{")) {
+      req.workflow_json = "embedded.json";
+    }
+    run.request = req;
+  }
+  item.run = run;
+  return item;
+}
+
+function slimCanvasNodes(nodes: unknown): unknown[] {
+  if (!Array.isArray(nodes)) return [];
+  return nodes.map((node) => {
+    if (!node || typeof node !== "object") return node;
+    const copy = { ...(node as Record<string, unknown>) };
+    if (Array.isArray(copy.history)) {
+      copy.history = copy.history.map(slimHistoryEntry);
+    }
+    return copy;
+  });
+}
+
+function slimCanvasDocument(doc: CanvasDocument): CanvasDocument {
+  return {
+    ...doc,
+    nodes: slimCanvasNodes(doc.nodes),
+  };
+}
+
+function writeDocAtomic(doc: CanvasDocument, { bumpUpdatedAt }: { bumpUpdatedAt: boolean }) {
+  if (bumpUpdatedAt) doc.updated_at = nowMs();
   const fp = filePath(doc.id);
   if (existsSync(fp)) {
     try {
@@ -215,9 +255,9 @@ function writeDoc(doc: CanvasDocument) {
       /* ignore backup failure */
     }
   }
-  // 先写临时文件再 rename，降低关机写到一半把 JSON 截断的风险
+  // 紧凑 JSON：同样内容比 pretty 小约 2～3 倍，解析/传输更快
   const tmp = `${fp}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(doc, null, 2), "utf8");
+  writeFileSync(tmp, JSON.stringify(doc), "utf8");
   try {
     renameSync(tmp, fp);
   } catch {
@@ -229,6 +269,10 @@ function writeDoc(doc: CanvasDocument) {
       /* ignore */
     }
   }
+}
+
+function writeDoc(doc: CanvasDocument) {
+  writeDocAtomic(slimCanvasDocument(doc), { bumpUpdatedAt: true });
 }
 
 function toRecord(doc: CanvasDocument): CanvasRecord {
@@ -267,7 +311,8 @@ function iterRecords(deleted: boolean, ctx?: CanvasAccessContext | null): Canvas
   for (const name of readdirSync(canvasDir)) {
     if (!name.endsWith(".json")) continue;
     try {
-      const doc = JSON.parse(readFileSync(path.join(canvasDir, name), "utf8")) as CanvasDocument;
+      const raw = JSON.parse(readFileSync(path.join(canvasDir, name), "utf8")) as CanvasDocument;
+      const doc = maybePersistSlimmed(raw);
       const isDeleted = Boolean(doc.deleted_at);
       if (isDeleted !== deleted) continue;
       if (ctx && !canAccessCanvas(doc, ctx)) continue;
@@ -316,11 +361,26 @@ export function createCanvas(
   return doc;
 }
 
+function maybePersistSlimmed(doc: CanvasDocument): CanvasDocument {
+  const slimmed = slimCanvasDocument(doc);
+  try {
+    const before = Buffer.byteLength(JSON.stringify(doc), "utf8");
+    const after = Buffer.byteLength(JSON.stringify(slimmed), "utf8");
+    // 打开/列表时顺带瘦身落盘（不改 updated_at），避免每次刷新都读百兆 JSON
+    if (before > 2 * 1024 * 1024 && after < before * 0.6) {
+      writeDocAtomic(slimmed, { bumpUpdatedAt: false });
+    }
+  } catch {
+    /* ignore rewrite failure */
+  }
+  return slimmed;
+}
+
 export function getCanvas(id: string, allowDeleted = false, ctx?: CanvasAccessContext | null) {
   const doc = readDoc(id);
   if (!allowDeleted && doc.deleted_at) throw new Error("画布已在回收站");
   assertCanvasAccess(doc, ctx ?? null);
-  return doc;
+  return maybePersistSlimmed(doc);
 }
 
 export function getCanvasMeta(id: string, ctx?: CanvasAccessContext | null) {
