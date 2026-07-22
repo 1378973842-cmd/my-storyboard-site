@@ -9,6 +9,7 @@ import {
   applyImageEdit,
   clearEditDrawing,
   closeImageEditor,
+  readLastCanvasId,
   redoEditDrawing,
   resetCropBox,
   resetImageEditZoom,
@@ -26,14 +27,20 @@ function assignRootRef(rootRef: Ref<HTMLDivElement>, node: HTMLDivElement | null
   else if (rootRef && 'current' in rootRef) rootRef.current = node;
 }
 
-/** 首帧保持 gate 可见；shell 默认 no-canvas，避免编辑器顶栏在引擎就绪前闪现 */
+/**
+ * 首帧标记：
+ * - 有上次画布 id → 直接进编辑器态（藏 gate），避免刷新闪选画布页
+ * - 否则 → no-canvas 显示 gate，避免空顶栏闪一下
+ */
 function seedCanvasRootMarkers(node: HTMLDivElement) {
-  if (node.dataset.editorSession == null) node.dataset.editorSession = '0';
-  if (node.dataset.canvasOpen == null) node.dataset.canvasOpen = '0';
+  const resumeEditor = Boolean(readLastCanvasId());
+  if (node.dataset.editorSession == null) node.dataset.editorSession = resumeEditor ? '1' : '0';
+  if (node.dataset.canvasOpen == null) node.dataset.canvasOpen = resumeEditor ? '1' : '0';
+  node.classList.toggle('is-editor', resumeEditor);
   const shell = node.querySelector('#shell');
-  if (shell && !shell.classList.contains('no-canvas')) {
-    shell.classList.add('no-canvas');
-  }
+  if (!shell) return;
+  if (resumeEditor) shell.classList.remove('no-canvas');
+  else if (!shell.classList.contains('no-canvas')) shell.classList.add('no-canvas');
 }
 
 type Props = {

@@ -432,8 +432,10 @@ export const CanvasMaterialLibrary = memo(function CanvasMaterialLibrary({
                                 title="点击放入画布，或拖到画布"
                                 onDragStart={e => {
                                   e.dataTransfer.effectAllowed = 'copy';
-                                  e.dataTransfer.setData('text/plain', item.url);
+                                  // 专用 MIME + 站点相对路径，供画布 drop 识别（勿当 OS 本地路径）
+                                  e.dataTransfer.setData('application/x-canvas-asset-url', item.url);
                                   e.dataTransfer.setData('text/uri-list', item.url);
+                                  e.dataTransfer.setData('text/plain', item.url);
                                 }}
                                 onClick={() => {
                                   if (!isInfiniteCanvasEditorOpen()) return;

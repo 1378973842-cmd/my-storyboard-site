@@ -3,6 +3,7 @@ export function disposeInfiniteCanvasEngine(options?: { preserveEditor?: boolean
 export function setInfiniteCanvasShellSuspended(suspended: boolean): void;
 export function isInfiniteCanvasEngineMountedOn(root: HTMLElement): boolean;
 export function isInfiniteCanvasEditorOpen(): boolean;
+export function readLastCanvasId(): string;
 export function consumeQueuedCanvasFavoriteNavigation(): Promise<{
   ok: boolean;
   reason?: string;

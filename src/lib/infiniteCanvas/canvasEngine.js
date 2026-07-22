@@ -52,7 +52,7 @@ let imageEditorUiWired = false;
 /** 拖节点/缩放/平移后：禁止 safeRender / 远程全量同步，避免闪屏 */
 const CANVAS_INTERACTION_COOLDOWN_MS = 8000;
 const LAST_CANVAS_ID_KEY = 'gemini-infinite-canvas-last-id';
-function readLastCanvasId(){
+export function readLastCanvasId(){
     try { return sessionStorage.getItem(LAST_CANVAS_ID_KEY) || ''; } catch(_) { return ''; }
 }
 function writeLastCanvasId(id){
@@ -7647,7 +7647,9 @@ function nodeTitleForMedia(node){
     return 'Image';
 }
 const IMAGE_DROP_EXT_RE = /\.(png|jpe?g|webp|gif)$/i;
+const CANVAS_ASSET_URL_MIME = 'application/x-canvas-asset-url';
 const IMAGE_DROP_TEXT_TYPES = [
+    CANVAS_ASSET_URL_MIME,
     'text/uri-list',
     'text/plain',
     'text/html',
@@ -7660,7 +7662,7 @@ const IMAGE_DROP_TEXT_TYPES = [
     'FileName',
     'FileNameW'
 ];
-const IMAGE_DROP_TYPE_HINT_RE = /^(?:files?|image\/.+|text\/(?:uri-list|html|plain|x-moz-url|x-file-url)|downloadurl|public\.(?:file-url|url)|uniformresourcelocator|filenamew?)$|application\/x-qt-(?:windows-mime|image)|application\/x-moz-file|com\.eagle/i;
+const IMAGE_DROP_TYPE_HINT_RE = /^(?:files?|image\/.+|text\/(?:uri-list|html|plain|x-moz-url|x-file-url)|downloadurl|public\.(?:file-url|url)|uniformresourcelocator|filenamew?|application\/x-canvas-asset-url)$|application\/x-qt-(?:windows-mime|image)|application\/x-moz-file|com\.eagle/i;
 function dropDataTypes(dataTransfer){
     return [...(dataTransfer?.types || [])].map(type => String(type || ''));
 }
@@ -7704,13 +7706,21 @@ function dropTextCandidates(dataTransfer){
     return uniqueValues(values.flatMap(imageDropTextFragments).map(decodeDropText))
         .filter(s => s && !s.startsWith('#'));
 }
+/** 本站素材库 /uploads 等相对路径：必须当 URL，不能当 OS 本地路径去 import */
+function isSiteImageDropValue(value){
+    const text = String(value || '').trim().split(/[?#]/, 1)[0];
+    return /^\/(?:uploads|output|assets)\//i.test(text) && IMAGE_DROP_EXT_RE.test(text);
+}
 function isRemoteImageDropValue(value){
     const text = String(value || '').trim();
-    return /^https?:\/\/.+/i.test(text) || /^data:image\//i.test(text) || /^blob:/i.test(text);
+    return isSiteImageDropValue(text)
+        || /^https?:\/\/.+/i.test(text)
+        || /^data:image\//i.test(text)
+        || /^blob:/i.test(text);
 }
 function isLocalImageDropValue(value){
     const text = String(value || '').trim();
-    if(!text) return false;
+    if(!text || isSiteImageDropValue(text)) return false;
     let path = text;
     if(/^file:/i.test(path)){
         try {
@@ -7724,7 +7734,7 @@ function isLocalImageDropValue(value){
     if(/^\/[a-zA-Z]:[\\/]/.test(path)) path = path.slice(1);
     const clean = path.split(/[?#]/, 1)[0];
     const isWindowsPath = /^[a-zA-Z]:[\\/]/.test(clean);
-    const isPosixPath = clean.startsWith('/');
+    const isPosixPath = clean.startsWith('/') && !/^\/(?:uploads|output|assets)\//i.test(clean);
     return (isWindowsPath || isPosixPath) && IMAGE_DROP_EXT_RE.test(clean);
 }
 function imageFilesFromDataTransfer(dataTransfer){
@@ -7734,15 +7744,18 @@ function localImagePathsFromDataTransfer(dataTransfer){
     return uniqueValues(dropTextCandidates(dataTransfer).filter(isLocalImageDropValue));
 }
 function imageUrlFromDataTransfer(dataTransfer){
+    const assetUrl = String(readDropData(dataTransfer, CANVAS_ASSET_URL_MIME) || '').trim();
+    if(assetUrl && isRemoteImageDropValue(assetUrl)) return assetUrl;
     return dropTextCandidates(dataTransfer).find(isRemoteImageDropValue) || '';
 }
 function imageDropPayload(dataTransfer){
     const files = imageFilesFromDataTransfer(dataTransfer);
     if(files.length) return {type:'files', files};
-    const localPaths = localImagePathsFromDataTransfer(dataTransfer);
-    if(localPaths.length) return {type:'localPaths', localPaths};
+    // 先认站点 URL（素材库 /uploads/…），避免被当成本地路径误走 import-local-image
     const url = imageUrlFromDataTransfer(dataTransfer);
     if(url) return {type:'url', url};
+    const localPaths = localImagePathsFromDataTransfer(dataTransfer);
+    if(localPaths.length) return {type:'localPaths', localPaths};
     return {type:'none'};
 }
 async function resolveImageDropPayload(dataTransfer){
@@ -17278,9 +17291,10 @@ function positionImageGenDock(node){
     imageGenDockEl.style.top = `${nodeRect.bottom - boardRect.top + gap}px`;
     imageGenDockEl.style.transform = 'translateX(-50%)';
     imageGenDockEl.style.transformOrigin = 'top center';
+    // 宽度随底栏内容（provider/模型全名）伸缩，不固定 720 把字截成 Running…
     imageGenDockEl.style.width = 'max-content';
     imageGenDockEl.style.minWidth = '280px';
-    imageGenDockEl.style.maxWidth = 'min(96vw, 720px)';
+    imageGenDockEl.style.maxWidth = 'none';
     imageGenDockEl.style.zIndex = '80';
     imageGenDockEl.style.pointerEvents = 'auto';
 }
@@ -21292,7 +21306,7 @@ function retryBarHtml(node){
     const stopBtn = node._cascadeFailed
         ? `<button class="node-stop-btn" type="button" data-stop="${node.id}">停止</button>`
         : '';
-    const msg = String(node.runError || tr('canvas.generationFailed'));
+    const msg = summarizeGenDockError(node.runError || tr('canvas.generationFailed'));
     return `<div class="node-retry-bar" data-retry-bar>
         <div class="node-retry-msg">${escapeHtml(msg)}</div>
         <div class="node-retry-actions">
@@ -21302,6 +21316,23 @@ function retryBarHtml(node){
             <button class="node-retry-dismiss" type="button" data-retry-dismiss="${node.id}" title="${escapeAttr(langIsEn() ? 'Dismiss' : '关闭')}">${langIsEn() ? 'Dismiss' : '关闭'}</button>
         </div>
     </div>`;
+}
+/** 展示用短文案；复制仍用 node.runError 原文 */
+function summarizeGenDockError(raw){
+    const text = String(raw || '').trim();
+    if(!text) return tr('canvas.generationFailed');
+    if(text.startsWith('{') || text.startsWith('[')){
+        try {
+            const obj = JSON.parse(text);
+            const msg = String(obj.msg || obj.message || obj.error || obj.detail || '').trim();
+            const code = obj.code != null ? `code=${obj.code}` : '';
+            const usage = Array.isArray(obj.data?.taskUsageList) ? obj.data.taskUsageList[0] : null;
+            const status = usage?.taskStatus ? String(usage.taskStatus) : '';
+            const bits = [msg, status, code].filter(Boolean);
+            if(bits.length) return bits.join(' · ');
+        } catch(_) {}
+    }
+    return text.length > 420 ? `${text.slice(0, 420)}…` : text;
 }
 function dismissNodeRunError(nodeId){
     const node = nodes.find(n => n.id === nodeId);
@@ -26216,14 +26247,30 @@ async function mountInfiniteCanvasEngineInner(root) {
   await loadConfig();
   if(!isMountGenerationCurrent(seq)) return disposeInfiniteCanvasEngine;
   pruneMissingComfyWorkflows();
+  // 有上次画布时先藏 gate，避免 loadCanvasList 期间闪到选画布页
+  const lastIdEarly = readLastCanvasId();
+  if(lastIdEarly && !canvas){
+    const liveShell = resolveLiveShell();
+    if(liveShell?.classList.contains('no-canvas')) liveShell.classList.remove('no-canvas');
+    // markCanvasEditorSession(true) 依赖 canvas 已赋值；恢复中先手写标记
+    if(canvasRoot){
+      canvasRoot.classList.add('is-editor');
+      canvasRoot.dataset.editorSession = '1';
+      canvasRoot.dataset.canvasOpen = '1';
+    }
+    setStatus(langIsEn() ? 'Opening...' : '打开中…');
+  }
   await loadCanvasList(false);
   if(!isMountGenerationCurrent(seq)) return disposeInfiniteCanvasEngine;
   const lastId = readLastCanvasId();
   const lastMeta = lastId ? canvases.find(c => c.id === lastId) : null;
-  if(!canvas && lastMeta && (lastMeta.kind || 'classic') !== 'smart'){
-    try { await openCanvas(lastId); } catch(e) { console.warn('[infinite-canvas] restore last canvas failed', e); }
-  } else if(lastId && !canvas) {
-    writeLastCanvasId('');
+  // openCanvas 本身会拉详情；不必等列表 meta，否则列表慢/缺项时会误清 lastId 并闪 gate
+  if(!canvas && lastId){
+    if(lastMeta && (lastMeta.kind || 'classic') === 'smart'){
+      writeLastCanvasId('');
+    } else {
+      try { await openCanvas(lastId); } catch(e) { console.warn('[infinite-canvas] restore last canvas failed', e); }
+    }
   }
   if(!isMountGenerationCurrent(seq)) return disposeInfiniteCanvasEngine;
   if(readCanvasFavoriteNavigation()?.canvasId){

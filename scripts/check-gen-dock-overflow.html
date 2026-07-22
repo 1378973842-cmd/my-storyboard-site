@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>gen-dock overflow check</title>
+  <link rel="stylesheet" href="/src/components/InfiniteCanvas/infinite-canvas.css" />
+  <style>
+    body { margin:0; background:#0e0e0e; color:#e5e2e1; font-family:Inter,sans-serif; padding:24px; }
+    .case { margin-bottom:28px; }
+    .case h3 { font-size:12px; color:rgba(229,226,225,.55); margin:0 0 10px; font-weight:600; }
+    .host { width:max-content; min-width:280px; }
+    .report { font-family:ui-monospace,monospace; font-size:12px; margin-top:8px; }
+    .ok { color:#7dffa6; }
+    .bad { color:#ff8a8a; }
+  </style>
+</head>
+<body class="infinite-canvas-root theme-dark">
+  <div id="cases"></div>
+  <script>
+    const models = [
+      'gpt-image-2',
+      'gpt-image-2-稳定',
+      'nano-banana-pro',
+      'nano-banana-pro-稳定',
+      'midjourneyV8.1-超长测试名称用来压爆底栏',
+    ];
+    const providers = ['RunningHub', 'Comfly API'];
+    const ratios = ['1:1', '16:9', '9:16'];
+    const resos = ['1K', '2K', '4K'];
+
+    function dockHtml(provider, model, ratio, reso) {
+      return `
+        <div class="gen-dock is-floating">
+          <textarea class="gen-dock-prompt" rows="2">描述任何你想要生成的内容</textarea>
+          <div class="gen-dock-bar">
+            <div class="gen-dock-group gen-dock-group-source">
+              <label class="gen-dock-chip gen-dock-chip-provider">
+                <span class="canvas-custom-select">
+                  <button type="button" class="canvas-custom-select-trigger select-lite">
+                    <span class="canvas-custom-select-label">${provider}</span>
+                    <span class="canvas-custom-select-chevron"></span>
+                  </button>
+                </span>
+              </label>
+              <label class="gen-dock-chip gen-dock-chip-model">
+                <span class="canvas-custom-select">
+                  <button type="button" class="canvas-custom-select-trigger select-lite">
+                    <span class="canvas-custom-select-label">${model}</span>
+                    <span class="canvas-custom-select-chevron"></span>
+                  </button>
+                </span>
+              </label>
+            </div>
+            <span class="gen-dock-sep"></span>
+            <div class="gen-dock-group gen-dock-group-size">
+              <div class="gen-dock-size">
+                <label class="gen-dock-chip gen-dock-chip-ratio">
+                  <i class="gen-dock-chip-icon" style="width:14px;height:14px;display:inline-block;outline:1px solid rgba(229,226,225,.4);border-radius:2px"></i>
+                  <span class="canvas-custom-select">
+                    <button type="button" class="canvas-custom-select-trigger select-lite">
+                      <span class="canvas-custom-select-label">${ratio}</span>
+                      <span class="canvas-custom-select-chevron"></span>
+                    </button>
+                  </span>
+                </label>
+                <label class="gen-dock-chip gen-dock-chip-resolution">
+                  <span class="canvas-custom-select">
+                    <button type="button" class="canvas-custom-select-trigger select-lite">
+                      <span class="canvas-custom-select-label">${reso}</span>
+                      <span class="canvas-custom-select-chevron"></span>
+                    </button>
+                  </span>
+                </label>
+              </div>
+            </div>
+            <span class="gen-dock-sep"></span>
+            <div class="gen-dock-group gen-dock-group-tools">
+              <button type="button" class="gen-dock-gear" aria-label="settings">≡</button>
+            </div>
+            <span class="gen-dock-sep"></span>
+            <div class="gen-dock-group gen-dock-group-run">
+              <div class="gen-dock-count-lite">
+                <button type="button" class="gen-dock-count-step">−</button>
+                <input class="gen-dock-count-input" value="1" />
+                <span class="gen-dock-count-suffix">x</span>
+                <button type="button" class="gen-dock-count-step">+</button>
+              </div>
+              <div class="gen-run-row gen-dock-run">
+                <button class="gen-btn gen-dock-send" type="button">↑</button>
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    const root = document.getElementById('cases');
+    const combos = [];
+    for (const p of providers) for (const m of models) for (const r of ratios.slice(0,2)) for (const z of resos.slice(0,2)) {
+      combos.push({ p, m, r, z });
+    }
+
+    const results = [];
+    combos.forEach((c, i) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'case';
+      wrap.innerHTML = `<h3>#${i+1} ${c.p} · ${c.m} · ${c.r} · ${c.z}</h3><div class="host">${dockHtml(c.p, c.m, c.r, c.z)}</div><div class="report"></div>`;
+      root.appendChild(wrap);
+    });
+
+    requestAnimationFrame(() => {
+      document.querySelectorAll('.case').forEach((caseEl, i) => {
+        const dock = caseEl.querySelector('.gen-dock');
+        const send = caseEl.querySelector('.gen-dock-send');
+        const labels = [...caseEl.querySelectorAll('.gen-dock-group-source .canvas-custom-select-label')];
+        const dr = dock.getBoundingClientRect();
+        const sr = send.getBoundingClientRect();
+        const pad = 0.5;
+        const inside =
+          sr.left >= dr.left - pad &&
+          sr.right <= dr.right + pad &&
+          sr.top >= dr.top - pad &&
+          sr.bottom <= dr.bottom + pad;
+        const fullText = labels.every(el => el.scrollWidth <= el.clientWidth + 1);
+        const ok = inside && fullText;
+        const report = caseEl.querySelector('.report');
+        report.className = 'report ' + (ok ? 'ok' : 'bad');
+        report.textContent = ok
+          ? `OK full labels + send inside (dock=${Math.round(dr.width)})`
+          : `FAIL inside=${inside} fullText=${fullText} overflow=${(sr.right - dr.right).toFixed(1)}`;
+        results.push({ i, ok, inside, fullText, model: combos[i].m, provider: combos[i].p });
+      });
+      const failed = results.filter(r => !r.ok);
+      const summary = document.createElement('pre');
+      summary.className = failed.length ? 'bad' : 'ok';
+      summary.textContent = failed.length
+        ? `FAILED ${failed.length}/${results.length}\n` + failed.map(f => `#${f.i+1} ${f.provider}/${f.model}`).join('\n')
+        : `ALL PASS ${results.length} combos (content-sized, no truncation)`;
+      summary.id = 'summary';
+      document.body.prepend(summary);
+      document.title = failed.length ? `FAIL ${failed.length}` : `PASS ${results.length}`;
+    });
+  </script>
+</body>
+</html>

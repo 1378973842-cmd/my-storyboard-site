@@ -161,3 +161,4 @@
 - RH 节点：独立 API Key 选择行；query 跟随 useWallet
 - RH 测试：前端下拉明文挂 API Key（rh_api_keys）
 - 防关机：脏画布8s强制保存；孤儿uploads扫描脚本（约150张待导演确认贴回）
+- 已部署线上 adfc6b8：8s脏保存心跳 + 原子写画布
