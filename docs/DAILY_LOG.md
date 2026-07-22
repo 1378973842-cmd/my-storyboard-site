@@ -162,3 +162,7 @@
 - RH 测试：前端下拉明文挂 API Key（rh_api_keys）
 - 防关机：脏画布8s强制保存；孤儿uploads扫描脚本（约150张待导演确认贴回）
 - 已部署线上 adfc6b8：8s脏保存心跳 + 原子写画布
+- 已部署 5a91cfb：dock/gate/素材库拖拽/报错条
+- ECS Caddy HTTPS: dreamgrid.cn + www 反代 3000；AUTH_COOKIE_SECURE=1 / TRUST_PROXY=1；验证 HTTP/2 200
+- 加速：OSS+CDN/升带宽暂缓不花钱；SSH22暂缓；可后续只做免费缩略图
+- 存盘加固：409合并/日志合并/打开禁存/成片库meta；准备部署

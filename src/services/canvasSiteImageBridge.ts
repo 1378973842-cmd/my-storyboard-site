@@ -49,6 +49,9 @@ export type CanvasOnlineImagePayload = {
   };
   /** 九宫格 Agent 生图任务：gpt-image-2 走官方渠道 */
   nine_grid_agent?: boolean;
+  /** 写入成片库 / 归属用 */
+  canvas_id?: string;
+  node_id?: string;
 };
 
 type CanvasImageTask = {
@@ -250,7 +253,17 @@ export function mapCanvasToEditorRequest(
 
 export type CanvasImageBridgeDeps = {
   projectRoot: string;
-  persistImage: (url: string, meta?: { userId?: string }) => Promise<string>;
+  persistImage: (
+    url: string,
+    meta?: {
+      userId?: string;
+      prompt?: string;
+      model?: string;
+      canvasId?: string;
+      nodeId?: string;
+      params?: Record<string, unknown>;
+    }
+  ) => Promise<string>;
   requireGate?: RequestHandler;
 };
 
@@ -281,6 +294,23 @@ async function callSiteEditImage(
  * 无限画布 API 生成：有参考图时与主页「编辑模式 / GPT 编辑」相同（/api/edit-image + RunningHub）。
  * 仅无图纯文案时走文生图（/api/generate-image）。
  */
+function persistMetaFromPayload(req: Request, payload: CanvasOnlineImagePayload) {
+  return {
+    userId: req.authUser?.id,
+    prompt: String(payload.prompt || "").trim(),
+    model: String(payload.model || "").trim(),
+    canvasId: String(payload.canvas_id || "").trim(),
+    nodeId: String(payload.node_id || "").trim(),
+    params: {
+      size: payload.size,
+      canvas_resolution: payload.canvas_resolution,
+      canvas_ratio: payload.canvas_ratio,
+      quality: payload.quality,
+      provider_id: payload.provider_id,
+    },
+  };
+}
+
 async function executeCanvasGeneration(
   req: Request,
   payload: CanvasOnlineImagePayload,
@@ -288,6 +318,7 @@ async function executeCanvasGeneration(
 ): Promise<{ images: string[]; url: string }> {
   const prompt = String(payload.prompt || "").trim() || "Edit the reference images.";
   const model = String(payload.model || "").trim();
+  const persistMeta = persistMetaFromPayload(req, payload);
   const refItems = (payload.reference_images || [])
     .map((r) => ({
       url: String(r?.url || "").trim(),
@@ -327,7 +358,7 @@ async function executeCanvasGeneration(
       sref: imageUrls[1] || null,
       projectRoot: deps.projectRoot,
     });
-    const localUrl = await deps.persistImage(upstreamUrl, { userId: req.authUser?.id });
+    const localUrl = await deps.persistImage(upstreamUrl, persistMeta);
     return { images: [localUrl], url: localUrl };
   }
 
@@ -355,7 +386,7 @@ async function executeCanvasGeneration(
       sref: imageUrls[1] || null,
       projectRoot: deps.projectRoot,
     });
-    const localUrl = await deps.persistImage(upstreamUrl, { userId: req.authUser?.id });
+    const localUrl = await deps.persistImage(upstreamUrl, persistMeta);
     return { images: [localUrl], url: localUrl };
   }
 
@@ -411,7 +442,7 @@ async function executeCanvasGeneration(
       nine_grid_agent: Boolean(payload.nine_grid_agent),
       url: upstreamUrl.slice(0, 160),
     });
-    const localUrl = await deps.persistImage(upstreamUrl, { userId: req.authUser?.id });
+    const localUrl = await deps.persistImage(upstreamUrl, persistMeta);
     return { images: [localUrl], url: localUrl };
   }
 
@@ -423,7 +454,7 @@ async function executeCanvasGeneration(
       references: [],
       projectRoot: deps.projectRoot,
     });
-    const localUrl = await deps.persistImage(upstreamUrl, { userId: req.authUser?.id });
+    const localUrl = await deps.persistImage(upstreamUrl, persistMeta);
     return { images: [localUrl], url: localUrl };
   }
 

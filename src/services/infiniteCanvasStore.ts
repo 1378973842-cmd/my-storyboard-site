@@ -161,6 +161,39 @@ function extractPreviewUrl(doc: CanvasDocument): string {
   return urls[0] || "";
 }
 
+function countNodesWithUrl(nodes: unknown): number {
+  if (!Array.isArray(nodes)) return 0;
+  let count = 0;
+  for (const item of nodes) {
+    if (!item || typeof item !== "object") continue;
+    const url = String((item as { url?: unknown }).url || "").trim();
+    if (url) count += 1;
+  }
+  return count;
+}
+
+/** 本板日志双向合并：任一侧独有记录都保留，避免刷新竞态把今日日志盖成昨天 */
+function mergeCanvasLogs(incoming: unknown, existing: unknown): unknown[] {
+  const map = new Map<string, Record<string, unknown>>();
+  const add = (log: unknown) => {
+    if (!log || typeof log !== "object") return;
+    const row = log as Record<string, unknown>;
+    const id = String(row.id || "").trim();
+    const key =
+      id ||
+      `${row.createdAt || ""}|${JSON.stringify(row.outputs || [])}|${String(row.prompt || "").slice(0, 80)}`;
+    const prev = map.get(key);
+    if (!prev || Number(row.createdAt || 0) >= Number(prev.createdAt || 0)) {
+      map.set(key, row);
+    }
+  };
+  (Array.isArray(existing) ? existing : []).forEach(add);
+  (Array.isArray(incoming) ? incoming : []).forEach(add);
+  return [...map.values()]
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+    .slice(0, 500);
+}
+
 function readDoc(id: string): CanvasDocument {
   const fp = filePath(id);
   if (!existsSync(fp)) throw new Error("画布不存在");
@@ -328,6 +361,7 @@ export function saveCanvas(
   doc.title = (payload.title || doc.title || "未命名画布").slice(0, 80);
   doc.icon = (payload.icon || doc.icon || "🧩").slice(0, 32);
   const existingNodeCount = Array.isArray(doc.nodes) ? doc.nodes.length : 0;
+  const existingUrlCount = countNodesWithUrl(doc.nodes);
   const incomingNodes = payload.nodes;
   if (
     Array.isArray(incomingNodes) &&
@@ -339,7 +373,24 @@ export function saveCanvas(
       `[canvas-store] blocked empty nodes overwrite for ${id} (existing ${existingNodeCount} nodes)`
     );
   } else if (incomingNodes !== undefined) {
-    doc.nodes = incomingNodes;
+    const incomingCount = incomingNodes.length;
+    const incomingUrlCount = countNodesWithUrl(incomingNodes);
+    const nodeDrop = existingNodeCount - incomingCount;
+    const urlDrop = existingUrlCount - incomingUrlCount;
+    // 刷新/多页竞态常见：用更瘦的内存稿覆盖磁盘。单次合法删除通常不会同时掉很多节点+图。
+    if (
+      payload.allow_empty_nodes !== true &&
+      existingNodeCount >= 8 &&
+      nodeDrop >= 3 &&
+      urlDrop >= 2 &&
+      incomingCount < existingNodeCount * 0.92
+    ) {
+      console.warn(
+        `[canvas-store] blocked suspicious shrink for ${id} (nodes ${existingNodeCount}->${incomingCount}, urls ${existingUrlCount}->${incomingUrlCount})`
+      );
+    } else {
+      doc.nodes = incomingNodes;
+    }
   }
   const existingConnCount = Array.isArray(doc.connections) ? doc.connections.length : 0;
   const incomingConnections = payload.connections;
@@ -356,7 +407,11 @@ export function saveCanvas(
     doc.connections = incomingConnections;
   }
   doc.viewport = payload.viewport ?? doc.viewport ?? { x: 0, y: 0, scale: 1 };
-  doc.logs = Array.isArray(payload.logs) ? payload.logs.slice(-500) : doc.logs || [];
+  if (payload.logs !== undefined) {
+    doc.logs = mergeCanvasLogs(payload.logs, doc.logs);
+  } else if (!Array.isArray(doc.logs)) {
+    doc.logs = [];
+  }
   doc.settings = payload.settings ?? doc.settings ?? {};
   if (!String(doc.owner_id || "").trim() && ctx?.userId) {
     doc.owner_id = ctx.userId;

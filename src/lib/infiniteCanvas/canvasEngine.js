@@ -671,6 +671,8 @@ let lastKnownSavedNodeCount = 0;
 let savingCanvasNow = false;
 let saveCanvasAgain = false;
 let applyingRemoteCanvas = false;
+/** openCanvas 拉详情期间禁止保存，避免用空/半截内存覆盖磁盘 */
+let openingCanvas = false;
 let remoteSyncTimer = null;
 let remoteSyncInterval = null;
 let remoteSyncBusy = false;
@@ -3240,7 +3242,7 @@ function refreshGeometryAfterLayout(){
 }
 let viewportSaveTimer = null;
 function scheduleSave(){
-    if(!canvas || applyingRemoteCanvas) return;
+    if(!canvas || applyingRemoteCanvas || openingCanvas) return;
     localCanvasDirty = true;
     if(!saveTimer && !savingCanvasNow) setStatus('Saving...');
     clearTimeout(saveTimer);
@@ -3252,7 +3254,7 @@ function scheduleSave(){
 }
 /** 生图完成 / 画笔应用等关键节点：立刻落盘，避免刷新前防抖未触发把图「吞掉」 */
 function scheduleSaveNow(){
-    if(!canvas || applyingRemoteCanvas) return;
+    if(!canvas || applyingRemoteCanvas || openingCanvas) return;
     localCanvasDirty = true;
     clearTimeout(saveTimer);
     saveTimer = null;
@@ -3267,7 +3269,7 @@ function scheduleSaveNow(){
 }
 /** 离开页面前尽量把脏画布带上（keepalive，不阻塞卸载） */
 function flushCanvasSaveKeepalive(){
-    if(!canvas || applyingRemoteCanvas) return;
+    if(!canvas || applyingRemoteCanvas || openingCanvas) return;
     if(!localCanvasDirty && !saveTimer && !saveCanvasAgain && !savingCanvasNow) return;
     clearTimeout(saveTimer);
     saveTimer = null;
@@ -3314,7 +3316,7 @@ function wireCanvasSaveLifecycle(){
     // 硬关机时 pagehide/keepalive 来不及跑；脏画布每 8s 强制落盘，缩短丢失窗口
     if(!window.__canvasDirtySaveHeartbeat){
         window.__canvasDirtySaveHeartbeat = setInterval(() => {
-            if(!canvas || applyingRemoteCanvas) return;
+            if(!canvas || applyingRemoteCanvas || openingCanvas) return;
             if(!localCanvasDirty && !saveTimer && !saveCanvasAgain) return;
             if(savingCanvasNow) return;
             scheduleSaveNow();
@@ -3323,7 +3325,7 @@ function wireCanvasSaveLifecycle(){
 }
 /** 拖节点/改尺寸：长防抖，避免松手后立刻保存→409/远程同步→全量 render */
 function scheduleNodeDragSave(){
-    if(!canvas || applyingRemoteCanvas) return;
+    if(!canvas || applyingRemoteCanvas || openingCanvas) return;
     localCanvasDirty = true;
     if(!saveTimer && !savingCanvasNow) setStatus('Saving...');
     clearTimeout(saveTimer);
@@ -3402,8 +3404,64 @@ function serializableCanvasNode(node){
 function serializableCanvasNodes(list=nodes){
     return (list || []).map(serializableCanvasNode);
 }
+function canvasNodesRichness(list){
+    const nodesList = Array.isArray(list) ? list : [];
+    let urls = 0;
+    for(const n of nodesList){
+        if(n && String(n.url || '').trim()) urls += 1;
+    }
+    return { count: nodesList.length, urls };
+}
+function canvasNodeMergeScore(node){
+    if(!node || typeof node !== 'object') return 0;
+    let score = 1;
+    if(String(node.url || '').trim()) score += 10;
+    score += Array.isArray(node.history) ? node.history.length * 2 : 0;
+    score += Array.isArray(node.generatedOutputs) ? node.generatedOutputs.length : 0;
+    if(String(node.prompt || node.text || '').trim()) score += 3;
+    if(node.disabled) score -= 1;
+    return score;
+}
+/** 409 冲突时合并节点：两边独有都保留；同 id 取信息更完整的一侧（同分偏本地） */
+function mergeCanvasNodeLists(localList, remoteList){
+    const map = new Map();
+    for(const n of (Array.isArray(remoteList) ? remoteList : [])){
+        if(n?.id) map.set(n.id, n);
+    }
+    for(const n of (Array.isArray(localList) ? localList : [])){
+        if(!n?.id) continue;
+        const prev = map.get(n.id);
+        if(!prev || canvasNodeMergeScore(n) >= canvasNodeMergeScore(prev)) map.set(n.id, n);
+    }
+    return [...map.values()];
+}
+function mergeCanvasConnectionLists(localList, remoteList){
+    const map = new Map();
+    const keyOf = (c) => `${c?.from || ''}|${c?.to || ''}|${c?.fromPort || ''}|${c?.toPort || ''}`;
+    for(const c of [...(Array.isArray(remoteList) ? remoteList : []), ...(Array.isArray(localList) ? localList : [])]){
+        if(!c?.from || !c?.to) continue;
+        map.set(keyOf(c), c);
+    }
+    return [...map.values()];
+}
+function mergeCanvasLogLists(localList, remoteList){
+    const map = new Map();
+    const add = (log) => {
+        if(!log || typeof log !== 'object') return;
+        const id = String(log.id || '').trim();
+        const key = id || `${log.createdAt || ''}|${JSON.stringify(log.outputs || [])}|${String(log.prompt || '').slice(0, 80)}`;
+        const prev = map.get(key);
+        if(!prev || Number(log.createdAt || 0) >= Number(prev.createdAt || 0)) map.set(key, log);
+    };
+    (Array.isArray(remoteList) ? remoteList : []).forEach(add);
+    (Array.isArray(localList) ? localList : []).forEach(add);
+    return [...map.values()]
+        .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+        .slice(0, 500);
+}
+let canvasSaveConflictRetries = 0;
 async function saveCanvas(){
-    if(!canvas || applyingRemoteCanvas) return;
+    if(!canvas || applyingRemoteCanvas || openingCanvas) return;
     if(savingCanvasNow){
         saveCanvasAgain = true;
         return;
@@ -3442,16 +3500,40 @@ async function saveCanvas(){
         if(res.status === 409){
             const data = await res.json().catch(() => ({}));
             const remote = data.detail?.canvas || data.canvas;
-            if(localCanvasDirty || saveCanvasAgain || Date.now() - lastBoardInteractionAt < CANVAS_INTERACTION_COOLDOWN_MS){
-                lastCanvasUpdatedAt = Number(data.detail?.updated_at || data.updated_at || remote?.updated_at || lastCanvasUpdatedAt || 0);
-                saveCanvasAgain = true;
-                setStatus('Saving...');
+            const remoteUpdated = Number(data.detail?.updated_at || data.updated_at || remote?.updated_at || 0);
+            // 禁止「抬版本号后用本地残缺稿强盖」。冲突一律与远端合并后再存。
+            if(!remote){
+                setStatus('Save failed');
                 return;
             }
-            if(remote && !localCanvasDirty){
-                applyRemoteCanvasData(remote);
+            canvasSaveConflictRetries += 1;
+            const mergedNodes = mergeCanvasNodeLists(nodePayload, remote.nodes);
+            const mergedConns = mergeCanvasConnectionLists(connections, remote.connections);
+            const mergedLogs = mergeCanvasLogLists(canvas.logs, remote.logs);
+            const before = canvasNodesRichness(nodePayload);
+            const after = canvasNodesRichness(mergedNodes);
+            nodes = mergedNodes;
+            connections = mergedConns;
+            canvas.nodes = mergedNodes;
+            canvas.connections = mergedConns;
+            canvas.logs = mergedLogs;
+            lastCanvasUpdatedAt = remoteUpdated || lastCanvasUpdatedAt;
+            lastKnownSavedNodeCount = Math.max(lastKnownSavedNodeCount || 0, after.count, canvasNodesRichness(remote.nodes).count);
+            sanitizeConnections();
+            if(before.count !== after.count || before.urls !== after.urls){
+                safeRender({ force: true });
             }
-            setStatus('Synced');
+            if(canvasSaveConflictRetries > 2){
+                // 连续冲突：停止强存，以合并结果留在内存并标脏，下一轮心跳再试
+                console.warn('[infinite-canvas] save conflict retries exhausted', canvas.id);
+                saveCanvasAgain = false;
+                localCanvasDirty = true;
+                setStatus(langIsEn() ? 'Sync conflict — will retry' : '同步冲突，稍后重试');
+                return;
+            }
+            saveCanvasAgain = true;
+            localCanvasDirty = true;
+            setStatus('Saving...');
             return;
         }
         if(!res.ok) throw new Error('save failed');
@@ -3460,6 +3542,7 @@ async function saveCanvas(){
         canvas.updated_at = Number(canvas.updated_at || Date.now());
         lastCanvasUpdatedAt = canvas.updated_at;
         lastKnownSavedNodeCount = Array.isArray(canvas.nodes) ? canvas.nodes.length : nodePayload.length;
+        canvasSaveConflictRetries = 0;
         localCanvasDirty = Boolean(saveCanvasAgain);
         if(currentCanvasTime) currentCanvasTime.textContent = formatCanvasTime(canvas.updated_at);
         setStatus('Saved');
@@ -3468,7 +3551,7 @@ async function saveCanvas(){
         console.error(e);
     } finally {
         savingCanvasNow = false;
-        if(saveCanvasAgain && canvas && !applyingRemoteCanvas){
+        if(saveCanvasAgain && canvas && !applyingRemoteCanvas && !openingCanvas){
             saveCanvasAgain = false;
             localCanvasDirty = true;
             setTimeout(saveCanvas, 0);
@@ -4620,9 +4703,12 @@ async function openCanvas(id, options = {}){
     saveTimer = null;
     clearTimeout(viewportSaveTimer);
     viewportSaveTimer = null;
+    saveCanvasAgain = false;
+    localCanvasDirty = false;
     const liveShell = resolveLiveShell();
     if(liveShell?.classList.contains('no-canvas')) liveShell.classList.remove('no-canvas');
     setStatus('Opening...');
+    openingCanvas = true;
     try {
         const res = await apiFetch(`/api/canvases/${id}`);
         if(!res.ok) throw new Error(tr('canvas.openFailed'));
@@ -4680,6 +4766,8 @@ async function openCanvas(id, options = {}){
             tr('canvas.openFailed')
         );
         console.error(e);
+    } finally {
+        openingCanvas = false;
     }
 }
 function remoteCanvasContentEquals(remote){
@@ -4691,22 +4779,29 @@ function remoteCanvasContentEquals(remote){
         return false;
     }
 }
-function applyRemoteCanvasData(remote){
+function applyRemoteCanvasData(remote, opts = {}){
     if(!remote || !canvas || remote.id !== canvas.id) return;
-    if(localCanvasDirty || saveTimer || savingCanvasNow || saveCanvasAgain){
+    const force = Boolean(opts.force);
+    if(!force && (localCanvasDirty || saveTimer || savingCanvasNow || saveCanvasAgain)){
         clearTimeout(remoteSyncTimer);
         remoteSyncTimer = setTimeout(syncRemoteCanvasNow, 1000);
         return;
     }
-    if(Date.now() - lastBoardInteractionAt < CANVAS_INTERACTION_COOLDOWN_MS){
+    if(!force && Date.now() - lastBoardInteractionAt < CANVAS_INTERACTION_COOLDOWN_MS){
         clearTimeout(remoteSyncTimer);
         remoteSyncTimer = setTimeout(syncRemoteCanvasNow, 2000);
         return;
     }
-    if(isCanvasInteracting()){
+    if(!force && isCanvasInteracting()){
         clearTimeout(remoteSyncTimer);
         remoteSyncTimer = setTimeout(syncRemoteCanvasNow, 1200);
         return;
+    }
+    if(force){
+        clearTimeout(saveTimer);
+        saveTimer = null;
+        saveCanvasAgain = false;
+        localCanvasDirty = false;
     }
     applyingRemoteCanvas = true;
     try {
@@ -20214,7 +20309,9 @@ async function buildGeneratorTaskPayload(gen, prompt, refs){
         canvas_resolution: gen.resolution || '1k',
         canvas_ratio: gen.ratio || 'square',
         canvas_custom_ratio: gen.customRatio || '',
-        reference_images:refs
+        reference_images:refs,
+        canvas_id: canvas?.id || '',
+        node_id: gen?.id || '',
     };
     const quality = normalizedImageQuality(gen.quality);
     if(quality) payload.quality = quality;
@@ -22595,10 +22692,15 @@ function normalizeTaskResultImages(result){
     return [];
 }
 async function createCanvasImageTask(payload){
+    const body = {
+        ...(payload || {}),
+        canvas_id: payload?.canvas_id || canvas?.id || '',
+        node_id: payload?.node_id || '',
+    };
     const res = await apiFetch('/api/canvas-image-tasks', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(payload)
+        body:JSON.stringify(body)
     });
     if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.generationFailed')));
     return res.json();
@@ -25961,9 +26063,9 @@ on(window, 'keydown', e => {
     if(e.key === 'Escape' && document.getElementById('textOutputReader')?.classList.contains('open')) { closeTextOutputReader(); return; }
     if(e.key === 'Escape' && tempLink){ cancelTempLink(); return; }
     if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') { e.preventDefault(); groupSelectedImages(); }
-    if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
-        const tag = document.activeElement?.tagName;
-        if(tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+    // Ctrl/Cmd+B：禁用/恢复选中节点。与 Ctrl+G 一致——焦点在 gen-dock 提示词框时也要生效
+    // （旧逻辑遇到 TEXTAREA 直接 return，Gen Console 下几乎永远失效）
+    if((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'b' || e.code === 'KeyB')) {
         if(!selected.size) return;
         e.preventDefault();
         toggleSelectedNodesDisabled();
