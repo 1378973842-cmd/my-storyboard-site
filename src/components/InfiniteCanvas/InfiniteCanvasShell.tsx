@@ -655,6 +655,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('nineGridAgent')}><i data-lucide="grid-3x3" className="w-4 h-4"></i><span>九宫格 Agent</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('slotsLoopVideoAgent')}><i data-lucide="repeat-2" className="w-4 h-4"></i><span>Slots 循环视频 Agent</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('mxShellPromptAgent')}><i data-lucide="film" className="w-4 h-4"></i><span>Mx-Shell 提示词 Agent</span></button>
+                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('mxShellPolishAgent')}><i data-lucide="wand-sparkles" className="w-4 h-4"></i><span>Mx-Shell 润色 Agent</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('deepWhiteShotAgent')}><i data-lucide="clapperboard" className="w-4 h-4"></i><span>DeepWhite 导演分镜 Agent</span></button>
                       <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('pixarAdScriptAgent')}><i data-lucide="sparkles" className="w-4 h-4"></i><span>故事动画分镜 Agent</span></button>
                       <div className="menu-section-title">输出</div>
@@ -846,8 +847,8 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                           <button className="image-edit-btn secondary" type="button" data-brush-tool="rect" onClick={(e) => { e.stopPropagation(); setBrushTool('rect'); }} title="矩形"><i data-lucide="square" className="w-4 h-4"></i></button>
                           <button className="image-edit-btn secondary" type="button" data-brush-tool="ellipse" onClick={(e) => { e.stopPropagation(); setBrushTool('ellipse'); }} title="椭圆"><i data-lucide="circle" className="w-4 h-4"></i></button>
                           <button className="image-edit-btn secondary" type="button" data-brush-tool="label" onClick={(e) => { e.stopPropagation(); setBrushTool('label'); }} title="角色编号标注"><i data-lucide="list-ordered" className="w-4 h-4"></i></button>
-                          <label><span data-i18n="canvas.color">颜色</span> <input id="paintBrushColor" type="color" value="#ff2d55" /></label>
-                          <label><span data-i18n="canvas.brushSize">笔刷</span> <input id="paintBrushSize" type="range" min={2} max={80} value={14} /></label>
+                          <label><span data-i18n="canvas.color">颜色</span> <input id="paintBrushColor" type="color" defaultValue="#ff2d55" /></label>
+                          <label><span data-i18n="canvas.brushSize">笔刷</span> <input id="paintBrushSize" type="range" min={2} max={80} defaultValue={14} /></label>
                           <button id="brushUndoBtn" className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); undoEditDrawing(); }} title="撤销"><i data-lucide="undo-2" className="w-4 h-4"></i></button>
                           <button id="brushRedoBtn" className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); redoEditDrawing(); }} title="恢复"><i data-lucide="redo-2" className="w-4 h-4"></i></button>
                           <button className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); clearEditDrawing(); }}><i data-lucide="eraser" className="w-4 h-4"></i><span data-i18n="canvas.clear">清空</span></button>

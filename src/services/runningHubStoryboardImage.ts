@@ -13,7 +13,7 @@ export type StoryboardImageEnv = {
   gptQuality: string;
 };
 
-/** 九宫格 Agent Phase B / 单格编辑：gpt-image-2 官方稳定图生图 */
+/** gpt-image-2-稳定 / 九宫格 Agent：官方稳定图生图 */
 export const RUNNINGHUB_G2_OFFICIAL_I2I_PATH = "/openapi/v2/rhart-image-g-2-official/image-to-image";
 
 export function getNineGridG2Path(): string {

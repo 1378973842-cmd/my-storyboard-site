@@ -77,14 +77,56 @@ function runninghubApiBase(): string {
   return (base || "https://www.runninghub.cn").replace(/\/+$/, "");
 }
 
-function runninghubApiKeyRaw(useWallet: boolean): string {
-  if (useWallet) {
-    const wallet = (process.env.RUNNINGHUB_WALLET_API_KEY || "").trim();
-    if (wallet) return wallet;
-  }
-  let key = (process.env.RUNNINGHUB_API_KEY || process.env.STORYBOARD_IMAGE_API_KEY || "").trim();
+function normalizeRunningHubApiKey(raw: string): string {
+  let key = String(raw || "").trim();
   if (/^bearer\s+/i.test(key)) key = key.replace(/^bearer\s+/i, "").trim();
   return key;
+}
+
+export type RunningHubApiKeyEntry = {
+  id: string;
+  label: string;
+  key: string;
+};
+
+/** 服务端完整列表（含密钥）；勿直接下发前端。 */
+function listRunningHubApiKeyEntries(): RunningHubApiKeyEntry[] {
+  const out: RunningHubApiKeyEntry[] = [];
+  const push = (id: string, label: string, raw: string) => {
+    const key = normalizeRunningHubApiKey(raw);
+    if (!key) return;
+    if (out.some((item) => item.key === key)) return;
+    out.push({ id, label, key });
+  };
+  push("credit", "key1", process.env.RUNNINGHUB_API_KEY || process.env.STORYBOARD_IMAGE_API_KEY || "");
+  push("wallet", "wallet", process.env.RUNNINGHUB_WALLET_API_KEY || "");
+  // 额外 Key：RUNNINGHUB_API_KEYS="key2:sk-1|key3:sk-2"
+  const extra = String(process.env.RUNNINGHUB_API_KEYS || "").trim();
+  if (extra) {
+    const parts = extra.split("|").map((s) => s.trim()).filter(Boolean);
+    parts.forEach((part, index) => {
+      const colon = part.indexOf(":");
+      if (colon > 0) {
+        push(`extra-${index + 1}`, part.slice(0, colon).trim() || `key${index + 2}`, part.slice(colon + 1));
+      } else {
+        push(`extra-${index + 1}`, `key${index + 2}`, part);
+      }
+    });
+  }
+  return out;
+}
+
+/** 前端下拉只用 id + 显示名，不含密钥正文。 */
+export function listRunningHubApiKeysForClient(): Array<{ id: string; label: string }> {
+  return listRunningHubApiKeyEntries().map(({ id, label }) => ({ id, label }));
+}
+
+function runninghubApiKeyRaw(useWallet: boolean): string {
+  if (useWallet) {
+    const wallet = normalizeRunningHubApiKey(process.env.RUNNINGHUB_WALLET_API_KEY || "");
+    if (wallet) return wallet;
+  }
+  return normalizeRunningHubApiKey(process.env.RUNNINGHUB_API_KEY || process.env.STORYBOARD_IMAGE_API_KEY || "");
 }
 
 function runninghubApiKey(useWallet = false): string {
@@ -93,13 +135,37 @@ function runninghubApiKey(useWallet = false): string {
   return key;
 }
 
+/** 前端只传 apiKeyId；服务端映射为真实 Key。 */
+function resolveRequestApiKey(opts: {
+  apiKeyId?: unknown;
+  apiKey?: unknown;
+  useWallet?: boolean;
+}): string {
+  const id = String(opts.apiKeyId || "").trim();
+  if (id) {
+    const entry = listRunningHubApiKeyEntries().find((item) => item.id === id);
+    if (!entry) throw httpError(400, "无效的 API Key 选择");
+    return entry.key;
+  }
+  // 兼容旧请求：若仍带明文 apiKey，仅当它属于服务端配置时才接受
+  const fromClient = normalizeRunningHubApiKey(String(opts.apiKey || ""));
+  if (fromClient) {
+    const known = listRunningHubApiKeyEntries();
+    if (!known.some((item) => item.key === fromClient)) {
+      throw httpError(400, "无效的 API Key（须为服务端已配置的 Key）");
+    }
+    return fromClient;
+  }
+  return runninghubApiKey(Boolean(opts.useWallet));
+}
+
 function rhUrl(subPath: string): string {
   return `${runninghubApiBase()}${subPath}`;
 }
 
-function rhHeaders(json: boolean, useWallet = false): Record<string, string> {
+function rhHeaders(json: boolean, apiKey = ""): Record<string, string> {
   const headers: Record<string, string> = {};
-  const key = runninghubApiKeyRaw(useWallet);
+  const key = normalizeRunningHubApiKey(apiKey);
   if (key) headers.Authorization = `Bearer ${key}`;
   if (json) headers["Content-Type"] = "application/json";
   return headers;
@@ -465,7 +531,7 @@ async function fetchRunningHubWorkflowJson(
   const apiKey = runninghubApiKey();
   const resp = await fetch(rhUrl("/api/openapi/getJsonApiFormat"), {
     method: "POST",
-    headers: rhHeaders(true),
+    headers: rhHeaders(true, apiKey),
     body: JSON.stringify({ apiKey, workflowId }),
   });
   const raw = await rhJson(resp);
@@ -511,11 +577,18 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
     try {
       const webappId = String(req.query.webappId || "").trim();
       if (!webappId) throw httpError(400, "webappId 必填");
-      const apiKey = runninghubApiKey();
+      const useWallet =
+        String(req.query.useWallet || "").trim() === "1" ||
+        String(req.query.useWallet || "").toLowerCase() === "true";
+      const apiKey = resolveRequestApiKey({
+        apiKeyId: req.query.apiKeyId,
+        apiKey: req.query.apiKey,
+        useWallet,
+      });
       const url = rhUrl(
         `/api/webapp/apiCallDemo?apiKey=${encodeURIComponent(apiKey)}&webappId=${encodeURIComponent(webappId)}`
       );
-      const resp = await fetch(url, { headers: rhHeaders(false) });
+      const resp = await fetch(url, { headers: rhHeaders(false, apiKey) });
       const raw = (await rhJson(resp)) as Record<string, unknown>;
       if (!resp.ok) throw httpError(resp.status, JSON.stringify(raw).slice(0, 500));
       if (raw && typeof raw === "object" && raw.code !== undefined && raw.code !== null && !isSuccessCode(raw.code)) {
@@ -533,7 +606,11 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
       const webappId = String(body.webappId || "").trim();
       if (!webappId) throw httpError(400, "webappId 必填");
       const useWallet = Boolean(body.useWallet);
-      const apiKey = runninghubApiKey(useWallet);
+      const apiKey = resolveRequestApiKey({
+        apiKeyId: body.apiKeyId,
+        apiKey: body.apiKey,
+        useWallet,
+      });
       const payload: Record<string, unknown> = {
         apiKey,
         webappId,
@@ -543,7 +620,7 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
       if (instanceType) payload.instanceType = instanceType;
       const resp = await fetch(rhUrl("/task/openapi/ai-app/run"), {
         method: "POST",
-        headers: rhHeaders(true, useWallet),
+        headers: rhHeaders(true, apiKey),
         body: JSON.stringify(payload),
       });
       const raw = (await rhJson(resp)) as Record<string, unknown>;
@@ -565,7 +642,11 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
       const workflowId = String(body.workflowId || "").trim();
       if (!workflowId) throw httpError(400, "workflowId 必填");
       const useWallet = Boolean(body.useWallet);
-      const apiKey = runninghubApiKey(useWallet);
+      const apiKey = resolveRequestApiKey({
+        apiKeyId: body.apiKeyId,
+        apiKey: body.apiKey,
+        useWallet,
+      });
       const payload: Record<string, unknown> = { apiKey, workflowId, addMetadata: true };
       if (Array.isArray(body.nodeInfoList) && body.nodeInfoList.length) payload.nodeInfoList = normalizeNodeInfoList(body.nodeInfoList);
       if (body.workflow) {
@@ -575,7 +656,7 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
       if (instanceType) payload.instanceType = instanceType;
       const resp = await fetch(rhUrl("/task/openapi/create"), {
         method: "POST",
-        headers: rhHeaders(true, useWallet),
+        headers: rhHeaders(true, apiKey),
         body: JSON.stringify(payload),
       });
       const raw = (await rhJson(resp)) as Record<string, unknown>;
@@ -595,10 +676,17 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
     try {
       const taskId = String(req.query.taskId || "").trim();
       if (!taskId) throw httpError(400, "taskId 必填");
-      const apiKey = runninghubApiKey();
+      const useWallet =
+        String(req.query.useWallet || "").trim() === "1" ||
+        String(req.query.useWallet || "").toLowerCase() === "true";
+      const apiKey = resolveRequestApiKey({
+        apiKeyId: req.query.apiKeyId,
+        apiKey: req.query.apiKey,
+        useWallet,
+      });
       const resp = await fetch(rhUrl("/task/openapi/outputs"), {
         method: "POST",
-        headers: rhHeaders(true),
+        headers: rhHeaders(true, apiKey),
         body: JSON.stringify({ apiKey, taskId }),
       });
       const raw = (await rhJson(resp)) as Record<string, unknown>;
@@ -631,7 +719,11 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
       const sourceUrl = String(body.url || "").trim();
       if (!sourceUrl) throw httpError(400, "url 必填");
       const useWallet = Boolean(body.useWallet);
-      const apiKey = runninghubApiKey(useWallet);
+      const apiKey = resolveRequestApiKey({
+        apiKeyId: body.apiKeyId,
+        apiKey: body.apiKey,
+        useWallet,
+      });
       const { buffer, mime, filename } = await readAssetBytes(sourceUrl, deps.projectRoot);
       if (!buffer.length) throw httpError(400, "素材为空，无法上传到 RunningHub");
       const form = new FormData();
@@ -640,7 +732,7 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
       form.append("file", new Blob([new Uint8Array(buffer)], { type: mime }), filename);
       const resp = await fetch(rhUrl("/task/openapi/upload"), {
         method: "POST",
-        headers: rhHeaders(false, useWallet),
+        headers: rhHeaders(false, apiKey),
         body: form as unknown as BodyInit,
       });
       const raw = (await rhJson(resp)) as Record<string, unknown>;

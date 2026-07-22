@@ -144,3 +144,20 @@
 - Mx-Shell 多机位对齐示例B：节拍标题四段结构+校验+user锚点
 - Mx-Shell 一镜到底对齐示例A：角度/按秒分段校验+修正范文矛盾运镜
 - Mx-Shell 润色 Agent 独立节点：task=polish，原生成节点不变
+
+## 2026-07-21
+
+### 记录 / 说明
+- AG25a: image/gen top action bar (crop/fav/download/enlarge)
+- AG25a: save-to-library modal (not favorites) on image action bar
+- 图片下拉新增 gpt-image-2-稳定，走 rhart-image-g-2-official/image-to-image
+- 修复画笔颜色：React value 无 onChange 导致只读，改为 defaultValue
+- 加固画布保存：生图完成立刻落盘 + 离开页 keepalive flush；素材库本地路径失败回退上传
+
+## 2026-07-22
+
+### 记录 / 说明
+- 完成回调：task ledger + pending丢失仍落板并强制保存
+- RH 节点：独立 API Key 选择行；query 跟随 useWallet
+- RH 测试：前端下拉明文挂 API Key（rh_api_keys）
+- 防关机：脏画布8s强制保存；孤儿uploads扫描脚本（约150张待导演确认贴回）

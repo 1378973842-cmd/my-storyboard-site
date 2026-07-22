@@ -260,7 +260,19 @@ function loadMxShellCameraMoves(projectRoot: string): string {
   return "";
 }
 
-function loadMxShellSystemPrompt(projectRoot: string): string {
+const MX_SHELL_POLISH_API_OVERRIDE = `
+---
+
+## 润色模式覆盖（优先于上文「完整四段模板」）
+
+当任务为 polish（润色）时：
+1. \`prompt\` **只输出画面提示词正文**，禁止出现【基础设定】【氛围与画质】【声音】【画面内容】段标题。
+2. 一镜到底：直接输出示例A【画面内容】内字段（分镜/景别/角度/构图/运镜手法/按秒画面内容），不要外包四段。
+3. 多机位：直接输出示例B分镜行列表，不要外包四段。
+4. 禁止另编支线；保留原稿镜头/事件/对白意图；运镜对齐词典。
+`.trim();
+
+function loadMxShellSystemPrompt(projectRoot: string, task: MxShellTask = "generate"): string {
   const candidates = [
     path.join(projectRoot, "prompts", "mx_shell_prompt_system.md"),
     path.join(projectRoot, "skills", "mx-shell-prompt", "Skill", "SKILL.md"),
@@ -275,6 +287,7 @@ function loadMxShellSystemPrompt(projectRoot: string): string {
       parts.push(`---\n\n## 运镜词典（强制参考）\n\n${cameraMoves}`);
     }
     parts.push(MX_SHELL_API_CONSTRAINT);
+    if (task === "polish") parts.push(MX_SHELL_POLISH_API_OVERRIDE);
     return parts.join("\n\n");
   }
   throw new Error("缺少 Mx-Shell SKILL 文件：prompts/mx_shell_prompt_system.md");
@@ -392,17 +405,43 @@ function buildMxShellUserMessage(opts: {
   if (isPolish) {
     lines.push(
       "【润色硬性规则】",
-      "1. 以下【用户原稿】是权威意图：保留镜头/事件顺序、角色行为、关键对白与总时长意图。",
-      "2. 禁止另编支线、禁止新增原稿没有的角色/道具/重大情节；允许补全 Mx-Shell 必填字段与专业表述。",
+      "1. 【用户原稿】是权威意图：保留镜头/事件顺序、角色行为、关键对白与总时长意图。",
+      "2. 禁止另编支线；禁止新增原稿没有的角色/道具/重大情节。",
       "3. 把模糊写法改成物理可拍、时间轴精确到秒；运镜对齐词典，去掉空词与矛盾组合。",
-      "4. 输出仍须是完整 Mx-Shell 模板纯文本（非批注、非对照表）。",
+      "4. `prompt` 只输出画面提示词正文：不要【基础设定】【氛围与画质】【声音】，也不要【画面内容】段标题。",
+      "5. 若原稿自带四段结构，只润色画面相关部分，仍只输出画面正文。",
       "",
       "【用户原稿】",
-      opts.story
+      opts.story,
+      "",
+      "【运镜要求】",
+      "镜头句语感对齐 system 运镜词典「正确示例」；禁止空词与矛盾组合。",
+      ""
     );
-  } else {
-    lines.push("【用户素材】", opts.story);
+    if (opts.mode === "multi_cam") {
+      lines.push(
+        "【多机位画面示范（只输出这类行，勿加其他大段）】",
+        "分镜1丨开场入画丨0-1.5s丨广角低角度固定机位，等待主体入画后切镜：……",
+        "分镜3丨冲突升级丨3-5s丨过肩视角跟拍，随主体侧移匀速横移：……",
+        ""
+      );
+    } else {
+      lines.push(
+        "【一镜到底画面示范（只输出这类字段，勿加其他大段）】",
+        "分镜：单镜头一镜到底。",
+        "景别：近景。角度：平视。构图：前景…；背景…。",
+        "运镜手法：跟拍，机位贴主体侧前方匀速后退跟随，动机是压迫逃亡感。",
+        "画面内容：",
+        "0-2秒：……",
+        "2-4秒：……",
+        ""
+      );
+    }
+    lines.push("润色【用户原稿】→ 仅输出 JSON：{\"mode\":\"...\",\"prompt\":\"画面提示词正文\"}。");
+    return lines.join("\n");
   }
+
+  lines.push("【用户素材】", opts.story);
   if (opts.atmosphere) {
     lines.push("", "【氛围与画质偏好（用户可改，未提供则按素材推断）】", opts.atmosphere);
   }
@@ -467,20 +506,34 @@ function buildMxShellUserMessage(opts: {
     );
   }
   lines.push(
-    isPolish
-      ? "请按 Mx-Shell_Prompts SKILL 润色【用户原稿】→ 填入对应模式模板 → 仅输出 JSON（含完整 prompt 纯文本）。"
-      : "请按 Mx-Shell_Prompts SKILL 执行：收集/推断参数 → 填入对应模式模板 → 仅输出 JSON（含完整 prompt 纯文本）。"
+    "请按 Mx-Shell_Prompts SKILL 执行：收集/推断参数 → 填入对应模式模板 → 仅输出 JSON（含完整 prompt 纯文本）。"
   );
   return lines.join("\n");
+}
+
+function normalizePolishPromptBody(prompt: string): string {
+  let text = String(prompt || "").trim();
+  // 若模型仍套四段，只取【画面内容】之后；再去掉段标题本身
+  if (text.includes("【画面内容】")) {
+    text = extractPictureContent(text).replace(/^【画面内容】\s*/, "").trim();
+  }
+  return text
+    .replace(/^【基础设定】[\s\S]*?(?=【氛围与画质】|【声音】|$)/, "")
+    .replace(/^【氛围与画质】[\s\S]*?(?=【声音】|【画面内容】|$)/, "")
+    .replace(/^【声音】[\s\S]*?(?=【画面内容】|$)/, "")
+    .replace(/^【画面内容】\s*/, "")
+    .trim();
 }
 
 function parseMxShellResponse(
   raw: string,
   mode: MxShellMode,
-  cameraIntensity: MxShellCameraIntensity
+  cameraIntensity: MxShellCameraIntensity,
+  task: MxShellTask = "generate"
 ): MxShellPromptResult {
   const text = String(raw || "").trim();
   if (!text) throw new Error("模型返回了空内容");
+  const pictureOnly = task === "polish";
 
   let parsed: unknown = null;
   try {
@@ -489,15 +542,20 @@ function parseMxShellResponse(
     parsed = extractBalancedJsonObject(text);
   }
 
-  // 容错：若模型直接吐出 Mx-Shell 纯文本模板，包一层返回
+  // 容错：若模型直接吐出纯文本
   if (!parsed || typeof parsed !== "object") {
-    if (text.includes("【基础设定】") && text.includes("【画面内容】")) {
-      assertMxShellPromptShape(text, mode, cameraIntensity);
+    const plain = pictureOnly ? normalizePolishPromptBody(text) : text;
+    if (
+      pictureOnly
+        ? plain.length >= MX_SHELL_STORY_MIN
+        : text.includes("【基础设定】") && text.includes("【画面内容】")
+    ) {
+      assertMxShellPromptShape(plain, mode, cameraIntensity, { pictureOnly });
       return {
         mode,
         mode_label: mxShellModeLabel(mode),
-        prompt: text,
-        display_text: text,
+        prompt: plain,
+        display_text: plain,
         has_refs: false,
         ref_count: 0,
       };
@@ -506,9 +564,10 @@ function parseMxShellResponse(
   }
 
   const obj = parsed as Record<string, unknown>;
-  const prompt = String(obj.prompt || obj.display_text || obj.full_prompt || "").trim();
+  let prompt = String(obj.prompt || obj.display_text || obj.full_prompt || "").trim();
   if (!prompt) throw new Error("模型 JSON 缺少 prompt");
-  assertMxShellPromptShape(prompt, mode, cameraIntensity);
+  if (pictureOnly) prompt = normalizePolishPromptBody(prompt);
+  assertMxShellPromptShape(prompt, mode, cameraIntensity, { pictureOnly });
   const resolvedMode = normalizeMxShellMode(obj.mode || mode);
   return {
     mode: resolvedMode,
@@ -577,18 +636,28 @@ function parseMxShellMultiShotLines(picture: string): Array<{
   return out;
 }
 
-/** 按 Mx-Shell skill 输出模板硬校验四段结构 + 模式形态 + 运镜质量 */
+/** 按 Mx-Shell skill 输出模板硬校验；润色模式仅校验画面正文（pictureOnly） */
 export function assertMxShellPromptShape(
   prompt: string,
   mode: MxShellMode,
-  cameraIntensity: MxShellCameraIntensity = "standard"
+  cameraIntensity: MxShellCameraIntensity = "standard",
+  opts: { pictureOnly?: boolean } = {}
 ): void {
-  const required = ["【基础设定】", "【氛围与画质】", "【声音】", "【画面内容】"];
-  const missing = required.filter((h) => !prompt.includes(h));
-  if (missing.length) {
-    throw new Error(`prompt 未遵循 Mx-Shell 模板（缺少 ${missing.join("、")}）`);
+  const pictureOnly = Boolean(opts.pictureOnly);
+  if (!pictureOnly) {
+    const required = ["【基础设定】", "【氛围与画质】", "【声音】", "【画面内容】"];
+    const missing = required.filter((h) => !prompt.includes(h));
+    if (missing.length) {
+      throw new Error(`prompt 未遵循 Mx-Shell 模板（缺少 ${missing.join("、")}）`);
+    }
+  } else {
+    for (const h of ["【基础设定】", "【氛围与画质】", "【声音】"] as const) {
+      if (prompt.includes(h)) {
+        throw new Error(`润色输出勿包含${h}，只输出画面提示词正文`);
+      }
+    }
   }
-  const picture = extractPictureContent(prompt);
+  const picture = pictureOnly ? prompt : extractPictureContent(prompt);
   if (mode === "one_shot") {
     if (!/分镜\s*[:：]\s*单镜头\s*一镜到底/.test(picture) && !/单镜头\s*一镜到底/.test(picture)) {
       throw new Error("一镜到底模式须含「分镜：单镜头一镜到底」（对齐示例输出A）");
@@ -630,7 +699,7 @@ export function assertMxShellPromptShape(
     picture.toLowerCase().includes(term.toLowerCase())
   );
   if (!hasLegalMove) {
-    throw new Error("【画面内容】未使用可识别的运镜手法名（见 camera-moves 词典）");
+    throw new Error("画面提示词未使用可识别的运镜手法名（见 camera-moves 词典）");
   }
   // 希区柯克变焦必须写清推进/变焦配合
   if (/希区柯克/.test(picture) && !/(推进|拉远).{0,24}(变焦|zoom)|(变焦|zoom).{0,24}(推进|拉远|反向)/i.test(picture)) {
@@ -748,18 +817,19 @@ export async function generateMxShellPromptOnServer(
         : `素材过短（至少 ${MX_SHELL_STORY_MIN} 字）：请提供故事大纲、剧本片段或分镜草稿`
     );
   }
-  const atmosphere = normalizeAtmosphere(body.atmosphere);
+  const atmosphere = task === "polish" ? "" : normalizeAtmosphere(body.atmosphere);
   const cameraIntensity = normalizeMxShellCameraIntensity(
     body.cameraIntensity ?? body.camera_intensity
   );
-  const imageUrls = normalizeImageUrls(body.imageUrls);
+  // 润色节点不吃参考图：只润色正文
+  const imageUrls = task === "polish" ? [] : normalizeImageUrls(body.imageUrls);
   const imageDataUrls = imageUrls.map((url) => resolveImageForVision(req, projectRoot, url)).filter(Boolean);
   const bindings = normalizeImageBindings(body.imageBindings, imageDataUrls.length);
   const model =
     String(body.model || "").trim() ||
     (process.env.TEXT_MODEL || "").trim() ||
     "gemini-3.5-flash";
-  const systemPrompt = loadMxShellSystemPrompt(projectRoot);
+  const systemPrompt = loadMxShellSystemPrompt(projectRoot, task);
   const baseUser = buildMxShellUserMessage({
     mode,
     task,
@@ -776,7 +846,7 @@ export async function generateMxShellPromptOnServer(
     try {
       const retryHint =
         task === "polish"
-          ? "硬性：润色不得另编剧情；一镜到底对齐示例A；多机位对齐示例B；镜头含词典手法名；禁止固定+位移等矛盾组合与空词。"
+          ? "硬性：只输出画面提示词正文（禁止基础设定/氛围/声音段）；不得另编剧情；一镜到底/多机位对齐示例A/B画面结构；禁空词与矛盾运镜。"
           : "硬性：一镜到底对齐示例A（景别/角度/构图/运镜手法/按秒画面内容）；多机位对齐示例B四段行；镜头含词典手法名；禁止固定+位移等矛盾组合与空词。";
       const userMessage =
         attempt === 0 || !lastError
@@ -788,7 +858,7 @@ export async function generateMxShellPromptOnServer(
         imageDataUrls,
         model,
       });
-      const result = parseMxShellResponse(text, mode, cameraIntensity);
+      const result = parseMxShellResponse(text, mode, cameraIntensity, task);
       result.has_refs = imageDataUrls.length > 0;
       result.ref_count = imageDataUrls.length;
       result.bindings = bindings;

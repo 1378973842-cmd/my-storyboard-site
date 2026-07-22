@@ -60,6 +60,7 @@ import {
 import { requireSiteGate } from "./siteAccessGate.js";
 import { recordFileOwnership } from "./canvasGenerations.js";
 import {
+  listRunningHubApiKeysForClient,
   listRunningHubAppsForConfig,
   listRunningHubWorkflowsForConfig,
   registerRunningHubWorkflowRoutes,
@@ -453,7 +454,16 @@ export function registerInfiniteCanvasRoutes(
     const defaultImage = (process.env.IMAGE_MODEL || "nano-banana-pro-稳定").trim();
     const editModel = (process.env.IMAGE_EDIT_MODEL || "").trim();
     const imageModels = Array.from(
-      new Set([defaultImage, editModel, "gpt-image-2", "nano-banana-pro", "nano-banana-pro-稳定", "midjourneyV8.1", "niji7"].filter(Boolean))
+      new Set([
+        defaultImage,
+        editModel,
+        "gpt-image-2",
+        "gpt-image-2-稳定",
+        "nano-banana-pro",
+        "nano-banana-pro-稳定",
+        "midjourneyV8.1",
+        "niji7",
+      ].filter(Boolean))
     );
     const chatModels = Array.from(
       new Set(
@@ -483,6 +493,8 @@ export function registerInfiniteCanvasRoutes(
           image_models: imageModels,
           has_key: Boolean((process.env.RUNNINGHUB_API_KEY || process.env.STORYBOARD_IMAGE_API_KEY || "").trim()),
           has_wallet_key: Boolean((process.env.RUNNINGHUB_WALLET_API_KEY || "").trim()),
+          // 仅 id + 显示名；密钥正文不下发前端
+          rh_api_keys: listRunningHubApiKeysForClient(),
           rh_apps: listRunningHubAppsForConfig(),
           rh_workflows: listRunningHubWorkflowsForConfig(),
         },

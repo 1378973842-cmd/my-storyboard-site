@@ -13,24 +13,24 @@ export const NINE_GRID_JSON_OUTPUT_CONSTRAINT =
   '- specs：景别 + 构图摘要（20–40 汉字），如「全景，黄金分割点构图，低角度仰拍」。\n' +
   `- 每条 prompt：纯中文、可直接文生图的长句/段落，严格 ${NINE_GRID_SHOT_PROMPT_MIN_CHARS}-${NINE_GRID_SHOT_PROMPT_MAX_CHARS} 个汉字，不可少于 ${NINE_GRID_SHOT_PROMPT_MIN_CHARS} 字。\n` +
   '- 每条 prompt 必须同时包含：①景别 ②机位与构图位置（黄金分割点/前景遮挡/对角线/荷兰角等至少一项）③光影与材质 ④角色具体动作与视线矢量 ⑤若出场须写「图N」引用。\n' +
+  '- 若使用前景遮挡/前景遮挡构图：指电影式前景层（纵深/虚化/窥视），须点名前景物及层次作用；不是「挡住角色身体」。正例：虚化前景树叶压在画面左缘；隔着门框窥视中景。反例：只写「前景遮挡构图」或空喊电影感。\n' +
   '- 禁止把构图、景别、光影只写在 specs 里而让 prompt 变成短句；specs 的信息必须并入 prompt。\n' +
   '- 与分镜页同级：采用前景/中景/背景三层空间描述，重材质、重光影、重微表情。';
 
+/** 造型总则（Phase B 只注入一次；不再塞进 PREFIX，避免与锚点块/完整锁定块叠三遍） */
 export const NINE_GRID_COSTUME_LOCK =
-  '人物造型锁定：以参考图为准，发型、发色、服装品类与颜色、鞋子、配饰必须与参考图一致；' +
+  '人物造型锁定：以参考图为准；发型、发色、服装品类与颜色、鞋子、配饰须一致；' +
   '禁止擅自换装、改色或改发型。仅当分镜文案明确写出换装情节时，该格才可改变服装。' +
-  '图生图时参考图的服装权重高于文字中与之冲突的描述。';
+  '图生图时参考图像素与造型锚点权重高于冲突文字。';
 
+/** 版式 / 禁缝 / 禁字；不含造型锁定（造型见 buildNineGridImagePrompt） */
 export const NINE_GRID_PREFIX =
   '在3X3网格中生成9个连贯分镜，固定版式为“从左到右、从上到下 1-9 顺序”。' +
   '每个格子严格为16:9横屏，整体大图严格为16:9。' +
-  '九格必须无任何分隔线、无边框、无留白、无黑边、无白边、无拼接缝；' +
-  '九格彼此紧贴，像一张完整画布被分为九个镜头。' +
+  '九格彼此紧贴，无分隔线、边框、留白、黑白边或拼接缝，像一张完整画布分为九个镜头。' +
   '以参考图为主体，保持环境空间布局一致、人物与物品相对位置合理，并通过不同角度推进剧情连贯发展。' +
-  NINE_GRID_COSTUME_LOCK +
-  '全图要求高分辨率、超高清细节、电影级质感、风格高度一致。' +
-  '负向约束：禁止任何文字元素、禁止字幕、禁止对白台词字卡、禁止标题字、禁止 logo、禁止水印、禁止网格线、禁止边框、禁止任何装饰性分割元素。' +
-  '如果模型倾向添加文字，必须改为纯画面表达，画面中不得出现可读字符。';
+  '全图要求高清细节、电影级质感、风格高度一致。' +
+  '负向约束：画面禁止任何可读文字（字幕、台词字卡、标题、logo、水印）及网格线、边框、装饰性分割。';
 
 export const IMAGE_REF_COSTUME_LOCK_RULE =
   '每一张上传的参考图均为「完整角色造型参考」：必须同时复刻五官、发型、体型与全套服装（上装/下装/鞋子/外套/配饰及颜色版型），禁止只学面部或气质而忽略服装。';
@@ -202,7 +202,13 @@ export function buildNineGridImagePrompt(shots, refs, opts = {}) {
     ? `\n"image_generation_model": "${imageModel}", "grid_layout": "3x3", "grid_aspect_ratio": "16:9"。`
     : '';
   const core = `${prefix}${modelMeta}\n${anchorBlock ? `${anchorBlock}\n` : ''}参考图命名映射：${refMap || '无'}\n九宫格内容要求（从左到右、从上到下对应1-9）：\n${shotLines}`;
-  return augmentImagePromptWithReferenceCostumeLock(core, refs, refLooks);
+  const base = normalizeReferenceCostumeWording(core);
+  // 有视觉锚点明细时：锚点块已列图N造型，只补一条总则，避免与【参考图完整造型锁定】逐图复读
+  if (anchorBlock) {
+    if (base.includes('【参考图完整造型锁定】')) return base;
+    return `${base}\n\n【参考图完整造型锁定】\n${IMAGE_REF_COSTUME_LOCK_RULE}\n${NINE_GRID_COSTUME_LOCK}`;
+  }
+  return augmentImagePromptWithReferenceCostumeLock(base, refs, refLooks);
 }
 
 export function loadNineGridImage(src) {

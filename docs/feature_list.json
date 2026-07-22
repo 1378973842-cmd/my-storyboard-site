@@ -124,6 +124,7 @@
         { "id": "AG23", "desc": "完整 Gen Console：video 无框图台/视频台+浮动 dock", "status": "done", "priority": 44 },
         { "id": "AG24", "desc": "完整 Gen Console：RH 摘要 dock —— 产品决定撤回，RH 保持节点内原 UI", "status": "cancelled", "priority": 45 },
         { "id": "AG25", "desc": "完整 Gen Console：复刻/修图壳优先（无框结果台+浮动控制）", "status": "todo", "priority": 46 },
+        { "id": "AG25a", "desc": "图片/Gen 结果台顶部浮动动作条：裁剪、保存到素材库、下载、放大查看", "status": "done", "priority": 46.5 },
         { "id": "AG26", "desc": "节点结果改为图台内 2×2 网格（角标展开/收起；下载/设主图；日常不弹全屏库）", "status": "done", "priority": 47 },
         { "id": "AG27", "desc": "多图双路径：角标展开=节点内网格查看；右键展开所有节点=拆成独立图片生成节点并上游扇出", "status": "done", "priority": 48 },
         { "id": "AG28", "desc": "叠卡角标合并；生成节点拖线自选下游；gen→gen 仅参考不级联一键运行", "status": "done", "priority": 49 },

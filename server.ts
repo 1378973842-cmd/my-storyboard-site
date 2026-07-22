@@ -25,6 +25,7 @@ import {
 } from "./src/services/canvasTextLlmBridge.js";
 import { buildNineGridImagePrompt, buildNineGridShotExpandRetryMessage, mapNineGridShotsFromLlm, NINE_GRID_JSON_OUTPUT_CONSTRAINT, NINE_GRID_SHOT_PROMPT_MIN_CHARS, nineGridShotsBelowMinChars } from "./src/lib/nineGrid/nineGridCore.js";
 import {
+  getNineGridG2Path,
   getStoryboardImageEnv,
   runStoryboardRunningHubGenerateJob,
   runStoryboardRunningHubG2Job,
@@ -1812,7 +1813,8 @@ ${pixarInstruction}
       response_format,
     });
     const requestModel = typeof model === "string" ? model.trim() : "";
-    const gptRequested = /^gpt-image-2$/i.test(requestModel);
+    const gptRequested = /^gpt-image-2(-稳定)?$/i.test(requestModel);
+    const gptOfficialPath = /^gpt-image-2-稳定$/i.test(requestModel);
     const { apiBase, apiKey } = gptRequested ? getGptEditEnv() : getThirdPartyEnv();
 
     if (!apiBase || !apiKey) {
@@ -1866,6 +1868,7 @@ ${pixarInstruction}
               image_size,
               aspect_ratio,
               projectRoot,
+              pathOverride: gptOfficialPath ? getNineGridG2Path() : undefined,
             })
           : await runStoryboardRunningHubJob({
               prompt: userPrompt,

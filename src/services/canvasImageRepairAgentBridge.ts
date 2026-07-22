@@ -13,9 +13,11 @@ import {
   textLlmConfigError,
 } from "./canvasTextLlmBridge.js";
 import {
+  getNineGridG2Path,
   getStoryboardImageEnv,
   isPublicRunningHubImageUrl,
   normalizeImageInputForUpload,
+  RUNNINGHUB_G2_OFFICIAL_I2I_PATH,
   runStoryboardRunningHubG2Job,
   runStoryboardRunningHubJob,
   uploadBinaryToRunningHub,
@@ -109,11 +111,16 @@ function toCanvasUploadPath(raw: string): string {
 }
 
 function isGptImage2Model(model?: string): boolean {
-  return /^gpt-image-2$/i.test(String(model || "").trim());
+  return /^gpt-image-2(-稳定)?$/i.test(String(model || "").trim());
+}
+
+function isGptImage2Stable(model?: string): boolean {
+  return /^gpt-image-2-稳定$/i.test(String(model || "").trim());
 }
 
 function normalizeImageModel(model?: string): string {
   const m = String(model || "").trim();
+  if (isGptImage2Stable(m)) return "gpt-image-2-稳定";
   if (isGptImage2Model(m)) return "gpt-image-2";
   return "nano-banana-pro";
 }
@@ -266,12 +273,16 @@ async function runImageEditJob(opts: {
   projectRoot: string;
 }): Promise<string> {
   if (isGptImage2Model(opts.imageModel)) {
+    const pathOverride = isGptImage2Stable(opts.imageModel)
+      ? getNineGridG2Path() || RUNNINGHUB_G2_OFFICIAL_I2I_PATH
+      : undefined;
     return runStoryboardRunningHubG2Job({
       prompt: opts.prompt,
       images: opts.images,
       image_size: opts.imageSize,
       aspect_ratio: opts.aspectRatio,
       projectRoot: opts.projectRoot,
+      pathOverride,
     });
   }
   return runStoryboardRunningHubJob({

@@ -137,6 +137,15 @@ export const CanvasMaterialLibrary = memo(function CanvasMaterialLibrary({
     void reloadLibrary();
   }, [open, scope, reloadLibrary]);
 
+  useEffect(() => {
+    const onLibraryChanged = () => {
+      if (!open || scope !== 'personal') return;
+      void reloadLibrary();
+    };
+    window.addEventListener('canvas-asset-library-changed', onLibraryChanged);
+    return () => window.removeEventListener('canvas-asset-library-changed', onLibraryChanged);
+  }, [open, scope, reloadLibrary]);
+
   const closeFolderMenu = useCallback(() => {
     setMenuFolderId(null);
     setMenuAnchor(null);

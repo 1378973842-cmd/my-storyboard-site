@@ -676,7 +676,7 @@ let remoteSyncInterval = null;
 let remoteSyncBusy = false;
 let lastCanvasUpdatedAt = 0;
 let models = {gpt:'gpt-image-2', nano:'nano-banana-pro'};
-let imageModels = ['gpt-image-2', 'nano-banana-pro'];
+let imageModels = ['gpt-image-2', 'gpt-image-2-稳定', 'nano-banana-pro'];
 const BATCH_POSTER_BASE_PROMPT = '【标题文字规则 — 结构锁定 / 视觉随主题 / 分层配色】必须完全保留参考海报上所有标题的字面文案（逐字一致，不得增删改字、不得翻译、不得改大小写或标点）；必须完全保留标题在画面中的位置、行数、对齐方式与排版层级（不得移动、合并或拆分标题区域）；必须重新设计标题的字体风格与配色，使其与下方场景主题的世界观和主色系统一；同一海报内主标题、促销高亮词/数字（FREE/TRILLION/BONUS/JACKPOT/%/纯数字）、副文案（如 up to）、CTA 按钮文字须使用不同配色层级，至少 3 种可区分的填充/发光色，禁止所有标题区块同一渐变色；含数字或 FREE 类促销词须用最高对比度高亮色；禁止照搬参考图标题的字体外观与颜色；参考图仅用于标题文案与排版参考，不复制参考图的背景、角色或整体配色。\n\n博弈游戏美术风格，老虎机手游广告，2D美式卡通风格，粗黑的闭合轮廓线，矢量插画，平涂赛璐璐风格，高饱和度，鲜艳的色彩，高对比度。\n\n场景：{theme_prompt}\n\n{title_style}';
 const BATCH_POSTER_PLAN_B_SCENE_BASE = '博弈游戏美术风格，老虎机手游广告，2D美式卡通风格，粗黑的闭合轮廓线，矢量插画，平涂赛璐璐风格，高饱和度，鲜艳的色彩，高对比度。';
 const BATCH_POSTER_DEFAULT_TITLE_STYLE_LAYERS = {
@@ -1921,7 +1921,7 @@ function ensureYouchuanNodeDefaults(node){
     }
 }
 function isGptImage2Model(model){
-    return /^gpt-image-2$/i.test(String(resolveImageModel(model) || '').trim());
+    return /^gpt-image-2(-稳定)?$/i.test(String(resolveImageModel(model) || '').trim());
 }
 function isNanoBananaModel(model){
     const m = String(normalizeLegacyImageModelId(resolveImageModel(model) || '')).trim();
@@ -2116,6 +2116,10 @@ function canvasFitFromAspect(ar, maxEdge = CANVAS_MEDIA_MAX_EDGE){
 }
 let imageGenDockEl = null;
 let imageGenDockNodeId = null;
+/** 单选图片 / Gen 结果台上方浮动动作条 */
+let imageActionBarEl = null;
+let imageActionBarNodeId = null;
+let imageActionBarUrl = '';
 /** 展开结果「加入图片组」选图态（不进持久化） */
 let genBatchPick = null; // { nodeId, urls: Set<string>, targetBatchId: 'new'|string }
 let genBatchPickBarEl = null;
@@ -2452,6 +2456,7 @@ function syncGeneratorNodeFrame(node, el){
         el.style.width = `${displayW}px`;
         el.style.height = '';
         el.classList.remove('sized');
+        scheduleLinkGeometryRefresh(new Set([node.id]));
         return;
     }
     const scale = syncGeneratorNodeScale(node, el);
@@ -2462,6 +2467,7 @@ function syncGeneratorNodeFrame(node, el){
     el.classList.add('sized');
     el.style.width = `${node.w}px`;
     el.style.height = `${node.h}px`;
+    scheduleLinkGeometryRefresh(new Set([node.id]));
 }
 /** 参考图尺寸变化后，刷新以其为上游的生成节点展示宽 */
 function resyncGensMatchingUpstreamImage(imageNode){
@@ -2529,10 +2535,20 @@ function fitGeneratorNodeHeight(node, elHint=null){
 }
 /** 图台尺寸变化后，把浮动控制台重新贴到节点下方 */
 function scheduleImageGenDockFollow(node){
-    if(!node || imageGenDockNodeId !== node.id || !imageGenDockEl) return;
-    positionImageGenDock(node);
+    if(!node) return;
+    if(imageGenDockNodeId === node.id && imageGenDockEl){
+        positionImageGenDock(node);
+        requestAnimationFrame(() => {
+            if(imageGenDockNodeId === node.id) positionImageGenDock(node);
+        });
+    }
+    scheduleImageActionBarFollow(node);
+}
+function scheduleImageActionBarFollow(node){
+    if(!node || imageActionBarNodeId !== node.id || !imageActionBarEl) return;
+    positionImageActionBar(node);
     requestAnimationFrame(() => {
-        if(imageGenDockNodeId === node.id) positionImageGenDock(node);
+        if(imageActionBarNodeId === node.id) positionImageActionBar(node);
     });
 }
 function imageModelOptions(selectedModel, providerId){
@@ -2701,6 +2717,9 @@ function setCanvasMode(open, { clearEditor = false, force = false } = {}){
         if(nodesEl) nodesEl.innerHTML = '';
         if(linksEl) linksEl.innerHTML = '';
         if(linkControlsEl) linkControlsEl.innerHTML = '';
+        removeImageActionBar();
+        removeImageGenDock();
+        closeAssetLibrarySaveModal();
     } else if(open && currentCanvasTitle) {
         currentCanvasTitle.textContent = canvas?.title || tr('canvas.untitled');
         currentCanvasTime.textContent = formatCanvasTime(canvas?.updated_at || canvas?.created_at);
@@ -2758,9 +2777,23 @@ function preventCanvasMiddleMouseDefault(e){
     const inShell = e.target?.closest?.('.infinite-canvas-root, .infinite-canvas-host, .infinite-canvas-page');
     if(inShell) e.preventDefault();
 }
+/** 端口命中区目标屏幕像素；缩小时放大世界坐标 hit，避免点不到圆点 */
+const PORT_HIT_SCREEN_PX = 64;
+const PORT_HIT_WORLD_MIN = 64;
+const PORT_HIT_WORLD_MAX = 220;
+function syncPortHitForScale(){
+    if(!world) return;
+    const scale = Math.max(0.08, viewport.scale || 1);
+    // scale>=1 用基准；缩小时按 1/scale 放大，封顶避免盖住半个节点
+    const hit = scale >= 1
+        ? PORT_HIT_WORLD_MIN
+        : Math.min(PORT_HIT_WORLD_MAX, Math.round(PORT_HIT_SCREEN_PX / scale));
+    world.style.setProperty('--canvas-port-hit', `${hit}px`);
+}
 function applyViewport(){
     if(!world) return;
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
+    syncPortHitForScale();
     if(minimapState) updateMinimapViewport();
     else scheduleMinimapRender();
     notifyViewportScaleChange();
@@ -2769,6 +2802,10 @@ function applyViewport(){
     if(imageGenDockNodeId && imageGenDockEl){
         const dockNode = nodes.find(n => n.id === imageGenDockNodeId);
         if(dockNode) positionImageGenDock(dockNode);
+    }
+    if(imageActionBarNodeId && imageActionBarEl){
+        const barNode = nodes.find(n => n.id === imageActionBarNodeId);
+        if(barNode) positionImageActionBar(barNode);
     }
     if(genBatchPick?.nodeId){
         const pickNode = nodes.find(n => n.id === genBatchPick.nodeId);
@@ -2805,7 +2842,7 @@ function cullNodesOutsideViewport(){
     });
 }
 /** 与 infinite-canvas.css .port 定位一致：圆点中心在节点边缘外 var(--port-dot-outset) */
-const PORT_DOT_OUTSET = 12;
+const PORT_DOT_OUTSET = 14;
 const PORT_ANCHOR_DX = { in: -PORT_DOT_OUTSET, out: PORT_DOT_OUTSET };
 
 /** 端口圆点"磁吸"效果：鼠标靠近圆点时圆点跟随吸附，移开后弹簧回位 */
@@ -3157,9 +3194,25 @@ function refreshGeometry(){
 function bindNodeLayoutObserver(el){
     if(!el || typeof ResizeObserver === 'undefined') return;
     if(!nodeLayoutObserver){
-        nodeLayoutObserver = new ResizeObserver(() => {
+        // 在 RO 回调里缓存真实布局尺寸，供端口锚点使用（避免在能量动画路径读 offset 强制布局）
+        nodeLayoutObserver = new ResizeObserver((entries) => {
+            const dirty = new Set();
+            for(const entry of entries || []){
+                const target = entry?.target;
+                const id = target?.dataset?.id;
+                if(!id || !target) continue;
+                const n = nodes.find(x => x.id === id);
+                if(!n) continue;
+                const w = Math.round(target.offsetWidth || 0);
+                const h = Math.round(target.offsetHeight || 0);
+                if(w > 0) n._layoutW = w;
+                if(h > 0) n._layoutH = h;
+                dirty.add(id);
+            }
             clearTimeout(nodeLayoutRefreshTimer);
-            nodeLayoutRefreshTimer = setTimeout(() => scheduleLinkGeometryRefresh(), 32);
+            nodeLayoutRefreshTimer = setTimeout(() => {
+                scheduleLinkGeometryRefresh(dirty.size ? dirty : null);
+            }, 32);
         });
     }
     if(el._layoutObserved) return;
@@ -3196,6 +3249,77 @@ function scheduleSave(){
         return;
     }
     saveTimer = setTimeout(saveCanvas, 500);
+}
+/** 生图完成 / 画笔应用等关键节点：立刻落盘，避免刷新前防抖未触发把图「吞掉」 */
+function scheduleSaveNow(){
+    if(!canvas || applyingRemoteCanvas) return;
+    localCanvasDirty = true;
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    clearTimeout(viewportSaveTimer);
+    viewportSaveTimer = null;
+    if(!savingCanvasNow) setStatus('Saving...');
+    if(savingCanvasNow){
+        saveCanvasAgain = true;
+        return;
+    }
+    void saveCanvas();
+}
+/** 离开页面前尽量把脏画布带上（keepalive，不阻塞卸载） */
+function flushCanvasSaveKeepalive(){
+    if(!canvas || applyingRemoteCanvas) return;
+    if(!localCanvasDirty && !saveTimer && !saveCanvasAgain && !savingCanvasNow) return;
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    clearTimeout(viewportSaveTimer);
+    viewportSaveTimer = null;
+    try {
+        sanitizeConnections();
+        const nodePayload = serializableCanvasNodes();
+        if(nodePayload.length === 0 && lastKnownSavedNodeCount > 0) return;
+        const body = JSON.stringify({
+            title:canvas.title,
+            icon:canvas.icon || '🧩',
+            nodes:nodePayload,
+            connections,
+            viewport,
+            logs:canvas.logs || [],
+            settings: canvas.settings || {},
+            client_id:CLIENT_ID,
+            base_updated_at:Number(lastCanvasUpdatedAt || canvas.updated_at || 0)
+        });
+        void fetch(`/api/canvases/${canvas.id}`, {
+            method:'PUT',
+            credentials:'same-origin',
+            headers:{'Content-Type':'application/json'},
+            body,
+            keepalive:true,
+        });
+        localCanvasDirty = false;
+        saveCanvasAgain = false;
+    } catch(e) {
+        console.warn('[infinite-canvas] keepalive save failed', e);
+    }
+}
+function wireCanvasSaveLifecycle(){
+    if(typeof window === 'undefined' || window.__canvasSaveLifecycleWired) return;
+    window.__canvasSaveLifecycleWired = true;
+    loadCanvasTaskLedger();
+    const flush = () => flushCanvasSaveKeepalive();
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', flush);
+    document.addEventListener('visibilitychange', () => {
+        if(document.hidden) flush();
+    });
+    // 硬关机时 pagehide/keepalive 来不及跑；脏画布每 8s 强制落盘，缩短丢失窗口
+    if(!window.__canvasDirtySaveHeartbeat){
+        window.__canvasDirtySaveHeartbeat = setInterval(() => {
+            if(!canvas || applyingRemoteCanvas) return;
+            if(!localCanvasDirty && !saveTimer && !saveCanvasAgain) return;
+            if(savingCanvasNow) return;
+            scheduleSaveNow();
+        }, 8000);
+    }
 }
 /** 拖节点/改尺寸：长防抖，避免松手后立刻保存→409/远程同步→全量 render */
 function scheduleNodeDragSave(){
@@ -3271,6 +3395,8 @@ function serializableCanvasNode(node){
     delete copy._cascadeFailed;
     delete copy._cascadeIdx;
     delete copy._agentStopRequested;
+    delete copy._layoutW;
+    delete copy._layoutH;
     return copy;
 }
 function serializableCanvasNodes(list=nodes){
@@ -5038,7 +5164,7 @@ function canStartBoardPanFromTarget(target){
     if(!board || !target) return false;
     if(isEditableTarget(target)) return false;
     if(target.closest?.(
-        '.node, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .image-gen-dock-host, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
+        '.node, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .image-gen-dock-host, .image-action-bar-host, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
     )) return false;
     return board.contains(target);
 }
@@ -5047,7 +5173,7 @@ function canStartForcedPanFromTarget(target){
     if(!board || !target) return false;
     if(isEditableTarget(target)) return false;
     if(target.closest?.(
-        'button, select, textarea, input, .port, .resize-handle, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .canvas-custom-select, .image-gen-dock-host, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
+        'button, select, textarea, input, .port, .resize-handle, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .canvas-custom-select, .image-gen-dock-host, .image-action-bar-host, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
     )) return false;
     return board.contains(target);
 }
@@ -5880,6 +6006,7 @@ function addRhNode(point){
         h:0,
         rhMode:'app',
         rhPayment:'free',
+        rhApiKeyId:'',
         webappId:'',
         workflowId:'',
         instanceType:'',
@@ -8508,6 +8635,17 @@ function getAnnotationBaseUrl(){
         }
         return inferAnnotationBaseUrl(cur);
     }
+    if(target.type === 'generator'){
+        const owner = nodes.find(n => n.id === target.ownerNodeId);
+        const cur = String(target.url || '').trim();
+        for(const item of generatorHistoryItems(owner)){
+            if(item.url !== cur) continue;
+            const pre = String(item.pre_annotation_url || '').trim();
+            if(pre) return pre;
+            return inferAnnotationBaseUrl(cur);
+        }
+        return inferAnnotationBaseUrl(cur);
+    }
     const node = nodes.find(n => n.id === (target.nodeId || cropState.nodeId));
     const pre = String(node?.pre_annotation_url || '').trim();
     if(pre) return pre;
@@ -8587,6 +8725,15 @@ async function restoreAnnotationBase(){
         target.url = baseUrl;
         if(owner.type === 'frameStack') refreshVideoFrameConsumers(owner.id);
         refreshNodes([owner.id]);
+    } else if(target.type === 'generator'){
+        const owner = nodes.find(n => n.id === target.ownerNodeId);
+        const oldUrl = target.url;
+        if(!owner || !oldUrl) return;
+        if(!replaceGeneratorMediaUrl(owner, oldUrl, baseUrl, {clearPreAnnotation:true})) return;
+        target.url = baseUrl;
+        refreshNodes([owner.id]);
+        refreshDownstreamGenConsumers(owner.id);
+        syncImageActionBar();
     } else {
         const node = nodes.find(n => n.id === (target.nodeId || cropState.nodeId));
         if(!node) return;
@@ -9148,6 +9295,42 @@ function resetCropBox(){
     clampCrop();
     renderCropBox();
 }
+/** Gen 结果台：把 history / previewRoundUrls 中的旧 URL 换成新图 */
+function replaceGeneratorMediaUrl(gen, oldUrl, newUrl, opts={}){
+    if(!isGenConsoleNode(gen) || !oldUrl || !newUrl) return false;
+    let changed = false;
+    if(Array.isArray(gen.history) && gen.history.length){
+        gen.history = gen.history.map(item => {
+            if(outputUrlValue(item) !== oldUrl) return item;
+            changed = true;
+            if(typeof item === 'string'){
+                return opts.clearPreAnnotation
+                    ? newUrl
+                    : {url:newUrl, name:opts.name || outputImageName(newUrl), ...(opts.keepPre !== false ? {pre_annotation_url:oldUrl} : {})};
+            }
+            const next = {...item, url:newUrl};
+            if(opts.name) next.name = opts.name;
+            if(opts.clearPreAnnotation) delete next.pre_annotation_url;
+            else if(opts.keepPre !== false && !next.pre_annotation_url) next.pre_annotation_url = oldUrl;
+            return next;
+        });
+    }
+    if(Array.isArray(gen.previewRoundUrls)){
+        const next = gen.previewRoundUrls.map(u => (outputUrlValue(u) === oldUrl ? newUrl : u));
+        if(next.some((u, i) => u !== gen.previewRoundUrls[i])){
+            gen.previewRoundUrls = next;
+            changed = true;
+        }
+    }
+    if(Array.isArray(gen.generatedOutputs)){
+        const next = gen.generatedOutputs.map(u => (outputUrlValue(u) === oldUrl ? newUrl : u));
+        if(next.some((u, i) => u !== gen.generatedOutputs[i])){
+            gen.generatedOutputs = next;
+            changed = true;
+        }
+    }
+    return changed;
+}
 async function commitImageEditorFile(file){
     if(!cropState || !file?.url) return false;
     const target = cropState.saveTarget || {type:'node', nodeId:cropState.nodeId};
@@ -9166,7 +9349,24 @@ async function commitImageEditorFile(file){
         target.url = file.url;
         if(owner.type === 'frameStack') refreshImageStackConsumers(owner.id);
         refreshNodes([owner.id]);
-        scheduleSave();
+        scheduleSaveNow();
+        return true;
+    }
+    if(target.type === 'generator'){
+        const owner = nodes.find(n => n.id === target.ownerNodeId);
+        const oldUrl = target.url;
+        if(!owner || !oldUrl) return false;
+        const markSave = /_mark\.(png|jpe?g|webp)$/i.test(String(file.name || file.url || ''));
+        if(!replaceGeneratorMediaUrl(owner, oldUrl, file.url, {
+            name: file.name || outputImageName(file.url),
+            keepPre: markSave,
+            clearPreAnnotation: false,
+        })) return false;
+        target.url = file.url;
+        refreshNodes([owner.id]);
+        refreshDownstreamGenConsumers(owner.id);
+        syncImageActionBar();
+        scheduleSaveNow();
         return true;
     }
     const node = nodes.find(n => n.id === (target.nodeId || cropState.nodeId));
@@ -9176,7 +9376,7 @@ async function commitImageEditorFile(file){
     node.url = file.url;
     node.name = file.name;
     render();
-    scheduleSave();
+    scheduleSaveNow();
     return true;
 }
 function finishImageEditorLayout(){
@@ -9763,7 +9963,7 @@ function isNodeControl(target){
     // 图台/轻量结果台主媒体：允许拖节点与 Alt 复制（含 video 结果）
     if(target?.closest?.('.gen-stage-hero, .gen-stage-frame, .agent-result-hero, .agent-result-frame')) return false;
     // 注意：.gen-stage / 图台主图不计入控件，单击需选中节点以唤出下方控制台
-    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs, .gen-stage-tile, .gen-stage-tile-actions, .gen-stage-grid, .gen-stage-stack-expand, .gen-stage-grid-collapse, .gen-stage-stack');
+    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .image-action-bar-host, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs, .gen-stage-tile, .gen-stage-tile-actions, .gen-stage-grid, .gen-stage-stack-expand, .gen-stage-grid-collapse, .gen-stage-stack');
 }
 function destroyLTXEditor(node){
     if(!node?._ltxEditor) return;
@@ -11763,7 +11963,7 @@ function renderMxShellPromptAgentBody(node){
     const promptSrc = sources.find(s => s.prompt && !s.refs?.length);
     const upstreamStory = String(promptSrc?.prompt || '').trim();
     const story = mxShellPromptAgentStory(node);
-    const imageUrls = mxShellPromptAgentImageUrls(node);
+    const imageUrls = polish ? [] : mxShellPromptAgentImageUrls(node);
     const outputText = String(node.outputText || '').trim();
     if(node.runStatus === 'done' && !outputText){
         node.runStatus = 'failed';
@@ -11773,16 +11973,19 @@ function renderMxShellPromptAgentBody(node){
     }
     const modeLabel = mxShellPromptModeLabel(node.mode);
     const modelName = clampAgentTextModel(node.model);
-    const namedRefs = mxShellPromptAgentImageBindings(node).filter(b => b.name).length;
+    const namedRefs = polish ? 0 : mxShellPromptAgentImageBindings(node).filter(b => b.name).length;
     const statusBits = [];
-    statusBits.push(imageUrls.length
-        ? (langIsEn() ? `${imageUrls.length} refs · ${namedRefs} named` : `${imageUrls.length} 张参考 · 已命名 ${namedRefs}`)
-        : (langIsEn() ? 'No refs' : '无参考图'));
+    if(!polish){
+        statusBits.push(imageUrls.length
+            ? (langIsEn() ? `${imageUrls.length} refs · ${namedRefs} named` : `${imageUrls.length} 张参考 · 已命名 ${namedRefs}`)
+            : (langIsEn() ? 'No refs' : '无参考图'));
+    }
     statusBits.push(story.length >= 10
         ? (upstreamStory && !String(node.story || '').trim()
             ? (polish ? (langIsEn() ? 'Upstream draft' : '上游原稿') : (langIsEn() ? 'Upstream story' : '上游故事'))
             : (polish ? (langIsEn() ? 'Draft ready' : '原稿就绪') : (langIsEn() ? 'Story ready' : '故事就绪')))
         : (polish ? (langIsEn() ? 'Need draft' : '需原稿') : (langIsEn() ? 'Need story' : '需故事')));
+    statusBits.push(modeLabel);
     statusBits.push(modelName);
     const wrap = document.createElement('div');
     wrap.className = 'generator-body mx-shell-prompt-body agent-console-body';
@@ -11835,6 +12038,7 @@ function renderMxShellPromptAgentBody(node){
             ${upstreamStory && !String(node.story || '').trim() ? `<div class="mx-shell-upstream-preview">${escapeHtml(upstreamStory.slice(0, 220))}${upstreamStory.length > 220 ? '…' : ''}</div>` : ''}
             <textarea class="mx-shell-story" placeholder="${escapeHtml(storyPh)}">${escapeHtml(node.story || '')}</textarea>
         </label>
+        ${polish ? '' : `
         <label class="field">
             <div class="setting-title">${langIsEn() ? 'Atmosphere (optional)' : '氛围（可选）'}</div>
             <textarea class="mx-shell-atmosphere" placeholder="${langIsEn() ? 'Look / grade…' : '画质 / 氛围…'}">${escapeHtml(node.atmosphere || '')}</textarea>
@@ -11842,7 +12046,7 @@ function renderMxShellPromptAgentBody(node){
         <details class="agent-refs-fold" ${imageUrls.length ? 'open' : ''}>
             <summary>${langIsEn() ? 'Reference images (optional)' : '参考图（可选）'}</summary>
             <div class="mx-shell-ref-list"></div>
-        </details>
+        </details>`}
         ${node.runError && !(node.runStatus === 'failed' && !outputText) ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
         <div class="gen-run-row">
             <button class="gen-btn mx-shell-run-btn ${node.running ? 'running' : ''}"><i data-lucide="${runIcon}" class="w-4 h-4"></i><span>${escapeHtml(runLabel)}</span></button>
@@ -11882,11 +12086,13 @@ function renderMxShellPromptAgentBody(node){
         scheduleSave();
     };
     const atmosphereEl = wrap.querySelector('.mx-shell-atmosphere');
-    bindScrollableText(atmosphereEl);
-    atmosphereEl.oninput = e => {
-        node.atmosphere = String(e.target.value || '').slice(0, 800);
-        scheduleSave();
-    };
+    if(atmosphereEl){
+        bindScrollableText(atmosphereEl);
+        atmosphereEl.oninput = e => {
+            node.atmosphere = String(e.target.value || '').slice(0, 800);
+            scheduleSave();
+        };
+    }
     const focusBtn = wrap.querySelector('.mx-shell-focus-view-btn');
     if(focusBtn){
         focusBtn.onclick = e => {
@@ -11908,7 +12114,10 @@ function renderMxShellPromptAgentBody(node){
         e.stopPropagation();
         void runMxShellPromptAgent(node.id);
     };
-    renderMxShellRefList(wrap.querySelector('.mx-shell-ref-list'), node, langIsEn() ? 'Optional: connect reference images' : '可选：连接角色/道具/场景参考图');
+    const refList = wrap.querySelector('.mx-shell-ref-list');
+    if(refList){
+        renderMxShellRefList(refList, node, langIsEn() ? 'Optional: connect reference images' : '可选：连接角色/道具/场景参考图');
+    }
     return wrap;
 }
 function renderTextOutputBody(node){
@@ -12192,7 +12401,7 @@ async function runMxShellPromptAgent(nodeId, opts={}){
         : (langIsEn() ? 'Mx-Shell Prompt Agent: generating…' : 'Mx-Shell 提示词 Agent：正在生成…'));
     const execute = async () => {
     try {
-        const bindings = mxShellPromptAgentImageBindings(node);
+        const bindings = polish ? [] : mxShellPromptAgentImageBindings(node);
         const imageUrls = [];
         const resolvedBindings = [];
         for(const b of bindings){
@@ -12215,7 +12424,7 @@ async function runMxShellPromptAgent(nodeId, opts={}){
                 mode:normalizeMxShellPromptMode(node.mode),
                 cameraIntensity:normalizeMxShellCameraIntensity(node.cameraIntensity),
                 story,
-                atmosphere:String(node.atmosphere || '').trim(),
+                atmosphere: polish ? '' : String(node.atmosphere || '').trim(),
                 imageUrls,
                 imageBindings:resolvedBindings,
                 model:clampAgentTextModel(node.model),
@@ -16377,10 +16586,9 @@ function renderGenStageTileHtml(node, url, previewIndex, primaryUrl){
     }
     const downloadLabel = langIsEn() ? 'Download' : '下载';
     const primaryLabel = langIsEn() ? 'Set primary' : '设为主图';
-    const collapseLabel = langIsEn() ? 'Collapse' : '收起';
-    // 非主图：下载 + 设为主图；主图：下载 + 收起
+    // 网格「收起」只保留右上角全局按钮，避免与格子内操作叠住
     const actionBtn = isPrimary
-        ? `<button type="button" class="gen-stage-tile-btn" data-action="collapse"><i data-lucide="minimize-2"></i><span>${escapeHtml(collapseLabel)}</span></button>`
+        ? ''
         : `<button type="button" class="gen-stage-tile-btn is-accent" data-action="set-primary"><span>${escapeHtml(primaryLabel)}</span></button>`;
     return `<div class="gen-stage-tile ${isPrimary ? 'is-primary' : ''}" data-preview-url="${escapeAttr(url)}" data-preview-index="${previewIndex}" role="button" tabindex="0">
         <div class="gen-stage-tile-media">${genStageMediaHtml(url)}</div>
@@ -16971,10 +17179,12 @@ function genDockAdvancedHtml(node){
 function genDockShellHtml(node, opts={}){
     const countVal = Math.max(1, Math.min(8, Number(node.count || 1)));
     const runLabel = agentPendingRunState(node.id, tr('canvas.apiGenerate'), tr('canvas.generating'));
-    const runBtn = `<button class="gen-btn gen-dock-send ${runLabel.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''} type="button" title="${escapeAttr(runLabel.label)}"><i data-lucide="arrow-up" class="w-4 h-4"></i></button>`;
+    const iconName = runLabel.runningCls ? 'loader-circle' : 'arrow-up';
+    const runBtn = `<button class="gen-btn gen-dock-send ${runLabel.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''} type="button" title="${escapeAttr(runLabel.label)}" aria-label="${escapeAttr(runLabel.label)}"><i data-lucide="${iconName}" class="w-4 h-4${runLabel.runningCls ? ' gen-dock-send-spin' : ''}"></i></button>`;
+    // 图片控制台不挂「停止」：圆形发送钮旁再塞停止会叠挤，且观感廉价
     const runHtml = opts.skipRun
         ? ''
-        : (hasUpstreamLoop(node.id) ? '' : agentGenRunActionsHtml(node.id, runBtn));
+        : (hasUpstreamLoop(node.id) ? '' : runBtn);
     const cascade = opts.showCascade ? cascadeBtnHtml(node) : '';
     const upstream = opts.showUpstream !== false ? `<div class="prompt-list gen-dock-upstream"></div>` : '';
     const refs = opts.showRefs
@@ -17069,8 +17279,8 @@ function positionImageGenDock(node){
     imageGenDockEl.style.transform = 'translateX(-50%)';
     imageGenDockEl.style.transformOrigin = 'top center';
     imageGenDockEl.style.width = 'max-content';
-    imageGenDockEl.style.minWidth = '360px';
-    imageGenDockEl.style.maxWidth = 'min(96vw, 980px)';
+    imageGenDockEl.style.minWidth = '280px';
+    imageGenDockEl.style.maxWidth = 'min(96vw, 720px)';
     imageGenDockEl.style.zIndex = '80';
     imageGenDockEl.style.pointerEvents = 'auto';
 }
@@ -17402,17 +17612,377 @@ function syncImageGenDock(){
     const ok = only && !isNodeDisabled(only) && isGenConsoleNode(only);
     if(!ok){
         removeImageGenDock();
+    } else {
+        const orphanCount = canvasRoot
+            ? canvasRoot.querySelectorAll('.image-gen-dock-host').length
+            : (board?.querySelectorAll('.image-gen-dock-host').length || 0);
+        if(orphanCount > 1 || imageGenDockNodeId !== only.id || !imageGenDockEl?.isConnected) remountImageGenDock(only);
+        else {
+            // 已打开时也要刷新参考图（上游 gen 主图连入后不能只 reposition）
+            softRefreshGeneratorInputLists(only);
+            positionImageGenDock(only);
+        }
+    }
+    // 顶部动作条与底部 dock 同刷新点（图片节点无 dock，仍靠这里唤出）
+    syncImageActionBar();
+}
+/** 单选图片节点 / 带图 Gen 结果台：当前可操作的图片 URL */
+function resolveImageActionBarTarget(node){
+    if(!node || isNodeDisabled(node)) return null;
+    if(node.type === 'image'){
+        const url = String(node.url || '').trim();
+        if(!url || isMissingAssetUrl(url)) return null;
+        if(mediaKindForNode(node) !== 'image') return null;
+        return {kind:'image', node, url, histItem:{url}};
+    }
+    if(!isGenConsoleNode(node)) return null;
+    const urls = generatorPreviewUrls(node).filter(u => u && !isMissingAssetUrl(u) && !isVideoUrl(u) && !isAudioUrl(u));
+    if(!urls.length) return null;
+    const all = generatorPreviewUrls(node);
+    let previewIndex = Math.max(0, Math.min(all.length - 1, Number(node.previewIndex ?? 0)));
+    let url = all[previewIndex] || '';
+    if(!url || isMissingAssetUrl(url) || isVideoUrl(url) || isAudioUrl(url)){
+        url = urls[urls.length - 1] || urls[0] || '';
+        previewIndex = all.indexOf(url);
+    }
+    if(!url) return null;
+    const histItem = generatorHistoryItems(node).find(x => x.url === url) || {url};
+    return {kind:'gen', node, url, previewIndex, histItem};
+}
+function removeImageActionBar(){
+    imageActionBarEl?.remove();
+    imageActionBarEl = null;
+    imageActionBarNodeId = null;
+    imageActionBarUrl = '';
+    const roots = [canvasRoot, board, nodesEl, document].filter(Boolean);
+    const seen = new Set();
+    roots.forEach(root => {
+        root.querySelectorAll?.('.image-action-bar-host').forEach(el => {
+            if(seen.has(el)) return;
+            seen.add(el);
+            el.remove();
+        });
+    });
+}
+function positionImageActionBar(node){
+    if(!imageActionBarEl || !node || !board) return;
+    const nodeEl = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
+    if(!nodeEl) return;
+    if(imageActionBarEl.parentElement !== board) board.appendChild(imageActionBarEl);
+    const nodeRect = nodeEl.getBoundingClientRect();
+    const boardRect = board.getBoundingClientRect();
+    const gap = 12;
+    const barH = imageActionBarEl.offsetHeight || 40;
+    imageActionBarEl.style.position = 'absolute';
+    imageActionBarEl.style.left = `${nodeRect.left - boardRect.left + nodeRect.width / 2}px`;
+    imageActionBarEl.style.top = `${nodeRect.top - boardRect.top - gap - barH}px`;
+    imageActionBarEl.style.transform = 'translateX(-50%)';
+    imageActionBarEl.style.transformOrigin = 'bottom center';
+    imageActionBarEl.style.width = 'max-content';
+    imageActionBarEl.style.zIndex = '82';
+    imageActionBarEl.style.pointerEvents = 'auto';
+}
+/** 本站 /uploads/ 路径；远程图需先上传再进素材库 */
+function assetLibraryLocalUploadsPath(url){
+    const text = String(url || '').trim();
+    if(!text) return '';
+    if(text.startsWith('/uploads/')) return text.split('?')[0];
+    try {
+        const parsed = new URL(text, window.location.origin);
+        if(parsed.origin === window.location.origin && parsed.pathname.startsWith('/uploads/')){
+            return parsed.pathname;
+        }
+    } catch(_){ /* ignore */ }
+    return '';
+}
+async function saveImageUrlToAssetCategory(categoryId, url, name){
+    if(!categoryId || !url) throw new Error(langIsEn() ? 'Missing folder or image' : '缺少文件夹或图片');
+    const local = assetLibraryLocalUploadsPath(url);
+    if(local){
+        const res = await apiFetch('/api/asset-library/items', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            credentials:'same-origin',
+            body: JSON.stringify({category_id:categoryId, url:local, name: name || undefined}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if(res.ok) return data;
+        // 本地路径登记失败（文件缺失/权限）时回退二进制上传，避免「看起来保存了其实没进库」
+        console.warn('[asset-library] local path save failed, fallback upload', data.error || res.status);
+    }
+    const blob = await fetch(url, {credentials:'include'}).then(r => {
+        if(!r.ok) throw new Error(langIsEn() ? 'Image read failed' : '图片读取失败');
+        return r.blob();
+    });
+    let filename = String(name || outputDownloadName(url) || `asset_${Date.now()}.png`).split('?')[0];
+    if(!/\.(png|jpe?g|webp|gif)$/i.test(filename)) filename = `${filename}.png`;
+    const form = new FormData();
+    form.append('category_id', categoryId);
+    form.append('file', blob, filename);
+    const res = await apiFetch('/api/asset-library/upload', {
+        method:'POST',
+        credentials:'same-origin',
+        body: form,
+    });
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok) throw new Error(data.error || (langIsEn() ? 'Upload failed' : '上传失败'));
+    return data;
+}
+let assetLibrarySaveModalEl = null;
+let assetLibrarySaveState = null; // { url, name, categoryId, scope, categories }
+function closeAssetLibrarySaveModal(){
+    assetLibrarySaveModalEl?.remove();
+    assetLibrarySaveModalEl = null;
+    assetLibrarySaveState = null;
+}
+function renderAssetLibrarySaveFolderList(host){
+    if(!host || !assetLibrarySaveState) return;
+    const list = host.querySelector('.asset-lib-save-folders');
+    if(!list) return;
+    const en = langIsEn();
+    const cats = assetLibrarySaveState.categories || [];
+    if(assetLibrarySaveState.scope === 'team'){
+        list.innerHTML = `<div class="asset-lib-save-empty">${escapeHtml(en ? 'Team library coming soon' : '团队素材即将上线')}</div>`;
+        return;
+    }
+    if(!cats.length){
+        list.innerHTML = `<div class="asset-lib-save-empty">${escapeHtml(en ? 'No folders yet' : '暂无文件夹')}</div>`;
+        return;
+    }
+    list.innerHTML = cats.map(cat => {
+        const selected = cat.id === assetLibrarySaveState.categoryId;
+        const count = Array.isArray(cat.items) ? cat.items.length : 0;
+        return `<button type="button" class="asset-lib-save-folder ${selected ? 'is-selected' : ''}" data-category-id="${escapeAttr(cat.id)}">
+            <i data-lucide="chevron-right" class="asset-lib-save-chevron"></i>
+            <i data-lucide="folder" class="asset-lib-save-folder-icon"></i>
+            <span class="asset-lib-save-folder-name">${escapeHtml(cat.name || (en ? 'Untitled' : '未命名'))}</span>
+            <span class="asset-lib-save-folder-count">${count}</span>
+        </button>`;
+    }).join('');
+    list.querySelectorAll('[data-category-id]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            assetLibrarySaveState.categoryId = btn.dataset.categoryId || '';
+            renderAssetLibrarySaveFolderList(host);
+            refreshIcons(list);
+            const saveBtn = host.querySelector('[data-asset-lib-save]');
+            if(saveBtn) saveBtn.disabled = !assetLibrarySaveState.categoryId || assetLibrarySaveState.scope !== 'personal';
+        };
+    });
+    refreshIcons(list);
+}
+async function reloadAssetLibrarySaveModal(host){
+    if(!host || !assetLibrarySaveState) return;
+    const res = await apiFetch('/api/asset-library', {credentials:'same-origin'});
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok) throw new Error(data.error || (langIsEn() ? 'Load library failed' : '加载素材库失败'));
+    const categories = Array.isArray(data.library?.categories) ? data.library.categories : [];
+    assetLibrarySaveState.categories = categories;
+    if(!categories.some(c => c.id === assetLibrarySaveState.categoryId)){
+        assetLibrarySaveState.categoryId = categories[0]?.id || '';
+    }
+    renderAssetLibrarySaveFolderList(host);
+    const saveBtn = host.querySelector('[data-asset-lib-save]');
+    if(saveBtn) saveBtn.disabled = !assetLibrarySaveState.categoryId || assetLibrarySaveState.scope !== 'personal';
+}
+async function openAssetLibrarySaveModal(url, name=''){
+    const cleanUrl = String(url || '').trim();
+    if(!cleanUrl || isMissingAssetUrl(cleanUrl)){
+        softAlert(langIsEn() ? 'No image to save' : '没有可保存的图片');
+        return;
+    }
+    closeAssetLibrarySaveModal();
+    const en = langIsEn();
+    assetLibrarySaveState = {
+        url: cleanUrl,
+        name: String(name || outputImageName(cleanUrl) || '').trim(),
+        categoryId: 'character',
+        scope: 'personal',
+        categories: [],
+    };
+    const host = document.createElement('div');
+    host.className = 'asset-lib-save-modal';
+    host.innerHTML = `
+        <div class="asset-lib-save-backdrop" data-asset-lib-close="1"></div>
+        <div class="asset-lib-save-dialog" role="dialog" aria-modal="true" aria-label="${escapeAttr(en ? 'Save to library' : '保存到素材库')}">
+            <div class="asset-lib-save-head">
+                <div class="asset-lib-save-title">
+                    <i data-lucide="folder"></i>
+                    <span>${escapeHtml(en ? 'Save to library' : '保存到素材库')}</span>
+                </div>
+                <button type="button" class="asset-lib-save-new-folder" data-asset-lib-new-folder="1">
+                    <i data-lucide="folder-plus"></i>
+                    <span>${escapeHtml(en ? 'New folder' : '新建文件夹')}</span>
+                </button>
+            </div>
+            <div class="asset-lib-save-tabs" role="tablist">
+                <button type="button" class="asset-lib-save-tab is-active" data-asset-lib-scope="personal">${escapeHtml(en ? 'Personal' : '个人')}</button>
+                <button type="button" class="asset-lib-save-tab" data-asset-lib-scope="team">${escapeHtml(en ? 'Team' : '团队')}</button>
+            </div>
+            <div class="asset-lib-save-folders"></div>
+            <div class="asset-lib-save-foot">
+                <button type="button" class="asset-lib-save-btn is-ghost" data-asset-lib-close="1">${escapeHtml(en ? 'Cancel' : '取消')}</button>
+                <button type="button" class="asset-lib-save-btn is-primary" data-asset-lib-save="1">${escapeHtml(en ? 'Save' : '保存')}</button>
+            </div>
+        </div>
+    `;
+    host.onpointerdown = e => e.stopPropagation();
+    host.onmousedown = e => e.stopPropagation();
+    host.onclick = e => {
+        if(e.target?.closest?.('[data-asset-lib-close]')){
+            e.stopPropagation();
+            closeAssetLibrarySaveModal();
+        }
+    };
+    host.querySelectorAll('[data-asset-lib-scope]').forEach(tab => {
+        tab.onclick = e => {
+            e.stopPropagation();
+            const scope = tab.dataset.assetLibScope || 'personal';
+            assetLibrarySaveState.scope = scope;
+            host.querySelectorAll('[data-asset-lib-scope]').forEach(t => t.classList.toggle('is-active', t === tab));
+            renderAssetLibrarySaveFolderList(host);
+            const saveBtn = host.querySelector('[data-asset-lib-save]');
+            if(saveBtn) saveBtn.disabled = scope !== 'personal' || !assetLibrarySaveState.categoryId;
+            if(scope === 'team') setStatus(en ? 'Team library coming soon' : '团队素材即将上线');
+        };
+    });
+    host.querySelector('[data-asset-lib-new-folder]')?.addEventListener('click', async e => {
+        e.stopPropagation();
+        if(assetLibrarySaveState.scope !== 'personal'){
+            setStatus(en ? 'Team library coming soon' : '团队素材即将上线');
+            return;
+        }
+        const folderName = window.prompt(en ? 'New folder name' : '新建文件夹名称', '');
+        if(folderName == null) return;
+        const trimmed = folderName.trim();
+        if(!trimmed) return;
+        try {
+            const res = await apiFetch('/api/asset-library/categories', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                credentials:'same-origin',
+                body: JSON.stringify({name: trimmed}),
+            });
+            const data = await res.json().catch(() => ({}));
+            if(!res.ok) throw new Error(data.error || (en ? 'Create folder failed' : '创建文件夹失败'));
+            if(data.category?.id) assetLibrarySaveState.categoryId = data.category.id;
+            await reloadAssetLibrarySaveModal(host);
+            setStatus(en ? 'Folder created' : '已新建文件夹');
+        } catch(err) {
+            softAlert(err?.message || (en ? 'Create folder failed' : '创建文件夹失败'));
+        }
+    });
+    host.querySelector('[data-asset-lib-save]')?.addEventListener('click', async e => {
+        e.stopPropagation();
+        const saveBtn = e.currentTarget;
+        if(assetLibrarySaveState.scope !== 'personal'){
+            setStatus(en ? 'Team library coming soon' : '团队素材即将上线');
+            return;
+        }
+        const categoryId = assetLibrarySaveState.categoryId;
+        if(!categoryId){
+            softAlert(en ? 'Select a folder' : '请选择文件夹');
+            return;
+        }
+        saveBtn.disabled = true;
+        try {
+            await saveImageUrlToAssetCategory(categoryId, assetLibrarySaveState.url, assetLibrarySaveState.name);
+            closeAssetLibrarySaveModal();
+            setStatus(en ? 'Saved to library' : '已保存到素材库');
+            window.dispatchEvent(new CustomEvent('canvas-asset-library-changed'));
+        } catch(err) {
+            softAlert(err?.message || (en ? 'Save failed' : '保存失败'));
+            saveBtn.disabled = false;
+        }
+    });
+    (canvasRoot || document.body).appendChild(host);
+    assetLibrarySaveModalEl = host;
+    refreshIcons(host);
+    try {
+        await reloadAssetLibrarySaveModal(host);
+    } catch(err) {
+        closeAssetLibrarySaveModal();
+        softAlert(err?.message || (en ? 'Load library failed' : '加载素材库失败'));
+    }
+}
+function bindImageActionBar(host, target){
+    if(!host || !target?.node) return;
+    const {node, url, kind, histItem} = target;
+    host.querySelector('[data-action="crop"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        if(kind === 'image') openImageEditor(node.id);
+        else {
+            openImageEditorCore({
+                nodeId: node.id,
+                url,
+                name: histItem?.name || outputImageName(url),
+                saveTarget:{type:'generator', ownerNodeId:node.id, url, name: histItem?.name || outputImageName(url)},
+            });
+        }
+    });
+    host.querySelector('[data-action="save-library"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void openAssetLibrarySaveModal(url, histItem?.name || outputImageName(url));
+    });
+    host.querySelector('[data-action="download"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        downloadUrl(url, outputDownloadName(url)).catch(err => softAlert(err.message || tr('canvas.outputDownloadEmpty')));
+    });
+    host.querySelector('[data-action="enlarge"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        if(kind === 'image') openImageNodeLightbox(node);
+        else openGeneratorHistoryLightbox(node, url);
+    });
+}
+function remountImageActionBar(node){
+    removeImageActionBar();
+    const target = resolveImageActionBarTarget(node);
+    if(!target || !board) return;
+    const host = document.createElement('div');
+    host.className = 'image-action-bar-host';
+    host.dataset.actionBarFor = node.id;
+    host.onpointerdown = e => e.stopPropagation();
+    host.onmousedown = e => e.stopPropagation();
+    host.onclick = e => e.stopPropagation();
+    const en = langIsEn();
+    host.innerHTML = `
+        <div class="image-action-bar" role="toolbar" aria-label="${escapeAttr(en ? 'Image actions' : '图片操作')}">
+            <button type="button" class="image-action-bar-btn" data-action="crop" title="${escapeAttr(en ? 'Crop' : '裁剪')}" aria-label="crop"><i data-lucide="crop"></i></button>
+            <button type="button" class="image-action-bar-btn" data-action="save-library" title="${escapeAttr(en ? 'Save to library' : '保存到素材库')}" aria-label="save-library"><i data-lucide="folder-plus"></i></button>
+            <button type="button" class="image-action-bar-btn" data-action="download" title="${escapeAttr(en ? 'Download' : '下载')}" aria-label="download"><i data-lucide="download"></i></button>
+            <button type="button" class="image-action-bar-btn" data-action="enlarge" title="${escapeAttr(en ? 'Enlarge' : '放大查看')}" aria-label="enlarge"><i data-lucide="maximize-2"></i></button>
+        </div>
+    `;
+    bindImageActionBar(host, target);
+    board.appendChild(host);
+    imageActionBarEl = host;
+    imageActionBarNodeId = node.id;
+    imageActionBarUrl = target.url;
+    positionImageActionBar(node);
+    requestAnimationFrame(() => positionImageActionBar(node));
+    refreshIcons(host);
+}
+function syncImageActionBar(){
+    const onlyId = selected.size === 1 ? [...selected][0] : null;
+    const only = onlyId ? nodes.find(n => n.id === onlyId) : null;
+    const target = only ? resolveImageActionBarTarget(only) : null;
+    if(!target){
+        removeImageActionBar();
         return;
     }
     const orphanCount = canvasRoot
-        ? canvasRoot.querySelectorAll('.image-gen-dock-host').length
-        : (board?.querySelectorAll('.image-gen-dock-host').length || 0);
-    if(orphanCount > 1 || imageGenDockNodeId !== only.id || !imageGenDockEl?.isConnected) remountImageGenDock(only);
-    else {
-        // 已打开时也要刷新参考图（上游 gen 主图连入后不能只 reposition）
-        softRefreshGeneratorInputLists(only);
-        positionImageGenDock(only);
+        ? canvasRoot.querySelectorAll('.image-action-bar-host').length
+        : (board?.querySelectorAll('.image-action-bar-host').length || 0);
+    if(
+        orphanCount > 1
+        || imageActionBarNodeId !== only.id
+        || imageActionBarUrl !== target.url
+        || !imageActionBarEl?.isConnected
+    ){
+        remountImageActionBar(only);
+        return;
     }
+    positionImageActionBar(only);
 }
 function renderVideoBody(node){
     const wrap = document.createElement('div');
@@ -18031,7 +18601,9 @@ function rhCurrentKind(node){
 }
 function ensureRhNodeSelection(node){
     if(!node || node.type !== 'rh') return null;
-    node.rhPayment = node.rhPayment || 'free';
+    const selected = rhSelectedApiKeyEntry(node);
+    node.rhApiKeyId = selected?.id || '';
+    node.rhPayment = selected?.id === 'wallet' ? 'wallet' : 'free';
     const all = runningHubAllEntries();
     let ref = rhSelectedEntryRef(node);
     if(!ref && all.length) ref = all[0];
@@ -18056,16 +18628,52 @@ function rhEntryOptions(selected){
     ` : '';
     return `${group('app', apps, 'AI 应用')}${group('workflow', workflows, '工作流')}`;
 }
-function rhPaymentOptions(node){
-    const provider = runningHubProvider();
-    const selected = node.rhPayment === 'wallet' ? 'wallet' : 'free';
-    return `
-        <option value="free" ${selected === 'free' ? 'selected' : ''}>免费积分 Key${provider?.has_key ? '' : '（未配置）'}</option>
-        <option value="wallet" ${selected === 'wallet' ? 'selected' : ''}>账户余额 Key${provider?.has_wallet_key ? '' : '（未配置）'}</option>
-    `;
+function rhApiKeyList(){
+    const list = runningHubProvider()?.rh_api_keys;
+    // 前端只收 id/label，不含密钥正文
+    return Array.isArray(list) ? list.filter(item => item && String(item.id || '').trim()) : [];
+}
+function rhSelectedApiKeyEntry(node){
+    const list = rhApiKeyList();
+    const wantId = String(node?.rhApiKeyId || '').trim();
+    if(wantId){
+        const byId = list.find(item => item.id === wantId);
+        if(byId) return byId;
+    }
+    if(node?.rhPayment === 'wallet'){
+        const wallet = list.find(item => item.id === 'wallet');
+        if(wallet) return wallet;
+    }
+    return list[0] || null;
+}
+function rhApiKeyOptions(node){
+    const list = rhApiKeyList();
+    const selected = rhSelectedApiKeyEntry(node);
+    if(!list.length){
+        return `<option value="">未配置 .env API Key</option>`;
+    }
+    return list.map(item => {
+        const label = String(item.label || item.id || 'API Key').trim();
+        return `<option value="${escapeAttr(item.id)}" ${selected?.id === item.id ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
 }
 function rhUseWallet(node){
-    return node?.rhPayment === 'wallet';
+    return rhSelectedApiKeyEntry(node)?.id === 'wallet';
+}
+function rhApiKeyHint(node){
+    const list = rhApiKeyList();
+    if(!list.length){
+        return langIsEn() ? 'No keys in .env' : '未配置任何 Key（.env）';
+    }
+    const entry = rhSelectedApiKeyEntry(node);
+    return String(entry?.label || entry?.id || 'key').trim();
+}
+function rhApiKeyRequestFields(node){
+    const entry = rhSelectedApiKeyEntry(node);
+    return {
+        apiKeyId: entry?.id || '',
+        useWallet: entry?.id === 'wallet',
+    };
 }
 function rhActiveFields(node){
     const sortFields = fields => [...(fields || [])].sort((a, b) => {
@@ -18256,10 +18864,6 @@ function renderRhBody(node){
                 <div class="setting-title">RunningHub 配置</div>
                 <select class="select-lite rh-entry-select">${rhEntryOptions(selectedKey)}</select>
             </label>
-            <label class="field rh-payment-field">
-                <div class="setting-title">Key</div>
-                <select class="select-lite rh-payment-select">${rhPaymentOptions(node)}</select>
-            </label>
             <label class="field rh-machine-field">
                 <div class="setting-title">显存</div>
                 <select class="select-lite rh-machine-select">
@@ -18268,6 +18872,13 @@ function renderRhBody(node){
                 </select>
             </label>
         </div>
+        <label class="field rh-apikey-field">
+            <div class="setting-title-row">
+                <div class="setting-title">API Key</div>
+                <span class="rh-apikey-hint">${escapeHtml(rhApiKeyHint(node))}</span>
+            </div>
+            <select class="select-lite rh-payment-select rh-apikey-select">${rhApiKeyOptions(node)}</select>
+        </label>
         <div class="rh-prompt-list"></div>
         <div class="rh-media-section">
             <div class="rh-media-head">
@@ -18313,7 +18924,18 @@ function renderRhBody(node){
     };
     const paymentSelect = wrap.querySelector('.rh-payment-select');
     if(paymentSelect) paymentSelect.onchange = e => {
-        node.rhPayment = e.target.value === 'wallet' ? 'wallet' : 'free';
+        const nextId = String(e.target.value || '').trim();
+        const list = rhApiKeyList();
+        const entry = list.find(item => item.id === nextId);
+        if(nextId && !entry){
+            softAlert(langIsEn() ? 'Unknown API key' : '无效的 API Key');
+            e.target.value = rhSelectedApiKeyEntry(node)?.id || '';
+            return;
+        }
+        node.rhApiKeyId = entry?.id || '';
+        node.rhPayment = entry?.id === 'wallet' ? 'wallet' : 'free';
+        const hint = wrap.querySelector('.rh-apikey-hint');
+        if(hint) hint.textContent = rhApiKeyHint(node);
         scheduleSave();
     };
     const machineSelect = wrap.querySelector('.rh-machine-select');
@@ -18603,7 +19225,7 @@ async function rhUploadValueIfNeeded(value, node=null){
     const res = await apiFetch('/api/runninghub/upload-asset', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({url:text, useWallet:rhUseWallet(node)})
+        body:JSON.stringify({url:text, ...rhApiKeyRequestFields(node)})
     });
     const data = await res.json();
     if(!res.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhUploadFailed'));
@@ -18677,9 +19299,10 @@ async function runRhNode(nodeId, opts={}){
         const nodeInfoList = await rhBuildNodeInfoList(node, media);
         const workflowExtras = mode === 'workflow' ? await rhBuildWorkflowRequestExtras(node, media, nodeInfoList) : {};
         const endpoint = mode === 'workflow' ? '/api/runninghub/workflow-submit' : '/api/runninghub/submit';
+        const keyFields = rhApiKeyRequestFields(node);
         const body = mode === 'workflow'
-            ? {workflowId:node.workflowId.trim(), nodeInfoList, instanceType:node.instanceType || '', useWallet:rhUseWallet(node), ...workflowExtras}
-            : {webappId:node.webappId.trim(), nodeInfoList, instanceType:node.instanceType || '', useWallet:rhUseWallet(node)};
+            ? {workflowId:node.workflowId.trim(), nodeInfoList, instanceType:node.instanceType || '', ...keyFields, ...workflowExtras}
+            : {webappId:node.webappId.trim(), nodeInfoList, instanceType:node.instanceType || '', ...keyFields};
         const submit = await fetch(endpoint, {
             method:'POST',
             headers:{'Content-Type':'application/json'},
@@ -18697,7 +19320,12 @@ async function runRhNode(nodeId, opts={}){
             if(!isPendingActive(host, pendingId)) return;
             await sleep(2500);
             if(!isPendingActive(host, pendingId)) return;
-            const data = await apiFetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}`).then(async r => {
+            const q = new URLSearchParams({
+                taskId,
+                useWallet: keyFields.useWallet ? '1' : '0',
+                apiKeyId: keyFields.apiKeyId || '',
+            });
+            const data = await apiFetch(`/api/runninghub/query?${q}`).then(async r => {
                 const json = await r.json();
                 if(!r.ok || json.success === false) throw new Error(json.detail || json.error || tr('canvas.rhFailed'));
                 return json.data || json;
@@ -19030,6 +19658,20 @@ function pushNodePending(node, pendings){
     const host = pendingHostForNode(node);
     if(!host || !pendings?.length) return host;
     host._pending = [...(host._pending || []), ...pendings];
+    // 同步登记 ledger：即使后续 _pending 被清空，完成回调仍能落板
+    pendings.forEach(p => {
+        if(!p?.canvasTaskId) return;
+        registerCanvasTaskLedger(p.canvasTaskId, {
+            canvasId: canvas?.id || '',
+            hostNodeId: host.id || '',
+            genNodeId: node?.id || '',
+            pendingId: p.id || '',
+            run: p.run || null,
+            appendGenerated: Boolean(p.appendGenerated),
+            startedAt: Number(p.startedAt || nowMs()),
+            canvasTaskType: String(p.canvasTaskType || 'online-image'),
+        });
+    });
     return host;
 }
 function isPendingActive(host, pendingId){
@@ -19780,7 +20422,11 @@ async function runGeneratorLegacy(genId, opts={}){
             refreshRunNodes(gen, out);
             return;
         }
-        const images = results.flatMap(result => result.images || []);
+        const images = results.flatMap(result => {
+            if(Array.isArray(result?.images) && result.images.length) return result.images;
+            if(result?.url) return [result.url];
+            return [];
+        }).map(outputUrlValue).filter(Boolean);
         const metas = collectRunMetas(host, pendingIds);
         run.request = results[0] ? requestMetaFromResult(results[0]) : {};
         host._pending = (host._pending||[]).filter(p => !pendingIds.includes(p.id));
@@ -19790,7 +20436,7 @@ async function runGeneratorLegacy(genId, opts={}){
         addGenerationLog({run, outputs:images, runMs:Math.max(...metas.map(m => m.runMs || 0), 0)});
         syncAgentRunStatusAfterTask(gen, {completed:agentPendingCount(gen.id) === 0});
         refreshRunNodes(gen, out);
-        scheduleSave();
+        scheduleSaveNow();
     } catch(err) {
         const host = out || gen;
         if(!pendingIds.some(id => (host._pending || []).some(p => p.id === id))){
@@ -21801,6 +22447,122 @@ function findPendingTask(taskId){
     }
     return null;
 }
+
+/** 进行中任务登记：pending 被清掉后仍可按 taskId 找回落板目标 */
+const CANVAS_TASK_LEDGER_KEY = 'gemini-canvas-task-ledger-v1';
+const canvasTaskLedger = new Map();
+function loadCanvasTaskLedger(){
+    try {
+        const raw = sessionStorage.getItem(CANVAS_TASK_LEDGER_KEY);
+        if(!raw) return;
+        const obj = JSON.parse(raw);
+        if(!obj || typeof obj !== 'object') return;
+        Object.entries(obj).forEach(([taskId, info]) => {
+            if(!taskId || !info || typeof info !== 'object') return;
+            canvasTaskLedger.set(String(taskId), info);
+        });
+    } catch(_){ /* ignore */ }
+}
+function persistCanvasTaskLedger(){
+    try {
+        const obj = {};
+        // ponytail: 只留最近 80 条，避免 sessionStorage 膨胀
+        const entries = [...canvasTaskLedger.entries()].slice(-80);
+        entries.forEach(([taskId, info]) => { obj[taskId] = info; });
+        sessionStorage.setItem(CANVAS_TASK_LEDGER_KEY, JSON.stringify(obj));
+    } catch(_){ /* ignore */ }
+}
+function registerCanvasTaskLedger(taskId, info){
+    const id = String(taskId || '').trim();
+    if(!id || !info) return;
+    canvasTaskLedger.set(id, {
+        ...info,
+        canvasId: String(info.canvasId || canvas?.id || ''),
+        updatedAt: nowMs(),
+    });
+    persistCanvasTaskLedger();
+}
+function unregisterCanvasTaskLedger(taskId){
+    const id = String(taskId || '').trim();
+    if(!id) return;
+    if(canvasTaskLedger.delete(id)) persistCanvasTaskLedger();
+}
+function canvasTaskLedgerEntry(taskId){
+    const id = String(taskId || '').trim();
+    if(!id) return null;
+    const info = canvasTaskLedger.get(id);
+    if(!info) return null;
+    if(canvas?.id && info.canvasId && info.canvasId !== canvas.id) return null;
+    return info;
+}
+/** pending 优先；丢失时用 ledger 拼出可落板的宿主与 run 元数据 */
+function resolveCanvasTaskContext(taskId){
+    const found = findPendingTask(taskId);
+    if(found) return { ...found, recovered: false };
+    const rec = canvasTaskLedgerEntry(taskId);
+    if(!rec) return null;
+    let gen = nodes.find(n => n.id === rec.genNodeId) || null;
+    let out = nodes.find(n => n.id === rec.hostNodeId) || null;
+    if(!gen && rec.run?.node?.id) gen = nodes.find(n => n.id === rec.run.node.id) || null;
+    if(!gen){
+        // 最后手段：当前选中的 generator，或最近有历史的 generator
+        const selectedGen = [...selected]
+            .map(id => nodes.find(n => n.id === id))
+            .find(n => n && isGenConsoleNode(n));
+        gen = selectedGen
+            || nodes
+                .filter(n => isGenConsoleNode(n))
+                .sort((a, b) => (b.history || []).length - (a.history || []).length)[0]
+            || null;
+    }
+    if(!out) out = gen ? (pendingHostForNode(gen) || gen) : null;
+    if(!out && !gen) return null;
+    const pending = {
+        id: rec.pendingId || uid('p'),
+        startedAt: Number(rec.startedAt || nowMs()),
+        run: rec.run || { node: gen ? { id: gen.id } : undefined, prompt: '' },
+        canvasTaskId: String(taskId),
+        canvasTaskType: String(rec.canvasTaskType || 'online-image'),
+        appendGenerated: Boolean(rec.appendGenerated),
+        _recovered: true,
+    };
+    return { out: out || gen, pending, recovered: true, gen };
+}
+function orphanImagesOntoCanvas(images, meta={}){
+    const urls = (images || []).map(outputUrlValue).filter(Boolean);
+    if(!urls.length || !canvas) return [];
+    const base = defaultPoint(0, 0);
+    const created = [];
+    urls.forEach((url, i) => {
+        const node = addNode({
+            id: uid('img'),
+            type: 'image',
+            x: Number(base?.x || 0) + i * 36,
+            y: Number(base?.y || 0) + i * 36,
+            url,
+            name: outputImageName(url) || `recovered_${Date.now()}_${i + 1}`,
+            mediaKind: 'image',
+        });
+        if(node) created.push(node);
+    });
+    addGenerationLog({
+        run: meta.run || { prompt: langIsEn() ? 'Recovered orphan result' : '找回未挂板结果' },
+        outputs: urls,
+        runMs: Number(meta.runMs || 0) || 0,
+    });
+    setStatus(langIsEn()
+        ? `Recovered ${urls.length} image(s) onto canvas`
+        : `已找回 ${urls.length} 张图到画布`);
+    return created;
+}
+function normalizeTaskResultImages(result){
+    if(Array.isArray(result?.images) && result.images.length){
+        return result.images.map(outputUrlValue).filter(Boolean);
+    }
+    if(result?.url) return [String(result.url).trim()].filter(Boolean);
+    if(result?.final_image_url) return [String(result.final_image_url).trim()].filter(Boolean);
+    return [];
+}
 async function createCanvasImageTask(payload){
     const res = await apiFetch('/api/canvas-image-tasks', {
         method:'POST',
@@ -21817,12 +22579,11 @@ async function pollReplicaAgentTask(taskId){
     activeCanvasTaskPolls.add(taskId);
     try {
         while(true){
-            const found = findPendingTask(taskId);
-            if(!found) return 'missing';
             const res = await apiFetch(`/api/canvas/replica-agent-tasks/${encodeURIComponent(taskId)}`);
             if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Replica Agent poll failed' : '复刻 Agent 任务查询失败'));
             const data = await res.json();
-            if(found.pending && data.stage_label){
+            const found = findPendingTask(taskId);
+            if(found?.pending && data.stage_label){
                 found.pending.stageLabel = data.stage_label;
                 refreshOutputTimer();
             }
@@ -21836,6 +22597,8 @@ async function pollReplicaAgentTask(taskId){
                     : (langIsEn() ? 'Replica Agent failed' : '复刻 Agent 失败')));
                 return 'failed';
             }
+            // pending 丢了但 ledger 还在：继续轮询，成功后走恢复落板
+            if(!found && !canvasTaskLedgerEntry(taskId)) return 'missing';
             await sleep(2000);
         }
     } catch(err) {
@@ -21846,9 +22609,16 @@ async function pollReplicaAgentTask(taskId){
     }
 }
 function completeReplicaAgentTask(taskId, data){
-    const found = findPendingTask(taskId);
-    if(!found) return;
-    const {out, pending} = found;
+    const images = data.final_image_url ? [data.final_image_url] : [];
+    const ctx = resolveCanvasTaskContext(taskId);
+    if(!ctx){
+        if(images.length) orphanImagesOntoCanvas(images, {run:{prompt:'replica-agent'}});
+        unregisterCanvasTaskLedger(taskId);
+        scheduleSaveNow();
+        return;
+    }
+    const {out, pending, recovered} = ctx;
+    if(recovered) console.warn('[canvas] recovered replica task without pending', taskId, out?.id);
     const meta = {
         runMs: nowMs() - Number(pending.startedAt || nowMs()),
         run: pending.run || {},
@@ -21858,9 +22628,8 @@ function completeReplicaAgentTask(taskId, data){
         reverse_prompt: data.reverse_prompt || '',
         washed_image_url: data.washed_image_url || '',
     };
-    const images = data.final_image_url ? [data.final_image_url] : [];
-    out._pending = (out._pending || []).filter(p => p.id !== pending.id);
-    const gen = nodes.find(n => n.id === meta.run?.node?.id);
+    if(!pending._recovered) out._pending = (out._pending || []).filter(p => p.id !== pending.id);
+    const gen = ctx.gen || nodes.find(n => n.id === meta.run?.node?.id);
     commitMediaOutputs(out, gen || (out.type !== 'output' ? out : null), images, meta.run?.refs?.[0], [meta], {
         appendGenerated:Boolean(pending.appendGenerated),
     });
@@ -21869,12 +22638,20 @@ function completeReplicaAgentTask(taskId, data){
     }
     addGenerationLog({run:meta.run, outputs:images, runMs:meta.runMs || 0});
     refreshRunNodes(gen, out);
-    scheduleSave();
+    unregisterCanvasTaskLedger(taskId);
+    scheduleSaveNow();
 }
 function completeImageRepairAgentTask(taskId, data){
-    const found = findPendingTask(taskId);
-    if(!found) return;
-    const {out, pending} = found;
+    const images = data.final_image_url ? [data.final_image_url] : [];
+    const ctx = resolveCanvasTaskContext(taskId);
+    if(!ctx){
+        if(images.length) orphanImagesOntoCanvas(images, {run:{prompt:'image-repair-agent'}});
+        unregisterCanvasTaskLedger(taskId);
+        scheduleSaveNow();
+        return;
+    }
+    const {out, pending, recovered} = ctx;
+    if(recovered) console.warn('[canvas] recovered repair task without pending', taskId, out?.id);
     const meta = {
         runMs: nowMs() - Number(pending.startedAt || nowMs()),
         run: pending.run || {},
@@ -21885,9 +22662,8 @@ function completeImageRepairAgentTask(taskId, data){
         lineart_image_url: data.lineart_image_url || '',
         blur_image_url: data.blur_image_url || '',
     };
-    const images = data.final_image_url ? [data.final_image_url] : [];
-    out._pending = (out._pending || []).filter(p => p.id !== pending.id);
-    const gen = nodes.find(n => n.id === meta.run?.node?.id);
+    if(!pending._recovered) out._pending = (out._pending || []).filter(p => p.id !== pending.id);
+    const gen = ctx.gen || nodes.find(n => n.id === meta.run?.node?.id);
     commitMediaOutputs(out, gen || (out.type !== 'output' ? out : null), images, meta.run?.refs?.[0], [meta], {
         appendGenerated:Boolean(pending.appendGenerated),
     });
@@ -21896,7 +22672,8 @@ function completeImageRepairAgentTask(taskId, data){
     }
     addGenerationLog({run:meta.run, outputs:images, runMs:meta.runMs || 0});
     refreshRunNodes(gen, out);
-    scheduleSave();
+    unregisterCanvasTaskLedger(taskId);
+    scheduleSaveNow();
 }
 async function pollImageRepairAgentTask(taskId){
     if(!taskId) return 'failed';
@@ -21904,12 +22681,11 @@ async function pollImageRepairAgentTask(taskId){
     activeCanvasTaskPolls.add(taskId);
     try {
         while(true){
-            const found = findPendingTask(taskId);
-            if(!found) return 'missing';
             const res = await apiFetch(`/api/canvas/image-repair-agent-tasks/${encodeURIComponent(taskId)}`);
             if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Repair Agent poll failed' : '修图 Agent 任务查询失败'));
             const data = await res.json();
-            if(found.pending && data.stage_label){
+            const found = findPendingTask(taskId);
+            if(found?.pending && data.stage_label){
                 found.pending.stageLabel = data.stage_label;
                 refreshOutputTimer();
             }
@@ -21923,6 +22699,7 @@ async function pollImageRepairAgentTask(taskId){
                     : (langIsEn() ? 'Repair Agent failed' : '修图 Agent 失败')));
                 return 'failed';
             }
+            if(!found && !canvasTaskLedgerEntry(taskId)) return 'missing';
             await sleep(2000);
         }
     } catch(err) {
@@ -21938,9 +22715,15 @@ async function pollCanvasImageTask(taskId){
     activeCanvasTaskPolls.add(taskId);
     try {
         while(true){
-            const found = findPendingTask(taskId);
-            if(!found) return 'missing';
+            // 先查上游状态：pending 丢了也不能放弃已成功的结果
             const res = await apiFetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`);
+            if(res.status === 404){
+                unregisterCanvasTaskLedger(taskId);
+                failCanvasImageTask(taskId, langIsEn()
+                    ? 'Task expired (server restarted?)'
+                    : '任务已失效（可能服务已重启）');
+                return 'failed';
+            }
             if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.generationFailed')));
             const data = await res.json();
             if(data.status === 'succeeded'){
@@ -21951,6 +22734,8 @@ async function pollCanvasImageTask(taskId){
                 failCanvasImageTask(taskId, data.error || tr('canvas.generationFailed'));
                 return 'failed';
             }
+            const found = findPendingTask(taskId);
+            if(!found && !canvasTaskLedgerEntry(taskId)) return 'missing';
             await sleep(1800);
         }
     } catch(err) {
@@ -21961,20 +22746,36 @@ async function pollCanvasImageTask(taskId){
     }
 }
 function completeCanvasImageTask(taskId, result){
-    const found = findPendingTask(taskId);
-    if(!found) return;
-    const {out, pending} = found;
+    const images = normalizeTaskResultImages(result);
+    if(!images.length){
+        failCanvasImageTask(taskId, langIsEn() ? 'No image returned' : '接口未返回图片');
+        return;
+    }
+    const ctx = resolveCanvasTaskContext(taskId);
+    if(!ctx){
+        // pending + ledger 都没了：仍把图落到当前画布，避免只剩孤儿文件
+        console.warn('[canvas] orphan complete without host, placing image nodes', taskId);
+        orphanImagesOntoCanvas(images, {run:{prompt: langIsEn() ? 'Recovered result' : '找回生图结果'}});
+        unregisterCanvasTaskLedger(taskId);
+        scheduleSaveNow();
+        return;
+    }
+    const {out, pending, recovered} = ctx;
+    if(recovered) console.warn('[canvas] recovered image task without pending', taskId, out?.id);
     const meta = {
         runMs: nowMs() - Number(pending.startedAt || nowMs()),
         run: pending.run || {},
     };
     meta.run.request = requestMetaFromResult(result);
-    const images = result.images || [];
-    out._pending = (out._pending || []).filter(p => p.id !== pending.id);
+    if(!pending._recovered){
+        out._pending = (out._pending || []).filter(p => p.id !== pending.id);
+    }
     if(out.type === 'output'){
         appendOutputImages(out, images, meta.run?.refs?.[0], [meta]);
     }
-    const gen = nodes.find(n => n.id === meta.run?.node?.id) || (out.type === 'generator' ? out : null);
+    const gen = ctx.gen
+        || nodes.find(n => n.id === meta.run?.node?.id)
+        || (out.type === 'generator' ? out : null);
     if(gen){
         mergeGeneratedOutputs(gen, images, Boolean(pending.appendGenerated));
         appendGeneratorPreviewRound(gen, images, meta);
@@ -21991,34 +22792,68 @@ function completeCanvasImageTask(taskId, result){
             if(imageGenDockNodeId === gen.id) syncImageGenDock();
             if(genHistoryPanelNodeId === gen.id) refreshOpenGenHistoryPanel();
         }
+    } else {
+        orphanImagesOntoCanvas(images, meta);
     }
     addGenerationLog({run:meta.run, outputs:images, runMs:meta.runMs || 0});
     refreshRunNodes(gen, out.type === 'output' ? out : null);
-    scheduleSave();
+    unregisterCanvasTaskLedger(taskId);
+    scheduleSaveNow();
 }
 function failCanvasImageTask(taskId, message){
-    const found = findPendingTask(taskId);
-    if(!found) return;
-    const {out, pending} = found;
+    const ctx = resolveCanvasTaskContext(taskId);
+    if(!ctx){
+        unregisterCanvasTaskLedger(taskId);
+        return;
+    }
+    const {out, pending} = ctx;
     const run = pending.run || {};
     const runMs = nowMs() - Number(pending.startedAt || nowMs());
-    out._pending = (out._pending || []).filter(p => p.id !== pending.id);
-    const gen = nodes.find(n => n.id === run?.node?.id) || (out.type === 'generator' ? out : null);
+    if(!pending._recovered){
+        out._pending = (out._pending || []).filter(p => p.id !== pending.id);
+    }
+    const gen = ctx.gen || nodes.find(n => n.id === run?.node?.id) || (out.type === 'generator' ? out : null);
     if(gen){
         syncAgentRunStatusAfterTask(gen, {failed:agentPendingCount(gen.id) === 0, error:message || tr('canvas.generationFailed')});
     }
     addGenerationLog({run, outputs:[], runMs, error:message || tr('canvas.generationFailed')});
     refreshRunNodes(gen, out.type === 'output' ? out : null);
-    scheduleSave();
+    unregisterCanvasTaskLedger(taskId);
+    scheduleSaveNow();
 }
 function resumeCanvasImageTasks(){
-    nodes.filter(n => n.type === 'output' || n.type === 'generator').forEach(host => {
+    loadCanvasTaskLedger();
+    // 从节点 pending 重建 ledger，并恢复轮询
+    nodes.filter(n => n.type === 'output' || isGenConsoleNode(n)).forEach(host => {
         (host._pending || []).forEach(p => {
-            if(p.canvasTaskType === 'online-image' && p.canvasTaskId) pollCanvasImageTask(p.canvasTaskId);
-            if(p.canvasTaskType === 'replica-agent' && p.canvasTaskId) pollReplicaAgentTask(p.canvasTaskId);
-            if(p.canvasTaskType === 'image-repair-agent' && p.canvasTaskId) pollImageRepairAgentTask(p.canvasTaskId);
+            if(!p.canvasTaskId) return;
+            const genId = p.run?.node?.id || (host.type !== 'output' ? host.id : '');
+            registerCanvasTaskLedger(p.canvasTaskId, {
+                canvasId: canvas?.id || '',
+                hostNodeId: host.id || '',
+                genNodeId: genId || '',
+                pendingId: p.id || '',
+                run: p.run || null,
+                appendGenerated: Boolean(p.appendGenerated),
+                startedAt: Number(p.startedAt || nowMs()),
+                canvasTaskType: String(p.canvasTaskType || 'online-image'),
+            });
+            if(p.canvasTaskType === 'online-image') pollCanvasImageTask(p.canvasTaskId);
+            if(p.canvasTaskType === 'replica-agent') pollReplicaAgentTask(p.canvasTaskId);
+            if(p.canvasTaskType === 'image-repair-agent') pollImageRepairAgentTask(p.canvasTaskId);
         });
     });
+    // pending 已丢但 ledger 仍在：继续轮询，成功则恢复落板
+    if(canvas?.id){
+        for(const [taskId, info] of canvasTaskLedger.entries()){
+            if(info.canvasId && info.canvasId !== canvas.id) continue;
+            if(findPendingTask(taskId)) continue;
+            const type = String(info.canvasTaskType || 'online-image');
+            if(type === 'replica-agent') pollReplicaAgentTask(taskId);
+            else if(type === 'image-repair-agent') pollImageRepairAgentTask(taskId);
+            else pollCanvasImageTask(taskId);
+        }
+    }
 }
 function outputMetaPrompt(meta={}){
     const direct = String(meta?.prompt || '').trim();
@@ -23499,6 +24334,10 @@ function onNodeDrag(e){
         const dockNode = nodes.find(n => n.id === imageGenDockNodeId);
         if(dockNode) positionImageGenDock(dockNode);
     }
+    if(imageActionBarNodeId && movingIds.has(imageActionBarNodeId)){
+        const barNode = nodes.find(n => n.id === imageActionBarNodeId);
+        if(barNode) positionImageActionBar(barNode);
+    }
 }
 function startNodeResize(e, node){
     e.preventDefault();
@@ -23688,7 +24527,8 @@ function nearestPort(clientX, clientY, kind){
             best = port;
         }
     });
-    return bestDistance <= 96 ? best : null;
+    // 与缩小时放大的端口命中一致，松手吸附略放宽
+    return bestDistance <= 120 ? best : null;
 }
 function wouldCreateGeneratorCycle(fromId, toId){
     const seen = new Set();
@@ -24120,14 +24960,18 @@ function portPointFromLayout(n, kind, el){
     if(kind === 'out') return { x: n.x + w + PORT_ANCHOR_DX.out, y };
     return { x: n.x + PORT_ANCHOR_DX.in, y };
 }
-/** 端口锚点尺寸：只读数据/style，禁止读 offset 或 getBoundingClientRect（会强制布局并冻住 SVG 能量动画） */
+/**
+ * 端口锚点尺寸：优先用 ResizeObserver 缓存的真实布局（_layoutW/H），
+ * 禁止在此读 offset/getBoundingClientRect（会强制布局并冻住 SVG 能量动画）。
+ */
 function nodeLayoutSizeForPort(n, el){
     const size = defaultNodeSize(n.type);
     const styleW = el ? parseFloat(el.style.width) : NaN;
     const styleH = el ? parseFloat(el.style.height) : NaN;
     const w = Math.max(
         1,
-        (Number.isFinite(styleW) && styleW > 0 ? styleW : 0)
+        Number(n._layoutW) || 0
+            || (Number.isFinite(styleW) && styleW > 0 ? styleW : 0)
             || Number(n._displayW)
             || Number(n.w)
             || size.w
@@ -24135,7 +24979,8 @@ function nodeLayoutSizeForPort(n, el){
     );
     const h = Math.max(
         1,
-        (Number.isFinite(styleH) && styleH > 0 ? styleH : 0)
+        Number(n._layoutH) || 0
+            || (Number.isFinite(styleH) && styleH > 0 ? styleH : 0)
             || Number(n._displayH)
             || Number(n.h)
             || size.h
@@ -24260,10 +25105,24 @@ function ensureConnectionLinkDom(c){
         btn.classList.toggle('hover', hoveredConnectionId === c.id);
     }
 }
+/** 已接线节点常亮端口圆点，避免线接到「看不见的点」上像断开 */
+function syncWiredPortVisibility(){
+    if(!nodesEl) return;
+    const wired = new Set();
+    connections.forEach(c => {
+        if(c?.from) wired.add(c.from);
+        if(c?.to) wired.add(c.to);
+    });
+    nodesEl.querySelectorAll('.node').forEach(el => {
+        const id = el.dataset?.id;
+        el.classList.toggle('has-wired-ports', Boolean(id && wired.has(id)));
+    });
+}
 function syncLinkDomToConnections(){
     if(!linksEl || !linkControlsEl) return;
     pruneOrphanLinkDom();
     connections.forEach(c => ensureConnectionLinkDom(c));
+    syncWiredPortVisibility();
     if(tempLink){
         let tempPath = linksEl.querySelector('path.link.temp');
         const d = linkPathD(tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2);
@@ -24333,6 +25192,7 @@ function renderLinks(){
         linkControlsEl.appendChild(btn);
         linksEl.appendChild(linkHitEl(a.x, a.y, b.x, b.y, c.id));
     });
+    syncWiredPortVisibility();
     if(tempLink){
         setTempLinkLayerActive(true);
         linksEl.appendChild(pathEl(tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2, 'link temp'));
@@ -24449,7 +25309,7 @@ function isLinkDeleteBlockedNearPort(from, to, hit){
 }
 function isPointerOverLinkUiChrome(el){
     return Boolean(el?.closest?.(
-        '.image-gen-dock-host, .gen-dock, .gen-history-panel, .node, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #selectionMenu, .minimap, .bottombar, .toolbar, .canvas-custom-select-panel'
+        '.image-gen-dock-host, .image-action-bar-host, .gen-dock, .gen-history-panel, .node, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #selectionMenu, .minimap, .bottombar, .toolbar, .canvas-custom-select-panel'
     ));
 }
 /** 命中测试时跳过连线 X 自身，避免「X 挡指针 → 下一帧又判定离开」来回闪 */
@@ -24580,7 +25440,7 @@ function applyNodeSelection(nodeId, e){
         clearGenBatchPick({refresh:true});
     }
     if(changed) refreshSelectionVisuals();
-    else syncImageGenDock(); // 已选中时仍确保控制台在位（点图台唤出）
+    else syncImageGenDock(); // 已选中时仍确保控制台/动作条在位（点图台唤出）
     return changed;
 }
 function pathEl(x1,y1,x2,y2,cls, connectionId=null){
@@ -24915,7 +25775,7 @@ on(board, 'wheel', e => {
 on(board, "wheel", e => {
     if(!canvas || !board) return;
     if(e.ctrlKey || e.metaKey) return; // 已由 capture 处理
-    if(e.target.closest?.('.image-gen-dock-host, .gen-dock, .canvas-custom-select-panel, .canvas-custom-select-menu')) return;
+    if(e.target.closest?.('.image-gen-dock-host, .image-action-bar-host, .gen-dock, .canvas-custom-select-panel, .canvas-custom-select-menu')) return;
     if(isOpenScrollableCanvasMenu(e.target)) return;
     if(e.target.closest('.error-message, .node-retry-msg')) return;
     e.preventDefault();
@@ -25316,6 +26176,7 @@ function attachEngineToRoot(root){
   wireBoardEvents();
   wireCustomTooltips(root);
   exposeCanvasGlobals();
+  wireCanvasSaveLifecycle();
   restoreEditorSurface();
   mountedEngineRoot = root;
   syncCanvasPageMarkers();
@@ -25350,6 +26211,7 @@ async function mountInfiniteCanvasEngineInner(root) {
   wireBoardEvents();
   wireCustomTooltips(root);
   exposeCanvasGlobals();
+  wireCanvasSaveLifecycle();
 
   await loadConfig();
   if(!isMountGenerationCurrent(seq)) return disposeInfiniteCanvasEngine;

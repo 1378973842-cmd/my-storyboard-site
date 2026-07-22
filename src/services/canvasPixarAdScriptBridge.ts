@@ -31,6 +31,9 @@ export type StoryAnimBody = {
   imageUrls?: string[];
   imageBindings?: StoryImageBinding[];
   missing_kinds?: string[];
+  /** 画布上已生成的资产生图提示词；story_script 时用于锁定锚点造型 */
+  asset_prompts?: StoryAssetPrompt[];
+  prior_asset_prompts?: StoryAssetPrompt[];
 };
 
 export type StoryAssetPrompt = {
@@ -106,14 +109,14 @@ const SCRIPT_API_CONSTRAINT = `
   "sheet_count": 2,
   "node_keys": { "char_a": "anchor_char_...", "scene_a": "anchor_scene_..." },
   "global_config_md": "锚点清单 Markdown（无品牌）",
-  "storyboard_table_md": "含故事梗概 + 按张分镜 Markdown 表；表头：编号 | 视频内容片段（拍什么） | 引用锚点 | 镜头描述",
+  "storyboard_table_md": "须含节拍地图+视觉策略；故事梗概；按张拆分多表（### 分镜1-9 / ### 分镜10-N…）。镜头描述=唯一事实源（视频向：景别+角度+运镜四件套+动作/光影）；线稿对其做静帧改编，视频按表串联",
   "sketch_sheets": [
     {
       "sheet_index": 1,
       "grid_count": 9,
       "shot_from": 1,
       "shot_to": 9,
-      "prompt": "完整线稿分镜提示词（含图N映射与线稿锁定硬句）"
+      "prompt": "线稿提示词：图N+线稿锁定+逐格静帧改编（禁机位运动过程句）"
     }
   ],
   "video_segments": [
@@ -129,11 +132,47 @@ const SCRIPT_API_CONSTRAINT = `
 要求：
 1. 无品牌/Logo。duration_sec 与用户一致。sheet_count ≥ ceil(duration/15)；≤15s 可为 1。
 2. **第 1 张 grid_count 必须为 9**；后续张 ∈ {4,6,9}。镜号全局连续（第2张不得从镜1/Panel1 重数）；每段视频 ≤15s。
-3. 分镜表引用锚点仅中文代号；镜头描述以景别开头且 ≥24 字。
-4. 每条 sketch prompt 必须含线稿锁定：铅笔线稿 / 不上颜色 / 不上灰度 / 只有黑白线条。
-5. 每条 sketch prompt **一律**写约定图N；并含中文结构：\`场景：\`、\`本段剧情：\`、表演夸张浮夸/迪士尼四肢、大特写与近景交替、禁止连续相同景别、禁止荷兰角倾斜构图、运镜图表；镜头号按 shot_from–shot_to 连续标注。禁止英文 Panel 重启编号。
-6. 非最后一张必须写：本张非最后一张 + 最后一格动作进行中 + 禁止任何收尾信号；下张首格「承接上一段动作」。最后一段可有【结尾】但无 Logo。
+3. 分镜表必须按张拆表：每张一个 \`### 分镜X-Y（对应视频段K，≤15s）\` 标题 + 独立表。须含节拍地图与视觉策略。引用锚点仅中文代号；镜头描述=事实源：景别开头+角度+构图名词（三分法构图/框架构图等词库之一）+运镜手法名（四件套）+动作/表情/空间/光影，去空白≥40字；禁止空词；禁止荷兰角。写「前景遮挡构图」须点名前景物与纵深/虚化/窥视层次（电影构图义，非遮挡身体）。
+4. 视频段用 \`本段镜头串联：\` 按分镜表镜头描述串联（勿写废弃名「本段剧情」）；禁止另起动作链与空词。线稿逐格须**静帧改编**，禁止机位运动过程句；**禁止**线稿写「本段剧情」「本段镜头串联」。
+5. 每条 sketch prompt 必须含线稿锁定：铅笔线稿 / 不上颜色 / 不上灰度 / 只有黑白线条。
+6. 每条 sketch prompt **一律**写约定图N；并含：\`场景：\`、\`静帧改编\`、表演夸张浮夸/迪士尼四肢、大特写与近景交替、禁止连续相同景别、禁止荷兰角倾斜构图、\`镜头号从…连续标注\`（仅镜号；**禁止**「运镜图表」/运镜箭头标注）。禁止英文 Panel 重启编号。
+7. 非最后一张必须写：本张非最后一张 + 最后一格动作进行中 + 禁止任何收尾信号；下张首格「承接上一段动作」。最后一段可有【结尾】但无 Logo。
 `.trim();
+
+const EMPTY_SHOT_WORDS =
+  /电影感|高级感|氛围感|张力强|运镜自然流畅|高级电影感运镜/;
+
+const CAMERA_MOVE_NAME =
+  /固定镜头|摇摄|俯仰|推进|拉远|横移|升降|手持|跟拍|过肩|滑轨|变焦|环绕/;
+
+const VISUAL_DEVICE =
+  /前景遮挡|框中框|负空间|插入特写|延迟反应|侧面揭示|过肩|纵深|门框|虚化前景|肩后/;
+
+/** 每格镜头描述须含其一（DeepWhite 构图词库） */
+const COMPOSITION_TERM =
+  /中心构图|三分法构图|框架构图|对角线构图|引导线构图|对称构图|黄金分割构图|纵深构图|负空间构图|三角构图|S形构图|前景遮挡构图|层次构图|开放式构图|封闭式构图/;
+
+/** 线稿静帧禁写的视频运动过程句 */
+const SKETCH_VIDEO_MOTION =
+  /机位自.{0,12}向|快速变焦|匀速前移|匀速靠近|匀速横移|口型对齐|动机是|机位沿|机位升高|机位后移|短距滑移/;
+
+/** 线稿若误带叙事摘要栏（旧名本段剧情 / 视频名本段镜头串联）：剥掉后放行 */
+function stripSketchPlotSummary(prompt: string): string {
+  return String(prompt || "")
+    .replace(
+      /(?:本段剧情|本段镜头串联)\s*[:：][\s\S]*?(?=(?:\n(?:本张|表演风格|景别|镜头号|逐格镜头|【非末张】|【末张】|参考\s|角色造型|场景\s*[:：]|与上一张)|$))/u,
+      ""
+    )
+    .replace(/(?:本段剧情|本段镜头串联)\s*[:：][^\n]*/g, "")
+    .replace(/本段剧情|本段镜头串联/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** 视频段：把废弃名「本段剧情」规范成「本段镜头串联」 */
+function normalizeVideoPlotLabel(prompt: string): string {
+  return String(prompt || "").replace(/本段剧情\s*[:：]/g, "本段镜头串联：");
+}
 
 function skillRoot(projectRoot: string): string {
   const file = path.join(projectRoot, "prompts", "pixar-ad-execution-script", "SKILL.md");
@@ -143,9 +182,23 @@ function skillRoot(projectRoot: string): string {
   return file;
 }
 
+function loadShotLanguageRef(projectRoot: string): string {
+  const file = path.join(
+    projectRoot,
+    "prompts",
+    "pixar-ad-execution-script",
+    "references",
+    "shot-language.md"
+  );
+  if (!existsSync(file)) return "";
+  return readFileSync(file, "utf8").trim();
+}
+
 function loadSystemPrompt(projectRoot: string, mode: StoryAnimMode): string {
   const skill = readFileSync(skillRoot(projectRoot), "utf8").trim();
-  return `${skill}\n\n${mode === "asset_prompts" ? ASSET_API_CONSTRAINT : SCRIPT_API_CONSTRAINT}`;
+  const shotLang = mode === "story_script" ? loadShotLanguageRef(projectRoot) : "";
+  const refBlock = shotLang ? `\n\n---\n\n# 镜头语言参考（强制）\n\n${shotLang}` : "";
+  return `${skill}${refBlock}\n\n${mode === "asset_prompts" ? ASSET_API_CONSTRAINT : SCRIPT_API_CONSTRAINT}`;
 }
 
 export function toNodeKeySuffix(value: unknown): string {
@@ -214,6 +267,50 @@ function markdownTableCells(line: string): string[] {
   return value.split("|").map((cell) => cell.trim());
 }
 
+/** 允许「全景镜头」「特写：」等常见写法；去掉行首「镜N：」后再判景别 */
+function normalizeShotDescriptionLead(raw: string): string {
+  return String(raw || "")
+    .trim()
+    .replace(/^镜\s*\d+\s*[：:.\-、]\s*/u, "")
+    .replace(/^第?\s*\d+\s*格\s*[：:.\-、]\s*/u, "");
+}
+
+function shotStartsWithScale(shot: string): boolean {
+  // Skill：必须以景别开头。模型常写「全景镜头 / 特写：…」，比严格「全景」更常见。
+  return /^(?:大特写|特写|近景|中近景|中景|全景|远景|大远景|中全景|定格画面)(?:镜头)?(?:\s|[，,：:、]|$)/u.test(
+    normalizeShotDescriptionLead(shot)
+  );
+}
+
+function assertStoryboardSheetHeadings(
+  markdown: string,
+  sheets: Array<{ shot_from: number; shot_to: number; sheet_index: number }>
+): void {
+  const text = String(markdown || "");
+  for (const sheet of sheets) {
+    const from = Number(sheet.shot_from);
+    const to = Number(sheet.shot_to);
+    const re = new RegExp(
+      `分镜\\s*${from}\\s*[-–—~～到至]\\s*${to}|分镜${from}-${to}|第${sheet.sheet_index}张`
+    );
+    if (!re.test(text)) {
+      throw new Error(
+        `分镜表须按张拆分，缺少标题「分镜${from}-${to}」（对应第${sheet.sheet_index}张）；禁止合成一张大表`
+      );
+    }
+  }
+}
+
+function assertStoryboardDesignPreamble(markdown: string): void {
+  const text = String(markdown || "");
+  if (!/节拍|Beat\s*\d/i.test(text)) {
+    throw new Error("分镜表前须输出节拍地图（节拍/Beat1…）");
+  }
+  if (!/视觉策略|前景遮挡|框中框|插入特写|负空间|延迟反应/.test(text)) {
+    throw new Error("分镜表前须输出视觉策略（选用装置并标明镜号）");
+  }
+}
+
 function assertDetailedStoryboard(markdown: string, expectedShots: number): void {
   const rows = String(markdown || "")
     .split(/\r?\n/)
@@ -223,6 +320,7 @@ function assertDetailedStoryboard(markdown: string, expectedShots: number): void
   if (byNumber.size < expectedShots) {
     throw new Error(`分镜表至少需要 ${expectedShots} 行镜头（当前 ${byNumber.size}）`);
   }
+  let deviceHits = 0;
   for (let number = 1; number <= expectedShots; number += 1) {
     const row = byNumber.get(number);
     if (!row) throw new Error(`分镜表缺少编号 ${number}`);
@@ -233,12 +331,71 @@ function assertDetailedStoryboard(markdown: string, expectedShots: number): void
     if (!anchors || /anchor_(?:char|prop|scene)_/i.test(anchors)) {
       throw new Error(`分镜${number}的引用锚点必须使用中文代号`);
     }
-    if (!/^(?:大特写|特写|近景|中近景|中景|全景|远景|定格画面)/.test(shot)) {
-      throw new Error(`分镜${number}的镜头描述必须以景别开头`);
+    if (!shotStartsWithScale(shot)) {
+      throw new Error(
+        `分镜${number}的镜头描述必须以景别开头（大特写/特写/近景/中近景/中景/全景/远景/定格画面，可带「镜头」）`
+      );
     }
-    if (shot.replace(/\s/g, "").length < 24) {
-      throw new Error(`分镜${number}的镜头描述过短，须详细描述怎么拍`);
+    if (shot.replace(/\s/g, "").length < 40) {
+      throw new Error(`分镜${number}的镜头描述过短，须含角度/运镜四件套/动作/光影等（≥40字）`);
     }
+    if (EMPTY_SHOT_WORDS.test(shot)) {
+      throw new Error(`分镜${number}的镜头描述含空词（电影感/运镜自然流畅等），请改成可执行描述`);
+    }
+    // 允许「禁止荷兰角」合规句；去掉后再查是否真的在用荷兰角
+    const shotSansDutchBan = shot.replace(/禁止荷兰角(?:倾斜构图)?/g, "");
+    if (/荷兰角|斜角构图|地平线倾斜/.test(shotSansDutchBan)) {
+      throw new Error(`分镜${number}禁止使用荷兰角/斜角构图（可写「禁止荷兰角」，勿写倾斜机位）`);
+    }
+    if (!COMPOSITION_TERM.test(shot)) {
+      throw new Error(
+        `分镜${number}的镜头描述须含构图名词（如三分法构图/框架构图/负空间构图/前景遮挡构图…）`
+      );
+    }
+    if (/前景遮挡/.test(shot)) {
+      // 电影义：点名前景物 + 纵深/虚化/窥视层次；剥掉构图名词后再查
+      const body = shot
+        .replace(/前景遮挡构图/g, "")
+        .replace(/前景遮挡(?=[，。；、\s]|$)/g, "");
+      const namedFg =
+        /(?:虚化)?前景[^，。；\n]{0,16}(门框|窗框|树叶|枝|芭蕉|栏杆|桌沿|杯沿|蒸汽|雾|肩|围裙|窗帘|车窗|书架|灌木|花)/.test(
+          body
+        ) ||
+        /(门框|窗框|树叶|枝|芭蕉|栏杆|桌沿|杯沿|蒸汽|雾|肩|围裙|窗帘|车窗|书架|灌木|花)[^，。；\n]{0,12}(前景|虚化|压|窥)/.test(
+          body
+        ) ||
+        /隔着[^，。；\n]{1,12}(门框|窗|肩|叶|栏杆|玻璃)/.test(body) ||
+        /过肩/.test(body);
+      const depthCue =
+        /虚化前景|纵深|窥视|压在画面|画面左缘|画面右缘|贴近镜头|形成.*层|前景层/.test(body) ||
+        namedFg;
+      if (!namedFg || !depthCue) {
+        throw new Error(
+          `分镜${number}写了前景遮挡构图，须点名前景物并写出纵深/虚化/窥视层次（如「虚化前景树叶压在画面左缘」；电影构图义，勿理解成遮挡身体）`
+        );
+      }
+    }
+    if (!CAMERA_MOVE_NAME.test(shot)) {
+      throw new Error(
+        `分镜${number}的镜头描述须含可识别运镜手法名（如推进/固定镜头/横移/跟拍…）`
+      );
+    }
+    if (VISUAL_DEVICE.test(shot)) deviceHits += 1;
+  }
+  const minDevices = Math.max(2, Math.ceil(expectedShots * 0.3));
+  if (deviceHits < minDevices) {
+    throw new Error(
+      `视觉装置不足：至少约 30% 格子须含前景遮挡/框中框/插入特写/负空间/过肩等可见元素（当前 ${deviceHits}/${expectedShots}）`
+    );
+  }
+}
+
+function assertVideoFollowsStoryboard(prompt: string, segmentIndex: number): void {
+  if (EMPTY_SHOT_WORDS.test(prompt)) {
+    throw new Error(`视频段${segmentIndex}含空词（电影感/运镜自然流畅等），须按分镜表改写`);
+  }
+  if (!/按分镜|分镜表|镜头描述|本段镜头串联/.test(prompt)) {
+    throw new Error(`视频段${segmentIndex}须含「本段镜头串联」或按分镜表/镜头描述表述，禁止另起镜头`);
   }
 }
 
@@ -252,6 +409,54 @@ function formatBindingLines(bindings: StoryImageBinding[]): string {
       return `图${index} = ${kind}「${name}」→ 提示词中写 图${index} / {@图${index}}`;
     })
     .join("\n");
+}
+
+function normalizePriorAssetPrompts(raw: unknown): StoryAssetPrompt[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item, i) => {
+      const row = (item || {}) as Record<string, unknown>;
+      const name = String(row.name || "").trim();
+      const prompt = String(row.prompt || "").trim();
+      if (!name || prompt.length < 20) return null;
+      return {
+        kind: String(row.kind || "character").trim() || "character",
+        name,
+        prompt: prompt.slice(0, 4000),
+        node_key: String(row.node_key || "").trim() || undefined,
+        index: i,
+      } as StoryAssetPrompt;
+    })
+    .filter(Boolean) as StoryAssetPrompt[];
+}
+
+function formatPriorAssetPromptBlock(assets: StoryAssetPrompt[]): string {
+  if (!assets.length) return "";
+  return assets
+    .map((a, i) => {
+      const kind = String(a.kind || "character");
+      return [
+        `### 已锁定资产 ${i + 1} · ${kind} · ${a.name}`,
+        a.node_key ? `Node Key：${a.node_key}` : "",
+        "生图提示词（锚点「造型关键词」必须由此压缩提炼，名称/外形不得另起一套）：",
+        a.prompt,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n");
+}
+
+function assertAnchorsAlignWithAssets(globalMd: string, assets: StoryAssetPrompt[]): void {
+  if (!assets.length) return;
+  const text = String(globalMd || "");
+  for (const asset of assets) {
+    if (!text.includes(asset.name)) {
+      throw new Error(
+        `锚点清单须包含已生成资产「${asset.name}」，且造型关键词须与该资产生图提示词一致（勿另起一套外形）`
+      );
+    }
+  }
 }
 
 function parseAssetResult(raw: string): StoryAnimResult {
@@ -280,7 +485,12 @@ function parseAssetResult(raw: string): StoryAnimResult {
   };
 }
 
-function parseScriptResult(raw: string, durationSec: number, _hasImages = false): StoryAnimResult {
+function parseScriptResult(
+  raw: string,
+  durationSec: number,
+  _hasImages = false,
+  priorAssets: StoryAssetPrompt[] = []
+): StoryAnimResult {
   const parsed = extractJson(raw);
   if (!parsed) throw new Error("模型未返回合法 JSON");
   const minSheets = minSheetCount(durationSec);
@@ -293,7 +503,9 @@ function parseScriptResult(raw: string, durationSec: number, _hasImages = false)
     const grid = Number(row.grid_count);
     if (!ALLOWED_GRIDS.has(grid)) throw new Error(`第${i + 1}张宫格数必须是 4/6/9`);
     if (i === 0 && grid !== 9) throw new Error("第1张分镜必须是 9 宫格");
-    const prompt = requiredText(row.prompt, `sketch_sheets[${i}].prompt`, 80);
+    const prompt = stripSketchPlotSummary(
+      requiredText(row.prompt, `sketch_sheets[${i}].prompt`, 80)
+    );
     if (!LINE_ART_LOCK.test(prompt)) {
       throw new Error(`第${i + 1}张线稿提示词缺少铅笔线稿/不上颜色/不上灰度约束`);
     }
@@ -302,9 +514,6 @@ function parseScriptResult(raw: string, durationSec: number, _hasImages = false)
     }
     if (!/场景\s*[:：]/.test(prompt)) {
       throw new Error(`第${i + 1}张线稿提示词缺少「场景：」`);
-    }
-    if (!/本段剧情\s*[:：]/.test(prompt)) {
-      throw new Error(`第${i + 1}张线稿提示词缺少「本段剧情：」`);
     }
     if (!/(极度夸张|浮夸)/.test(prompt) || !/迪士尼/.test(prompt)) {
       throw new Error(`第${i + 1}张线稿提示词缺少夸张浮夸/迪士尼表演风格句`);
@@ -315,8 +524,19 @@ function parseScriptResult(raw: string, durationSec: number, _hasImages = false)
     if (!/禁止荷兰角/.test(prompt)) {
       throw new Error(`第${i + 1}张线稿提示词须写「禁止荷兰角倾斜构图」`);
     }
-    if (!/运镜/.test(prompt)) {
-      throw new Error(`第${i + 1}张线稿提示词缺少每格运镜标注要求`);
+    if (!/静帧改编/.test(prompt)) {
+      throw new Error(`第${i + 1}张线稿提示词须标明「静帧改编」（逐格从分镜表提炼定格画面，勿粘贴视频运镜）`);
+    }
+    if (!/镜头号从/.test(prompt)) {
+      throw new Error(`第${i + 1}张线稿提示词须写「镜头号从…连续标注」`);
+    }
+    if (/标注运镜图表/.test(prompt)) {
+      throw new Error(`第${i + 1}张线稿提示词禁止「标注运镜图表」（运镜只在分镜表/视频段；格上仅镜号）`);
+    }
+    if (SKETCH_VIDEO_MOTION.test(prompt)) {
+      throw new Error(
+        `第${i + 1}张线稿含视频运动句（机位自×向×/快速变焦/匀速前移/口型对齐/动机是…），请改为静帧改编`
+      );
     }
     if (/Panel\s*\d+/i.test(prompt)) {
       throw new Error(`第${i + 1}张线稿提示词禁止使用英文 Panel 编号，请用全局连续镜号`);
@@ -356,16 +576,21 @@ function parseScriptResult(raw: string, durationSec: number, _hasImages = false)
   const storyboard = humanizeStoryboardAnchors(
     requiredText(parsed.storyboard_table_md, "storyboard_table_md", 200)
   );
+  assertStoryboardDesignPreamble(storyboard);
   assertDetailedStoryboard(storyboard, expectedShots);
+  assertStoryboardSheetHeadings(storyboard, sketch_sheets);
 
   const videoRaw = Array.isArray(parsed.video_segments) ? parsed.video_segments : [];
   if (videoRaw.length < minSheets) throw new Error(`video_segments 至少 ${minSheets} 段`);
   const video_segments: StoryVideoSegment[] = videoRaw.map((item, i) => {
     const row = (item || {}) as Record<string, unknown>;
-    const prompt = requiredText(row.prompt, `video_segments[${i}].prompt`, 80);
+    const prompt = normalizeVideoPlotLabel(
+      requiredText(row.prompt, `video_segments[${i}].prompt`, 80)
+    );
     for (const marker of ["【画面渲染】", "【对话】", "【音效】"]) {
       if (!prompt.includes(marker)) throw new Error(`视频段${i + 1}缺少 ${marker}`);
     }
+    assertVideoFollowsStoryboard(prompt, i + 1);
     const dur = Number(row.duration_sec) || Math.ceil(durationSec / videoRaw.length);
     if (dur > 15) throw new Error(`视频段${i + 1}时长不得超过 15 秒`);
     return {
@@ -392,6 +617,7 @@ function parseScriptResult(raw: string, durationSec: number, _hasImages = false)
   };
 
   const global_config_md = requiredText(parsed.global_config_md, "global_config_md", 80);
+  assertAnchorsAlignWithAssets(global_config_md, priorAssets);
   const lastVideo = video_segments[video_segments.length - 1]?.prompt || "";
   if (/Logo徽标|品牌Logo|品牌名：/i.test(lastVideo + global_config_md)) {
     throw new Error("禁止品牌 Logo / 品牌名收尾；请改为故事收束");
@@ -433,9 +659,10 @@ export function parseStoryAnimAssetResult(raw: string): StoryAnimResult {
 export function parseStoryAnimScriptResult(
   raw: string,
   durationSec = 30,
-  hasImages = false
+  hasImages = false,
+  priorAssets: StoryAssetPrompt[] = []
 ): StoryAnimResult {
-  return parseScriptResult(raw, durationSec, hasImages);
+  return parseScriptResult(raw, durationSec, hasImages, priorAssets);
 }
 
 /** @deprecated use parseStoryAnimScriptResult */
@@ -493,6 +720,7 @@ export async function generatePixarAdScriptOnServer(
   const missing = Array.isArray(body.missing_kinds)
     ? body.missing_kinds.map((k) => String(k || "").trim()).filter(Boolean)
     : [];
+  const priorAssets = normalizePriorAssetPrompts(body.asset_prompts ?? body.prior_asset_prompts);
 
   const systemPrompt = loadSystemPrompt(projectRoot, mode);
   let baseMessage = "";
@@ -511,6 +739,7 @@ export async function generatePixarAdScriptOnServer(
     ].join("\n");
   } else {
     const durationSec = normalizeDurationSec(body.duration_sec ?? body.durationSec ?? 30);
+    const assetLockBlock = formatPriorAssetPromptBlock(priorAssets);
     baseMessage = [
       `mode：story_script`,
       `总时长：${durationSec} 秒`,
@@ -519,6 +748,17 @@ export async function generatePixarAdScriptOnServer(
       "",
       "【画布流程】资产彩图不必连回本 Agent。线稿提示词约定 图1/图2…；导演稍后把线稿提示词+资产图一起接到生图节点。",
       "",
+      priorAssets.length
+        ? [
+            "【已锁定资产生图提示词】（来自画布「资产提示词」按钮；必须遵守）",
+            "1. 锚点清单中的角色/道具/场景名称须与下列资产 name 一致。",
+            "2. 各锚点「造型关键词」必须由下列生图提示词压缩提炼，禁止另起一套外形/服装/材质。",
+            "3. 线稿提示词中的 图1=/图2= 命名与顺序：角色→道具→场景，与下列资产一致。",
+            "",
+            assetLockBlock,
+          ].join("\n")
+        : "【已锁定资产生图提示词】无（导演尚未生成资产提示词；可自行写造型关键词，并在锚点中注明待资产对齐）",
+      "",
       "【可选参考图】（有则对齐约定顺序，无则仍写约定图N + 造型关键词）",
       formatBindingLines(imageBindings),
       imageUrls.length ? `当前已连参考图：${imageUrls.length} 张` : "当前未连参考图（正常）",
@@ -526,7 +766,7 @@ export async function generatePixarAdScriptOnServer(
       "【故事】",
       story,
       "",
-      "输出无品牌故事动画完整 JSON。线稿提示词必须用中文结构：场景： / 本段剧情： / 非末张写动作进行中与禁止收尾 / 夸张浮夸迪士尼四肢 / 大特写与近景交替 / 禁止连续相同景别 / 禁止荷兰角倾斜构图 / 全局连续镜号与每格运镜图表；禁止英文 Panel 编号；锁定黑白铅笔线稿。",
+      "输出无品牌故事动画完整 JSON。严格按 Skill：锚点→节拍地图+视觉策略→按张拆分分镜表→线稿仅逐格静帧（禁止本段剧情/本段镜头串联）→视频段用「本段镜头串联：」（勿写废弃名本段剧情）按表串联→配乐。命名隔离，避免线稿串味。",
     ].join("\n");
   }
 
@@ -540,7 +780,7 @@ export async function generatePixarAdScriptOnServer(
       const text = await callLlm(systemPrompt, userMessage, model);
       if (mode === "asset_prompts") return parseAssetResult(text);
       const durationSec = normalizeDurationSec(body.duration_sec ?? body.durationSec ?? 30);
-      return parseScriptResult(text, durationSec, imageUrls.length > 0);
+      return parseScriptResult(text, durationSec, imageUrls.length > 0, priorAssets);
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
       if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 900 * (attempt + 1)));

@@ -6,6 +6,7 @@ import {
   getStoryboardImageEnv,
   isMidjourneyV81Model,
   isNiji7Model,
+  RUNNINGHUB_G2_OFFICIAL_I2I_PATH,
   RUNNINGHUB_G2_RATIOS,
   runStoryboardRunningHubG2Job,
   runStoryboardRunningHubGenerateJob,
@@ -88,7 +89,19 @@ function absoluteUrl(req: Request, url: string): string {
 }
 
 function isGptImage2(model?: string): boolean {
-  return /^gpt-image-2$/i.test(String(model || "").trim());
+  return /^gpt-image-2(-稳定)?$/i.test(String(model || "").trim());
+}
+
+function isGptImage2Stable(model?: string): boolean {
+  return /^gpt-image-2-稳定$/i.test(String(model || "").trim());
+}
+
+/** gpt-image-2-稳定 / 九宫格 Agent → 官方 G2 图生图 */
+function resolveG2I2IPath(model?: string, nineGridAgent?: boolean): string | undefined {
+  if (nineGridAgent || isGptImage2Stable(model)) {
+    return getNineGridG2Path() || RUNNINGHUB_G2_OFFICIAL_I2I_PATH;
+  }
+  return undefined;
 }
 
 function canvasResolutionToImageSize(res?: string): "1K" | "2K" | "4K" {
@@ -350,7 +363,7 @@ async function executeCanvasGeneration(
     let upstreamUrl: string;
     if (rhEnv) {
       if (isGptImage2(model)) {
-        const g2Path = payload.nine_grid_agent ? getNineGridG2Path() : undefined;
+        const g2Path = resolveG2I2IPath(model, payload.nine_grid_agent);
         console.log("[canvas-image/runninghub-g2]", {
           resolution: image_size,
           aspect_ratio,
@@ -358,6 +371,7 @@ async function executeCanvasGeneration(
           canvas_ratio: payload.canvas_ratio,
           quality: payload.quality,
           images: imageUrls.length,
+          model,
           nine_grid_agent: Boolean(payload.nine_grid_agent),
           g2_path: g2Path || rhEnv.gptPath,
         });

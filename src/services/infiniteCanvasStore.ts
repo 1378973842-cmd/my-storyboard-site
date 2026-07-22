@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 
@@ -182,7 +182,20 @@ function writeDoc(doc: CanvasDocument) {
       /* ignore backup failure */
     }
   }
-  writeFileSync(fp, JSON.stringify(doc, null, 2), "utf8");
+  // 先写临时文件再 rename，降低关机写到一半把 JSON 截断的风险
+  const tmp = `${fp}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(doc, null, 2), "utf8");
+  try {
+    renameSync(tmp, fp);
+  } catch {
+    // Windows 上目标已存在时 rename 可能失败：回退为直接覆盖写
+    writeFileSync(fp, readFileSync(tmp));
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 function toRecord(doc: CanvasDocument): CanvasRecord {

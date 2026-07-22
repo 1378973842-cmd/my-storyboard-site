@@ -1,16 +1,17 @@
-﻿# 跨会话交接报告 (Handoff)
+# 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  1. **Mx-Shell 润色 Agent（AG39）**：新节点 `mxShellPolishAgent`（菜单「Mx-Shell 润色 Agent」）。贴原稿 → 选一镜到底/多机位 → 润色；API `task=polish`。原「Mx-Shell 提示词 Agent」不变（`task=generate`）。
-  2. AG37/AG38：多机位示例B、一镜到底示例A 对齐仍在。
-- **验证状态**：`npm run check:mx-shell` 与 `node init.mjs` 通过。
-- **明日焦点**：AG25（完整 Gen Console）。
-- **Blockers**：无。
-- **未提交 Git**：含 AG37–AG39 与此前画布改动；勿提交 `.env`。提醒导演 Git Commit。
+  1. **防关机丢保存**：脏画布每 8s 强制 `scheduleSaveNow`；服务端 `writeDoc` 先写 tmp 再 rename。
+  2. **孤儿图找回**：`node scripts/recover-orphan-uploads.mjs --since 2026-07-21`（dry-run 见约 150 张）；`--canvas <id> --apply` 可贴回。
+  3. RH Key 下拉脱敏（key1/key2）。
+- **验证状态**：`node init.mjs` 通过；orphan dry-run 通过。
+- **明日焦点**：导演确认目标画布后 `--apply`；AG25。
+- **Blockers**：无。硬关机仍可能丢掉「未满 8s 且未完成 PUT」的窗口。
+- **未提交 Git**：含心跳保存 / atomic write / recover 脚本；勿提交 `.env`。提醒导演 Git Commit。
 
 ## 新对话开场白（复制给 Agent）
 
 ```
 继续 gemini-deploy。先读 docs/HANDOFF.md。
-Mx-Shell 有两个节点：生成 / 润色。下一决策 AG25。
+已有 8s 脏保存心跳 + 孤儿图找回脚本。确认 canvasId 后可 --apply。
 ```

@@ -124,4 +124,16 @@ assert.throws(
   /按秒分段/
 );
 
+// —— 润色：只允许画面正文 ——
+assert.doesNotThrow(() =>
+  assertMxShellPromptShape(goodMulti, "multi_cam", "standard", { pictureOnly: true })
+);
+assert.doesNotThrow(() =>
+  assertMxShellPromptShape(goodOneShot, "one_shot", "standard", { pictureOnly: true })
+);
+assert.throws(
+  () => assertMxShellPromptShape(wrap(goodMulti), "multi_cam", "standard", { pictureOnly: true }),
+  /基础设定|氛围|声音/
+);
+
 console.log("check-mx-shell-prompt: ok");
