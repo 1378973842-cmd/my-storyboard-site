@@ -15,10 +15,25 @@ export type StoryboardImageEnv = {
 
 /** gpt-image-2-稳定 / 九宫格 Agent：官方稳定图生图 */
 export const RUNNINGHUB_G2_OFFICIAL_I2I_PATH = "/openapi/v2/rhart-image-g-2-official/image-to-image";
+/** gpt-image-2 文生图（无参考图时禁止误走 nano T2I） */
+export const RUNNINGHUB_G2_T2I_PATH = "/openapi/v2/rhart-image-g-2/text-to-image";
+export const RUNNINGHUB_G2_OFFICIAL_T2I_PATH = "/openapi/v2/rhart-image-g-2-official/text-to-image";
 
 export function getNineGridG2Path(): string {
   return (
     (process.env.NINE_GRID_GPT_PATH ?? RUNNINGHUB_G2_OFFICIAL_I2I_PATH).trim() || RUNNINGHUB_G2_OFFICIAL_I2I_PATH
+  );
+}
+
+export function getG2TextToImagePath(official = false): string {
+  if (official) {
+    return (
+      (process.env.STORYBOARD_IMAGE_GPT_T2I_OFFICIAL_PATH ?? RUNNINGHUB_G2_OFFICIAL_T2I_PATH).trim() ||
+      RUNNINGHUB_G2_OFFICIAL_T2I_PATH
+    );
+  }
+  return (
+    (process.env.STORYBOARD_IMAGE_GPT_T2I_PATH ?? RUNNINGHUB_G2_T2I_PATH).trim() || RUNNINGHUB_G2_T2I_PATH
   );
 }
 
@@ -428,6 +443,29 @@ export async function runStoryboardRunningHubG2Job(opts: {
   };
   const path = (opts.pathOverride?.trim() || env.gptPath).trim() || env.gptPath;
   return submitAndPollRunningHub(env, path, body, "edit-image/runninghub-g2");
+}
+
+/** gpt-image-2 文生图（无参考图） */
+export async function runStoryboardRunningHubG2TextJob(opts: {
+  prompt: string;
+  image_size?: unknown;
+  aspect_ratio?: unknown;
+  quality?: unknown;
+  projectRoot: string;
+  pathOverride?: string;
+}): Promise<string> {
+  const env = getStoryboardImageEnv();
+  if (!env) throw new Error("未配置 STORYBOARD_IMAGE_API_KEY");
+  const g2 = mapRunningHubG2OutputParams(opts.image_size, opts.aspect_ratio, opts.quality);
+  const body = {
+    prompt: opts.prompt.trim(),
+    resolution: g2.resolution,
+    aspectRatio: g2.aspectRatio,
+    quality: g2.quality,
+  };
+  const path =
+    (opts.pathOverride?.trim() || getG2TextToImagePath(false)).trim() || getG2TextToImagePath(false);
+  return submitAndPollRunningHub(env, path, body, "generate-image/runninghub-g2-t2i");
 }
 
 export function extractCitedReferenceIndices(text: string, maxReferences: number): number[] {

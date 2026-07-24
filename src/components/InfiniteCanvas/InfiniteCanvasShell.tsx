@@ -17,6 +17,7 @@ import {
   setBrushTool,
   setCropAspectLock,
   setImageEditMode,
+  toggleCropAspectMenu,
   undoEditDrawing,
 } from '../../lib/infiniteCanvas/canvasEngine.js';
 
@@ -37,8 +38,11 @@ function seedCanvasRootMarkers(node: HTMLDivElement) {
   if (node.dataset.editorSession == null) node.dataset.editorSession = resumeEditor ? '1' : '0';
   if (node.dataset.canvasOpen == null) node.dataset.canvasOpen = resumeEditor ? '1' : '0';
   node.classList.toggle('is-editor', resumeEditor);
+  // 裁剪/画笔内联编辑会挂 html.canvas-image-edit-open；HMR 中断时先清，避免壳层叠乱
+  try { document.documentElement.classList.remove('canvas-image-edit-open'); } catch { /* ignore */ }
   const shell = node.querySelector('#shell');
   if (!shell) return;
+  if (!shell.classList.contains('shell')) shell.classList.add('shell');
   if (resumeEditor) shell.classList.remove('no-canvas');
   else if (!shell.classList.contains('no-canvas')) shell.classList.add('no-canvas');
 }
@@ -442,9 +446,9 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                           <button id="backToManagerBtn" className="tool-btn tool-btn-back" type="button" title="返回画布管理" aria-label="返回画布管理" data-i18n-title="canvas.backToManager"><i data-lucide="arrow-left" className="w-4 h-4"></i></button>
                           <div className="canvas-nav-meta">
                               <div id="currentCanvasTitle" className="current-canvas-title">未命名画布</div>
-                              <div id="currentCanvasTime" className="current-canvas-time">--</div>
+                              <div id="saveState" className="current-canvas-save">--</div>
+                              <div id="currentCanvasTime" className="current-canvas-time" hidden aria-hidden="true">--</div>
                           </div>
-                          <p id="saveState" style={{ display: "none" }} data-i18n="canvas.chooseFirst">请选择或新建画布</p>
                       </div>
                   </div>
               </div>
@@ -825,9 +829,17 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                       <div id="logList" className="log-list"></div>
                   </div>
               </div>
-              <div id="imageEditModal" className="image-edit-modal" onClick={() => closeImageEditor()}>
+              <div
+                id="imageEditModal"
+                className="image-edit-modal"
+                onClick={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.currentTarget.classList.contains('is-canvas-inline')) return;
+                  closeImageEditor();
+                }}
+              >
                   <div className="image-edit-panel" onClick={(e) => e.stopPropagation()}>
-                      <div className="image-edit-head">
+                      <div className="image-edit-head image-edit-head-legacy">
                           <div>
                               <div id="imageEditTitle" className="image-edit-title" data-i18n="canvas.editImage">编辑图片</div>
                               <div id="imageEditSub" className="image-edit-sub" data-i18n="canvas.editImageSub">选择裁剪或画笔模式</div>
@@ -838,7 +850,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                           </div>
                           <button className="preview-icon-btn" type="button" onClick={() => closeImageEditor()} title="关闭" data-i18n-title="common.close"><i data-lucide="x" className="w-4 h-4"></i></button>
                       </div>
-                      <div id="imageCropTools" className="image-edit-tools active">
+                      <div id="imageCropTools" className="image-edit-tools image-edit-tools-legacy active">
                           <span className="image-edit-sub" data-i18n="canvas.cropAspect">裁剪比例</span>
                           <button type="button" className="crop-aspect-btn active" data-crop-aspect="original" data-i18n="canvas.cropAspectOriginal" onClick={(e) => { e.stopPropagation(); setCropAspectLock('original'); }}>原图比例</button>
                           <button type="button" className="crop-aspect-btn" data-crop-aspect="free" data-i18n="canvas.cropAspectFree" onClick={(e) => { e.stopPropagation(); setCropAspectLock('free'); }}>自由</button>
@@ -849,11 +861,12 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                           <button type="button" className="crop-aspect-btn" data-crop-aspect="3:4" onClick={(e) => { e.stopPropagation(); setCropAspectLock('3:4'); }}>3:4</button>
                           <span id="cropAspectHint" className="image-edit-sub"></span>
                       </div>
-                      <div id="imageBrushTools" className="image-edit-tools">
+                      <div id="imageBrushTools" className="image-edit-tools image-edit-tools-legacy">
                           <button className="image-edit-btn primary" type="button" data-brush-tool="free" onClick={(e) => { e.stopPropagation(); setBrushTool('free'); }} title="自由画笔"><i data-lucide="paintbrush" className="w-4 h-4"></i></button>
                           <button className="image-edit-btn secondary" type="button" data-brush-tool="rect" onClick={(e) => { e.stopPropagation(); setBrushTool('rect'); }} title="矩形"><i data-lucide="square" className="w-4 h-4"></i></button>
                           <button className="image-edit-btn secondary" type="button" data-brush-tool="ellipse" onClick={(e) => { e.stopPropagation(); setBrushTool('ellipse'); }} title="椭圆"><i data-lucide="circle" className="w-4 h-4"></i></button>
-                          <button className="image-edit-btn secondary" type="button" data-brush-tool="label" onClick={(e) => { e.stopPropagation(); setBrushTool('label'); }} title="角色编号标注"><i data-lucide="list-ordered" className="w-4 h-4"></i></button>
+                          <button className="image-edit-btn secondary" type="button" data-brush-tool="text" onClick={(e) => { e.stopPropagation(); setBrushTool('text'); }} title="文字"><i data-lucide="type" className="w-4 h-4"></i></button>
+                          <button className="image-edit-btn secondary" type="button" data-brush-tool="label" onClick={(e) => { e.stopPropagation(); setBrushTool('label'); }} title="标注序号"><i data-lucide="list-ordered" className="w-4 h-4"></i></button>
                           <label><span data-i18n="canvas.color">颜色</span> <input id="paintBrushColor" type="color" defaultValue="#ff2d55" /></label>
                           <label><span data-i18n="canvas.brushSize">笔刷</span> <input id="paintBrushSize" type="range" min={2} max={80} defaultValue={14} /></label>
                           <button id="brushUndoBtn" className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); undoEditDrawing(); }} title="撤销"><i data-lucide="undo-2" className="w-4 h-4"></i></button>
@@ -862,6 +875,30 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                           <div id="annotationLabelPick" className="annotation-label-pick" style={{ display: "none" }} />
                           <button id="annotationRestoreBtn" className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); restoreAnnotationBase(); }} title="恢复标注前的原图"><i data-lucide="rotate-ccw" className="w-4 h-4"></i><span>恢复原图</span></button>
                       </div>
+
+                      {/* 画笔：图片上方工具栏（图3） */}
+                      <div id="imageEditBrushDock" className="image-edit-brush-dock" onClick={(e) => e.stopPropagation()}>
+                          <button type="button" className="image-edit-dock-icon" onClick={() => closeImageEditor()} title="关闭" aria-label="close"><i data-lucide="x" className="w-4 h-4"></i></button>
+                          <div className="image-edit-brush-tools" id="imageBrushToolsInline">
+                              <button type="button" className="image-edit-dock-tool active" data-brush-tool="free" onClick={() => setBrushTool('free')} title="自由画笔"><i data-lucide="paintbrush" className="w-4 h-4"></i></button>
+                              <button type="button" className="image-edit-dock-tool" data-brush-tool="rect" onClick={() => setBrushTool('rect')} title="矩形"><i data-lucide="square" className="w-4 h-4"></i></button>
+                              <button type="button" className="image-edit-dock-tool" data-brush-tool="ellipse" onClick={() => setBrushTool('ellipse')} title="椭圆"><i data-lucide="circle" className="w-4 h-4"></i></button>
+                              <button type="button" className="image-edit-dock-tool" onClick={() => clearEditDrawing()} title="橡皮/清空"><i data-lucide="eraser" className="w-4 h-4"></i></button>
+                              <button type="button" className="image-edit-dock-tool" data-brush-tool="text" onClick={() => setBrushTool('text')} title="文字"><i data-lucide="type" className="w-4 h-4"></i></button>
+                              <button type="button" className="image-edit-dock-tool" data-brush-tool="label" onClick={() => setBrushTool('label')} title="标注序号"><i data-lucide="list-ordered" className="w-4 h-4"></i></button>
+                              <div id="brushTextFieldWrap" className="brush-text-field-wrap" hidden>
+                                  <input id="brushTextInput" className="brush-text-input" type="text" maxLength={80} placeholder="输入文字后点画布放置" autoComplete="off" />
+                              </div>
+                              <div id="annotationLabelPickInline" className="annotation-label-pick annotation-label-pick-inline" hidden />
+                              <label className="image-edit-dock-color" title="颜色"><input id="paintBrushColorInline" type="color" defaultValue="#ff2d55" onChange={(e) => { const m = document.getElementById('paintBrushColor') as HTMLInputElement | null; if (m) { m.value = e.target.value; m.dispatchEvent(new Event('input', { bubbles: true })); } }} /></label>
+                              <label className="image-edit-dock-size" title="笔刷大小"><input id="paintBrushSizeInline" type="range" min={2} max={80} defaultValue={14} onChange={(e) => { const m = document.getElementById('paintBrushSize') as HTMLInputElement | null; if (m) { m.value = e.target.value; m.dispatchEvent(new Event('input', { bubbles: true })); } }} /></label>
+                              <button type="button" className="image-edit-dock-tool" onClick={() => undoEditDrawing()} title="撤销"><i data-lucide="undo-2" className="w-4 h-4"></i></button>
+                              <button type="button" className="image-edit-dock-tool" onClick={() => redoEditDrawing()} title="恢复"><i data-lucide="redo-2" className="w-4 h-4"></i></button>
+                              <button id="annotationRestoreBtnInline" className="image-edit-dock-tool" type="button" onClick={() => restoreAnnotationBase()} title="恢复原图"><i data-lucide="rotate-ccw" className="w-4 h-4"></i></button>
+                          </div>
+                          <button id="imageEditBrushSaveBtn" type="button" className="image-edit-dock-save" onClick={() => applyImageEdit()}><i data-lucide="save" className="w-4 h-4"></i><span>Save</span></button>
+                      </div>
+
                       <div id="imageEditStage" className="image-edit-stage">
                           <div className="image-edit-stage-inner">
                               <div id="cropCanvas" className="crop-canvas">
@@ -873,11 +910,37 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                               </div>
                           </div>
                       </div>
-                      <div className="image-edit-actions">
+
+                      {/* 裁剪：底部工具条（图1）+ 宽高比菜单（图2） */}
+                      <div id="imageEditCropDock" className="image-edit-crop-dock active" onClick={(e) => e.stopPropagation()}>
+                          <button type="button" className="image-edit-dock-icon" onClick={() => closeImageEditor()} title="取消" aria-label="cancel"><i data-lucide="x" className="w-4 h-4"></i></button>
+                          <div className="image-edit-crop-aspect-wrap">
+                              <button id="cropAspectToggle" type="button" className="image-edit-crop-aspect-btn" aria-expanded="false" onClick={() => toggleCropAspectMenu()}>
+                                  <i data-lucide="rectangle-horizontal" className="w-4 h-4"></i>
+                                  <span>宽高比</span>
+                              </button>
+                              <div id="cropAspectMenu" className="crop-aspect-menu" hidden>
+                                  <button type="button" className="crop-aspect-menu-item active" data-crop-aspect="original" onClick={() => setCropAspectLock('original')}>原图比例</button>
+                                  <button type="button" className="crop-aspect-menu-item" data-crop-aspect="1:1" onClick={() => setCropAspectLock('1:1')}>1 : 1</button>
+                                  <button type="button" className="crop-aspect-menu-item" data-crop-aspect="4:3" onClick={() => setCropAspectLock('4:3')}>4 : 3</button>
+                                  <button type="button" className="crop-aspect-menu-item" data-crop-aspect="3:4" onClick={() => setCropAspectLock('3:4')}>3 : 4</button>
+                                  <button type="button" className="crop-aspect-menu-item" data-crop-aspect="16:9" onClick={() => setCropAspectLock('16:9')}>16 : 9</button>
+                                  <button type="button" className="crop-aspect-menu-item" data-crop-aspect="9:16" onClick={() => setCropAspectLock('9:16')}>9 : 16</button>
+                                  <button type="button" className="crop-aspect-menu-item" data-crop-aspect="21:9" onClick={() => setCropAspectLock('21:9')}>21 : 9</button>
+                                  <div className="crop-aspect-menu-sep" />
+                                  <button type="button" className="crop-aspect-menu-item" data-crop-aspect="free" onClick={() => setCropAspectLock('free')}>自定义…</button>
+                              </div>
+                          </div>
+                          <button id="imageEditApplyBtn" type="button" className="image-edit-crop-confirm" onClick={() => applyImageEdit()}>
+                              <i data-lucide="check" className="w-4 h-4"></i>
+                              <span>确认裁剪</span>
+                          </button>
+                      </div>
+
+                      <div className="image-edit-actions image-edit-actions-legacy">
                           <span id="imageEditZoomLabel" style={{ color: "#94a3b8", fontSize: 11, fontWeight: 800, padding: "0 4px", marginRight: "auto", cursor: "pointer", userSelect: "none" }} title="双击重置缩放" onDoubleClick={() => resetImageEditZoom()}>100%</span>
                           <button className="image-edit-btn secondary" type="button" onClick={() => resetCropBox()}><i data-lucide="rotate-ccw" className="w-4 h-4"></i><span data-i18n="canvas.reset">重置</span></button>
                           <button className="image-edit-btn secondary" type="button" onClick={() => closeImageEditor()} data-i18n="common.cancel">取消</button>
-                          <button id="imageEditApplyBtn" className="image-edit-btn primary" type="button" onClick={() => applyImageEdit()}><i data-lucide="crop" className="w-4 h-4"></i><span data-i18n="canvas.applyCrop">应用裁剪</span></button>
                       </div>
                   </div>
               </div>

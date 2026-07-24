@@ -25,6 +25,8 @@ export function updateCurrentCanvasTitle(title: string): Promise<boolean>;
 
 export function setImageEditMode(mode: string, userTouched?: boolean): void;
 export function setCropAspectLock(lock: string): void;
+export function toggleCropAspectMenu(): void;
+export function setCropAspectMenuOpen(open: boolean): void;
 export function setBrushTool(tool: string): void;
 export function undoEditDrawing(): void;
 export function redoEditDrawing(): void;

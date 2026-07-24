@@ -2,6 +2,7 @@ import type { Express, Request, Response, RequestHandler } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { augmentImagePromptWithReferenceCostumeLock } from "../lib/nineGrid/nineGridCore.js";
 import {
+  getG2TextToImagePath,
   getNineGridG2Path,
   getStoryboardImageEnv,
   isMidjourneyV81Model,
@@ -9,6 +10,7 @@ import {
   RUNNINGHUB_G2_OFFICIAL_I2I_PATH,
   RUNNINGHUB_G2_RATIOS,
   runStoryboardRunningHubG2Job,
+  runStoryboardRunningHubG2TextJob,
   runStoryboardRunningHubGenerateJob,
   runStoryboardRunningHubJob,
   runStoryboardRunningHubMjV81Job,
@@ -105,6 +107,13 @@ function resolveG2I2IPath(model?: string, nineGridAgent?: boolean): string | und
     return getNineGridG2Path() || RUNNINGHUB_G2_OFFICIAL_I2I_PATH;
   }
   return undefined;
+}
+
+function resolveG2T2IPath(model?: string, nineGridAgent?: boolean): string {
+  if (nineGridAgent || isGptImage2Stable(model)) {
+    return getG2TextToImagePath(true);
+  }
+  return getG2TextToImagePath(false);
 }
 
 function canvasResolutionToImageSize(res?: string): "1K" | "2K" | "4K" {
@@ -319,13 +328,18 @@ async function executeCanvasGeneration(
   const prompt = String(payload.prompt || "").trim() || "Edit the reference images.";
   const model = String(payload.model || "").trim();
   const persistMeta = persistMetaFromPayload(req, payload);
-  const refItems = (payload.reference_images || [])
+  const rawRefs = payload.reference_images || [];
+  const refItems = rawRefs
     .map((r) => ({
       url: String(r?.url || "").trim(),
       name: String(r?.name || "").trim(),
     }))
     .filter((r) => r.url);
   const imageUrls = refItems.map((r) => absoluteUrl(req, r.url)).filter(Boolean);
+  // 前端已连参考图但 URL 解析失败时，禁止静默掉进 nano 文生图
+  if (rawRefs.length > 0 && imageUrls.length === 0) {
+    throw new Error("参考图地址无效，无法按所选模型生成");
+  }
   const enrichedPrompt = refItems.length
     ? augmentImagePromptWithReferenceCostumeLock(prompt, refItems)
     : prompt;
@@ -334,6 +348,12 @@ async function executeCanvasGeneration(
     ? gpt2AspectRatioFromPayload(payload)
     : canvasRatioToAspectRatio(payload);
   const rhEnv = getStoryboardImageEnv();
+  console.log("[canvas-image/route]", {
+    model,
+    refs: imageUrls.length,
+    nine_grid_agent: Boolean(payload.nine_grid_agent),
+    provider_id: payload.provider_id,
+  });
 
   if (isNiji7Model(model)) {
     if (!rhEnv) throw new Error("未配置 STORYBOARD_IMAGE_API_KEY，无法使用 niji7");
@@ -447,6 +467,26 @@ async function executeCanvasGeneration(
   }
 
   if (rhEnv) {
+    if (isGptImage2(model)) {
+      const g2T2i = resolveG2T2IPath(model, payload.nine_grid_agent);
+      console.log("[canvas-image/runninghub-g2-t2i]", {
+        model,
+        g2_path: g2T2i,
+        resolution: image_size,
+        aspect_ratio,
+      });
+      const upstreamUrl = await runStoryboardRunningHubG2TextJob({
+        prompt,
+        image_size: gpt2ImageSizeFromPayload(payload),
+        aspect_ratio,
+        quality: payload.quality,
+        projectRoot: deps.projectRoot,
+        pathOverride: g2T2i,
+      });
+      const localUrl = await deps.persistImage(upstreamUrl, persistMeta);
+      return { images: [localUrl], url: localUrl };
+    }
+    console.log("[canvas-image/runninghub-t2i]", { model, resolution: image_size, aspect_ratio });
     const upstreamUrl = await runStoryboardRunningHubGenerateJob({
       prompt,
       image_size,
