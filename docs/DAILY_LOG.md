@@ -194,3 +194,18 @@
 - AG53: 空白左键不再平移；中键/Space 平移；加大端口命中
 - AG54: 端口磁吸十字中心 + 选中环加强 + 手型/抓取光标
 - AG55: 端口磁吸/命中改为朝外半圆
+- AG58: 拖动生图节点时收起控制台，松手再展开
+
+## 2026-07-27
+
+### 记录 / 说明
+- AG59: 生成中UI去掉整图模糊，改底部琥珀状态条
+- AG60: 预览放大对齐封面；左右键按预览列表顺序
+- AG61: 网格稳列/生成不收起/点哪看哪/上限120
+- AG62: 拉线去双倍render；草稿延后+session节流；undo structuredClone
+- AG63: 修生图 Invalid string length（runSnapshot 瘦快照+scrub历史）
+
+## 2026-07-28
+
+### 记录 / 说明
+- AG65: commitStructureDomPatch 局部DOM挂载，init通过

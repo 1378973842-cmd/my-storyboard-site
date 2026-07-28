@@ -205,6 +205,64 @@ function commitCanvasStructureEdit(){
     refreshGeometryAfterLayout();
     if(minimapState) updateMinimapNodePositions();
 }
+/** 局部挂载一颗节点（不整板 render） */
+function mountNodeDom(node){
+    if(!node || !nodesEl) return null;
+    const existing = nodesEl.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
+    if(existing) return existing;
+    const fresh = renderNode(node);
+    nodesEl.appendChild(fresh);
+    refreshIcons(fresh);
+    return fresh;
+}
+/** 局部卸下一颗节点 DOM */
+function unmountNodeDom(id){
+    if(!id || !nodesEl) return;
+    nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`)?.remove();
+    if(imageGenDockNodeId === id) removeImageGenDock();
+    if(imageActionBarNodeId === id) removeImageActionBar();
+}
+/**
+ * 结构变更的局部 DOM 路径：只增删/刷新受影响节点 + 连线。
+ * 失败时回退 commitCanvasStructureEdit（整板）。
+ */
+function commitStructureDomPatch({ addedIds = [], removedIds = [], refreshIds = [] } = {}){
+    localStructureRevision += 1;
+    resetCanvasInteractionForEdit();
+    rebindDomIfStale();
+    if((!nodesEl || !world) && canvasRoot) bindDomElements(canvasRoot);
+    syncCanvasModelFromState();
+    try {
+        const removed = [...new Set((removedIds || []).filter(Boolean))];
+        const added = [...new Set((addedIds || []).filter(Boolean))];
+        const refresh = [...new Set((refreshIds || []).filter(Boolean))]
+            .filter(id => !removed.includes(id) && nodes.some(n => n.id === id));
+        removed.forEach(unmountNodeDom);
+        added.forEach(id => {
+            const node = nodes.find(n => n.id === id);
+            if(node) mountNodeDom(node);
+        });
+        // 清掉模型里已不存在、DOM 却还在的孤儿
+        if(nodesEl){
+            const live = new Set(nodes.map(n => n.id));
+            [...nodesEl.children].forEach(child => {
+                if(child.dataset?.id && !live.has(child.dataset.id)) child.remove();
+            });
+        }
+        if(refresh.length) refreshNodes(refresh);
+        syncLinkDomToConnections();
+        const touch = new Set([...added, ...removed, ...refresh]);
+        scheduleLinkGeometryRefresh(touch.size ? touch : null);
+        refreshGeometryAfterLayout();
+        if(minimapState) updateMinimapNodePositions();
+        else scheduleMinimapRender({ positionsOnly: true });
+        syncImageGenDock();
+        scheduleViewportNodeCull();
+    } catch(err) {
+        console.error('[infinite-canvas] structure patch failed, falling back to full render', err);
+        commitCanvasStructureEdit();
+    }
+}
 function shouldBlockCanvasGateTransition(){
     return isCanvasInteracting() || Date.now() - lastBoardInteractionAt < CANVAS_INTERACTION_COOLDOWN_MS;
 }
@@ -2532,10 +2590,8 @@ function upstreamReferenceNodeWidth(gen){
 function genStageGridCols(count){
     const n = Math.max(1, Number(count) || 1);
     if(n <= 1) return 1;
-    if(n <= 4) return 2;
-    if(n <= 9) return 3;
-    if(n <= 16) return 4;
-    return Math.min(6, Math.max(3, Math.ceil(Math.sqrt(n))));
+    // 趋近方阵：列数 ≈ ceil(√n)，少图不留空列；上限 8，避免锁死 4 列变成细长条
+    return Math.min(8, Math.max(2, Math.min(n, Math.ceil(Math.sqrt(n)))));
 }
 /** 展开：每格按比例最长边归一，整体按列数铺开 */
 function genStageGridCellWidth(node){
@@ -3440,7 +3496,11 @@ function refreshGeometryAfterLayout(){
 let viewportSaveTimer = null;
 /** HMR / React 重挂载会新建模块实例；草稿挂在 window + sessionStorage，避免提示词/模型被旧云端稿打回 */
 const LIVE_CANVAS_DRAFT_KEY = '__INFINITE_CANVAS_LIVE_DRAFT__';
-function stashLiveCanvasDraft(){
+let liveDraftStashRaf = 0;
+let liveDraftSessionTimer = null;
+const LIVE_DRAFT_SESSION_THROTTLE_MS = 2000;
+/** 内存草稿可每帧后写；sessionStorage 全量 stringify 很贵，节流 */
+function stashLiveCanvasDraft({ persistSession = true } = {}){
     if(!canvas?.id || typeof window === 'undefined') return;
     try {
         pullFocusedEditableIntoModel();
@@ -3458,12 +3518,49 @@ function stashLiveCanvasDraft(){
             settings: canvas.settings || {},
         };
         window[LIVE_CANVAS_DRAFT_KEY] = draft;
+        if(!persistSession) return;
         try {
             sessionStorage.setItem(LIVE_CANVAS_DRAFT_KEY, JSON.stringify(draft));
-        } catch(_) { /* quota */ }
+        } catch(err) {
+            // quota / Invalid string length：保留内存草稿即可，勿打断生图
+            console.warn('[infinite-canvas] session draft skipped', err?.message || err);
+        }
     } catch(e) {
         console.warn('[infinite-canvas] stash draft failed', e);
     }
+}
+/** 交互首帧先出画：下一帧写内存草稿，sessionStorage 再节流 */
+function scheduleStashLiveCanvasDraft(){
+    if(!canvas?.id || typeof window === 'undefined') return;
+    const run = () => {
+        liveDraftStashRaf = 0;
+        stashLiveCanvasDraft({ persistSession: false });
+        if(liveDraftSessionTimer) return;
+        liveDraftSessionTimer = setTimeout(() => {
+            liveDraftSessionTimer = null;
+            stashLiveCanvasDraft({ persistSession: true });
+        }, LIVE_DRAFT_SESSION_THROTTLE_MS);
+    };
+    if(liveDraftStashRaf) return;
+    if(typeof requestAnimationFrame === 'function'){
+        liveDraftStashRaf = requestAnimationFrame(() => {
+            requestAnimationFrame(run);
+        });
+    } else {
+        liveDraftStashRaf = 1;
+        setTimeout(run, 0);
+    }
+}
+function flushLiveCanvasDraftPersist(){
+    if(liveDraftStashRaf && typeof cancelAnimationFrame === 'function'){
+        cancelAnimationFrame(liveDraftStashRaf);
+        liveDraftStashRaf = 0;
+    }
+    if(liveDraftSessionTimer){
+        clearTimeout(liveDraftSessionTimer);
+        liveDraftSessionTimer = null;
+    }
+    stashLiveCanvasDraft({ persistSession: true });
 }
 function readLiveCanvasDraft(canvasId){
     if(!canvasId || typeof window === 'undefined') return null;
@@ -3517,7 +3614,7 @@ function adoptLiveCanvasDraft(serverCanvas){
 function scheduleSave(){
     if(!canvas || applyingRemoteCanvas || openingCanvas) return;
     localCanvasDirty = true;
-    stashLiveCanvasDraft();
+    scheduleStashLiveCanvasDraft();
     if(!saveTimer && !savingCanvasNow) setStatus('Saving...');
     clearTimeout(saveTimer);
     if(savingCanvasNow){
@@ -3530,7 +3627,7 @@ function scheduleSave(){
 function scheduleSaveNow(){
     if(!canvas || applyingRemoteCanvas || openingCanvas) return;
     localCanvasDirty = true;
-    stashLiveCanvasDraft();
+    flushLiveCanvasDraftPersist();
     clearTimeout(saveTimer);
     saveTimer = null;
     clearTimeout(viewportSaveTimer);
@@ -3586,7 +3683,7 @@ function flushCanvasSaveKeepalive(){
     viewportSaveTimer = null;
     try {
         pullFocusedEditableIntoModel();
-        stashLiveCanvasDraft();
+        flushLiveCanvasDraftPersist();
         sanitizeConnections();
         const nodePayload = serializableCanvasNodes();
         if(nodePayload.length === 0 && lastKnownSavedNodeCount > 0) return;
@@ -3706,8 +3803,10 @@ function slimHistoryEntryForSave(entry){
     const item = {...entry};
     if(item.run && typeof item.run === 'object'){
         const run = {...item.run};
-        // 历史里嵌入整颗 node 快照会把画布撑到百兆，刷新极慢
-        delete run.node;
+        // 历史里嵌入整颗 node 快照会把画布撑到百兆，刷新极慢；也会触发 Invalid string length
+        if(run.node && typeof run.node === 'object'){
+            run.node = slimRunSnapshotNode(run.node);
+        }
         if(run.request && typeof run.request === 'object'){
             const req = {...run.request};
             const wf = req.workflow_json;
@@ -3719,6 +3818,24 @@ function slimHistoryEntryForSave(entry){
         item.run = run;
     }
     return item;
+}
+/** 内存里也清掉历史嵌套膨胀（旧画布可能已埋下整颗 node） */
+function scrubGeneratorHistoryBloat(gen){
+    if(!isGenConsoleNode(gen) || !Array.isArray(gen.history) || !gen.history.length) return false;
+    let changed = false;
+    gen.history = gen.history.map(entry => {
+        const fatNode = entry?.run?.node;
+        const wasFat = fatNode && typeof fatNode === 'object' && (
+            Array.isArray(fatNode.history)
+            || Array.isArray(fatNode.previewRoundUrls)
+            || Array.isArray(fatNode.inputs)
+            || Object.keys(fatNode).length > 24
+        );
+        const slim = slimHistoryEntryForSave(entry);
+        if(wasFat) changed = true;
+        return slim;
+    });
+    return changed;
 }
 function serializableCanvasNode(node){
     const copy = {...(node || {})};
@@ -3736,6 +3853,7 @@ function serializableCanvasNode(node){
     delete copy._layoutW;
     delete copy._layoutH;
     delete copy._stageSlots;
+    delete copy._lightboxFocusUrl;
     if(Array.isArray(copy.history)){
         copy.history = copy.history.map(slimHistoryEntryForSave);
     }
@@ -3800,10 +3918,9 @@ async function saveCanvas(){
     savingCanvasNow = true;
     saveCanvasAgain = false;
     try {
-        const res = await apiFetch(`/api/canvases/${savedId}`, {
-            method:'PUT',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
+        let saveBody = '';
+        try {
+            saveBody = JSON.stringify({
                 title:savedTitle,
                 icon:savedIcon,
                 nodes:nodePayload,
@@ -3813,7 +3930,23 @@ async function saveCanvas(){
                 settings: savedSettings,
                 client_id:CLIENT_ID,
                 base_updated_at:savedBaseUpdatedAt
-            })
+            });
+        } catch(serErr) {
+            const msg = serErr instanceof Error ? serErr.message : String(serErr);
+            if(/Invalid string length/i.test(msg)){
+                nodes.filter(n => isGenConsoleNode(n)).forEach(scrubGeneratorHistoryBloat);
+                setStatus(langIsEn()
+                    ? 'Save blocked: canvas data too large (history bloat scrubbed — retry)'
+                    : '保存被拦：画布数据过大（已清理历史膨胀，请再试一次）');
+                localCanvasDirty = true;
+                return;
+            }
+            throw serErr;
+        }
+        const res = await apiFetch(`/api/canvases/${savedId}`, {
+            method:'PUT',
+            headers:{'Content-Type':'application/json'},
+            body: saveBody
         });
         if(canvas?.id !== savedId){
             // 已切到别的画布：磁盘写的是旧板，忽略回包
@@ -3888,14 +4021,14 @@ async function saveCanvas(){
         canvasSaveConflictRetries = 0;
         localCanvasDirty = Boolean(saveCanvasAgain);
         if(!localCanvasDirty) clearLiveCanvasDraft(canvas.id);
-        else stashLiveCanvasDraft();
+        else stashLiveCanvasDraft({ persistSession: true });
         if(currentCanvasTime) currentCanvasTime.textContent = formatCanvasTime(canvas.updated_at);
         setStatus('Saved');
     } catch(e) {
         if(canvas?.id === savedId){
             setStatus('Save failed');
             console.error(e);
-            stashLiveCanvasDraft();
+            stashLiveCanvasDraft({ persistSession: true });
         }
     } finally {
         savingCanvasNow = false;
@@ -4902,6 +5035,7 @@ async function createCanvas(){
         migrateLegacyTextViewNodes();
         migrateImageBatchNodes();
         migratePromptGroupNodes();
+        nodes.filter(n => isGenConsoleNode(n)).forEach(scrubGeneratorHistoryBloat);
         syncAllLoopImageBatchSizes();
         selected.clear();
         setCanvasMode(true);
@@ -5094,6 +5228,7 @@ async function openCanvas(id, options = {}){
         migrateLegacyTextViewNodes();
         migrateImageBatchNodes();
         migratePromptGroupNodes();
+        nodes.filter(n => isGenConsoleNode(n)).forEach(scrubGeneratorHistoryBloat);
         syncAllLoopImageBatchSizes();
         nodes.filter(n => n.type === 'replicaAgent').forEach(syncReplicaAgentRoles);
         pruneMissingComfyWorkflows();
@@ -5244,6 +5379,7 @@ function applyRemoteCanvasData(remote, opts = {}){
         migrateLegacyTextViewNodes();
         migrateImageBatchNodes();
         migratePromptGroupNodes();
+        nodes.filter(n => isGenConsoleNode(n)).forEach(scrubGeneratorHistoryBloat);
         syncAllLoopImageBatchSizes();
         pruneMissingComfyWorkflows();
         // 保留仍存在的选中，避免远程同步把 gen-dock 拆掉（打字中尤其明显）
@@ -5703,10 +5839,18 @@ bindCanvasMenuWheelScroll();
 }
 
 
+let silentAddNodeDepth = 0;
+function withSilentAddNode(fn){
+    silentAddNodeDepth += 1;
+    try { return fn(); }
+    finally { silentAddNodeDepth -= 1; }
+}
 function addNode(node){
     if(!ensureCanvas()) return;
     nodes.push(node);
-    render();
+    // 拉线新建等：先凑齐连线再统一挂载/save，避免双倍整板重画
+    if(silentAddNodeDepth > 0) return node;
+    commitStructureDomPatch({ addedIds: [node.id] });
     scheduleSave();
     const freshEl = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
     if(freshEl) freshEl.classList.add('node-just-added');
@@ -8056,24 +8200,28 @@ function createLinkedNode(type){
     const origin = nodes.find(n => n.id === state.originId);
     if(!origin) return;
     pushUndo();
-    const created = createNodeByType(type, state.point);
+    const created = withSilentAddNode(() => createNodeByType(type, state.point));
     if(!created) return;
     const fromId = state.originKind === 'out' ? origin.id : created.id;
     const toId = state.originKind === 'out' ? created.id : origin.id;
     const fromNode = nodes.find(n => n.id === fromId);
     const toNode = nodes.find(n => n.id === toId);
     if(fromNode && toNode) ensureLoopAcceptsConnection(fromNode, toNode);
+    const refreshIds = [];
     if(canConnect(fromId, toId) && !connections.some(c => c.from === fromId && c.to === toId)){
         connections.push({id:uid('c'), from:fromId, to:toId});
         if(toNode?.type === 'loop') syncLoopImageBatchSize(toNode);
         syncGeneratorInputs();
-        scheduleSave();
-        render();
-        // 拉线新建后图台可能随上游参考变宽，强制再贴一次控制台
-        const genId = isGenConsoleNode(toNode) ? toId : (isGenConsoleNode(fromNode) ? fromId : '');
-        if(genId) resyncGenFrameAfterLinkChange(genId);
-        else resyncGenFrameAfterLinkChange(toId);
+        if(isGeneratorLikeNode(fromNode)) refreshIds.push(fromId);
+        if(isGeneratorLikeNode(toNode)) refreshIds.push(toId);
     }
+    commitStructureDomPatch({ addedIds: [created.id], refreshIds });
+    scheduleSave();
+    const freshEl = nodesEl?.querySelector(`.node[data-id="${CSS.escape(created.id)}"]`);
+    if(freshEl) freshEl.classList.add('node-just-added');
+    const genId = isGenConsoleNode(toNode) ? toId : (isGenConsoleNode(fromNode) ? fromId : '');
+    if(genId) resyncGenFrameAfterLinkChange(genId);
+    else resyncGenFrameAfterLinkChange(toId);
 }
 function createNodeByType(type, point){
     if(type === 'image') return addImageNode(point);
@@ -11554,6 +11702,7 @@ function generatorHistoryLightboxSource(node){
 }
 function openGeneratorHistoryLightbox(node, url){
     if(!url) return;
+    if(node && isGenConsoleNode(node)) node._lightboxFocusUrl = outputUrlValue(url);
     openOutputLightbox(url, generatorHistoryLightboxSource(node));
 }
 function genHistoryCardActionsHtml(url, item){
@@ -16775,8 +16924,8 @@ function isGenConsoleNode(node){
     // generator / video 完整 Gen Console；msgen 旧画布兼容但菜单隐藏；rh 保持节点内原 UI；ltx/comfy 明确不做
     return node && (node.type === 'generator' || node.type === 'msgen' || node.type === 'video');
 }
-const MAX_GEN_PREVIEW = 24;
-const MAX_GEN_HISTORY = 48;
+const MAX_GEN_PREVIEW = 120;
+const MAX_GEN_HISTORY = 120;
 let genHistoryPanelEl = null;
 let genHistoryPanelNodeId = null;
 
@@ -16865,11 +17014,12 @@ function clampGeneratorPreviewIndex(gen){
 }
 function resetGeneratorPreviewRound(gen){
     if(!isGenConsoleNode(gen)) return;
-    // 新一轮生成不清空整库 history，只重置本轮预览指针由 append 接管
-    gen.historyOpen = false;
+    // 新一轮生成：保留展开网格（避免「点生成整页跳成叠卡」）；只清本轮比例/主图钉
+    // 不改 historyOpen
     delete gen._stageAspect;
     delete gen.primaryPinned;
     delete gen.primaryUrl;
+    delete gen._lightboxFocusUrl;
 }
 /** 在预览列表里按 URL 定位（兼容 outputUrlValue 归一化） */
 function genStageFindPreviewIndex(urls, url){
@@ -17673,6 +17823,7 @@ function bindGenStageInteractions(root, node){
             e.stopPropagation();
             applyNodeSelection(node.id, e);
             const url = hero.getAttribute('data-preview-url') || '';
+            if(url) node._lightboxFocusUrl = outputUrlValue(url);
             const urls = generatorPreviewUrls(node);
             const idx = Math.max(0, urls.indexOf(url));
             openResultsMenu(e.clientX, e.clientY, {url, previewIndex: idx >= 0 ? idx : Number(node.previewIndex || 0)});
@@ -17733,6 +17884,7 @@ function bindGenStageInteractions(root, node){
             e.stopPropagation();
             applyNodeSelection(node.id, e);
             const url = tile.getAttribute('data-preview-url') || '';
+            if(url) node._lightboxFocusUrl = outputUrlValue(url);
             const idx = Number(tile.dataset.previewIndex || 0);
             openResultsMenu(e.clientX, e.clientY, {url, previewIndex: idx});
         };
@@ -17748,13 +17900,16 @@ function bindGenStageInteractions(root, node){
             e.stopPropagation();
             applyNodeSelection(node.id, e);
             const url = tile.getAttribute('data-preview-url') || '';
-            // 单击不设主图；设主图仅右键菜单 / 「设为主图」按钮
+            if(url) node._lightboxFocusUrl = outputUrlValue(url);
+            // 单击不设主图；批量勾选除外。普通单击直接预览当前格（点哪看哪）
             if(isGenBatchPicking(node)){
                 if(toggleGenBatchPickUrl(url)){
                     refresh();
                     syncGenBatchPickBar();
                 }
+                return;
             }
+            if(url) openGeneratorHistoryLightbox(node, url);
         };
         const media = tile.querySelector('img, video');
         const url = tile.getAttribute('data-preview-url') || media?.getAttribute('src') || '';
@@ -17914,11 +18069,13 @@ function renderGenStageHtml(node){
         : (pendingN > 1
             ? (langIsEn() ? `Generating (${pendingN})…` : `生成中 (${pendingN})…`)
             : (langIsEn() ? 'Generating…' : '生成中…'));
-    // 收起态：底图模糊 + 律动波纹（不用 lite 空胶囊）
+    // 收起态：底图保持可读，底部状态条（不糊整图、不居中小胶囊）
     const busyOverlay = (isBusy && !showGrid)
         ? `<div class="gen-stage-busy gen-stage-busy-collapsed" aria-live="polite">
-            <div class="output-pending-waves" aria-hidden="true"><span></span><span></span><span></span></div>
-            <span class="gen-stage-busy-label">${escapeHtml(busyLabel)}</span>
+            <div class="gen-stage-busy-bar">
+                <span class="gen-stage-busy-dot" aria-hidden="true"></span>
+                <span class="gen-stage-busy-label">${escapeHtml(busyLabel)}</span>
+            </div>
         </div>`
         : '';
     const emptyIcon = node.type === 'video' ? 'clapperboard' : 'image';
@@ -18311,7 +18468,11 @@ function expandGenStageResultsToGeneratorNodes(sourceId){
     selected.clear();
     if(primaryChildId) selected.add(primaryChildId);
     syncGeneratorInputs();
-    commitCanvasStructureEdit();
+    commitStructureDomPatch({
+        addedIds: createdIds,
+        removedIds: [source.id],
+        refreshIds: outgoing.map(c => c.to).filter(Boolean),
+    });
     scheduleSave();
 }
 function genDockRatioOptions(node){
@@ -18516,6 +18677,18 @@ function renderGeneratorBody(node){
     refreshGenStage(wrap, node);
     refreshIcons(wrap);
     return wrap;
+}
+/** 拖动当前挂着控制台的生图节点时：收起 dock（不销毁），松手再展开 */
+function dragTouchesImageGenDock(){
+    if(!dragNode?.node || !imageGenDockNodeId) return false;
+    if(dragNode.node.id === imageGenDockNodeId) return true;
+    return (dragNode.children || []).some(c => c?.node?.id === imageGenDockNodeId);
+}
+function collapseImageGenDockForDrag(){
+    if(!imageGenDockEl || !dragTouchesImageGenDock()) return;
+    imageGenDockEl.hidden = true;
+    imageGenDockEl.setAttribute('aria-hidden', 'true');
+    imageGenDockEl.style.pointerEvents = 'none';
 }
 function removeImageGenDock(){
     if(imageGenDockEl?.__sizeOutsideClose){
@@ -18917,6 +19090,12 @@ function syncImageGenDock(){
         removeImageActionBar();
         return;
     }
+    // 拖动中保持收起，避免中途 remount/定位把控制台又拉出来
+    if(dragNode?.chromeActive && dragTouchesImageGenDock()){
+        collapseImageGenDockForDrag();
+        syncImageActionBar();
+        return;
+    }
     const onlyId = selected.size === 1 ? [...selected][0] : null;
     const only = onlyId ? nodes.find(n => n.id === onlyId) : null;
     const isGen = only && isGenConsoleNode(only);
@@ -18970,18 +19149,25 @@ function resolveImageActionBarTarget(node){
         return {kind:'image', node, url, histItem:{url}};
     }
     if(!isGenConsoleNode(node)) return null;
-    const urls = generatorPreviewUrls(node).filter(u => u && !isMissingAssetUrl(u) && !isVideoUrl(u) && !isAudioUrl(u));
-    if(!urls.length) return null;
     const all = generatorPreviewUrls(node);
-    let previewIndex = Math.max(0, Math.min(all.length - 1, Number(node.previewIndex ?? 0)));
-    let url = all[previewIndex] || '';
+    const imageUrls = all.filter(u => u && !isMissingAssetUrl(u) && !isVideoUrl(u) && !isAudioUrl(u));
+    if(!imageUrls.length) return null;
+    // 优先：用户刚点过的格子；否则封面/主图
+    const focusUrl = outputUrlValue(node._lightboxFocusUrl);
+    const coverUrl = genStageCollapsedDisplayUrl(node, all);
+    let previewIndex = focusUrl ? genStageFindPreviewIndex(all, focusUrl) : -1;
+    if(previewIndex < 0) previewIndex = genStageFindPreviewIndex(all, coverUrl);
+    if(previewIndex < 0){
+        previewIndex = Math.max(0, Math.min(all.length - 1, Number(node.previewIndex ?? all.length - 1)));
+    }
+    let url = all[previewIndex] || coverUrl || focusUrl || '';
     if(!url || isMissingAssetUrl(url) || isVideoUrl(url) || isAudioUrl(url)){
-        url = urls[urls.length - 1] || urls[0] || '';
-        previewIndex = all.indexOf(url);
+        url = imageUrls[imageUrls.length - 1] || imageUrls[0] || '';
+        previewIndex = genStageFindPreviewIndex(all, url);
     }
     if(!url) return null;
-    const histItem = generatorHistoryItems(node).find(x => x.url === url) || {url};
-    return {kind:'gen', node, url, previewIndex, histItem};
+    const histItem = generatorHistoryItems(node).find(x => outputUrlValue(x.url) === outputUrlValue(url)) || {url};
+    return {kind:'gen', node, url, previewIndex: Math.max(0, previewIndex), histItem};
 }
 function removeImageActionBar(){
     imageActionBarEl?.remove();
@@ -21753,6 +21939,8 @@ function syncGeneratorDockFieldsIntoNode(gen){
 async function runGenerator(genId, opts={}){
     const gen = nodes.find(n => n.id === genId);
     if(!gen || isNodeDisabled(gen)) return;
+    // 旧历史可能嵌了整颗 node；先瘦身，避免本次 runSnapshot/save 再炸 Invalid string length
+    if(scrubGeneratorHistoryBloat(gen)) scheduleSave();
     syncGeneratorDockFieldsIntoNode(gen);
     pullFocusedEditableIntoModel();
     // 循环必须显式传 loopContext；禁止吃全局残留（否则图片组会退化为「多参考出一张」）
@@ -23233,12 +23421,22 @@ function deleteNode(id, event){
     event?.stopPropagation();
     if(!nodes.some(n => n.id === id)) return;
     try { pushUndo(); } catch(err) { console.warn('[infinite-canvas] undo snapshot failed', err); }
+    const neighborIds = connections
+        .filter(c => c.from === id || c.to === id)
+        .flatMap(c => [c.from, c.to])
+        .filter(nid => nid && nid !== id);
+    const owningGroups = nodes
+        .filter(n => (n.type === 'group' || n.type === 'promptGroup' || n.type === 'imageBatch') && (n.items || []).includes(id))
+        .map(n => n.id);
     purgeNodeFromGroups(id);
     destroyLTXEditor(nodes.find(n => n.id === id));
     nodes = nodes.filter(n => n.id !== id);
     connections = connections.filter(c => c.from !== id && c.to !== id);
     selected.delete(id);
-    commitCanvasStructureEdit();
+    syncGeneratorInputs();
+    const refreshIds = [...new Set([...neighborIds, ...owningGroups])]
+        .filter(nid => nodes.some(n => n.id === nid));
+    commitStructureDomPatch({ removedIds: [id], refreshIds });
     scheduleSave();
 }
 function clearNodeContentBeforeDelete(id){
@@ -23271,11 +23469,11 @@ function deleteConnection(id, event){
     connections = connections.filter(c => c.id !== id);
     if(hoveredConnectionId === id) hoveredConnectionId = '';
     syncGeneratorInputs();
-    syncCanvasModelFromState();
-    ensureLiveCanvasDom();
-    syncLinkDomToConnections();
-    render({ force: true });
-    refreshGeometryAfterLayout();
+    const refreshIds = [removed.from, removed.to].filter(nid => {
+        const n = nodes.find(x => x.id === nid);
+        return n && (isGeneratorLikeNode(n) || n.type === 'loop');
+    });
+    commitStructureDomPatch({ refreshIds });
     if(removed.to) resyncGenFrameAfterLinkChange(removed.to);
     scheduleSave();
 }
@@ -23336,15 +23534,29 @@ function outputMetaFor(url, out){
     const item = list.find(x => outputUrlValue(x) === url);
     return item && typeof item === 'object' ? item : {};
 }
+function slimRunSnapshotNode(node){
+    if(!node || typeof node !== 'object') return {};
+    // 只留任务标签/回显需要的字段；禁止嵌入 history/preview（会嵌套膨胀到 Invalid string length）
+    return {
+        id: node.id,
+        type: node.type,
+        model: node.model,
+        apiProvider: node.apiProvider,
+        msCustomModel: node.msCustomModel,
+        msgenModel: node.msgenModel,
+        mode: node.mode,
+        comfyWorkflow: node.comfyWorkflow,
+        webappId: node.webappId,
+        workflowId: node.workflowId,
+        ratio: node.ratio,
+        resolution: node.resolution,
+        quality: node.quality,
+    };
+}
 function runSnapshot(node, prompt, refs=[]){
-    const clone = JSON.parse(JSON.stringify(node || {}));
-    delete clone.running;
-    delete clone.runStatus;
-    delete clone.runError;
-    delete clone.inputs;
     return {
         nodeType: node?.type || '',
-        node: clone,
+        node: slimRunSnapshotNode(node),
         prompt: prompt || '',
         refs: (refs || []).map(ref => ({url:ref.url, name:ref.name || 'image'})).filter(ref => ref.url),
     };
@@ -24097,10 +24309,22 @@ async function createCanvasImageTask(payload){
         canvas_id: payload?.canvas_id || canvas?.id || '',
         node_id: payload?.node_id || '',
     };
+    let raw = '';
+    try {
+        raw = JSON.stringify(body);
+    } catch(err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if(/Invalid string length/i.test(msg)){
+            throw new Error(langIsEn()
+                ? 'Generation request is too large (reference/history data). Try fewer refs or a lighter canvas.'
+                : '生图请求过大（参考图/历史数据膨胀）。请减少参考图或换轻量画布后再试。');
+        }
+        throw err;
+    }
     const res = await apiFetch('/api/canvas-image-tasks', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(body)
+        body: raw
     });
     if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.generationFailed')));
     return res.json();
@@ -24843,7 +25067,28 @@ function markOutputViewed(out, url){
 function outputLightboxSourceList(out){
     const node = out?.id ? nodes.find(n => n.id === out.id) || out : out;
     if(!node) return [];
-    if(isGenConsoleNode(node)) return generatorHistoryItems(node);
+    if(isGenConsoleNode(node)){
+        // 与格子 DOM 一致：有 _stageSlots 时按槽位序；否则按预览列表（旧→新）
+        const hist = generatorHistoryItems(node);
+        const byUrl = new Map();
+        hist.forEach(item => {
+            const u = outputUrlValue(item?.url);
+            if(u && !byUrl.has(u)) byUrl.set(u, item);
+        });
+        let urls = [];
+        if(Array.isArray(node._stageSlots) && node._stageSlots.length){
+            urls = node._stageSlots
+                .filter(s => s?.kind === 'url' && s.url)
+                .map(s => outputUrlValue(s.url))
+                .filter(Boolean);
+        }
+        if(!urls.length) urls = generatorPreviewUrls(node);
+        return urls.map(url => {
+            const u = outputUrlValue(url);
+            const hit = byUrl.get(u);
+            return hit ? {...hit, url: u} : {url: u};
+        }).filter(item => item.url);
+    }
     if(node.type === 'imageBatch'){
         return imageBatchChildImages(node).map(img => ({url: img.url, name: img.name || 'image'}));
     }
@@ -24871,7 +25116,8 @@ function navigateOutputLightbox(direction){
     const out = currentOutputLightboxOutId ? nodes.find(n => n.id === currentOutputLightboxOutId) : null;
     const items = outputLightboxItems(out);
     if(items.length < 2) return false;
-    let idx = items.findIndex(item => item.url === currentOutputLightboxUrl);
+    const urls = items.map(item => item.url);
+    let idx = genStageFindPreviewIndex(urls, currentOutputLightboxUrl);
     if(idx < 0) idx = 0;
     const next = items[(idx + direction + items.length) % items.length];
     const nextOut = next.outId ? nodes.find(n => n.id === next.outId) : null;
@@ -25635,14 +25881,28 @@ function connectSelectionToGenerator(kind, genId){
     resyncGenFrameAfterLinkChange(genId);
 }
 
+function cloneCanvasHistoryPayload(){
+    const nodeSnap = serializableCanvasNodes();
+    const connSnap = connections || [];
+    try {
+        if(typeof structuredClone === 'function'){
+            return { nodes: structuredClone(nodeSnap), connections: structuredClone(connSnap) };
+        }
+    } catch(_) { /* fall through */ }
+    return {
+        nodes: JSON.parse(JSON.stringify(nodeSnap)),
+        connections: JSON.parse(JSON.stringify(connSnap)),
+    };
+}
 function pushUndo(){
     if(!canvas) return;
-    undoStack.push({nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))});
+    // 必须在调用方 mutate 前同步快照；structuredClone 通常比 JSON round-trip 轻
+    undoStack.push(cloneCanvasHistoryPayload());
     if(undoStack.length > UNDO_MAX) undoStack.shift();
     redoStack = [];
 }
 function snapshotCanvasState(){
-    return {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+    return cloneCanvasHistoryPayload();
 }
 function applyCanvasHistoryState(state){
     nodes = state.nodes;
@@ -25851,6 +26111,7 @@ function onNodePointerMove(e){
     if(!dragNode.chromeActive){
         dragNode.chromeActive = true;
         withCanvasRootClass(list => list.add('canvas-node-drag'));
+        collapseImageGenDockForDrag();
     }
     onNodeDrag(e);
 }
@@ -25887,6 +26148,7 @@ function startNodeDrag(e, node){
     if(duplicateCreated){
         dragNode = {...payload, chromeActive: true};
         pendingNodeDrag = null;
+        collapseImageGenDockForDrag();
     } else {
         applyNodeSelection(dragTarget.id, e);
         pendingNodeDrag = payload;
@@ -25921,7 +26183,8 @@ function onNodeDrag(e){
     updateGroupDropHighlights([dragNode.node, ...(dragNode.children || []).map(c => c.node)], lastMouseBoard);
     scheduleLinkGeometryRefresh(movingIds);
     scheduleMinimapRender({ positionsOnly: true });
-    if(imageGenDockNodeId && movingIds.has(imageGenDockNodeId)){
+    // 拖动中控制台已收起，不必每帧跟位
+    if(imageGenDockNodeId && movingIds.has(imageGenDockNodeId) && imageGenDockEl && !imageGenDockEl.hidden){
         const dockNode = nodes.find(n => n.id === imageGenDockNodeId);
         if(dockNode) positionImageGenDock(dockNode);
     }
@@ -26041,10 +26304,11 @@ function finishTempLink(e){
         cancelTempLink();
     }
     if(needsRender){
-        syncCanvasModelFromState();
-        render({ force: true });
-        syncLinkDomToConnections();
-        refreshGeometryAfterLayout();
+        const fromId = originKind === 'out' ? originId : target?.dataset?.id;
+        const toId = originKind === 'out' ? target?.dataset?.id : originId;
+        commitStructureDomPatch({
+            refreshIds: [fromId, toId].filter(Boolean),
+        });
     } else if(tempLink){
         refreshTempLinkDom();
     } else {
@@ -26333,6 +26597,10 @@ function endDrag(event=null){
     if(shouldRenderKnife) safeRender({ force: true });
     if(boardPanMoved || nodeDragMoved || resizeMoved) lastBoardInteractionAt = Date.now();
     clearGroupDropHighlights();
+    // 松手后展开生图控制台（拖动中曾收起）
+    if(nodeState?.chromeActive || nodeDragMoved){
+        requestAnimationFrame(() => syncImageGenDock());
+    }
     if(nodeDragMoved || resizeMoved || nodeState?.duplicateCreated){
         scheduleNodeDragSave();
         requestAnimationFrame(() => {
@@ -27706,10 +27974,16 @@ function deleteSelectedNodes(){
     selected.forEach(collect);
     toDelete.forEach(id => purgeNodeFromGroups(id));
     toDelete.forEach(id => destroyLTXEditor(nodes.find(n => n.id === id)));
+    const neighborIds = connections
+        .filter(c => toDelete.has(c.from) || toDelete.has(c.to))
+        .flatMap(c => [c.from, c.to])
+        .filter(nid => nid && !toDelete.has(nid));
     nodes = nodes.filter(n => !toDelete.has(n.id));
     connections = connections.filter(c => !toDelete.has(c.from) && !toDelete.has(c.to));
     selected.clear();
-    commitCanvasStructureEdit();
+    syncGeneratorInputs();
+    const refreshIds = [...new Set(neighborIds)].filter(nid => nodes.some(n => n.id === nid));
+    commitStructureDomPatch({ removedIds: [...toDelete], refreshIds });
     scheduleSave();
 }
 function hasImageFiles(items){
@@ -27993,7 +28267,7 @@ export function disposeInfiniteCanvasEngine({ preserveEditor = false } = {}) {
     imageEditFocusNodeId = '';
     forceClearImageEditChrome();
   } catch(_) {}
-  try { stashLiveCanvasDraft(); } catch(_) {}
+  try { flushLiveCanvasDraftPersist(); } catch(_) {}
   try { flushCanvasSaveKeepalive(); } catch(_) {}
   stopCanvasRemotePolling();
   if(outputTimer){

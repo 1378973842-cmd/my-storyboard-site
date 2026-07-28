@@ -1809,50 +1809,72 @@
   background:transparent;
   backdrop-filter:none;
 }
-/* 收起态生成中：只糊表面主图；波纹/文案盖在 hero 上，避免整框 backdrop 把扇叠底层再糊一层 */
+/* 收起态：底图清晰，仅底部压暗 + 状态条 */
 .gen-stage-busy.gen-stage-busy-collapsed {
-  background:rgba(14,14,14,.18);
+  align-items:flex-end;
+  justify-content:center;
+  padding:0 12px 12px;
+  background:linear-gradient(to top, rgba(14,14,14,.58) 0%, rgba(14,14,14,.18) 38%, transparent 62%);
   backdrop-filter:none;
 }
 .gen-stage-stack-hero > .gen-stage-busy {
   z-index:5;
   border-radius:inherit;
-  background:rgba(14,14,14,.22);
 }
-.gen-stage-busy.gen-stage-busy-collapsed .output-pending-waves {
-  opacity:1;
+.gen-stage-stack-hero > .gen-stage-busy.gen-stage-busy-collapsed {
+  background:linear-gradient(to top, rgba(14,14,14,.58) 0%, rgba(14,14,14,.18) 38%, transparent 62%);
 }
+/* 生成中不再糊掉主图 */
 .gen-stage.is-busy:not(.is-grid) .gen-stage-stack-hero img,
 .gen-stage.is-busy:not(.is-grid) .gen-stage-stack-hero video,
 .gen-stage.is-busy:not(.is-grid) .gen-stage-hero img,
 .gen-stage.is-busy:not(.is-grid) .gen-stage-hero video {
-  filter:blur(7px) saturate(.88) brightness(.92);
-  transform:scale(1.06);
-  transition:filter .35s ease, transform .45s cubic-bezier(.22,.61,.36,1);
+  filter:none;
+  transform:none;
+  transition:filter .25s ease, transform .25s ease;
 }
 .gen-stage.is-busy.is-empty .gen-stage-empty {
-  filter:blur(3px);
-  opacity:.55;
+  opacity:.7;
 }
 .gen-stage-busy .output-pending-waves { opacity:.9; }
+.gen-stage-busy-bar {
+  position:relative; z-index:3;
+  display:inline-flex; align-items:center; gap:8px;
+  height:30px; padding:0 12px 0 10px;
+  border-radius:999px;
+  background:rgba(28,27,27,.72);
+  backdrop-filter:blur(20px);
+  outline:0.5px solid rgba(255,184,102,.28);
+  box-shadow:0 12px 40px -16px rgba(0,0,0,.55);
+}
+.gen-stage-busy-dot {
+  width:7px; height:7px; border-radius:50%;
+  background:#ffb866;
+  box-shadow:0 0 0 0 rgba(255,184,102,.45);
+  animation:genBusyDotPulse 1.4s ease-out infinite;
+  flex:none;
+}
+@keyframes genBusyDotPulse {
+  0% { box-shadow:0 0 0 0 rgba(255,184,102,.5); opacity:1; }
+  70% { box-shadow:0 0 0 8px rgba(255,184,102,0); opacity:.85; }
+  100% { box-shadow:0 0 0 0 rgba(255,184,102,0); opacity:1; }
+}
 .gen-stage-busy-label {
   position:relative; z-index:3;
-  height:28px; padding:0 12px;
-  border-radius:999px;
   display:inline-flex; align-items:center;
-  background:rgba(14,14,14,.62);
-  backdrop-filter:blur(16px);
   color:#e5e2e1;
   font-family:"Manrope",sans-serif;
-  font-size:11px; font-weight:700; letter-spacing:.04em;
+  font-size:12px; font-weight:700; letter-spacing:.06em;
+  text-transform:none;
+}
+/* 非收起态仍可能单独用 label 胶囊 */
+.gen-stage-busy:not(.gen-stage-busy-collapsed) > .gen-stage-busy-label {
+  height:28px; padding:0 12px;
+  border-radius:999px;
+  background:rgba(14,14,14,.62);
+  backdrop-filter:blur(16px);
+  font-size:11px; letter-spacing:.04em;
   outline:0.5px solid rgba(255,184,102,.22);
-}
-.gen-stage-busy-collapsed .gen-stage-busy-label {
-  animation:genBusyLabelPulse 1.8s ease-in-out infinite;
-}
-@keyframes genBusyLabelPulse {
-  0%, 100% { opacity:.88; transform:scale(1); }
-  50% { opacity:1; transform:scale(1.03); }
 }
 .gen-dock-send-spin {
   animation:gen-dock-send-spin 0.9s linear infinite;

@@ -1,15 +1,17 @@
 # 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  1. **deploy 分支已提交**：**AG37–AG57**（裁剪/画笔、端口磁吸、选中环、侧栏炭灰、开板/禁用性能、生图串板隔离、冲突合并自检等）。
-  2. 大板仍可能因整板 `render` + 序列化变卡；暂不改架构，可用新开轻板规避。
-- **验证状态**：硬刷后确认开板首屏、禁用即时变灰、端口半圆磁吸、画笔应用后无需刷新可见。
-- **明日焦点**：AG25；或按需做局部 DOM 更新减轻大板卡顿。
+  1. **已部署上线** `3680ed6`：**AG37–AG57**。
+  2. **本地未提交 AG58–AG65**：
+     - AG62–AG64：性能第一步、Invalid string length、方阵网格
+     - **AG65 性能第二步**：`commitStructureDomPatch`——`addNode` / `deleteNode` / `deleteSelectedNodes` / `createLinkedNode` / `deleteConnection` / 拉线落点 / 展开拆图 走局部挂载；失败回退整板 `commitCanvasStructureEdit`。保存仍 `scheduleSave`。
+- **验证状态**：硬刷大板——删节点、拉出生图、断线应明显少整板闪；若异常会 console 打 fallback。
+- **明日焦点**：确认后 commit + deploy。
 - **Blockers**：无。
 
 ## 新对话开场白（复制给 Agent）
 
 ```
 继续 gemini-deploy。先读 docs/HANDOFF.md。
-AG37–AG57 已上 deploy；下一优先 AG25，或大板局部更新性能。
+AG58–AG65 本地未部署（含局部 DOM 第二步）。确认后上线。
 ```

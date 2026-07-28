@@ -156,7 +156,15 @@
         { "id": "AG54", "desc": "交互：端口圆点吸附十字中心；图/生图选中环加强；悬停手型/按住抓取", "status": "done", "priority": 75 },
         { "id": "AG55", "desc": "交互：端口磁吸/命中改为朝外半圆，圆点不可被拖进图片内侧", "status": "done", "priority": 76 },
         { "id": "AG56", "desc": "修：端口磁吸时空白 board 仍保持十字（勿被 default 盖回箭头）+ 半圆略放大", "status": "done", "priority": 77 },
-        { "id": "AG57", "desc": "性能：开板先首屏再查资源；禁用轻量 DOM 补丁；静帧图复用+lazy", "status": "done", "priority": 78 }
+        { "id": "AG57", "desc": "性能：开板先首屏再查资源；禁用轻量 DOM 补丁；静帧图复用+lazy", "status": "done", "priority": 78 },
+        { "id": "AG58", "desc": "交互：拖动生图节点时收起底部控制台，松手后再展开", "status": "done", "priority": 79 },
+        { "id": "AG59", "desc": "UI：生成中收起态去掉整图模糊，改为底部琥珀状态条", "status": "done", "priority": 80 },
+        { "id": "AG60", "desc": "修：预览放大对齐封面URL；左右键按画布预览列表（旧→新）切换", "status": "done", "priority": 81 },
+        { "id": "AG61", "desc": "修：网格固定≤4列少跳格；生成不收起展开；预览点哪看哪；上限24→120", "status": "done", "priority": 82 },
+        { "id": "AG62", "desc": "性能第一步：拉线新建去双倍render；草稿延后+session节流；undo用structuredClone", "status": "done", "priority": 83 },
+        { "id": "AG63", "desc": "修：生图 Invalid string length——runSnapshot 不再整颗深拷贝节点；开板/开跑 scrub 历史膨胀", "status": "done", "priority": 84 },
+        { "id": "AG64", "desc": "UI：生图网格列数改√n趋近方阵（上限8），避免固定4列细长条", "status": "done", "priority": 85 },
+        { "id": "AG65", "desc": "性能第二步：删/建/拉线/断线走局部DOM挂载，失败才回退整板render", "status": "done", "priority": 86 }
       ]
     },
     {
