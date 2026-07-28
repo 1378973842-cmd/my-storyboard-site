@@ -1,11 +1,12 @@
 # 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  1. **已部署上线** `3680ed6`：**AG37–AG57**。
-  2. **本地未提交 AG58–AG65**：
-     - AG62–AG64：性能第一步、Invalid string length、方阵网格
-     - **AG65 性能第二步**：`commitStructureDomPatch`——`addNode` / `deleteNode` / `deleteSelectedNodes` / `createLinkedNode` / `deleteConnection` / 拉线落点 / 展开拆图 走局部挂载；失败回退整板 `commitCanvasStructureEdit`。保存仍 `scheduleSave`。
-- **验证状态**：硬刷大板——删节点、拉出生图、断线应明显少整板闪；若异常会 console 打 fallback。
+  1. **已推送** `f528b74`：**AG58–AG65**。
+  2. **本地未提交 AG66–AG69**：
+     - AG66–AG67：粘贴落点、历史 hub
+     - AG68：素材库主/子文件夹 + 行内编辑
+     - **AG69**：主页「我的收藏」迁入素材库顶部（收藏 → 分隔线 → 文件夹）；顶栏入口改为进画布并打开素材库收藏。
+- **验证状态**：开素材库点「收藏」应列出星标成片；顶栏不再显示「我的收藏」。
 - **明日焦点**：确认后 commit + deploy。
 - **Blockers**：无。
 
@@ -13,5 +14,5 @@
 
 ```
 继续 gemini-deploy。先读 docs/HANDOFF.md。
-AG58–AG65 本地未部署（含局部 DOM 第二步）。确认后上线。
+AG66–AG69 本地未部署。确认后上线。
 ```

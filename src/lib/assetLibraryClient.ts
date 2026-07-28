@@ -9,6 +9,7 @@ export type AssetLibraryCategory = {
   id: string;
   name: string;
   type: string;
+  parent_id?: string | null;
   items: AssetLibraryItem[];
 };
 
@@ -31,12 +32,12 @@ export async function fetchAssetLibrary(): Promise<AssetLibraryDoc> {
   return data.library as AssetLibraryDoc;
 }
 
-export async function createAssetCategory(name: string) {
+export async function createAssetCategory(name: string, parentId?: string | null) {
   const res = await fetch('/api/asset-library/categories', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, parent_id: parentId || null }),
   });
   return parseJson(res);
 }

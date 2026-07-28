@@ -428,6 +428,13 @@ let outputLightbox, outputPreview, outputLightboxImg, outputCompareContainer, ou
 let outputCompareOriginal, outputCompareOriginalWrap, outputCompareSlider, outputResolution;
 let outputDownloadBtn, outputFavoriteBtn, outputLightboxVideo, outputPromptPanel, outputPromptText, outputCopyPromptBtn;
 let outputRerunBtn, logModal, logList, logSearchInput, logModalCount, logClearBar, logClearBtn, logClearCancel, logClearConfirm, errorModal, errorTitle, errorMessage;
+let historyLibraryPane, historyLogsPane, historyLibraryList, historyLibrarySearch, historyHubTitle;
+let historyHubTitleText, historyLibraryControls, historyLibraryZoom, historyLibrarySortBtn;
+let historyHubTab = 'library';
+let historyLibraryItems = [];
+let historyLibraryLoadTimer = 0;
+let historyLibraryTileSize = 112;
+let historyLibrarySortDesc = true; // true = 新→旧，对齐参考默认
 let workflowTemplateSearchInput, workflowTemplateTitleInput, workflowTemplateDescInput;
 let workflowTemplateSaveForm, workflowTemplateSaveCancel, workflowTemplateSaveConfirm;
 let workflowTemplateDeleteBar, workflowTemplateDeleteLabel, workflowTemplateDeleteCancel, workflowTemplateDeleteConfirm;
@@ -619,6 +626,15 @@ function bindDomElements(root) {
   logClearBtn = g('logClearBtn');
   logClearCancel = g('logClearCancel');
   logClearConfirm = g('logClearConfirm');
+  historyLibraryPane = g('historyLibraryPane');
+  historyLogsPane = g('historyLogsPane');
+  historyLibraryList = g('historyLibraryList');
+  historyLibrarySearch = g('historyLibrarySearch');
+  historyHubTitle = g('historyHubTitle');
+  historyHubTitleText = g('historyHubTitleText');
+  historyLibraryControls = g('historyLibraryControls');
+  historyLibraryZoom = g('historyLibraryZoom');
+  historyLibrarySortBtn = g('historyLibrarySortBtn');
   workflowTemplateModal = g('workflowTemplateModal');
   workflowTemplateList = g('workflowTemplateList');
   workflowTemplateBtn = g('workflowTemplateBtn');
@@ -8520,7 +8536,8 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
     const form = new FormData();
     supported.forEach(file => form.append('files', file));
     const data = await apiFetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
-    const base = point || screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
+    // 未显式传点时落在最近鼠标画布坐标（粘贴/导入），勿默认视口中心
+    const base = point || lastMouseBoard || screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
     const created = [];
     (data.files || []).forEach((file, i) => {
         const kind = file.kind || mediaKindForUpload(supported[i]);
@@ -8932,102 +8949,147 @@ function openCanvasWorkflowImportPicker(){
     input.click();
 }
 function closeCanvasGenerationBrowser(){
-    document.getElementById('canvasGenerationBrowser')?.remove();
+    // 兼容旧入口：成片库已并入历史 hub
+    closeCanvasLog();
+}
+function historyDayKey(raw){
+    const d = new Date(raw || Date.now());
+    if(Number.isNaN(d.getTime())) return 'unknown';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+function historyDayLabel(dayKey){
+    // 参考「图片历史」：日期原样显示 YYYY-MM-DD
+    if(dayKey === 'unknown') return langIsEn() ? 'Unknown date' : '未知日期';
+    return dayKey;
+}
+function applyHistoryLibraryTileSize(size){
+    historyLibraryTileSize = Math.max(72, Math.min(180, Number(size) || 112));
+    if(historyLibraryList) historyLibraryList.style.setProperty('--history-tile-size', `${historyLibraryTileSize}px`);
+    if(historyLibraryZoom && Number(historyLibraryZoom.value) !== historyLibraryTileSize){
+        historyLibraryZoom.value = String(historyLibraryTileSize);
+    }
+}
+function groupHistoryLibraryByDay(items){
+    const groups = new Map();
+    const ordered = [...items].sort((a, b) => {
+        const ta = new Date(a.created_at || 0).getTime();
+        const tb = new Date(b.created_at || 0).getTime();
+        return historyLibrarySortDesc ? (tb - ta) : (ta - tb);
+    });
+    ordered.forEach(item => {
+        const key = historyDayKey(item.created_at);
+        if(!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(item);
+    });
+    // Map 插入顺序已随排序方向，勿再 reverse
+    return [...groups.entries()];
+}
+function renderHistoryLibrary(){
+    if(!historyLibraryList) return;
+    applyHistoryLibraryTileSize(historyLibraryTileSize);
+    const q = String(historyLibrarySearch?.value || '').trim().toLowerCase();
+    const filtered = historyLibraryItems.filter(item => {
+        if(!q) return true;
+        return `${item.prompt || ''} ${item.model || ''}`.toLowerCase().includes(q);
+    });
+    if(!filtered.length){
+        historyLibraryList.innerHTML = `<div class="history-library-empty">${langIsEn() ? 'No generations found' : '没有匹配的历史生成'}</div>`;
+        return;
+    }
+    const groups = groupHistoryLibraryByDay(filtered);
+    historyLibraryList.innerHTML = groups.map(([dayKey, dayItems]) => `
+        <section class="history-library-day">
+            <div class="history-library-day-label">${escapeHtml(historyDayLabel(dayKey))}</div>
+            <div class="history-library-grid">
+                ${dayItems.map(item => {
+                    const url = item.preview_path || item.thumbnail_path || '';
+                    const thumb = item.preview_path || item.thumbnail_path || url;
+                    const prompt = String(item.prompt || '').trim();
+                    const tip = prompt || item.model || '';
+                    return `<button type="button" class="history-library-card" data-url="${escapeAttr(url)}" data-name="${escapeAttr((item.model || 'gen') + '')}" title="${escapeAttr(tip)}">
+                        <img src="${escapeAttr(thumb)}" alt="" loading="lazy" />
+                    </button>`;
+                }).join('')}
+            </div>
+        </section>
+    `).join('');
+    historyLibraryList.querySelectorAll('.history-library-card').forEach(btn => {
+        btn.onclick = () => {
+            const url = btn.getAttribute('data-url');
+            const name = btn.getAttribute('data-name') || 'image';
+            if(!url) return;
+            placeImageUrlOnCanvas(url, name);
+            closeCanvasLog();
+        };
+    });
+}
+async function loadHistoryLibrary(){
+    if(!historyLibraryList) return;
+    historyLibraryList.innerHTML = `<div class="history-library-empty">${langIsEn() ? 'Loading…' : '加载中…'}</div>`;
+    try {
+        const q = encodeURIComponent(String(historyLibrarySearch?.value || '').trim());
+        const res = await apiFetch(`/api/canvas-generations?limit=120${q ? `&q=${q}` : ''}`);
+        if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Load failed' : '加载失败'));
+        const data = await res.json();
+        historyLibraryItems = Array.isArray(data.items) ? data.items : [];
+        renderHistoryLibrary();
+    } catch(err) {
+        historyLibraryList.innerHTML = `<div class="history-library-empty">${escapeHtml(err.message || (langIsEn() ? 'Load failed' : '加载失败'))}</div>`;
+    }
+}
+function syncHistoryHubUi(tab = historyHubTab){
+    historyHubTab = tab === 'logs' ? 'logs' : 'library';
+    const isLogs = historyHubTab === 'logs';
+    if(historyLibraryPane) historyLibraryPane.hidden = isLogs;
+    if(historyLogsPane) historyLogsPane.hidden = !isLogs;
+    if(historyLibraryControls) historyLibraryControls.hidden = isLogs;
+    logModal?.querySelectorAll('.canvas-history-tabs [data-history-tab]').forEach(btn => {
+        const active = btn.getAttribute('data-history-tab') === historyHubTab;
+        btn.classList.toggle('is-active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    const titleEl = historyHubTitleText || historyHubTitle;
+    if(titleEl){
+        titleEl.textContent = isLogs
+            ? (langIsEn() ? 'Board logs' : '本板日志')
+            : (langIsEn() ? 'Image history' : '图片历史');
+    }
+    const titleIcon = historyHubTitle?.querySelector?.('[data-lucide]');
+    if(titleIcon) titleIcon.setAttribute('data-lucide', isLogs ? 'scroll-text' : 'image');
+    if(isLogs){
+        updateLogModalCount(
+            filteredCanvasLogs().length,
+            (canvas?.logs || []).length
+        );
+    } else if(logModalCount){
+        logModalCount.textContent = langIsEn()
+            ? 'Click a still to place it on this board'
+            : '点选成片放入当前板';
+    }
 }
 function openCanvasHistoryHub(tab = 'library'){
     if(!ensureCanvas() || !isInfiniteCanvasEditorOpen()) return;
-    if(tab === 'logs'){
-        closeCanvasGenerationBrowser();
-        openCanvasLog();
-        return;
+    // 旧动态成片弹层若残留则清掉
+    document.getElementById('canvasGenerationBrowser')?.remove();
+    logClearBar?.setAttribute('hidden', '');
+    syncHistoryHubUi(tab);
+    if(historyHubTab === 'logs'){
+        renderCanvasLog();
+        syncStudioFilterChips(logModal, 'data-log-filter', logStatusFilter);
+    } else {
+        void loadHistoryLibrary();
     }
-    closeCanvasLog();
-    void openCanvasGenerationBrowser();
+    logModal?.classList.add('open');
+    refreshIcons();
+    if(historyHubTab === 'library'){
+        requestAnimationFrame(() => historyLibrarySearch?.focus());
+    }
 }
 async function openCanvasGenerationBrowser(){
-    if(!ensureCanvas() || !isInfiniteCanvasEditorOpen()) return;
-    closeCanvasGenerationBrowser();
-    const root = canvasRoot || document.querySelector('.infinite-canvas-root');
-    if(!root) return;
-    const modal = document.createElement('div');
-    modal.id = 'canvasGenerationBrowser';
-    modal.className = 'canvas-gen-browser-modal';
-    modal.innerHTML = `
-        <div class="canvas-gen-browser-panel" role="dialog" aria-label="历史">
-            <div class="canvas-gen-browser-head">
-                <div>
-                    <div class="canvas-gen-browser-title">历史</div>
-                    <div class="canvas-gen-browser-sub">成片库可跨画布放入当前板 · 本板日志看运行记录</div>
-                </div>
-                <button type="button" class="canvas-gen-browser-close" aria-label="关闭">×</button>
-            </div>
-            <div class="canvas-history-tabs" role="tablist">
-                <button type="button" class="canvas-history-tab is-active" data-history-tab="library" role="tab" aria-selected="true">成片库</button>
-                <button type="button" class="canvas-history-tab" data-history-tab="logs" role="tab" aria-selected="false">本板日志</button>
-            </div>
-            <input class="canvas-gen-browser-search" type="search" placeholder="搜索提示词 / 模型…" autocomplete="off" />
-            <div class="canvas-gen-browser-list"><div class="canvas-gen-browser-empty">加载中…</div></div>
-        </div>
-    `;
-    const list = modal.querySelector('.canvas-gen-browser-list');
-    const search = modal.querySelector('.canvas-gen-browser-search');
-    let items = [];
-    const renderItems = () => {
-        const q = String(search.value || '').trim().toLowerCase();
-        const filtered = items.filter(item => {
-            if(!q) return true;
-            return `${item.prompt || ''} ${item.model || ''}`.toLowerCase().includes(q);
-        });
-        list.innerHTML = filtered.length
-            ? filtered.map(item => {
-                const url = item.preview_path || item.thumbnail_path || '';
-                return `<button type="button" class="canvas-gen-browser-item" data-url="${escapeAttr(url)}" data-name="${escapeAttr((item.model || 'gen') + '')}">
-                    <img src="${escapeAttr(item.thumbnail_path || url)}" alt="" loading="lazy" />
-                    <div class="canvas-gen-browser-meta">
-                        <div class="canvas-gen-browser-prompt">${escapeHtml(String(item.prompt || '').slice(0, 120) || '（无提示词）')}</div>
-                        <div class="canvas-gen-browser-model">${escapeHtml(item.model || '未知模型')}</div>
-                    </div>
-                </button>`;
-            }).join('')
-            : `<div class="canvas-gen-browser-empty">${langIsEn() ? 'No generations found' : '没有匹配的历史生成'}</div>`;
-        list.querySelectorAll('.canvas-gen-browser-item').forEach(btn => {
-            btn.onclick = () => {
-                const url = btn.getAttribute('data-url');
-                const name = btn.getAttribute('data-name') || 'image';
-                if(!url) return;
-                placeImageUrlOnCanvas(url, name);
-                closeCanvasGenerationBrowser();
-            };
-        });
-    };
-    const load = async () => {
-        try {
-            const q = encodeURIComponent(String(search.value || '').trim());
-            const res = await apiFetch(`/api/canvas-generations?limit=120${q ? `&q=${q}` : ''}`);
-            if(!res.ok) throw new Error(await responseErrorMessage(res, '加载失败'));
-            const data = await res.json();
-            items = Array.isArray(data.items) ? data.items : [];
-            renderItems();
-        } catch(err) {
-            list.innerHTML = `<div class="canvas-gen-browser-empty">${escapeHtml(err.message || '加载失败')}</div>`;
-        }
-    };
-    modal.addEventListener('mousedown', e => { if(e.target === modal) closeCanvasGenerationBrowser(); });
-    modal.querySelector('.canvas-gen-browser-close').onclick = () => closeCanvasGenerationBrowser();
-    modal.querySelectorAll('[data-history-tab]').forEach(btn => {
-        btn.onclick = () => {
-            const tab = btn.getAttribute('data-history-tab');
-            if(tab === 'logs') openCanvasHistoryHub('logs');
-        };
-    });
-    let timer = 0;
-    search.addEventListener('input', () => {
-        window.clearTimeout(timer);
-        timer = window.setTimeout(() => { void load(); }, 220);
-    });
-    root.appendChild(modal);
-    requestAnimationFrame(() => search.focus());
-    void load();
+    openCanvasHistoryHub('library');
 }
 async function createImageCardsFromLocalPaths(paths, point){
     if(!ensureCanvas()) return [];
@@ -19265,11 +19327,8 @@ function renderAssetLibrarySaveFolderList(host){
         list.innerHTML = `<div class="asset-lib-save-empty">${escapeHtml(en ? 'Team library coming soon' : '团队素材即将上线')}</div>`;
         return;
     }
-    if(!cats.length){
-        list.innerHTML = `<div class="asset-lib-save-empty">${escapeHtml(en ? 'No folders yet' : '暂无文件夹')}</div>`;
-        return;
-    }
-    list.innerHTML = cats.map(cat => {
+    const creating = Boolean(assetLibrarySaveState.creating);
+    const rows = cats.map(cat => {
         const selected = cat.id === assetLibrarySaveState.categoryId;
         const count = Array.isArray(cat.items) ? cat.items.length : 0;
         return `<button type="button" class="asset-lib-save-folder ${selected ? 'is-selected' : ''}" data-category-id="${escapeAttr(cat.id)}">
@@ -19279,15 +19338,78 @@ function renderAssetLibrarySaveFolderList(host){
             <span class="asset-lib-save-folder-count">${count}</span>
         </button>`;
     }).join('');
+    const createRow = creating
+        ? `<div class="asset-lib-save-inline-row">
+            <i data-lucide="folder" class="asset-lib-save-folder-icon"></i>
+            <input type="text" class="asset-lib-save-inline-input" placeholder="${escapeAttr(en ? 'Folder name' : '文件夹名称')}" value="${escapeAttr(assetLibrarySaveState.createName || '')}" />
+            <button type="button" class="asset-lib-save-inline-btn" data-asset-lib-create-confirm="1" title="${escapeAttr(en ? 'Confirm' : '确认')}"><i data-lucide="check"></i></button>
+            <button type="button" class="asset-lib-save-inline-btn" data-asset-lib-create-cancel="1" title="${escapeAttr(en ? 'Cancel' : '取消')}"><i data-lucide="x"></i></button>
+           </div>`
+        : '';
+    if(!cats.length && !creating){
+        list.innerHTML = `<div class="asset-lib-save-empty">${escapeHtml(en ? 'No folders yet' : '暂无文件夹')}</div>`;
+        return;
+    }
+    list.innerHTML = `${createRow}${rows}`;
     list.querySelectorAll('[data-category-id]').forEach(btn => {
         btn.onclick = e => {
             e.stopPropagation();
+            assetLibrarySaveState.creating = false;
+            assetLibrarySaveState.createName = '';
             assetLibrarySaveState.categoryId = btn.dataset.categoryId || '';
             renderAssetLibrarySaveFolderList(host);
             refreshIcons(list);
             const saveBtn = host.querySelector('[data-asset-lib-save]');
             if(saveBtn) saveBtn.disabled = !assetLibrarySaveState.categoryId || assetLibrarySaveState.scope !== 'personal';
         };
+    });
+    const input = list.querySelector('.asset-lib-save-inline-input');
+    if(input){
+        input.oninput = () => { assetLibrarySaveState.createName = input.value; };
+        input.onkeydown = e => {
+            if(e.key === 'Enter'){
+                e.preventDefault();
+                list.querySelector('[data-asset-lib-create-confirm]')?.click();
+            }
+            if(e.key === 'Escape'){
+                e.preventDefault();
+                list.querySelector('[data-asset-lib-create-cancel]')?.click();
+            }
+        };
+        requestAnimationFrame(() => { input.focus(); input.select(); });
+    }
+    list.querySelector('[data-asset-lib-create-cancel]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        assetLibrarySaveState.creating = false;
+        assetLibrarySaveState.createName = '';
+        renderAssetLibrarySaveFolderList(host);
+    });
+    list.querySelector('[data-asset-lib-create-confirm]')?.addEventListener('click', async e => {
+        e.stopPropagation();
+        const trimmed = String(assetLibrarySaveState.createName || '').trim();
+        if(!trimmed){
+            assetLibrarySaveState.creating = false;
+            assetLibrarySaveState.createName = '';
+            renderAssetLibrarySaveFolderList(host);
+            return;
+        }
+        try {
+            const res = await apiFetch('/api/asset-library/categories', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                credentials:'same-origin',
+                body: JSON.stringify({name: trimmed}),
+            });
+            const data = await res.json().catch(() => ({}));
+            if(!res.ok) throw new Error(data.error || (en ? 'Create folder failed' : '创建文件夹失败'));
+            assetLibrarySaveState.creating = false;
+            assetLibrarySaveState.createName = '';
+            if(data.category?.id) assetLibrarySaveState.categoryId = data.category.id;
+            await reloadAssetLibrarySaveModal(host);
+            setStatus(en ? 'Folder created' : '已新建文件夹');
+        } catch(err) {
+            softAlert(err?.message || (en ? 'Create folder failed' : '创建文件夹失败'));
+        }
     });
     refreshIcons(list);
 }
@@ -19319,6 +19441,8 @@ async function openAssetLibrarySaveModal(url, name=''){
         categoryId: 'character',
         scope: 'personal',
         categories: [],
+        creating: false,
+        createName: '',
     };
     const host = document.createElement('div');
     host.className = 'asset-lib-save-modal';
@@ -19366,31 +19490,15 @@ async function openAssetLibrarySaveModal(url, name=''){
             if(scope === 'team') setStatus(en ? 'Team library coming soon' : '团队素材即将上线');
         };
     });
-    host.querySelector('[data-asset-lib-new-folder]')?.addEventListener('click', async e => {
+    host.querySelector('[data-asset-lib-new-folder]')?.addEventListener('click', e => {
         e.stopPropagation();
         if(assetLibrarySaveState.scope !== 'personal'){
             setStatus(en ? 'Team library coming soon' : '团队素材即将上线');
             return;
         }
-        const folderName = window.prompt(en ? 'New folder name' : '新建文件夹名称', '');
-        if(folderName == null) return;
-        const trimmed = folderName.trim();
-        if(!trimmed) return;
-        try {
-            const res = await apiFetch('/api/asset-library/categories', {
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                credentials:'same-origin',
-                body: JSON.stringify({name: trimmed}),
-            });
-            const data = await res.json().catch(() => ({}));
-            if(!res.ok) throw new Error(data.error || (en ? 'Create folder failed' : '创建文件夹失败'));
-            if(data.category?.id) assetLibrarySaveState.categoryId = data.category.id;
-            await reloadAssetLibrarySaveModal(host);
-            setStatus(en ? 'Folder created' : '已新建文件夹');
-        } catch(err) {
-            softAlert(err?.message || (en ? 'Create folder failed' : '创建文件夹失败'));
-        }
+        assetLibrarySaveState.creating = true;
+        assetLibrarySaveState.createName = '';
+        renderAssetLibrarySaveFolderList(host);
     });
     host.querySelector('[data-asset-lib-save]')?.addEventListener('click', async e => {
         e.stopPropagation();
@@ -23683,6 +23791,7 @@ function filteredCanvasLogs(){
 }
 function updateLogModalCount(shown, total){
     if(!logModalCount) return;
+    if(historyHubTab !== 'logs') return;
     if(!total){
         logModalCount.textContent = langIsEn() ? '0 records' : '0 条记录';
         return;
@@ -23789,24 +23898,13 @@ function renderCanvasLog(){
     refreshIcons();
 }
 function syncLogModalHistoryTabs(){
-    logModal?.querySelectorAll('.canvas-history-tabs [data-history-tab]').forEach(btn => {
-        const active = btn.getAttribute('data-history-tab') === 'logs';
-        btn.classList.toggle('is-active', active);
-        btn.setAttribute('aria-selected', active ? 'true' : 'false');
-    });
+    syncHistoryHubUi(historyHubTab);
 }
 function openCanvasLog(){
-    if(!ensureCanvas()) return;
-    closeCanvasGenerationBrowser();
-    logClearBar?.setAttribute('hidden', '');
-    renderCanvasLog();
-    syncStudioFilterChips(logModal, 'data-log-filter', logStatusFilter);
-    syncLogModalHistoryTabs();
-    logModal.classList.add('open');
-    refreshIcons();
+    openCanvasHistoryHub('logs');
 }
 function closeCanvasLog(){
-    logModal.classList.remove('open');
+    logModal?.classList.remove('open');
     logClearBar?.setAttribute('hidden', '');
 }
 function bindStudioModalControls(){
@@ -23816,6 +23914,29 @@ function bindStudioModalControls(){
             renderCanvasLog();
         });
     }
+    if(historyLibrarySearch){
+        on(historyLibrarySearch, 'input', () => {
+            window.clearTimeout(historyLibraryLoadTimer);
+            historyLibraryLoadTimer = window.setTimeout(() => { void loadHistoryLibrary(); }, 220);
+        });
+    }
+    if(historyLibraryZoom){
+        applyHistoryLibraryTileSize(historyLibraryZoom.value);
+        on(historyLibraryZoom, 'input', () => {
+            applyHistoryLibraryTileSize(historyLibraryZoom.value);
+        });
+    }
+    bindClick(historyLibrarySortBtn, () => {
+        historyLibrarySortDesc = !historyLibrarySortDesc;
+        historyLibrarySortBtn?.classList.toggle('is-asc', !historyLibrarySortDesc);
+        historyLibrarySortBtn?.setAttribute(
+            'title',
+            historyLibrarySortDesc
+                ? (langIsEn() ? 'Newest first' : '新→旧')
+                : (langIsEn() ? 'Oldest first' : '旧→新')
+        );
+        renderHistoryLibrary();
+    });
     logModal?.querySelectorAll('[data-log-filter]').forEach(btn => {
         bindClick(btn, () => {
             logStatusFilter = btn.getAttribute('data-log-filter') || 'all';
@@ -23825,7 +23946,7 @@ function bindStudioModalControls(){
     });
     logModal?.querySelectorAll('.canvas-history-tabs [data-history-tab]').forEach(btn => {
         bindClick(btn, () => {
-            const tab = btn.getAttribute('data-history-tab') || 'logs';
+            const tab = btn.getAttribute('data-history-tab') || 'library';
             openCanvasHistoryHub(tab);
         });
     });
@@ -27630,9 +27751,14 @@ board.onmousedown = e => {
     }
 };
 on(board, 'pointerdown', onBoardPointerDown);
+const trackBoardPointer = e => {
+    if(!canvas || !board) return;
+    lastMouseBoard = screenToWorld(e.clientX, e.clientY);
+};
+// 捕获阶段：节点/浮层 stopPropagation 时仍刷新粘贴落点
+on(board, 'pointermove', trackBoardPointer, {capture: true});
 on(board, 'mousemove', e => {
-    const point = screenToWorld(e.clientX, e.clientY);
-    lastMouseBoard = point;
+    trackBoardPointer(e);
     scheduleConnectionHoverUpdate(e);
     schedulePortMagnetUpdate(e.clientX, e.clientY);
     if(canvas && knifeActive && !isEditableTarget(e.target) && !dragNode && !dragBoard && !resizeNode && !tempLink){
@@ -27809,10 +27935,15 @@ on(window, 'paste', e => {
     if(!files.length) return;
     e.preventDefault();
     lastImagePasteAt = Date.now();
+    // 粘贴落点 = 鼠标停放的画布世界坐标（board mousemove 持续刷新 lastMouseBoard）
+    const point = (e.clientX || e.clientY)
+        ? screenToWorld(e.clientX, e.clientY)
+        : lastMouseBoard;
+    if(point && (e.clientX || e.clientY)) lastMouseBoard = point;
     const blank = [...selected].map(id => nodes.find(n => n.id === id)).find(n => n?.type === 'image' && !n.url);
     if(blank) fillImageNode(blank.id, files);
-    else if(files.length > 1) uploadImageGroup(files);
-    else uploadImages(files);
+    else if(files.length > 1) uploadImageGroup(files, point);
+    else uploadImages(files, point);
 });
 on(window, 'keydown', e => {
     if(!canvas) return;
@@ -27831,6 +27962,7 @@ on(window, 'keydown', e => {
         return;
     }
     if(e.key === 'Escape' && genHistoryPanelEl) { closeGenHistoryPanel(); return; }
+    if(e.key === 'Escape' && logModal?.classList.contains('open')) { closeCanvasLog(); return; }
     if(e.key === 'Escape' && document.getElementById('canvasGenerationBrowser')) { closeCanvasGenerationBrowser(); return; }
     if(e.key === 'Escape' && document.getElementById('canvasNodeSearchModal')) { closeCanvasNodeSearch(); return; }
     if(e.key === 'Escape' && domGet('imageEditModal')?.classList.contains('open')) { closeImageEditor(); return; }

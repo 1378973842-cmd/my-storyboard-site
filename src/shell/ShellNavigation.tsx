@@ -198,7 +198,14 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
     setInfiniteCanvasKeepAlive(true);
     setScreen('infinite-canvas');
   }, []);
-  const openMyFavorites = useCallback(() => openSubPage('my-favorites'), [openSubPage]);
+  const openMyFavorites = useCallback(() => {
+    setInfiniteCanvasKeepAlive(true);
+    setScreen('infinite-canvas');
+    // 进入画布后打开素材库「收藏」
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('canvas-open-material-library', { detail: { view: 'favorites' } }));
+    }, 80);
+  }, []);
   const openGallery = useCallback(() => openSubPage('gallery'), [openSubPage]);
   const openAdminUsers = useCallback(() => openSubPage('admin-users'), [openSubPage]);
   const openAdminRhWorkflows = useCallback(() => openSubPage('admin-rh-workflows'), [openSubPage]);

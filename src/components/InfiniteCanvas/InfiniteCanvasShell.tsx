@@ -792,41 +792,69 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                       <div id="workflowTemplateList" className="workflow-template-list" />
                   </div>
               </div>
-              <div id="logModal" className="log-modal studio-modal-backdrop" onClick={() => canvasWin["closeCanvasLog"]?.()}>
-                  <div className="log-panel studio-modal-panel" onClick={(e) => e.stopPropagation()}>
+              <div id="logModal" className="log-modal studio-modal-backdrop history-hub-modal" onClick={() => canvasWin["closeCanvasLog"]?.()}>
+                  <div className="log-panel studio-modal-panel history-hub-panel" onClick={(e) => e.stopPropagation()}>
                       <div className="studio-modal-head log-head">
                           <div className="studio-modal-head-text">
-                              <div className="studio-modal-title log-title" data-i18n="canvas.generationLogs">本板日志</div>
-                              <div id="logModalCount" className="studio-modal-sub">0 条记录</div>
+                              <div id="historyHubTitle" className="studio-modal-title log-title history-hub-title">
+                                  <i data-lucide="image" className="history-hub-title-icon" aria-hidden />
+                                  <span id="historyHubTitleText">图片历史</span>
+                              </div>
+                              <div id="logModalCount" className="studio-modal-sub">跨画布成片，点选放入当前板</div>
                           </div>
-                          <button className="studio-modal-close preview-icon-btn" type="button" onClick={() => canvasWin["closeCanvasLog"]?.()} title="关闭" data-i18n-title="common.close" aria-label="关闭">
-                              <i data-lucide="x" className="w-4 h-4"></i>
-                          </button>
+                          <div className="history-hub-head-actions">
+                              <div id="historyLibraryControls" className="history-library-controls" data-history-controls="library">
+                                  <div className="history-library-zoom" title="缩略图大小">
+                                      <i data-lucide="minus" className="w-3.5 h-3.5" aria-hidden />
+                                      <input id="historyLibraryZoom" type="range" min="72" max="180" step="4" defaultValue="112" aria-label="缩略图大小" />
+                                      <i data-lucide="plus" className="w-3.5 h-3.5" aria-hidden />
+                                  </div>
+                                  <button id="historyLibrarySortBtn" type="button" className="preview-icon-btn history-library-sort-btn" title="切换排序" aria-label="切换排序">
+                                      <i data-lucide="arrow-up-down" className="w-4 h-4" />
+                                  </button>
+                              </div>
+                              <button className="studio-modal-close preview-icon-btn" type="button" onClick={() => canvasWin["closeCanvasLog"]?.()} title="关闭" data-i18n-title="common.close" aria-label="关闭">
+                                  <i data-lucide="x" className="w-4 h-4"></i>
+                              </button>
+                          </div>
                       </div>
                       <div className="canvas-history-tabs in-log-modal" role="tablist" aria-label="历史切换">
-                          <button type="button" className="canvas-history-tab" data-history-tab="library" role="tab" aria-selected="false">成片库</button>
-                          <button type="button" className="canvas-history-tab is-active" data-history-tab="logs" role="tab" aria-selected="true">本板日志</button>
+                          <button type="button" className="canvas-history-tab is-active" data-history-tab="library" role="tab" aria-selected="true">成片库</button>
+                          <button type="button" className="canvas-history-tab" data-history-tab="logs" role="tab" aria-selected="false">本板日志</button>
                       </div>
-                      <div className="studio-modal-toolbar log-toolbar">
-                          <label className="studio-modal-search">
-                              <i data-lucide="search" className="w-3.5 h-3.5" aria-hidden />
-                              <input id="logSearchInput" type="search" placeholder="搜索提示词、平台、任务 ID…" data-i18n-placeholder="canvas.logSearchPlaceholder" autoComplete="off" />
-                          </label>
-                          <div className="studio-modal-filters" role="group" aria-label="日志筛选">
-                              <button type="button" className="studio-filter-chip is-active" data-log-filter="all" data-i18n="canvas.logFilterAll">全部</button>
-                              <button type="button" className="studio-filter-chip" data-log-filter="ok" data-i18n="canvas.logFilterSuccess">成功</button>
-                              <button type="button" className="studio-filter-chip" data-log-filter="failed" data-i18n="canvas.logFilterFailed">失败</button>
+                      <div id="historyLibraryPane" className="history-hub-pane" data-history-pane="library">
+                          <div className="studio-modal-toolbar history-library-toolbar">
+                              <label className="studio-modal-search">
+                                  <i data-lucide="search" className="w-3.5 h-3.5" aria-hidden />
+                                  <input id="historyLibrarySearch" type="search" placeholder="搜索提示词 / 模型…" autoComplete="off" />
+                              </label>
                           </div>
-                          <button id="logClearBtn" type="button" className="studio-modal-ghost-btn" data-i18n="canvas.logClear">清空</button>
-                      </div>
-                      <div id="logClearBar" className="studio-modal-inline-confirm" hidden>
-                          <span className="studio-modal-inline-confirm-text" data-i18n="canvas.logClearConfirm">确定清空全部生成记录？此操作不可撤销。</span>
-                          <div className="studio-modal-inline-confirm-actions">
-                              <button id="logClearCancel" type="button" className="studio-modal-ghost-btn" data-i18n="common.cancel">取消</button>
-                              <button id="logClearConfirm" type="button" className="studio-modal-danger-btn" data-i18n="canvas.logClear">清空</button>
+                          <div id="historyLibraryList" className="history-library-list">
+                              <div className="history-library-empty">加载中…</div>
                           </div>
                       </div>
-                      <div id="logList" className="log-list"></div>
+                      <div id="historyLogsPane" className="history-hub-pane" data-history-pane="logs" hidden>
+                          <div className="studio-modal-toolbar log-toolbar">
+                              <label className="studio-modal-search">
+                                  <i data-lucide="search" className="w-3.5 h-3.5" aria-hidden />
+                                  <input id="logSearchInput" type="search" placeholder="搜索提示词、平台、任务 ID…" data-i18n-placeholder="canvas.logSearchPlaceholder" autoComplete="off" />
+                              </label>
+                              <div className="studio-modal-filters" role="group" aria-label="日志筛选">
+                                  <button type="button" className="studio-filter-chip is-active" data-log-filter="all" data-i18n="canvas.logFilterAll">全部</button>
+                                  <button type="button" className="studio-filter-chip" data-log-filter="ok" data-i18n="canvas.logFilterSuccess">成功</button>
+                                  <button type="button" className="studio-filter-chip" data-log-filter="failed" data-i18n="canvas.logFilterFailed">失败</button>
+                              </div>
+                              <button id="logClearBtn" type="button" className="studio-modal-ghost-btn" data-i18n="canvas.logClear">清空</button>
+                          </div>
+                          <div id="logClearBar" className="studio-modal-inline-confirm" hidden>
+                              <span className="studio-modal-inline-confirm-text" data-i18n="canvas.logClearConfirm">确定清空全部生成记录？此操作不可撤销。</span>
+                              <div className="studio-modal-inline-confirm-actions">
+                                  <button id="logClearCancel" type="button" className="studio-modal-ghost-btn" data-i18n="common.cancel">取消</button>
+                                  <button id="logClearConfirm" type="button" className="studio-modal-danger-btn" data-i18n="canvas.logClear">清空</button>
+                              </div>
+                          </div>
+                          <div id="logList" className="log-list"></div>
+                      </div>
                   </div>
               </div>
               <div

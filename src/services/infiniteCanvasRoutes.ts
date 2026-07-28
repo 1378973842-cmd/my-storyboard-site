@@ -288,7 +288,8 @@ export function registerInfiniteCanvasRoutes(
   app.post("/api/asset-library/categories", gate, (req, res) => {
     try {
       const body = req.body || {};
-      res.json(createAssetCategory(String(body.name || "新建文件夹"), canvasAccessCtx(req)));
+      const parentId = body.parent_id == null || body.parent_id === "" ? null : String(body.parent_id);
+      res.json(createAssetCategory(String(body.name || "新建文件夹"), canvasAccessCtx(req), parentId));
     } catch (err) {
       canvasError(res, err, "创建文件夹失败");
     }

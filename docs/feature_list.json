@@ -164,7 +164,11 @@
         { "id": "AG62", "desc": "性能第一步：拉线新建去双倍render；草稿延后+session节流；undo用structuredClone", "status": "done", "priority": 83 },
         { "id": "AG63", "desc": "修：生图 Invalid string length——runSnapshot 不再整颗深拷贝节点；开板/开跑 scrub 历史膨胀", "status": "done", "priority": 84 },
         { "id": "AG64", "desc": "UI：生图网格列数改√n趋近方阵（上限8），避免固定4列细长条", "status": "done", "priority": 85 },
-        { "id": "AG65", "desc": "性能第二步：删/建/拉线/断线走局部DOM挂载，失败才回退整板render", "status": "done", "priority": 86 }
+        { "id": "AG65", "desc": "性能第二步：删/建/拉线/断线走局部DOM挂载，失败才回退整板render", "status": "done", "priority": 86 },
+        { "id": "AG66", "desc": "交互：剪贴板粘贴图片落到鼠标停放的画布坐标（非视口中心）", "status": "done", "priority": 87 },
+        { "id": "AG67", "desc": "UI：历史弹层统一壳；成片库按日方图网格（缩放/排序，对齐图片历史排布）", "status": "done", "priority": 88 },
+        { "id": "AG68", "desc": "素材库：右上+建主文件夹、三点新建子文件夹；新建/重命名/移动/删除改行内，去掉 prompt 弹窗", "status": "done", "priority": 89 },
+        { "id": "AG69", "desc": "素材库：主页「我的收藏」迁入侧栏顶部（收藏/分隔线/文件夹），可放板与取消收藏", "status": "done", "priority": 90 }
       ]
     },
     {

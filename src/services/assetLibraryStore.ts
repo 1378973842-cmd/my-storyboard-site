@@ -14,6 +14,8 @@ export type AssetLibraryCategory = {
   id: string;
   name: string;
   type: "image";
+  /** 子文件夹父级；空/缺省 = 主文件夹 */
+  parent_id?: string | null;
   items: AssetLibraryItem[];
 };
 
@@ -101,7 +103,8 @@ function readLibrary(ownerId: string): AssetLibraryDoc {
       categories: categories.map((c) => ({
         id: String(c.id || uuidv4().replace(/-/g, "")),
         name: sanitizeName(c.name, "未命名文件夹"),
-        type: "image",
+        type: "image" as const,
+        parent_id: c.parent_id ? String(c.parent_id) : null,
         items: Array.isArray(c.items) ? c.items : [],
       })),
       updated_at: Number(parsed.updated_at) || nowMs(),
@@ -164,13 +167,22 @@ export function getAssetLibrary(ctx?: CanvasAccessContext | null): AssetLibraryD
   return readLibrary(ownerId);
 }
 
-export function createAssetCategory(name: string, ctx?: CanvasAccessContext | null) {
+export function createAssetCategory(
+  name: string,
+  ctx?: CanvasAccessContext | null,
+  parentId?: string | null
+) {
   const ownerId = assertOwner(ctx);
   const lib = readLibrary(ownerId);
+  let parent_id: string | null = parentId ? String(parentId) : null;
+  if (parent_id) {
+    findCategory(lib, parent_id); // 父级必须存在
+  }
   const category: AssetLibraryCategory = {
     id: `cat_${uuidv4().replace(/-/g, "").slice(0, 12)}`,
     name: sanitizeName(name, "新建文件夹"),
     type: "image",
+    parent_id,
     items: [],
   };
   lib.categories.unshift(category);
@@ -190,20 +202,37 @@ export function renameAssetCategory(categoryId: string, name: string, ctx?: Canv
 export function deleteAssetCategory(categoryId: string, ctx?: CanvasAccessContext | null) {
   const ownerId = assertOwner(ctx);
   const lib = readLibrary(ownerId);
-  const cat = findCategory(lib, categoryId);
-  for (const item of cat.items) {
-    const abs = resolveSourcePath(item.url);
-    if (abs && existsSync(abs)) {
-      try {
-        unlinkSync(abs);
-      } catch {
-        /* ignore */
+  findCategory(lib, categoryId);
+  const removeIds = new Set<string>();
+  const collect = (id: string) => {
+    removeIds.add(id);
+    for (const c of lib.categories) {
+      if (c.parent_id === id) collect(c.id);
+    }
+  };
+  collect(categoryId);
+  for (const cat of lib.categories) {
+    if (!removeIds.has(cat.id)) continue;
+    for (const item of cat.items) {
+      const abs = resolveSourcePath(item.url);
+      if (abs && existsSync(abs)) {
+        try {
+          unlinkSync(abs);
+        } catch {
+          /* ignore */
+        }
       }
     }
   }
-  lib.categories = lib.categories.filter((c) => c.id !== categoryId);
+  lib.categories = lib.categories.filter((c) => !removeIds.has(c.id));
   if (!lib.categories.length) {
-    lib.categories.push({ id: `cat_${uuidv4().replace(/-/g, "").slice(0, 12)}`, name: "未命名文件夹", type: "image", items: [] });
+    lib.categories.push({
+      id: `cat_${uuidv4().replace(/-/g, "").slice(0, 12)}`,
+      name: "未命名文件夹",
+      type: "image",
+      parent_id: null,
+      items: [],
+    });
   }
   writeLibrary(ownerId, lib);
   return { library: lib };
@@ -217,6 +246,7 @@ export function duplicateAssetCategory(categoryId: string, ctx?: CanvasAccessCon
     id: `cat_${uuidv4().replace(/-/g, "").slice(0, 12)}`,
     name: sanitizeName(`${source.name} 副本`, "新建文件夹"),
     type: "image",
+    parent_id: source.parent_id || null,
     items: source.items.map((item) => ({
       ...item,
       id: `asset_${uuidv4().replace(/-/g, "").slice(0, 12)}`,

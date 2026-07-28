@@ -377,7 +377,6 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
     screen,
     openCover,
     openInfiniteCanvas,
-    openMyFavorites,
     openGallery,
     openAdminUsers,
     openAdminRhWorkflows,
@@ -545,16 +544,6 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
               <StudioBackgroundRevealControl heroTone />
             ) : null}
 
-            <button
-              type="button"
-              onClick={openMyFavorites}
-              className={cn(
-                'cover-nav-icon-btn cover-nav-icon-btn-muted hidden h-9 items-center rounded-full px-3.5 text-[12px] font-label tracking-[0.04em] md:inline-flex',
-                subPage === 'my-favorites' && 'cover-nav-icon-btn-active',
-              )}
-            >
-              我的收藏
-            </button>
             <button
               type="button"
               onClick={openGallery}
