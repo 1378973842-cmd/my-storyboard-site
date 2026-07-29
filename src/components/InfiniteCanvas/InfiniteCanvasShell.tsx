@@ -56,6 +56,8 @@ type Props = {
 type FlyoutItem = {
   icon: string;
   label: string;
+  desc?: string;
+  badge?: string;
   action: () => void;
 };
 
@@ -68,46 +70,48 @@ const AGENT_FLYOUT_GROUPS: FlyoutGroup[] = [
   {
     heading: 'Agent',
     items: [
-      { icon: 'bot', label: '复刻 Agent', action: () => canvasWin['addReplicaAgentNode']?.() },
-      { icon: 'wand-sparkles', label: '修图 Agent', action: () => canvasWin['addImageRepairAgentNode']?.() },
-      { icon: 'layout-grid', label: 'Poster Agent', action: () => canvasWin['addBatchPosterAgentNode']?.() },
-      { icon: 'grid-3x3', label: '九宫格 Agent', action: () => canvasWin['addNineGridAgentNode']?.() },
-      { icon: 'repeat-2', label: 'Slots 循环视频 Agent', action: () => canvasWin['addSlotsLoopVideoAgentNode']?.() },
-      { icon: 'film', label: 'Mx-Shell 提示词 Agent', action: () => canvasWin['addMxShellPromptAgentNode']?.() },
-      { icon: 'file-text', label: 'Mx-Shell 提示词展示', action: () => canvasWin['addMxShellPromptViewNode']?.() },
-      { icon: 'clapperboard', label: 'DeepWhite 导演分镜 Agent', action: () => canvasWin['addDeepWhiteShotAgentNode']?.() },
-      { icon: 'book-open', label: 'DeepWhite 分镜文档', action: () => canvasWin['addDeepWhiteShotViewNode']?.() },
+      { icon: 'bot', label: '复刻 Agent', desc: '角色一致性复刻', action: () => canvasWin['addReplicaAgentNode']?.() },
+      { icon: 'wand-sparkles', label: '修图 Agent', desc: '局部修复与润色', action: () => canvasWin['addImageRepairAgentNode']?.() },
+      { icon: 'layout-grid', label: 'Poster Agent', desc: '批量海报编排', action: () => canvasWin['addBatchPosterAgentNode']?.() },
+      { icon: 'grid-3x3', label: '九宫格 Agent', desc: '分镜九宫格生成', action: () => canvasWin['addNineGridAgentNode']?.() },
+      { icon: 'repeat-2', label: 'Slots 循环视频', desc: '槽位循环成片', action: () => canvasWin['addSlotsLoopVideoAgentNode']?.() },
+      { icon: 'film', label: 'Mx-Shell 提示词', desc: '影壳提示词编排', action: () => canvasWin['addMxShellPromptAgentNode']?.() },
+      { icon: 'file-text', label: 'Mx-Shell 展示', desc: '提示词结果展示', action: () => canvasWin['addMxShellPromptViewNode']?.() },
+      { icon: 'clapperboard', label: 'DeepWhite 分镜', desc: '导演分镜 Agent', action: () => canvasWin['addDeepWhiteShotAgentNode']?.() },
+      { icon: 'book-open', label: 'DeepWhite 文档', desc: '分镜文档输出', action: () => canvasWin['addDeepWhiteShotViewNode']?.() },
     ],
   },
 ];
 
 const NODE_FLYOUT_GROUPS: FlyoutGroup[] = [
   {
-    heading: '基础',
+    heading: '添加节点',
     items: [
-      { icon: 'image-plus', label: '图片', action: () => canvasWin['addImageNode']?.() },
-      { icon: 'text-cursor-input', label: '提示词', action: () => canvasWin['addPromptNode']?.() },
-      { icon: 'repeat-2', label: '循环', action: () => canvasWin['addLoopNode']?.() },
+      { icon: 'align-left', label: '提示词', desc: '脚本、广告词、品牌文案', action: () => canvasWin['addPromptNode']?.() },
+      { icon: 'image', label: '图片', desc: '宣传图、海报、封面', action: () => canvasWin['addImageNode']?.() },
+      { icon: 'circle-play', label: '视频生成', desc: '文生视频 / 图生视频', action: () => canvasWin['addVideoNode']?.() },
+      { icon: 'repeat-2', label: '循环', desc: '批量循环执行', action: () => canvasWin['addLoopNode']?.() },
+      { icon: 'message-square-text', label: 'LLM', desc: '文本推理与改写', action: () => canvasWin['addLLMNode']?.() },
     ],
   },
   {
     heading: '生成',
     items: [
-      { icon: 'message-square-text', label: 'LLM', action: () => canvasWin['addLLMNode']?.() },
-      { icon: 'wand-sparkles', label: '图片生成', action: () => canvasWin['addGeneratorNode']?.() },
-      { icon: 'scan-search', label: '反推', action: () => canvasWin['addVideoReverseNode']?.() },
+      { icon: 'wand-sparkles', label: '图片生成', desc: 'API 生图', action: () => canvasWin['addGeneratorNode']?.() },
+      { icon: 'workflow', label: 'RH 生成', desc: 'RunningHub 工作流', action: () => canvasWin['addRhNode']?.() },
+      { icon: 'scan-search', label: '视频反推', desc: '从视频反推提示词', action: () => canvasWin['addVideoReverseNode']?.() },
     ],
   },
   {
     heading: '整理',
     items: [
-      { icon: 'circle-dot', label: 'Output', action: () => canvasWin['addOutputNode']?.() },
-      { icon: 'images', label: '图片组', action: () => canvasWin['createImageBatchFromSelection']?.() },
-      { icon: 'layers', label: '提示词组', action: () => canvasWin['createPromptGroupFromSelection']?.() },
+      { icon: 'images', label: '图片组', desc: '多图集合整理', action: () => canvasWin['createImageBatchFromSelection']?.() },
+      { icon: 'layers', label: '提示词组', desc: '多提示词成组', action: () => canvasWin['createPromptGroupFromSelection']?.() },
+      { icon: 'circle-dot', label: 'Output', desc: '结果输出节点', action: () => canvasWin['addOutputNode']?.() },
+      { icon: 'file-output', label: '文本输出', desc: '长文本阅读输出', action: () => canvasWin['addTextOutputNode']?.() },
     ],
   },
 ];
-
 type ShortcutRow = { label: string; keys: string[] };
 type ShortcutGroup = { title: string; rows: ShortcutRow[] };
 
@@ -260,6 +264,7 @@ function ToolbarFlyout({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const closeTimerRef = useRef<number | null>(null);
+  const openRef = useRef(false);
   const [open, setOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ left: 0, top: 0 });
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
@@ -268,6 +273,10 @@ function ToolbarFlyout({
     const root = document.querySelector('.infinite-canvas-root');
     setPortalRoot(root instanceof HTMLElement ? root : null);
   }, []);
+
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
 
   const syncMenuPos = useCallback(() => {
     const el = triggerRef.current;
@@ -290,8 +299,13 @@ function ToolbarFlyout({
   }, [open, groups]);
 
   const refreshFlyoutIcons = useCallback(() => {
-    const lucide = (window as unknown as { lucide?: { createIcons?: () => void } }).lucide;
-    lucide?.createIcons?.();
+    const lucide = (window as unknown as {
+      lucide?: { createIcons?: (opts?: { root?: HTMLElement }) => void };
+    }).lucide;
+    // 只刷菜单内图标，避免重绘触发器上的「+」打断旋转动画
+    const root = menuRef.current ?? undefined;
+    if (root) lucide?.createIcons?.({ root });
+    else lucide?.createIcons?.();
   }, []);
 
   const openMenu = useCallback(() => {
@@ -299,6 +313,8 @@ function ToolbarFlyout({
       window.clearTimeout(closeTimerRef.current);
       closeTimerRef.current = null;
     }
+    // 已打开时只取消关闭；勿重算定位——离开「+」后 hover scale 回弹会改 getBoundingClientRect，菜单会抖一下
+    if (openRef.current) return;
     syncMenuPos();
     setOpen(true);
   }, [syncMenuPos]);
@@ -349,14 +365,21 @@ function ToolbarFlyout({
                 type="button"
                 className="toolbar-flyout-item"
                 role="menuitem"
-                title={item.label}
                 onClick={() => {
                   setOpen(false);
                   item.action();
                 }}
               >
-                <i data-lucide={item.icon} className="w-4 h-4"></i>
-                <span>{item.label}</span>
+                <span className="toolbar-flyout-item-icon" aria-hidden="true">
+                  <i data-lucide={item.icon} className="w-4 h-4"></i>
+                </span>
+                <span className="toolbar-flyout-item-copy">
+                  <span className="toolbar-flyout-item-title">
+                    <span className="toolbar-flyout-item-label">{item.label}</span>
+                    {item.badge ? <span className="toolbar-flyout-item-badge">{item.badge}</span> : null}
+                  </span>
+                  {item.desc ? <span className="toolbar-flyout-item-desc">{item.desc}</span> : null}
+                </span>
               </button>
             ))}
           </div>
@@ -386,7 +409,9 @@ function ToolbarFlyout({
             setOpen((value) => !value);
           }}
         >
-          <i data-lucide={triggerIcon} className="w-4 h-4"></i>
+          <span className="toolbar-flyout-trigger-spin" aria-hidden="true">
+            <i data-lucide={triggerIcon} className="w-4 h-4"></i>
+          </span>
           <span>{triggerLabel}</span>
         </button>
       </div>
@@ -648,30 +673,151 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                       <span data-i18n="canvas.outputDragHint">拖离节点后再松手，即可复制到画布</span>
                   </div>
                   <div id="selectionBox" className="selection-box"></div>
-                  <div id="createMenu" className="create-menu">
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('image')}><i data-lucide="image-plus" className="w-4 h-4"></i><span data-i18n="canvas.imageCard">图片卡片</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('imageBatch')}><i data-lucide="images" className="w-4 h-4"></i><span data-i18n="canvas.imageBatchNode">图片组</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('prompt')}><i data-lucide="text-cursor-input" className="w-4 h-4"></i><span data-i18n="canvas.prompt">提示词</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('loop')}><i data-lucide="repeat-2" className="w-4 h-4"></i><span data-i18n="canvas.loopNode">循环节点</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('llm')}><i data-lucide="message-square-text" className="w-4 h-4"></i><span data-i18n="canvas.llmNode">LLM 节点</span></button>
+                  <div id="createMenu" className="create-menu create-menu-nodes">
+                      <div className="create-menu-header">添加节点</div>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('prompt')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="align-left" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title" data-i18n="canvas.prompt">提示词</span>
+                              <span className="menu-btn-desc">脚本、广告词、品牌文案</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('image')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="image" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title" data-i18n="canvas.imageCard">图片卡片</span>
+                              <span className="menu-btn-desc">宣传图、海报、封面</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('imageBatch')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="images" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title" data-i18n="canvas.imageBatchNode">图片组</span>
+                              <span className="menu-btn-desc">多图集合整理</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('loop')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="repeat-2" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title" data-i18n="canvas.loopNode">循环节点</span>
+                              <span className="menu-btn-desc">批量循环执行</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('llm')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="message-square-text" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title" data-i18n="canvas.llmNode">LLM 节点</span>
+                              <span className="menu-btn-desc">文本推理与改写</span>
+                          </span>
+                      </button>
                       <div className="menu-section-title">生成</div>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('generator')}><i data-lucide="wand-sparkles" className="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('video')}><i data-lucide="clapperboard" className="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('rh')}><i data-lucide="workflow" className="w-4 h-4"></i><span data-i18n="canvas.rhGenerate">RH生成</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('videoReverse')}><i data-lucide="scan-search" className="w-4 h-4"></i><span>视频反推</span></button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('generator')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="wand-sparkles" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title" data-i18n="canvas.apiGenerate">图片生成</span>
+                              <span className="menu-btn-desc">API 生图</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('video')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="circle-play" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title" data-i18n="canvas.videoGenerateNode">视频生成</span>
+                              <span className="menu-btn-desc">文生视频 / 图生视频</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('rh')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="workflow" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title" data-i18n="canvas.rhGenerate">RH生成</span>
+                              <span className="menu-btn-desc">RunningHub 工作流</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('videoReverse')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="scan-search" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title">视频反推</span>
+                              <span className="menu-btn-desc">从视频反推提示词</span>
+                          </span>
+                      </button>
                       <div className="menu-section-title">Agent</div>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('replicaAgent')}><i data-lucide="bot" className="w-4 h-4"></i><span>复刻 Agent</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('imageRepairAgent')}><i data-lucide="wand-sparkles" className="w-4 h-4"></i><span>修图 Agent</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('batchPosterAgent')}><i data-lucide="layout-grid" className="w-4 h-4"></i><span>Batch Poster Agent</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('nineGridAgent')}><i data-lucide="grid-3x3" className="w-4 h-4"></i><span>九宫格 Agent</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('slotsLoopVideoAgent')}><i data-lucide="repeat-2" className="w-4 h-4"></i><span>Slots 循环视频 Agent</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('mxShellPromptAgent')}><i data-lucide="film" className="w-4 h-4"></i><span>Mx-Shell 提示词 Agent</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('mxShellPolishAgent')}><i data-lucide="wand-sparkles" className="w-4 h-4"></i><span>Mx-Shell 润色 Agent</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('deepWhiteShotAgent')}><i data-lucide="clapperboard" className="w-4 h-4"></i><span>DeepWhite 导演分镜 Agent</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('pixarAdScriptAgent')}><i data-lucide="sparkles" className="w-4 h-4"></i><span>故事动画分镜 Agent</span></button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('replicaAgent')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="bot" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title">复刻 Agent</span>
+                              <span className="menu-btn-desc">角色一致性复刻</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('imageRepairAgent')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="wand-sparkles" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title">修图 Agent</span>
+                              <span className="menu-btn-desc">局部修复与润色</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('batchPosterAgent')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="layout-grid" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title">Batch Poster Agent</span>
+                              <span className="menu-btn-desc">批量海报编排</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('nineGridAgent')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="grid-3x3" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title">九宫格 Agent</span>
+                              <span className="menu-btn-desc">分镜九宫格生成</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('slotsLoopVideoAgent')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="repeat-2" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title">Slots 循环视频 Agent</span>
+                              <span className="menu-btn-desc">槽位循环成片</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('mxShellPromptAgent')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="film" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title">Mx-Shell 提示词 Agent</span>
+                              <span className="menu-btn-desc">影壳提示词编排</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('mxShellPolishAgent')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="wand-sparkles" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title">Mx-Shell 润色 Agent</span>
+                              <span className="menu-btn-desc">提示词润色优化</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('deepWhiteShotAgent')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="clapperboard" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title">DeepWhite 导演分镜 Agent</span>
+                              <span className="menu-btn-desc">导演分镜编排</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('pixarAdScriptAgent')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="sparkles" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title">故事动画分镜 Agent</span>
+                              <span className="menu-btn-desc">故事动画分镜脚本</span>
+                          </span>
+                      </button>
                       <div className="menu-section-title">输出</div>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('output')}><i data-lucide="circle-dot" className="w-4 h-4"></i><span>Output</span></button>
-                      <button className="menu-btn" onClick={() => canvasWin["menuAdd"]?.('textOutput')}><i data-lucide="file-output" className="w-4 h-4"></i><span>文本输出</span></button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('output')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="circle-dot" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title">Output</span>
+                              <span className="menu-btn-desc">结果输出节点</span>
+                          </span>
+                      </button>
+                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('textOutput')}>
+                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="file-output" className="w-4 h-4"></i></span>
+                          <span className="menu-btn-copy">
+                              <span className="menu-btn-title">文本输出</span>
+                              <span className="menu-btn-desc">长文本阅读输出</span>
+                          </span>
+                      </button>
                   </div>
                   <div id="linkCreateMenu" className="create-menu"></div>
                   <div id="nodeInputMenu" className="create-menu"></div>
