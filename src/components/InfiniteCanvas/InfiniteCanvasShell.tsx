@@ -854,6 +854,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                           <div id="outputResolution" className="output-resolution">--</div>
                           <div className="output-preview-actions">
                               <button id="outputFavoriteBtn" className="preview-icon-btn output-lightbox-fav" type="button" title="收藏" aria-label="收藏" aria-pressed="false"><i data-lucide="star" className="w-4 h-4"></i></button>
+                              <button id="outputCompareBtn" className="preview-icon-btn output-lightbox-compare" type="button" title="对比" aria-label="对比" aria-pressed="false" hidden><i data-lucide="columns-2" className="w-4 h-4"></i></button>
                               <button id="outputDownloadBtn" className="preview-icon-btn" type="button" title="下载" aria-label="下载" data-i18n-title="canvas.download"><i data-lucide="download" className="w-4 h-4"></i></button>
                               <button id="outputLightboxCloseBtn" className="preview-icon-btn" type="button" title="关闭" aria-label="关闭" data-i18n-title="common.close"><i data-lucide="x" className="w-4 h-4"></i></button>
                           </div>

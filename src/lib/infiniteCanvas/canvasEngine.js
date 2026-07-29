@@ -426,7 +426,7 @@ let gateViewMode = 'grid';
 let workflowTemplateModal, workflowTemplateList, workflowTemplateBtn;
 let outputLightbox, outputPreview, outputLightboxImg, outputCompareContainer, outputCompareResult;
 let outputCompareOriginal, outputCompareOriginalWrap, outputCompareSlider, outputResolution;
-let outputDownloadBtn, outputFavoriteBtn, outputLightboxVideo, outputPromptPanel, outputPromptText, outputCopyPromptBtn;
+let outputDownloadBtn, outputFavoriteBtn, outputCompareBtn, outputLightboxVideo, outputPromptPanel, outputPromptText, outputCopyPromptBtn;
 let outputRerunBtn, logModal, logList, logSearchInput, logModalCount, logClearBar, logClearBtn, logClearCancel, logClearConfirm, errorModal, errorTitle, errorMessage;
 let historyLibraryPane, historyLogsPane, historyLibraryList, historyLibrarySearch, historyHubTitle;
 let historyHubTitleText, historyLibraryControls, historyLibraryZoom, historyLibrarySortBtn;
@@ -613,6 +613,7 @@ function bindDomElements(root) {
   outputResolution = g('outputResolution');
   outputDownloadBtn = g('outputDownloadBtn');
   outputFavoriteBtn = g('outputFavoriteBtn');
+  outputCompareBtn = g('outputCompareBtn');
   outputLightboxVideo = g('outputLightboxVideo');
   outputPromptPanel = g('outputPromptPanel');
   outputPromptText = g('outputPromptText');
@@ -6737,7 +6738,7 @@ function addRhNode(point){
         type:'rh',
         x:p.x,
         y:p.y,
-        w:430,
+        w:820,
         h:0,
         rhMode:'app',
         rhPayment:'free',
@@ -6748,6 +6749,7 @@ function addRhNode(point){
         rhAppInfo:null,
         rhWorkflowInfo:null,
         rhParams:{},
+        generatedOutputs:[],
         inputs:[],
         running:false
     });
@@ -11221,7 +11223,7 @@ function refreshRhNodeContent(node){
     const el = nodesEl.querySelector(`.rh-node[data-id="${CSS.escape(node.id)}"], .node.rh-node[data-id="${CSS.escape(node.id)}"]`);
     if(!el?.querySelector('.rh-prompt-list')) return false;
     if(!patchNodeHeadStatus(el, node)) return false;
-    patchGenRunButton(el, node, tr('canvas.rhRun'), tr('canvas.rhRunning'));
+    patchGenRunButton(el, node, langIsEn() ? 'Run Node' : '运行节点', langIsEn() ? 'Running…' : '运行中…');
     patchNodeRetryBar(el, node);
     const cascadeSlot = el.querySelector('.gen-run-row');
     if(cascadeSlot){
@@ -11232,11 +11234,15 @@ function refreshRhNodeContent(node){
             bindCascadeButtons(cascadeSlot, node.id);
         }
     }
-    // 媒体缩略图可更新；不重建 prompt textarea / 参数表单
+    const running = agentPendingCount(node.id) > 0 || Boolean(node.running);
+    el.querySelectorAll('.rh-status-dot').forEach(dot => dot.classList.toggle('is-on', running));
+    el.querySelector('.rh-progress')?.classList.toggle('is-on', running);
+    // 媒体/输出可更新；不重建 prompt textarea / 参数表单
     try {
         const fields = rhActiveFields(node);
         const media = rhMediaSources(node);
         renderRhMediaFields(el.querySelector('.rh-input-list'), node, fields, media);
+        rhRenderOutputPane(el.querySelector('.rh-output-stage'), node);
     } catch(err) {
         console.warn('[infinite-canvas] rh incremental patch partial fail', err);
     }
@@ -11305,6 +11311,8 @@ const NODE_TYPE_ICON = {
 function renderNode(node){
     normalizeApiNodeLayout(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
+    // 旧窄 RH 节点升到三栏默认宽
+    if(node.type === 'rh' && Number(node.w || 0) > 0 && Number(node.w) < 780) node.w = 820;
     const el = document.createElement('div');
     const size = defaultNodeSize(node.type);
     const hasFixedSize = Boolean(node.h || size.h);
@@ -11348,7 +11356,10 @@ function renderNode(node){
     const promptGroupHeadToggle = node.type === 'promptGroup' ? promptGroupHeadToggleHtml(node) : '';
     const imageBatchHeadToggle = node.type === 'imageBatch' ? imageBatchHeadToggleHtml(node) : '';
     const headIcon = NODE_TYPE_ICON[node.type] || 'zap';
-    el.innerHTML = `<div class="node-head"><span class="node-head-icon"><i data-lucide="${headIcon}" class="w-3 h-3"></i></span><span class="node-title">${displayTitle}</span><div style="display:flex;align-items:center;gap:8px;margin-left:auto">${promptGroupHeadToggle}${imageBatchHeadToggle}${disabledBadge}${statusHtml}<button type="button" class="node-delete-btn text-gray-300 hover:text-red-500" aria-label="${escapeAttr(tr('common.delete'))}"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
+    const rhLiveDot = node.type === 'rh'
+        ? `<span class="rh-status-dot rh-head-dot ${(agentPendingCount(node.id) > 0 || Boolean(node.running)) ? 'is-on' : ''}" aria-hidden="true"></span>`
+        : '';
+    el.innerHTML = `<div class="node-head"><span class="node-head-icon"><i data-lucide="${headIcon}" class="w-3 h-3"></i></span><span class="node-title">${displayTitle}</span>${rhLiveDot}<div style="display:flex;align-items:center;gap:8px;margin-left:auto">${promptGroupHeadToggle}${imageBatchHeadToggle}${disabledBadge}${statusHtml}<button type="button" class="node-delete-btn text-gray-300 hover:text-red-500" aria-label="${escapeAttr(tr('common.delete'))}"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
     const deleteBtn = el.querySelector('.node-delete-btn');
     if(deleteBtn){
         deleteBtn.onmousedown = e => e.stopPropagation();
@@ -12037,7 +12048,7 @@ function defaultNodeSize(type){
     if(type === 'videoReverse') return {w:380, h:460};
     if(type === 'msgen') return {w:260, h:0};
     if(type === 'video') return {w:260, h:0};
-    if(type === 'rh') return {w:430, h:0};
+    if(type === 'rh') return {w:820, h:0};
     if(type === 'comfy') return {w:420, h:460};
     if(type === 'ltxDirector') return {w:1000, h:800};
     if(type === 'output') return {w:460, h:0};
@@ -17444,9 +17455,7 @@ function generatorPreviewUrls(node){
 function collapseOpenGenStagesOnBoardClick(){
     const opened = nodes.filter(n => isGenConsoleNode(n) && n.historyOpen);
     if(!opened.length) return false;
-    opened.forEach(n => { n.historyOpen = false; });
-    refreshNodes(opened.map(n => n.id));
-    scheduleSave();
+    opened.forEach(n => setGenStageHistoryOpen(n, false));
     return true;
 }
 function generatorHistoryItemAt(node, index){
@@ -17926,8 +17935,7 @@ function bindGenStageInteractions(root, node){
                 openGenHistoryPanel(node);
                 return;
             }
-            node.historyOpen = !node.historyOpen;
-            refresh();
+            setGenStageHistoryOpen(node, !node.historyOpen);
         };
     }
     const expandBtn = root?.querySelector?.('.gen-stage-stack-expand, [data-action="expand-grid"]');
@@ -17938,8 +17946,7 @@ function bindGenStageInteractions(root, node){
             e.stopPropagation();
             applyNodeSelection(node.id, e);
             // 角标展开：节点内查看全部结果（图1网格）；生成中也可展开看 pending 占位
-            node.historyOpen = true;
-            refresh();
+            setGenStageHistoryOpen(node, true);
         };
     }
     const collapseGridBtn = root?.querySelector?.('.gen-stage-grid-collapse, [data-action="collapse-grid"]');
@@ -17949,8 +17956,7 @@ function bindGenStageInteractions(root, node){
             e.preventDefault();
             e.stopPropagation();
             applyNodeSelection(node.id, e);
-            node.historyOpen = false;
-            refresh();
+            setGenStageHistoryOpen(node, false);
         };
     }
     root?.querySelectorAll?.('.gen-stage-tile[data-preview-index]').forEach(tile => {
@@ -18009,8 +18015,7 @@ function bindGenStageInteractions(root, node){
                 return;
             }
             if(action === 'collapse'){
-                node.historyOpen = false;
-                refresh();
+                setGenStageHistoryOpen(node, false);
                 return;
             }
             if(action === 'set-primary'){
@@ -18233,17 +18238,274 @@ function renderGenStageHtml(node){
         </div>
     </div>`;
 }
-function refreshGenStage(root, node){
+const GEN_STAGE_FLIP_MS = 420;
+const GEN_STAGE_FLIP_EASE = 'cubic-bezier(.22,.61,.36,1)';
+function prefersGenStageReducedMotion(){
+    try{ return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+    catch(_){ return false; }
+}
+function captureGenStageFlipMap(stage){
+    const map = new Map();
+    if(!stage) return map;
+    const add = (el, url) => {
+        const key = outputUrlValue(url);
+        if(!key || map.has(key)) return;
+        const r = el.getBoundingClientRect();
+        if(r.width < 2 || r.height < 2) return;
+        map.set(key, {left:r.left, top:r.top, width:r.width, height:r.height, el});
+    };
+    stage.querySelectorAll('.gen-stage-stack-hero[data-preview-url], .gen-stage-tile[data-preview-url], .gen-stage-hero[data-preview-url]').forEach(el => {
+        add(el, el.getAttribute('data-preview-url'));
+    });
+    stage.querySelectorAll('.gen-stage-stack-peek').forEach(el => {
+        const media = el.querySelector('img[src], video[src]');
+        if(media) add(el, media.getAttribute('src'));
+    });
+    return map;
+}
+function waitGenStageMediaReady(stage){
+    if(!stage) return Promise.resolve();
+    const medias = [...stage.querySelectorAll('.gen-stage-tile-media img, .gen-stage-tile-media video, .gen-stage-stack-hero img, .gen-stage-stack-hero video, .gen-stage-hero img, .gen-stage-hero video')];
+    return Promise.all(medias.map(media => {
+        if(media.tagName === 'VIDEO'){
+            if(media.readyState >= 1) return Promise.resolve();
+            return new Promise(resolve => {
+                media.addEventListener('loadedmetadata', resolve, {once:true});
+                media.addEventListener('error', resolve, {once:true});
+            });
+        }
+        if(media.complete && media.naturalWidth > 0){
+            return media.decode ? media.decode().catch(() => {}) : Promise.resolve();
+        }
+        return new Promise(resolve => {
+            const done = () => {
+                if(media.decode) media.decode().then(resolve, resolve);
+                else resolve();
+            };
+            media.addEventListener('load', done, {once:true});
+            media.addEventListener('error', resolve, {once:true});
+        });
+    })).then(() => {});
+}
+/** 在拆 DOM 之前盖住旧图：克隆已解码媒体，避免「先空一帧再飞」 */
+function spawnGenStageFlipGhostFromCapture(from, url){
+    const ghost = document.createElement('div');
+    ghost.className = 'gen-stage-flip-ghost';
+    ghost.dataset.flipUrl = url;
+    ghost.style.left = `${from.left}px`;
+    ghost.style.top = `${from.top}px`;
+    ghost.style.width = `${from.width}px`;
+    ghost.style.height = `${from.height}px`;
+    ghost.style.opacity = '1';
+    ghost.style.transition = 'none';
+    const srcMedia = from.el?.querySelector?.('img, video') || null;
+    const srcUrl = outputUrlValue(srcMedia?.getAttribute?.('src') || srcMedia?.currentSrc || '');
+    // 只有同源才克隆，避免「从封面飞出却带着封面像素、落地换成别的图」再闪一下
+    if(srcMedia && srcUrl && srcUrl === outputUrlValue(url)){
+        const clone = srcMedia.cloneNode(true);
+        clone.removeAttribute('style');
+        clone.style.width = '100%';
+        clone.style.height = '100%';
+        clone.style.objectFit = 'cover';
+        clone.style.display = 'block';
+        clone.draggable = false;
+        ghost.appendChild(clone);
+    } else if(isVideoUrl(url)){
+        const v = document.createElement('video');
+        v.src = url;
+        v.muted = true;
+        v.playsInline = true;
+        v.preload = 'metadata';
+        ghost.appendChild(v);
+    } else {
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = '';
+        img.draggable = false;
+        ghost.appendChild(img);
+    }
+    document.body.appendChild(ghost);
+    return ghost;
+}
+function animateGenStageFlipGhostTo(ghost, to, {fadeOut=false, delay=0, scaleTo=1}={}){
+    if(!ghost || !to) return;
+    // 先读布局再开 transition，避免第一帧就飞到终点
+    void ghost.offsetWidth;
+    ghost.style.transformOrigin = 'center center';
+    ghost.style.transition = [
+        `left ${GEN_STAGE_FLIP_MS}ms ${GEN_STAGE_FLIP_EASE} ${delay}ms`,
+        `top ${GEN_STAGE_FLIP_MS}ms ${GEN_STAGE_FLIP_EASE} ${delay}ms`,
+        `width ${GEN_STAGE_FLIP_MS}ms ${GEN_STAGE_FLIP_EASE} ${delay}ms`,
+        `height ${GEN_STAGE_FLIP_MS}ms ${GEN_STAGE_FLIP_EASE} ${delay}ms`,
+        `opacity ${Math.round(GEN_STAGE_FLIP_MS * .55)}ms ease ${delay}ms`,
+        `transform ${GEN_STAGE_FLIP_MS}ms ${GEN_STAGE_FLIP_EASE} ${delay}ms`
+    ].join(', ');
+    requestAnimationFrame(() => {
+        ghost.style.left = `${to.left}px`;
+        ghost.style.top = `${to.top}px`;
+        ghost.style.width = `${to.width}px`;
+        ghost.style.height = `${to.height}px`;
+        if(scaleTo !== 1) ghost.style.transform = `scale(${scaleTo})`;
+        if(fadeOut) ghost.style.opacity = '0';
+    });
+}
+function playGenStageFlipMorph(stage, firstMap, ghosts, {expanding=true, node=null, nodeEl=null}={}){
+    if(!stage || !firstMap?.size) return;
+    const lastMap = captureGenStageFlipMap(stage);
+    const hideEls = [...stage.querySelectorAll('.gen-stage-stack-hero, .gen-stage-stack-peek, .gen-stage-tile, .gen-stage-hero, .gen-stage-grid-collapse, .gen-stage-stack-expand')];
+    const peekEls = [...stage.querySelectorAll('.gen-stage-stack-peek')];
+    hideEls.forEach(el => {
+        el.style.opacity = '0';
+        el.style.transition = 'none';
+    });
+    stage.classList.add('is-flipping');
+    if(node) node._stageFlipping = true;
+    const anchor = [...firstMap.values()][0] || [...lastMap.values()][0];
+    const heroEl = stage.querySelector('.gen-stage-stack-hero[data-preview-url], .gen-stage-tile.is-primary[data-preview-url], .gen-stage-hero[data-preview-url]');
+    const heroKey = outputUrlValue(heroEl?.getAttribute('data-preview-url') || '');
+    // 收起终点只用封面矩形：若飞向带 rotate 的 peek AABB，落地再换成真叠卡会像「刻意对齐」
+    const heroLast = (heroKey && lastMap.get(heroKey))
+        || (heroEl ? (() => {
+            const r = heroEl.getBoundingClientRect();
+            return {left:r.left, top:r.top, width:r.width, height:r.height};
+        })() : null)
+        || [...lastMap.values()][0]
+        || anchor;
+    const ghostByUrl = new Map(ghosts.map(g => [g.dataset.flipUrl, g]));
+    const urls = new Set([...firstMap.keys(), ...lastMap.keys()]);
+    let i = 0;
+    urls.forEach(url => {
+        const first = firstMap.get(url);
+        const last = lastMap.get(url);
+        const delay = Math.min(72, i * 14);
+        i += 1;
+        let ghost = ghostByUrl.get(url);
+        if(expanding){
+            if(!last) return;
+            const from = first || anchor;
+            if(!from) return;
+            if(!ghost){
+                ghost = spawnGenStageFlipGhostFromCapture(from, url);
+                ghosts.push(ghost);
+                ghostByUrl.set(url, ghost);
+            }
+            animateGenStageFlipGhostTo(ghost, last, {delay});
+            return;
+        }
+        // 收起：全部收进封面，非封面淡出；扇叠 peek 不参与 FLIP 终点
+        if(!first || !heroLast) return;
+        if(!ghost){
+            ghost = spawnGenStageFlipGhostFromCapture(first, url);
+            ghosts.push(ghost);
+            ghostByUrl.set(url, ghost);
+        }
+        const isHero = url === heroKey;
+        animateGenStageFlipGhostTo(ghost, heroLast, {
+            fadeOut: !isHero,
+            delay,
+            scaleTo: isHero ? 1 : 0.92
+        });
+    });
+    const finish = () => {
+        // 封面先上屏；peek 稍后淡入，避免「飞到扇位再咬齐」的对齐感
+        hideEls.forEach(el => {
+            if(el.classList.contains('gen-stage-stack-peek')) return;
+            el.style.transition = 'none';
+            el.style.opacity = '1';
+        });
+        peekEls.forEach(el => {
+            el.style.transition = 'none';
+            el.style.opacity = '0';
+        });
+        requestAnimationFrame(() => {
+            ghosts.forEach(g => g.remove());
+            hideEls.forEach(el => {
+                if(el.classList.contains('gen-stage-stack-peek')) return;
+                el.style.transition = '';
+                el.style.opacity = '';
+            });
+            peekEls.forEach((el, idx) => {
+                el.style.transition = `opacity 180ms ease ${idx * 30}ms`;
+                el.style.opacity = '1';
+            });
+            clearTimeout(stage._flipTimer);
+            stage._flipTimer = setTimeout(() => {
+                peekEls.forEach(el => { el.style.transition = ''; el.style.opacity = ''; });
+                stage.classList.remove('is-flipping');
+                if(node) delete node._stageFlipping;
+                // 尺寸已在 refresh 时算好，收尾再 fit 会微挪一截，像对齐校正
+                try { refreshGeometryAfterLayout(); } catch(_){ /* ignore */ }
+                if(node && selected.has(node.id)) positionImageGenDock(node);
+                if(node && isGenBatchPicking(node)) syncGenBatchPickBar();
+            }, 220);
+        });
+    };
+    const maxDelay = Math.min(72, Math.max(0, (urls.size - 1) * 14));
+    const animDone = new Promise(resolve => setTimeout(resolve, GEN_STAGE_FLIP_MS + maxDelay + 24));
+    Promise.race([
+        Promise.all([animDone, waitGenStageMediaReady(stage)]),
+        new Promise(resolve => setTimeout(resolve, GEN_STAGE_FLIP_MS + maxDelay + 320))
+    ]).then(finish);
+}
+/** 叠卡↔网格：铺开 / 叠合；程序化切换可传 animate:false */
+function setGenStageHistoryOpen(node, open, opts={}){
+    if(!node || !isGenConsoleNode(node)) return false;
+    const next = !!open;
+    if(!!node.historyOpen === next) return false;
+    const animate = opts.animate !== false && !prefersGenStageReducedMotion();
+    const nodeEl = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
+    const host = nodeEl?.querySelector?.('.gen-stage-slot');
+    const stage = host?.querySelector?.('.gen-stage');
+    const expanding = next;
+    let firstMap = null;
+    let ghosts = [];
+    if(animate && stage){
+        firstMap = captureGenStageFlipMap(stage);
+        if(!firstMap.size) firstMap = null;
+        else {
+            // 根因修复：必须先盖幽灵再拆 DOM。旧逻辑是 innerHTML 拆掉→节点瞬间变宽/变窄→幽灵才出现，中间空一帧必闪。
+            firstMap.forEach((rect, url) => {
+                ghosts.push(spawnGenStageFlipGhostFromCapture(rect, url));
+            });
+            // 旧舞台立刻隐身（幽灵已在上层），避免拆节点时旧图与新布局叠闪
+            stage.style.opacity = '0';
+            stage.style.pointerEvents = 'none';
+        }
+    }
+    node.historyOpen = next;
+    if(nodeEl) refreshGenStage(nodeEl, node, {deferFollowUpFit: !!firstMap});
+    else refreshNodes([node.id]);
+    if(firstMap && nodeEl){
+        const nextStage = nodeEl.querySelector('.gen-stage-slot .gen-stage, .gen-stage');
+        if(nextStage) playGenStageFlipMorph(nextStage, firstMap, ghosts, {expanding, node, nodeEl});
+        else ghosts.forEach(g => g.remove());
+    }
+    scheduleSave();
+    syncImageGenDock();
+    return true;
+}
+function refreshGenStage(root, node, opts={}){
     const host = root?.querySelector?.('.gen-stage-slot') || (root?.classList?.contains('gen-stage-slot') ? root : null);
     if(!host || !node) return;
     host.innerHTML = renderGenStageHtml(node);
+    // 动画前先藏真图与按钮，避免中间闪一帧最终态
+    if(opts.deferFollowUpFit){
+        host.querySelectorAll('.gen-stage-stack-hero, .gen-stage-stack-peek, .gen-stage-tile, .gen-stage-hero, .gen-stage-grid-collapse, .gen-stage-stack-expand').forEach(el => {
+            el.style.opacity = '0';
+            el.style.transition = 'none';
+        });
+        host.querySelector('.gen-stage')?.classList.add('is-flipping');
+    }
     bindGenStageInteractions(host, node);
     refreshIcons(host);
     // 叠卡↔网格内容高度/宽度变化，非手改尺寸时重测
     if(!node._userSized) delete node._baseFrameH;
     fitGeneratorNodeHeight(node);
+    // 翻牌动画期间勿二次 fit，否则终点格子会挪位，卸幽灵时像「图变了」
+    if(opts.deferFollowUpFit) return;
     // 展开后节点变高：下一帧重算端口/连线，保证锚在展开块垂直中心
     requestAnimationFrame(() => {
+        if(node._stageFlipping) return;
         fitGeneratorNodeHeight(node);
         try { refreshGeometryAfterLayout(); } catch(_){ /* ignore */ }
         if(selected.has(node.id)) positionImageGenDock(node);
@@ -20120,8 +20382,19 @@ function rhFieldRole(field){
     const kind = rhFieldKind(field);
     if(['image','video','audio','number','boolean'].includes(kind)) return kind;
     const text = `${field?.fieldName || ''} ${field?.label || ''} ${field?.group || ''}`.toLowerCase();
-    if(/prompt|positive|negative|text|caption|description|关键词|提示词|正向|负向/.test(text)) return 'prompt';
+    // 含「输入文本 / 文案 / 描述」等也进右侧提示词区，勿落到左侧参数栏
+    if(/prompt|positive|negative|text|caption|description|关键词|提示词|正向|负向|输入文本|文本|文案|描述|内容/.test(text)) return 'prompt';
     return 'text';
+}
+/** 右侧舞台：图片/视频/音频/提示词，以及无选项的自由文本 */
+function rhIsStageField(field){
+    const role = rhFieldRole(field);
+    if(['image', 'video', 'audio', 'prompt'].includes(role)) return true;
+    if(role === 'text' && !(rhExtractFieldOptions(field)?.length)) return true;
+    return false;
+}
+function rhIsSideParamField(field){
+    return !rhIsStageField(field);
 }
 function rhExtractFieldOptions(field){
     const candidates = [field?.fieldData, field?.options, field?.list, field?.values, field?.enum, field?.choices, field?.items, field?.selectOptions, field?.dropdown];
@@ -20502,13 +20775,10 @@ async function rhBuildWorkflowRequestExtras(node, media, nodeInfoList){
     const config = await ensureRunningHubWorkflowConfigForNode(node);
     if(!config || (config.optionalImageMode || 'prune-workflow') !== 'prune-workflow') return {};
     const fields = rhActiveFields(node);
-    const indexes = rhFieldIndexes(fields);
     const missingOptional = [];
     for(const field of fields){
         if(rhFieldKind(field) !== 'image') continue;
-        const key = rhParamKey(field.nodeId, field.fieldName);
-        const idx = indexes[key] || 0;
-        const hasInput = Boolean(media.image?.[idx]?.url);
+        const hasInput = rhSlotHasMedia(node, field, media);
         if(field.required === true && !hasInput){
             throw new Error(`RunningHub 工作流缺少必选图片：${rhRequiredLabel(field)}`);
         }
@@ -20526,74 +20796,173 @@ async function rhBuildWorkflowRequestExtras(node, media, nodeInfoList){
     return workflow ? {workflow} : {};
 }
 function rhMediaPreviewHtml(ref, kind){
-    const safe = escapeAttr(ref?.url || '');
-    if(kind === 'video') return `<video src="${safe}" muted preload="metadata" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video>`;
-    if(kind === 'audio') return `<i data-lucide="file-audio" class="w-6 h-6 text-slate-400"></i>`;
-    return safe && !isMissingAssetUrl(safe) ? `<img src="${safe}">` : `<i data-lucide="image" class="w-6 h-6 text-slate-400"></i>`;
+    const safe = escapeAttr(typeof ref === 'string' ? ref : (ref?.url || ''));
+    if(kind === 'video') {
+        return safe
+            ? `<video src="${safe}" muted preload="metadata" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video>`
+            : `<i data-lucide="file-video" class="w-6 h-6"></i>`;
+    }
+    if(kind === 'audio') return `<i data-lucide="file-audio" class="w-6 h-6"></i>`;
+    return safe && !isMissingAssetUrl(safe) ? `<img src="${safe}" alt="" draggable="false">` : `<i data-lucide="image" class="w-6 h-6"></i>`;
+}
+function rhSlotHasMedia(node, field, media=null){
+    return Boolean(String(rhFieldValue(node, field, media) || '').trim());
+}
+function rhSetSlotMediaUrl(node, fieldKey, url){
+    node.rhParams = node.rhParams || {};
+    const clean = String(url || '').trim();
+    if(!clean){
+        delete node.rhParams[fieldKey];
+        return;
+    }
+    node.rhParams[fieldKey] = { value: clean, sourceFromUpstream: false };
+}
+async function rhUploadLocalFileToSlot(nodeId, fieldKey, file){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || !file) return;
+    const form = new FormData();
+    form.append('files', file);
+    setStatus(langIsEn() ? 'Uploading…' : '上传中...');
+    const data = await apiFetch('/api/ai/upload', { method:'POST', body:form }).then(async r => {
+        if(!r.ok) throw new Error(await responseErrorMessage(r, langIsEn() ? 'Upload failed' : '上传失败'));
+        return r.json();
+    });
+    const uploaded = data.files?.[0];
+    if(!uploaded?.url) throw new Error(langIsEn() ? 'Upload failed' : '上传失败');
+    pushUndo();
+    rhSetSlotMediaUrl(node, fieldKey, uploaded.url);
+    refreshNodes([nodeId]);
+    scheduleSave();
+    setStatus('Saved');
+}
+function rhAcceptForKind(kind){
+    if(kind === 'video') return 'video/*';
+    if(kind === 'audio') return 'audio/*';
+    return 'image/*';
+}
+function rhFileMatchesKind(file, kind){
+    const mediaKind = mediaKindForUpload(file);
+    if(kind === 'video') return mediaKind === 'video';
+    if(kind === 'audio') return mediaKind === 'audio';
+    return mediaKind === 'image';
+}
+function rhOutputPreviewRef(node){
+    const refs = generatedImageRefs(node);
+    if(!refs.length) return null;
+    const idx = Math.max(0, Math.min(refs.length - 1, Number(node.previewIndex ?? refs.length - 1)));
+    return refs[idx] || refs[refs.length - 1] || null;
+}
+function rhRenderOutputPane(container, node){
+    if(!container) return;
+    const running = agentPendingCount(node.id) > 0 || Boolean(node.running);
+    const refs = generatedImageRefs(node);
+    const current = rhOutputPreviewRef(node);
+    const url = current?.url || '';
+    const kind = current?.kind || (isVideoUrl(url) ? 'video' : 'image');
+    const filled = Boolean(url);
+    container.classList.toggle('is-filled', filled);
+    if(running && !url){
+        container.innerHTML = `<div class="rh-output-empty is-running">
+            <i data-lucide="loader-circle" class="w-6 h-6 spin-icon"></i>
+            <span>${langIsEn() ? 'Generating…' : '生成中…'}</span>
+        </div>`;
+        refreshIcons();
+        return;
+    }
+    if(!url){
+        container.innerHTML = `<div class="rh-output-empty">
+            <i data-lucide="image" class="rh-media-ph-icon"></i>
+            <span>${langIsEn() ? 'Output appears here' : '运行后结果会显示在这里'}</span>
+        </div>`;
+        refreshIcons();
+        return;
+    }
+    container.innerHTML = `
+        <div class="rh-output-media" data-rh-output-count="${refs.length}">
+            ${rhMediaPreviewHtml(url, kind)}
+            ${refs.length > 1 ? `<span class="rh-output-count">${refs.length}</span>` : ''}
+        </div>
+    `;
+    if(refs.length > 1){
+        container.querySelector('.rh-output-media')?.addEventListener('click', e => {
+            e.stopPropagation();
+            node.previewIndex = ((Number(node.previewIndex ?? refs.length - 1) + 1) % refs.length);
+            rhRenderOutputPane(container, node);
+            scheduleSave();
+        });
+    }
 }
 function renderRhBody(node){
     // 无进行中 pending 时清掉存档里卡住的「运行中」徽章（按钮可能已是空闲态）
     reconcileAgentRunStateFromPending(node.id);
     const wrap = document.createElement('div');
-    wrap.className = 'rh-body';
+    wrap.className = 'rh-body rh-body-tri';
     node.rhParams = node.rhParams || {};
-    const entry = ensureRhNodeSelection(node);
+    ensureRhNodeSelection(node);
     const selectedRef = rhSelectedEntryRef(node);
     const media = rhMediaSources(node);
     const fields = rhActiveFields(node);
-    const mode = selectedRef?.kind || rhCurrentKind(node);
     const selectedKey = selectedRef ? runningHubEntryKey(selectedRef.kind, selectedRef.id) : '';
+    const running = agentPendingCount(node.id) > 0 || Boolean(node.running);
+    const advancedOpen = Boolean(node.rhAdvancedOpen);
+    const rhBtn = agentPendingRunState(node.id, langIsEn() ? 'Run Node' : '运行节点', langIsEn() ? 'Running…' : '运行中…');
+    // 一整块 satin 面板：左右凹井 + 中间参数贴面（无三分栏外框）
     wrap.innerHTML = `
-        <div class="rh-top">
-            <label class="field rh-webapp-field">
-                <div class="setting-title">RunningHub 配置</div>
-                <select class="select-lite rh-entry-select">${rhEntryOptions(selectedKey)}</select>
-            </label>
-            <label class="field rh-machine-field">
-                <div class="setting-title">显存</div>
-                <select class="select-lite rh-machine-select">
-                    <option value="" ${!node.instanceType ? 'selected' : ''}>24G</option>
-                    <option value="plus" ${node.instanceType === 'plus' ? 'selected' : ''}>48G</option>
-                </select>
-            </label>
+        <div class="rh-tri">
+            <section class="rh-pane rh-pane-in">
+                <div class="rh-pane-head">
+                    <span class="rh-pane-title"><i data-lucide="image" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Input Image' : '输入图像'}</span></span>
+                </div>
+                <div class="rh-input-stack">
+                    <div class="rh-input-list rh-media-grid"></div>
+                    <div class="rh-prompt-list"></div>
+                </div>
+            </section>
+            <section class="rh-pane rh-pane-params">
+                <div class="rh-side-scroll">
+                    <div class="rh-param-list rh-side-params"></div>
+                </div>
+            </section>
+            <section class="rh-pane rh-pane-out">
+                <div class="rh-pane-head">
+                    <span class="rh-pane-title">
+                        <i data-lucide="${running ? 'loader-circle' : 'image'}" class="w-3.5 h-3.5 ${running ? 'spin-icon' : ''}"></i>
+                        <span>${langIsEn() ? 'Output Image' : '输出图像'}</span>
+                    </span>
+                </div>
+                <div class="rh-well rh-output-stage"></div>
+            </section>
         </div>
-        <label class="field rh-apikey-field">
-            <div class="setting-title-row">
-                <div class="setting-title">API Key</div>
-                <span class="rh-apikey-hint">${escapeHtml(rhApiKeyHint(node))}</span>
+        <div class="rh-foot">
+            <div class="gen-run-row rh-run-row">
+                ${agentGenRunActionsHtml(node.id, `<button class="gen-btn rh-run ${rhBtn.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''}><span>${escapeHtml(rhBtn.label)}</span></button>`)}
+                ${cascadeBtnHtml(node)}
             </div>
-            <select class="select-lite rh-payment-select rh-apikey-select">${rhApiKeyOptions(node)}</select>
-        </label>
-        <div class="rh-prompt-list"></div>
-        <div class="rh-media-section">
-            <div class="rh-media-head">
-                <span class="generator-section-label" style="margin:0">${tr('canvas.rhInputs')}</span>
-                ${(() => {
-                    const mf = rhMediaFieldsFromList(fields);
-                    if(!mf.length) return '';
-                    const img = mf.filter(f => rhFieldRole(f) === 'image').length;
-                    const vid = mf.filter(f => rhFieldRole(f) === 'video').length;
-                    const aud = mf.filter(f => rhFieldRole(f) === 'audio').length;
-                    const parts = [];
-                    if(img) parts.push(`图片 ${img}`);
-                    if(vid) parts.push(`视频 ${vid}`);
-                    if(aud) parts.push(`音频 ${aud}`);
-                    return parts.length ? `<span class="rh-media-count">${parts.join(' · ')}</span>` : '';
-                })()}
+            <div class="rh-progress ${running ? 'is-on' : ''}" aria-hidden="true"><div class="rh-progress-bar"></div></div>
+            <button type="button" class="rh-advanced-toggle ${advancedOpen ? 'is-open' : ''}" aria-expanded="${advancedOpen ? 'true' : 'false'}">
+                <span>${langIsEn() ? 'Advanced Settings' : '高级设置'}</span>
+                <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+            </button>
+            <div class="rh-advanced ${advancedOpen ? 'is-open' : ''}">
+                <label class="field rh-side-field rh-webapp-field">
+                    <div class="setting-title">${langIsEn() ? 'Config' : '配置'}</div>
+                    <select class="select-lite rh-entry-select">${rhEntryOptions(selectedKey)}</select>
+                </label>
+                <label class="field rh-side-field rh-machine-field">
+                    <div class="setting-title">${langIsEn() ? 'VRAM' : '显存'}</div>
+                    <select class="select-lite rh-machine-select">
+                        <option value="" ${!node.instanceType ? 'selected' : ''}>24G</option>
+                        <option value="plus" ${node.instanceType === 'plus' ? 'selected' : ''}>48G</option>
+                    </select>
+                </label>
+                <label class="field rh-side-field rh-apikey-field">
+                    <div class="setting-title-row">
+                        <div class="setting-title">API Key</div>
+                        <span class="rh-apikey-hint">${escapeHtml(rhApiKeyHint(node))}</span>
+                    </div>
+                    <select class="select-lite rh-payment-select rh-apikey-select">${rhApiKeyOptions(node)}</select>
+                </label>
             </div>
-            <div class="input-list rh-input-list"></div>
-        </div>
-        <div class="rh-param-head">
-            <span>${mode === 'workflow' ? tr('canvas.rhWorkflowParams') : tr('canvas.rhParams')}</span>
-            <span>${fields.length}</span>
-        </div>
-        <div class="rh-param-list"></div>
-        <div class="gen-run-row">
-            ${(() => {
-                const rhBtn = agentPendingRunState(node.id, tr('canvas.rhRun'), tr('canvas.rhRunning'));
-                return agentGenRunActionsHtml(node.id, `<button class="gen-btn rh-run ${rhBtn.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''}><i data-lucide="workflow" class="w-4 h-4"></i>${escapeHtml(rhBtn.label)}</button>`);
-            })()}
-            ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
     `;
@@ -20628,30 +20997,112 @@ function renderRhBody(node){
         node.instanceType = e.target.value === 'plus' ? 'plus' : '';
         scheduleSave();
     };
-    renderRhPromptFields(wrap.querySelector('.rh-prompt-list'), node, fields);
+    const advToggle = wrap.querySelector('.rh-advanced-toggle');
+    if(advToggle){
+        advToggle.onmousedown = e => e.stopPropagation();
+        advToggle.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            node.rhAdvancedOpen = !node.rhAdvancedOpen;
+            wrap.querySelector('.rh-advanced')?.classList.toggle('is-open', node.rhAdvancedOpen);
+            advToggle.classList.toggle('is-open', node.rhAdvancedOpen);
+            advToggle.setAttribute('aria-expanded', node.rhAdvancedOpen ? 'true' : 'false');
+            scheduleSave();
+        };
+    }
     renderRhMediaFields(wrap.querySelector('.rh-input-list'), node, fields, media);
+    renderRhPromptFields(wrap.querySelector('.rh-prompt-list'), node, fields);
     renderRhParams(wrap.querySelector('.rh-param-list'), node, fields, media);
+    rhRenderOutputPane(wrap.querySelector('.rh-output-stage'), node);
     wrap.querySelector('.rh-run').onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
     bindCascadeButtons(wrap, node.id);
     refreshIcons();
     return wrap;
 }
-function rhFieldDisplayLabel(field){
-    return String(field?.label || field?.fieldName || 'Field').trim();
+const RH_FRIENDLY_LABELS = {
+    aspectratio: '宽高比',
+    aspect_ratio: '宽高比',
+    resolution: '分辨率',
+    prompt: '提示词',
+    negativeprompt: '负向提示词',
+    negative_prompt: '负向提示词',
+    seed: '种子',
+    steps: '步数',
+    cfg: 'CFG',
+    guidance: '引导系数',
+    strength: '强度',
+    denoise: '降噪',
+    width: '宽度',
+    height: '高度',
+    duration: '时长',
+    fps: '帧率',
+};
+function rhLooksTechnicalName(value){
+    const s = String(value || '').trim();
+    if(!s) return false;
+    if(s.length > 28) return true;
+    if(/::/.test(s)) return true;
+    if(/^RH[_-]/i.test(s)) return true;
+    if(/Rhart|FlashOfficial|ImageToImage|TextToImage/i.test(s)) return true;
+    return false;
 }
-/** 参数名与说明同一行展示，避免说明掉到输入框下方导致错位。 */
+function rhHumanizeFieldToken(raw){
+    const s = String(raw || '').trim();
+    if(!s) return '';
+    let token = s.replace(/^RH[_-]*/i, '');
+    const segs = token.split(/[:./|_]+/).filter(Boolean);
+    token = segs[segs.length - 1] || token;
+    const camel = token.match(/[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+/g);
+    if(camel?.length){
+        const words = camel.filter(x => !/^\d+$/.test(x) && x.length > 1);
+        if(words.length) token = words.slice(-2).join(' ');
+    }
+    const key = token.toLowerCase().replace(/[\s_-]+/g, '');
+    if(RH_FRIENDLY_LABELS[key]) return RH_FRIENDLY_LABELS[key];
+    const spaced = token.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim();
+    if(!spaced) return '';
+    return spaced.replace(/\b\w/g, c => c.toUpperCase());
+}
+function rhFieldDisplayLabel(field){
+    const label = String(field?.label || '').trim();
+    const name = String(field?.fieldName || '').trim();
+    if(label && !rhLooksTechnicalName(label)) return label;
+    return rhHumanizeFieldToken(label || name) || (langIsEn() ? 'Field' : '参数');
+}
+function rhFieldTechTitle(field){
+    return [field?.label, field?.fieldName, field?.note]
+        .map(v => String(v || '').trim())
+        .filter(Boolean)
+        .filter((v, i, arr) => arr.indexOf(v) === i)
+        .join(' · ');
+}
+/** 短标签 + title 挂技术名；长 note 不再并排显示，避免两列参数互相踩字 */
 function rhFieldTitleHtml(field, label){
     const safeLabel = escapeHtml(label);
+    const tech = rhFieldTechTitle(field);
     const note = String(field?.note || '').trim();
-    const notePart = note && note !== label
-        ? `<span class="rh-field-note">${escapeHtml(note)}</span>`
-        : '';
-    return `<div class="setting-title rh-field-title"><span class="rh-field-label">${safeLabel}</span>${notePart}</div>`;
+    const showNote = note
+        && note !== label
+        && !rhLooksTechnicalName(note)
+        && note.length <= 18;
+    const notePart = showNote ? `<span class="rh-field-note">${escapeHtml(note)}</span>` : '';
+    return `<div class="setting-title rh-field-title" title="${escapeAttr(tech || label)}"><span class="rh-field-label">${safeLabel}</span>${notePart}</div>`;
 }
 function rhMediaConnectHint(kind){
-    if(kind === 'video') return '拖入含视频的 Image 节点并连线';
-    if(kind === 'audio') return '拖入含音频的上游节点并连线';
-    return '拖入 Image 节点并连线';
+    if(kind === 'video') return langIsEn() ? 'Connect a video Image node' : '连接视频节点';
+    if(kind === 'audio') return langIsEn() ? 'Connect an audio source' : '连接音频节点';
+    return langIsEn() ? 'Connect an Image node' : '连接图片节点';
+}
+function rhMediaSlotLabel(kind, index){
+    const n = Math.max(1, Number(index) || 0);
+    if(langIsEn()){
+        if(kind === 'video') return `Video ${n}`;
+        if(kind === 'audio') return `Audio ${n}`;
+        return `Image ${n}`;
+    }
+    if(kind === 'video') return `视频 ${n}`;
+    if(kind === 'audio') return `音频 ${n}`;
+    return `图片 ${n}`;
 }
 function rhMediaFieldsFromList(fields){
     return (fields || []).filter(f => ['image','video','audio'].includes(rhFieldRole(f)));
@@ -20660,28 +21111,176 @@ function renderRhMediaFields(list, node, fields, media){
     if(!list) return;
     const slots = rhMediaFieldsFromList(fields);
     if(!slots.length) return renderRhInputs(list, node, media);
+    list.classList.add('rh-media-grid');
+    list.classList.toggle('is-solo', slots.length === 1);
     list.innerHTML = slots.map(field => {
         const kind = rhFieldRole(field);
-        const label = rhFieldDisplayLabel(field);
         const key = rhParamKey(field.nodeId, field.fieldName);
         const idx = rhFieldIndexes(fields)[key] || 0;
-        const ref = media?.[kind]?.[idx] || null;
-        const url = ref?.url || '';
-        const badge = field.required === true ? '必选' : '可选';
-        const preview = url
-            ? rhMediaPreviewHtml(ref, kind)
-            : `<i data-lucide="${kind === 'video' ? 'file-video' : kind === 'audio' ? 'file-audio' : 'image'}" class="w-6 h-6 text-slate-400"></i>`;
-        return `<div class="rh-media-slot ${url ? 'has-media' : 'empty'}">
-            ${rhFieldTitleHtml(field, label)}
-            <div class="rh-media-slot-row">
-                <div class="rh-media-slot-preview">${preview}</div>
-                <div class="rh-media-slot-meta">
-                    <span class="rh-media-slot-badge">${badge}</span>
-                    <span class="rh-media-slot-hint">${url ? escapeHtml(ref?.name || '已连接上游素材') : rhMediaConnectHint(kind)}</span>
+        const slotNo = idx + 1;
+        const label = rhMediaSlotLabel(kind, slotNo);
+        const tech = rhFieldTechTitle(field) || rhFieldDisplayLabel(field);
+        const url = String(rhFieldValue(node, field, media) || '').trim();
+        const fromUpload = Boolean(node.rhParams?.[key] && node.rhParams[key].sourceFromUpstream === false && node.rhParams[key].value);
+        const badge = field.required === true
+            ? (langIsEn() ? 'Required' : '必选')
+            : (langIsEn() ? 'Optional' : '可选');
+        const sourceHint = url
+            ? (fromUpload
+                ? (langIsEn() ? 'Uploaded' : '已上传')
+                : (langIsEn() ? 'From link' : '来自连线'))
+            : (langIsEn() ? 'Drop or click' : '拖入或点击');
+        const emptyIcon = kind === 'video' ? 'video' : kind === 'audio' ? 'music' : 'image';
+        const emptyHint = kind === 'video'
+            ? (langIsEn() ? 'Drop or upload video' : '拖入或上传视频')
+            : kind === 'audio'
+                ? (langIsEn() ? 'Drop or upload audio' : '拖入或上传音频')
+                : (langIsEn() ? 'Drop or upload image' : '拖入或上传图片');
+        return `<div class="rh-media-tile ${url ? 'has-media' : 'empty'}" data-rh-slot-key="${escapeAttr(key)}" data-rh-slot-kind="${escapeAttr(kind)}" title="${escapeAttr(tech)}">
+            <div class="rh-media-tile-frame">
+                ${url
+                    ? `<div class="rh-media-tile-media">${rhMediaPreviewHtml(url, kind)}</div>`
+                    : `<div class="rh-media-tile-empty">
+                        <i data-lucide="${emptyIcon}" class="rh-media-ph-icon"></i>
+                        <span>${escapeHtml(emptyHint)}</span>
+                    </div>`}
+                <div class="rh-media-tile-veil" aria-hidden="true"></div>
+                <div class="rh-media-tile-top">
+                    <span class="rh-media-tile-badge ${field.required === true ? 'is-req' : ''}">${escapeHtml(badge)}</span>
+                    ${url ? `<button type="button" class="rh-media-tile-clear" data-rh-slot-clear="${escapeAttr(key)}" title="${escapeAttr(langIsEn() ? 'Clear' : '清除')}" aria-label="${escapeAttr(langIsEn() ? 'Clear' : '清除')}"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>` : ''}
+                </div>
+                <div class="rh-media-tile-foot">
+                    <span class="rh-media-tile-name">${escapeHtml(label)}</span>
+                    <span class="rh-media-tile-hint">${escapeHtml(sourceHint)}</span>
                 </div>
             </div>
+            <input type="file" class="rh-media-tile-file" accept="${escapeAttr(rhAcceptForKind(kind))}" hidden>
         </div>`;
     }).join('');
+    bindRhMediaTiles(list, node);
+    refreshIcons();
+}
+function bindRhMediaTiles(list, node){
+    if(!list || !node) return;
+    list.querySelectorAll('.rh-media-tile').forEach(tile => {
+        const key = tile.dataset.rhSlotKey;
+        const kind = tile.dataset.rhSlotKind || 'image';
+        const fileInput = tile.querySelector('.rh-media-tile-file');
+        const clearBtn = tile.querySelector('[data-rh-slot-clear]');
+        const openPicker = () => fileInput?.click();
+        tile.onmousedown = e => e.stopPropagation();
+        tile.ondragover = e => {
+            if(hasImageDropData(e.dataTransfer) || isActiveOutputImageDrag(e.dataTransfer)){
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = 'copy';
+                tile.classList.add('drag-over');
+                dropOverlay?.classList?.remove('active');
+            }
+        };
+        tile.ondragleave = e => {
+            e.stopPropagation();
+            if(!tile.contains(e.relatedTarget)) tile.classList.remove('drag-over');
+        };
+        tile.ondrop = async e => {
+            e.preventDefault();
+            e.stopPropagation();
+            tile.classList.remove('drag-over');
+            dropOverlay?.classList?.remove('active');
+            try {
+                if(isActiveOutputImageDrag(e.dataTransfer)){
+                    const url = resolveOutputDragUrl(e.dataTransfer);
+                    if(!url) return;
+                    if(kind === 'image' && (isVideoUrl(url) || isAudioUrl(url))){
+                        softAlert(langIsEn() ? 'This slot needs an image' : '此槽位需要图片');
+                        return;
+                    }
+                    pushUndo();
+                    rhSetSlotMediaUrl(node, key, url);
+                    refreshNodes([node.id]);
+                    scheduleSave();
+                    return;
+                }
+                const payload = await resolveImageDropPayload(e.dataTransfer);
+                if(payload.type === 'files' && payload.files?.length){
+                    const file = payload.files.find(f => rhFileMatchesKind(f, kind)) || payload.files[0];
+                    if(!rhFileMatchesKind(file, kind)){
+                        softAlert(langIsEn() ? 'Unsupported file for this slot' : '文件类型与槽位不匹配');
+                        return;
+                    }
+                    await rhUploadLocalFileToSlot(node.id, key, file);
+                    return;
+                }
+                if(payload.type === 'url' && payload.url){
+                    pushUndo();
+                    rhSetSlotMediaUrl(node, key, payload.url);
+                    refreshNodes([node.id]);
+                    scheduleSave();
+                }
+            } catch(err) {
+                setStatus('Ready');
+                softAlert(err?.message || (langIsEn() ? 'Import failed' : '导入失败'));
+            }
+        };
+        tile.onclick = e => {
+            if(e.target.closest('[data-rh-slot-clear]')) return;
+            if(e.target.closest('video, audio')) return;
+            openPicker();
+        };
+        if(fileInput){
+            fileInput.onchange = async () => {
+                const file = fileInput.files?.[0];
+                fileInput.value = '';
+                if(!file) return;
+                if(!rhFileMatchesKind(file, kind)){
+                    softAlert(langIsEn() ? 'Unsupported file for this slot' : '文件类型与槽位不匹配');
+                    return;
+                }
+                try {
+                    await rhUploadLocalFileToSlot(node.id, key, file);
+                } catch(err) {
+                    setStatus('Ready');
+                    softAlert(err?.message || (langIsEn() ? 'Upload failed' : '上传失败'));
+                }
+            };
+        }
+        if(clearBtn){
+            clearBtn.onclick = e => {
+                e.preventDefault();
+                e.stopPropagation();
+                pushUndo();
+                rhSetSlotMediaUrl(node, key, '');
+                // 清本地覆盖后，若有上游连线会自动回落到连线素材
+                refreshNodes([node.id]);
+                scheduleSave();
+            };
+        }
+        // 连线 URL 失效/裂图时回落到占位，避免整块纯黑
+        const mediaEl = tile.querySelector('.rh-media-tile-media img, .rh-media-tile-media video');
+        if(mediaEl){
+            const markBroken = () => {
+                tile.classList.add('is-broken');
+                tile.classList.remove('has-media');
+                tile.classList.add('empty');
+                const mediaWrap = tile.querySelector('.rh-media-tile-media');
+                if(mediaWrap) mediaWrap.remove();
+                if(!tile.querySelector('.rh-media-tile-empty')){
+                    const kindLabel = kind === 'video'
+                        ? (langIsEn() ? 'Drop or upload video' : '拖入或上传视频')
+                        : (langIsEn() ? 'Drop or upload image' : '拖入或上传图片');
+                    const empty = document.createElement('div');
+                    empty.className = 'rh-media-tile-empty';
+                    empty.innerHTML = `<i data-lucide="${kind === 'video' ? 'video' : 'image'}" class="rh-media-ph-icon"></i><span>${escapeHtml(kindLabel)}</span>`;
+                    tile.querySelector('.rh-media-tile-frame')?.insertBefore(empty, tile.querySelector('.rh-media-tile-veil'));
+                    refreshIcons();
+                }
+                const hint = tile.querySelector('.rh-media-tile-hint');
+                if(hint) hint.textContent = langIsEn() ? 'Drop or click' : '拖入或点击';
+            };
+            mediaEl.addEventListener('error', markBroken, { once:true });
+            if(mediaEl.tagName === 'IMG' && mediaEl.complete && mediaEl.naturalWidth === 0) markBroken();
+        }
+    });
 }
 function renderRhInputs(list, node, media){
     if(!list) return;
@@ -20701,28 +21300,36 @@ function renderRhInputs(list, node, media){
 }
 function renderRhPromptFields(container, node, fields){
     if(!container) return;
-    const prompts = (fields || []).filter(field => rhFieldRole(field) === 'prompt');
+    // 右侧文本区：prompt + 无选项自由文本（如「输入文本」）
+    const prompts = (fields || []).filter(field => {
+        const role = rhFieldRole(field);
+        if(role === 'prompt') return true;
+        if(role === 'text' && !(rhExtractFieldOptions(field)?.length)) return true;
+        return false;
+    });
     if(!prompts.length){
         container.innerHTML = '';
         return;
     }
     container.innerHTML = prompts.map(field => {
         const key = rhParamKey(field.nodeId, field.fieldName);
-        const label = rhFieldDisplayLabel(field) || 'Prompt';
+        const label = rhFieldDisplayLabel(field) || (langIsEn() ? 'Prompt' : '提示词');
+        const tech = rhFieldTechTitle(field) || label;
         const value = rhFieldValue(node, field, rhMediaSources(node));
-        return `<label class="field rh-prompt-field">
-            ${rhFieldTitleHtml(field, label)}
-            <textarea class="setting-input rh-param-input" data-rh-param="${escapeAttr(key)}" data-rh-role="prompt">${escapeHtml(value)}</textarea>
+        return `<label class="rh-prompt-tile" title="${escapeAttr(tech)}">
+            <div class="rh-prompt-tile-head">
+                <span class="rh-prompt-tile-label">${escapeHtml(label)}</span>
+                <i data-lucide="type" class="w-3.5 h-3.5" aria-hidden="true"></i>
+            </div>
+            <textarea class="setting-input rh-param-input rh-prompt-tile-input" data-rh-param="${escapeAttr(key)}" data-rh-role="prompt" rows="4" placeholder="${escapeAttr(langIsEn() ? 'Enter prompt…' : '输入提示词…')}">${escapeHtml(value)}</textarea>
         </label>`;
     }).join('');
     bindRhParamControls(container, node);
+    refreshIcons();
 }
 function renderRhParams(container, node, fields, media){
     if(!container) return;
-    const params = (fields || []).filter(field => {
-        const role = rhFieldRole(field);
-        return !['image','video','audio','prompt'].includes(role);
-    });
+    const params = (fields || []).filter(rhIsSideParamField);
     if(!params.length){
         container.innerHTML = `<div class="rh-empty">${tr('canvas.rhNoParams')}</div>`;
         return;
@@ -20734,7 +21341,8 @@ function renderRhParams(container, node, fields, media){
         const value = rhFieldValue(node, field, media);
         const label = rhFieldDisplayLabel(field) || `Field ${i + 1}`;
         const valueText = String(value ?? '');
-        const wide = kind === 'text' && (String(label).length > 18 || valueText.length > 28);
+        // 左侧参数栏单列排布；长文本仍可占满侧栏宽度
+        const wide = kind === 'text' && valueText.length > 40;
         return renderRhSettingField(node, field, key, kind, label, value, options, wide);
     }).join('');
     bindRhParamControls(container, node);
@@ -20937,17 +21545,14 @@ function rhSummarizeTaskFail(raw){
 async function rhBuildNodeInfoList(node, media){
     const fields = rhActiveFields(node);
     const result = [];
-    const indexes = rhFieldIndexes(fields);
     for(const field of fields){
         const kind = rhFieldKind(field);
-        const key = rhParamKey(field.nodeId, field.fieldName);
         if(rhCurrentKind(node) === 'workflow' && field.sourceFromUpstream === false && !['image','video','audio'].includes(kind)) continue;
-        if(rhCurrentKind(node) === 'workflow' && kind === 'image'){
-            const idx = indexes[key] || 0;
-            const hasInput = Boolean(media.image?.[idx]?.url);
-            if(field.required !== true && !hasInput) continue;
-        }
         let value = rhFieldValue(node, field, media);
+        if(rhCurrentKind(node) === 'workflow' && kind === 'image'){
+            // 上游连线或本地拖入上传都算有输入；勿只认 media.image
+            if(field.required !== true && !String(value || '').trim()) continue;
+        }
         if(['image','video','audio'].includes(kind)) value = await rhUploadValueIfNeeded(value, node);
         if(typeof value === 'string' && /[\r\n]/.test(value)) value = value.split(/\r?\n/).map(s => s.trim()).filter(Boolean)[0] || '';
         result.push({nodeId:field.nodeId, fieldName:field.fieldName, fieldValue:value});
@@ -25183,7 +25788,13 @@ function outputCompareUrlFor(url, out){
     if(typeof source === 'string' && source) return source;
     if(source?.url) return source.url;
     const meta = outputMetaFor(url, out);
-    return meta?.run?.refs?.find(ref => ref?.url)?.url || '';
+    const fromMeta = meta?.run?.refs?.find(ref => ref?.url)?.url || '';
+    if(fromMeta) return fromMeta;
+    // 旧历史缺 run.refs / imageComparisons 时，回退生图节点当前图1
+    const node = out?.id ? nodes.find(n => n.id === out.id) || out : out;
+    if(!node || !CANVAS_GENERATOR_TYPES.includes(node.type)) return '';
+    const first = orderedSources(node, generatorSources(node)).find(s => s?.refs?.some(r => r?.url));
+    return first?.refs?.find(r => r?.url)?.url || '';
 }
 function markOutputViewed(out, url){
     if(!out || !url || !(out.images || []).length) return;
@@ -25303,12 +25914,21 @@ async function downloadUrl(url, filename){
     link.remove();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
+function syncOutputCompareBtn(active){
+    if(!outputCompareBtn) return;
+    const canCompare = !!currentOutputCompareUrl && !!currentOutputLightboxUrl && !isVideoUrl(currentOutputLightboxUrl);
+    outputCompareBtn.hidden = !canCompare;
+    const pressed = !!(active && canCompare);
+    outputCompareBtn.classList.toggle('is-active', pressed);
+    outputCompareBtn.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+}
 function setOutputCompareMode(active){
     outputPreview.classList.toggle('compare-mode', active);
     if(active){
         outputCompareOriginalWrap.style.clipPath = 'inset(0 50% 0 0)';
         outputCompareSlider.style.left = '50%';
     }
+    syncOutputCompareBtn(active);
 }
 function outputResolutionText(text, meta=null){
     const parts = [text || '--'];
@@ -25462,6 +26082,13 @@ function initOutputCompareEvents(){
         }
     }, {passive:false});
     on(window, 'touchend', () => { outputCompareDrag = false; });
+    if(outputCompareBtn){
+        on(outputCompareBtn, 'click', e => {
+            e.stopPropagation();
+            if(!currentOutputCompareUrl || !currentOutputLightboxUrl || isVideoUrl(currentOutputLightboxUrl)) return;
+            setOutputCompareMode(!outputPreview.classList.contains('compare-mode'));
+        });
+    }
 }
 function initOutputLightboxEvents(){
     if(!outputLightbox) return;
@@ -25576,6 +26203,11 @@ function closeOutputLightbox(){
         outputFavoriteBtn.style.display = '';
         outputFavoriteBtn.classList.remove('is-active');
         outputFavoriteBtn.setAttribute('aria-pressed', 'false');
+    }
+    if(outputCompareBtn){
+        outputCompareBtn.hidden = true;
+        outputCompareBtn.classList.remove('is-active');
+        outputCompareBtn.setAttribute('aria-pressed', 'false');
     }
     resetOutputPreviewZoom();
     currentOutputCompareUrl = '';

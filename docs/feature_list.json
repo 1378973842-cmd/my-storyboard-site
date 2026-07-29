@@ -168,7 +168,9 @@
         { "id": "AG66", "desc": "交互：剪贴板粘贴图片落到鼠标停放的画布坐标（非视口中心）", "status": "done", "priority": 87 },
         { "id": "AG67", "desc": "UI：历史弹层统一壳；成片库按日方图网格（缩放/排序，对齐图片历史排布）", "status": "done", "priority": 88 },
         { "id": "AG68", "desc": "素材库：右上+建主文件夹、三点新建子文件夹；新建/重命名/移动/删除改行内，去掉 prompt 弹窗", "status": "done", "priority": 89 },
-        { "id": "AG69", "desc": "素材库：主页「我的收藏」迁入侧栏顶部（收藏/分隔线/文件夹），可放板与取消收藏", "status": "done", "priority": 90 }
+        { "id": "AG69", "desc": "素材库：主页「我的收藏」迁入侧栏顶部（收藏/分隔线/文件夹），可放板与取消收藏", "status": "done", "priority": 90 },
+        { "id": "AG70", "desc": "预览：有图1时显示「对比」按钮；一键开关左右擦除；缺 meta 时回退 generatorSources 首图", "status": "done", "priority": 91 },
+        { "id": "AG71", "desc": "UI：生图叠卡展开铺开 / 收起叠合幽灵 FLIP 动画（尊重 reduced-motion）", "status": "done", "priority": 92 }
       ]
     },
     {
@@ -181,7 +183,8 @@
         { "desc": "RunningHub 字段含义：从 apiCallDemo 原始 nodeInfoList.description 提取真实中文含义作为 label；STRING 归一到 TEXT", "status": "done" },
         { "desc": "RunningHub 测试面板：字段卡片支持指针拖拽自定义排序（碰撞检测 + framer-motion layout 磁吸动画），顺序写入 field.order 随保存持久化", "status": "done" },
         { "desc": "RunningHub 字段编辑器新增「参数说明」文本框（写入 field.note，自定义工作流字段无描述时可手填），测试面板与画布 RH 节点参数/提示词卡片下方均展示该说明", "status": "done" },
-        { "desc": "修复 RunningHub 管理页保存/新增/删除后未广播 BroadcastChannel('studio-api')，导致常驻后台的画布 canvasEngine 拿着过期配置（含 note）不刷新的问题", "status": "done" }
+        { "desc": "修复 RunningHub 管理页保存/新增/删除后未广播 BroadcastChannel('studio-api')，导致常驻后台的画布 canvasEngine 拿着过期配置（含 note）不刷新的问题", "status": "done" },
+        { "desc": "画布 RH 节点：三栏 satin 布局（输入图 / 参数 / 输出图）+ Run Node 光晕进度条 + Advanced 收纳配置/显存/Key", "status": "done" }
       ]
     },
     {
