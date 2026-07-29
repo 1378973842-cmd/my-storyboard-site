@@ -848,6 +848,7 @@ html[data-theme="light"] body {
   .studio-canvas-meta-input {
     width: 100%;
     min-width: 0;
+    flex: 1 1 auto;
     padding: 0;
     border: none;
     background: transparent;
@@ -887,8 +888,8 @@ html[data-theme="light"] body {
 
   .studio-canvas-meta {
     min-width: 0;
-    max-width: min(300px, 44vw);
-    padding: 5px 12px 5px 10px;
+    max-width: min(340px, 48vw);
+    padding: 5px 12px 6px 10px;
     border-radius: 12px;
     background: rgba(18, 16, 14, 0.82);
     outline: 0.5px solid rgba(255, 184, 102, 0.14);
@@ -899,7 +900,18 @@ html[data-theme="light"] body {
     -webkit-backdrop-filter: blur(40px) saturate(175%);
   }
 
+  /* 上：左名称 / 右日期；下：保存状态 */
+  .studio-canvas-meta-topline {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+  }
+
   .studio-canvas-meta-title {
+    min-width: 0;
+    flex: 1 1 auto;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -910,13 +922,39 @@ html[data-theme="light"] body {
     letter-spacing: -0.02em;
   }
 
-  .studio-canvas-meta-time {
-    color: rgba(229, 226, 225, 0.62);
+  .studio-canvas-meta-date {
+    flex: 0 0 auto;
+    color: rgba(229, 226, 225, 0.72);
     font-family: "Manrope", sans-serif;
-    font-size: 9px;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+
+  .studio-canvas-meta-time,
+  .studio-canvas-meta-status {
+    margin-top: 1px;
+    color: rgba(229, 226, 225, 0.55);
+    font-family: "Manrope", sans-serif;
+    font-size: 10px;
     font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .studio-canvas-meta-status.is-saving {
+    color: rgba(255, 184, 102, 0.92);
+  }
+
+  .studio-canvas-meta-status.is-saved {
+    color: rgba(229, 226, 225, 0.55);
+  }
+
+  .studio-canvas-meta-status.is-error {
+    color: #fca5a5;
   }
 
   .cover-nav-text-link {

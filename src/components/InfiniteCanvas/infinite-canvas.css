@@ -392,11 +392,13 @@
   white-space:nowrap;
 }
 .current-canvas-save.is-saving { color:rgba(255,184,102,.88); }
+.current-canvas-save.is-saved { color:rgba(229,226,225,.62); }
 .current-canvas-save.is-error { color:#fca5a5; }
 .infinite-canvas-root.theme-dark .current-canvas-title { color:#e5e2e1; }
 .infinite-canvas-root.theme-dark .current-canvas-time { color:rgba(229,226,225,.58); }
 .infinite-canvas-root.theme-dark .current-canvas-save { color:rgba(229,226,225,.58); }
 .infinite-canvas-root.theme-dark .current-canvas-save.is-saving { color:rgba(255,184,102,.9); }
+.infinite-canvas-root.theme-dark .current-canvas-save.is-saved { color:rgba(229,226,225,.62); }
 .infinite-canvas-root.theme-dark .current-canvas-save.is-error { color:#fca5a5; }
 .canvas-list { display:flex; flex-direction:column; gap:8px; overflow:auto; max-height:360px; }
 .canvas-item { position:relative; width:100%; aspect-ratio:1/1; text-align:left; border:none; outline:0.5px solid rgba(237,240,243,.6); outline-offset:-0.5px; background:#fff; border-radius:14px; padding:0; transition:all .18s var(--ease); cursor:pointer; }

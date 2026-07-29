@@ -67,7 +67,12 @@ function CanvasHeaderCluster({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [meta, setMeta] = useState<{ title: string; time: string } | null>(null);
+  const [meta, setMeta] = useState<{
+    title: string;
+    date: string;
+    status: string;
+    statusKind: string;
+  } | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -82,16 +87,24 @@ function CanvasHeaderCluster({
     }
     const titleEl = document.getElementById('currentCanvasTitle');
     const timeEl = document.getElementById('currentCanvasTime');
-    if (!titleEl || !timeEl) {
+    const saveEl = document.getElementById('saveState');
+    if (!titleEl || !saveEl) {
       setMeta(null);
       return;
     }
     setMeta(prev => {
       const next = {
         title: titleEl.textContent?.trim() || '未命名画布',
-        time: timeEl.textContent?.trim() || '--',
+        date: timeEl?.dataset?.shortDate?.trim() || '',
+        status: saveEl.textContent?.trim() || '已保存到云端',
+        statusKind: saveEl.dataset.kind || '',
       };
-      if (prev?.title === next.title && prev?.time === next.time) return prev;
+      if (
+        prev?.title === next.title
+        && prev?.date === next.date
+        && prev?.status === next.status
+        && prev?.statusKind === next.statusKind
+      ) return prev;
       return next;
     });
   }, []);
@@ -110,8 +123,27 @@ function CanvasHeaderCluster({
     });
     const titleEl = document.getElementById('currentCanvasTitle');
     const timeEl = document.getElementById('currentCanvasTime');
+    const saveEl = document.getElementById('saveState');
     if (titleEl) obs.observe(titleEl, { childList: true, characterData: true, subtree: true });
-    if (timeEl) obs.observe(timeEl, { childList: true, characterData: true, subtree: true });
+    if (timeEl) {
+      obs.observe(timeEl, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['data-short-date'],
+      });
+    }
+    // 镜像隐藏顶栏 #saveState：保存中 / 已保存到云端 写在这里，可见顶栏必须跟着变
+    if (saveEl) {
+      obs.observe(saveEl, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['data-kind', 'class', 'hidden'],
+      });
+    }
     window.addEventListener('canvas-board-bg-change', syncMeta);
     return () => {
       obs.disconnect();
@@ -209,33 +241,45 @@ function CanvasHeaderCluster({
             className={cn('studio-canvas-meta', editing && 'is-editing')}
             aria-label={`当前画布：${meta.title}`}
           >
-            {editing ? (
-              <input
-                ref={inputRef}
-                type="text"
-                maxLength={80}
-                value={draft}
-                className="studio-canvas-meta-input"
-                onChange={e => setDraft(e.target.value)}
-                onBlur={() => void commitRename()}
-                onKeyDown={e => {
-                  e.stopPropagation();
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    void commitRename();
-                  }
-                  if (e.key === 'Escape') {
-                    e.preventDefault();
-                    cancelRename();
-                  }
-                }}
-                onMouseDown={e => e.stopPropagation()}
-                onClick={e => e.stopPropagation()}
-              />
-            ) : (
-              <div className="studio-canvas-meta-title">{meta.title}</div>
-            )}
-            <div className="studio-canvas-meta-time">{meta.time}</div>
+            <div className="studio-canvas-meta-topline">
+              {editing ? (
+                <input
+                  ref={inputRef}
+                  type="text"
+                  maxLength={80}
+                  value={draft}
+                  className="studio-canvas-meta-input"
+                  onChange={e => setDraft(e.target.value)}
+                  onBlur={() => void commitRename()}
+                  onKeyDown={e => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void commitRename();
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      cancelRename();
+                    }
+                  }}
+                  onMouseDown={e => e.stopPropagation()}
+                  onClick={e => e.stopPropagation()}
+                />
+              ) : (
+                <div className="studio-canvas-meta-title">{meta.title}</div>
+              )}
+              {meta.date ? <div className="studio-canvas-meta-date">{meta.date}</div> : null}
+            </div>
+            <div
+              className={cn(
+                'studio-canvas-meta-status',
+                meta.statusKind === 'saving' && 'is-saving',
+                meta.statusKind === 'saved' && 'is-saved',
+                meta.statusKind === 'error' && 'is-error',
+              )}
+            >
+              {meta.status}
+            </div>
           </div>
         ) : null}
       </div>

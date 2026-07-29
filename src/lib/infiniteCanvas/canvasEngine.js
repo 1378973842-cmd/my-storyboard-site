@@ -662,7 +662,7 @@ function syncCanvasTopbarLabels(){
     currentCanvasTitle.textContent = canvas.title || tr('canvas.untitled');
   }
   if(currentCanvasTime){
-    currentCanvasTime.textContent = formatCanvasTime(canvas.updated_at || canvas.created_at);
+    syncCurrentCanvasTimeLabel(canvas.updated_at || canvas.created_at);
     syncSaveSubtitleTime();
   }
 }
@@ -2787,6 +2787,25 @@ function formatCanvasTime(value){
     if(Number.isNaN(date.getTime())) return '--';
     return date.toLocaleString(window.StudioI18n?.lang() === 'en' ? 'en-US' : 'zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
 }
+/** 顶栏日期角标，如 (0706) */
+function formatCanvasDateParen(value){
+    if(!value) return '';
+    const raw = Number(value);
+    const time = raw < 10000000000 ? raw * 1000 : raw;
+    const date = new Date(time);
+    if(Number.isNaN(date.getTime())) return '';
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `(${m}${d})`;
+}
+function syncCurrentCanvasTimeLabel(value){
+    if(!currentCanvasTime) return;
+    const stamp = value || canvas?.updated_at || canvas?.created_at;
+    currentCanvasTime.textContent = formatCanvasTime(stamp);
+    const short = formatCanvasDateParen(stamp);
+    if(short) currentCanvasTime.dataset.shortDate = short;
+    else delete currentCanvasTime.dataset.shortDate;
+}
 function formatCanvasCreatedLabel(value){
     if(!value) return '--';
     const raw = Number(value);
@@ -2836,13 +2855,19 @@ function setSaveSubtitle(text, kind = ''){
     saveEl.textContent = String(text || '').trim() || '--';
     saveEl.dataset.kind = kind || '';
     saveEl.classList.toggle('is-saving', kind === 'saving');
+    saveEl.classList.toggle('is-saved', kind === 'saved');
     saveEl.classList.toggle('is-error', kind === 'error');
 }
 function syncSaveSubtitleTime(){
     if(!canvas) return;
     const saveEl = domGet('saveState');
     if(saveEl?.dataset?.kind === 'saving') return;
-    setSaveSubtitle(formatCanvasEditedLabel(canvas.updated_at || canvas.created_at), 'time');
+    // 顶栏副标题固定为保存态文案（Studio 顶栏镜像 #saveState），不再用「编辑于…」盖住
+    if(localCanvasDirty || saveTimer || savingCanvasNow || saveCanvasAgain){
+        setSaveSubtitle(langIsEn() ? 'Saving…' : '保存中...', 'saving');
+        return;
+    }
+    setSaveSubtitle(langIsEn() ? 'Saved to cloud' : '已保存到云端', 'saved');
 }
 function setStatus(text){
     const raw = String(text || '').trim();
@@ -2852,7 +2877,6 @@ function setStatus(text){
     } else if(/^Saved$/i.test(raw)){
         clearTimeout(saveStatusClearTimer);
         setSaveSubtitle(langIsEn() ? 'Saved to cloud' : '已保存到云端', 'saved');
-        saveStatusClearTimer = setTimeout(() => syncSaveSubtitleTime(), 1600);
     } else if(/Save failed|保存失败/i.test(raw)){
         clearTimeout(saveStatusClearTimer);
         setSaveSubtitle(langIsEn() ? 'Save failed' : '保存失败', 'error');
@@ -2958,7 +2982,7 @@ function setCanvasMode(open, { clearEditor = false, force = false } = {}){
         closeAssetLibrarySaveModal();
     } else if(open && currentCanvasTitle) {
         currentCanvasTitle.textContent = canvas?.title || tr('canvas.untitled');
-        currentCanvasTime.textContent = formatCanvasTime(canvas?.updated_at || canvas?.created_at);
+        syncCurrentCanvasTimeLabel(canvas?.updated_at || canvas?.created_at);
         syncSaveSubtitleTime();
     }
     syncCanvasPageMarkers();
@@ -3631,7 +3655,7 @@ function scheduleSave(){
     if(!canvas || applyingRemoteCanvas || openingCanvas) return;
     localCanvasDirty = true;
     scheduleStashLiveCanvasDraft();
-    if(!saveTimer && !savingCanvasNow) setStatus('Saving...');
+    if(!savingCanvasNow) setStatus('Saving...');
     clearTimeout(saveTimer);
     if(savingCanvasNow){
         saveCanvasAgain = true;
@@ -3753,17 +3777,9 @@ function wireCanvasSaveLifecycle(){
         }, 8000);
     }
 }
-/** 拖节点/改尺寸：长防抖，避免松手后立刻保存→409/远程同步→全量 render */
+/** 拖节点/改尺寸：松手立刻落盘，缩短刷新丢失窗口；文案走「保存中…→已保存到云端」 */
 function scheduleNodeDragSave(){
-    if(!canvas || applyingRemoteCanvas || openingCanvas) return;
-    localCanvasDirty = true;
-    if(!saveTimer && !savingCanvasNow) setStatus('Saving...');
-    clearTimeout(saveTimer);
-    if(savingCanvasNow){
-        saveCanvasAgain = true;
-        return;
-    }
-    saveTimer = setTimeout(saveCanvas, 1200);
+    scheduleSaveNow();
 }
 /** 滚轮/平移仅改视口：长防抖，避免每次缩放都触发保存→同步→全量 render 闪屏 */
 function scheduleViewportSave(){
@@ -4038,7 +4054,7 @@ async function saveCanvas(){
         localCanvasDirty = Boolean(saveCanvasAgain);
         if(!localCanvasDirty) clearLiveCanvasDraft(canvas.id);
         else stashLiveCanvasDraft({ persistSession: true });
-        if(currentCanvasTime) currentCanvasTime.textContent = formatCanvasTime(canvas.updated_at);
+        syncCurrentCanvasTimeLabel(canvas.updated_at);
         setStatus('Saved');
     } catch(e) {
         if(canvas?.id === savedId){
@@ -5341,7 +5357,7 @@ function applyRemoteCanvasData(remote, opts = {}){
             if(remote.title != null) canvas.title = remote.title;
             if(!localViewport) viewport = remote.viewport || viewport;
             applyViewport();
-            if(currentCanvasTime) currentCanvasTime.textContent = formatCanvasTime(remote.updated_at || remote.created_at);
+            syncCurrentCanvasTimeLabel(remote.updated_at || remote.created_at);
             syncSaveSubtitleTime();
             setStatus('Synced');
             return;
@@ -5375,7 +5391,7 @@ function applyRemoteCanvasData(remote, opts = {}){
                 updateLinksGeometry();
             }
             if(currentCanvasTitle) currentCanvasTitle.textContent = canvas.title || tr('canvas.untitled');
-            if(currentCanvasTime) currentCanvasTime.textContent = formatCanvasTime(canvas.updated_at || canvas.created_at);
+            syncCurrentCanvasTimeLabel(canvas.updated_at || canvas.created_at);
             syncSaveSubtitleTime();
             setStatus('Synced');
             return;
@@ -5417,7 +5433,7 @@ function applyRemoteCanvasData(remote, opts = {}){
         }
         resumeCanvasImageTasks();
         if(currentCanvasTitle) currentCanvasTitle.textContent = canvas.title || tr('canvas.untitled');
-        if(currentCanvasTime) currentCanvasTime.textContent = formatCanvasTime(canvas.updated_at || canvas.created_at);
+        syncCurrentCanvasTimeLabel(canvas.updated_at || canvas.created_at);
         syncSaveSubtitleTime();
         setStatus('Synced');
     } finally {
@@ -28154,7 +28170,7 @@ function restoreEditorSurface(){
     if(!canvas || !shell) return false;
     setCanvasMode(true);
     if(currentCanvasTitle) currentCanvasTitle.textContent = canvas.title || tr('canvas.untitled');
-    if(currentCanvasTime) currentCanvasTime.textContent = formatCanvasTime(canvas.updated_at || canvas.created_at);
+    syncCurrentCanvasTimeLabel(canvas.updated_at || canvas.created_at);
     syncSaveSubtitleTime();
     renderCanvasList();
     ensureEditorDomFromModel();
