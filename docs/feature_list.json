@@ -170,7 +170,10 @@
         { "id": "AG68", "desc": "素材库：右上+建主文件夹、三点新建子文件夹；新建/重命名/移动/删除改行内，去掉 prompt 弹窗", "status": "done", "priority": 89 },
         { "id": "AG69", "desc": "素材库：主页「我的收藏」迁入侧栏顶部（收藏/分隔线/文件夹），可放板与取消收藏", "status": "done", "priority": 90 },
         { "id": "AG70", "desc": "预览：有图1时显示「对比」按钮；一键开关左右擦除；缺 meta 时回退 generatorSources 首图", "status": "done", "priority": 91 },
-        { "id": "AG71", "desc": "UI：生图叠卡展开铺开 / 收起叠合幽灵 FLIP 动画（尊重 reduced-motion）", "status": "done", "priority": 92 }
+        { "id": "AG71", "desc": "UI：生图叠卡展开铺开 / 收起叠合幽灵 FLIP 动画（尊重 reduced-motion）", "status": "done", "priority": 92 },
+        { "id": "AG72", "desc": "RH：真等比缩放——内部固定820排版+transform，外壳按视觉尺寸套住（不撑裂节点壳）", "status": "done", "priority": 93 },
+        { "id": "AG73", "desc": "RH共用壳：矮工作流随内容长高；高工作流壳高封顶+三栏内滚；底栏（运行/高级）始终可见", "status": "done", "priority": 94 },
+        { "id": "AG74", "desc": "工作流模版库UI：侧栏（最近/我的/公开）+搜索+创建+封面网格卡（对齐导演稿）", "status": "done", "priority": 95 }
       ]
     },
     {

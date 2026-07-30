@@ -889,54 +889,66 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
               </div>
               <div id="workflowTemplateModal" className="workflow-template-modal studio-modal-backdrop" onClick={() => canvasWin["closeWorkflowTemplateModal"]?.()}>
                   <div className="workflow-template-panel studio-modal-panel" onClick={(e) => e.stopPropagation()}>
-                      <div className="studio-modal-head workflow-template-head">
-                          <div className="studio-modal-head-text">
-                              <div className="studio-modal-title workflow-template-title" data-i18n="canvas.workflowTemplates">工作流模板</div>
-                              <div className="studio-modal-sub workflow-template-sub" data-i18n="canvas.workflowModalHint">点击卡片插入当前画布；可保存当前连线为模板</div>
-                          </div>
-                          <button className="studio-modal-close preview-icon-btn" type="button" onClick={() => canvasWin["closeWorkflowTemplateModal"]?.()} title="关闭" data-i18n-title="common.close" aria-label="关闭">
-                              <i data-lucide="x" className="w-4 h-4"></i>
+                      <aside className="workflow-template-nav" aria-label="模板分类">
+                          <button type="button" className="workflow-template-nav-item" data-wf-filter="recent">
+                              <i data-lucide="clock-3" className="w-4 h-4" aria-hidden />
+                              <span data-i18n="canvas.wfNavRecent">最近使用</span>
                           </button>
-                      </div>
-                      <div className="studio-modal-toolbar workflow-template-toolbar">
-                          <label className="studio-modal-search">
-                              <i data-lucide="search" className="w-3.5 h-3.5" aria-hidden />
-                              <input id="workflowTemplateSearchInput" type="search" placeholder="搜索模板名称或说明…" data-i18n-placeholder="canvas.wfSearchPlaceholder" autoComplete="off" />
-                          </label>
-                          <div className="studio-modal-filters" role="group" aria-label="模板筛选">
-                              <button type="button" className="studio-filter-chip is-active" data-wf-filter="all" data-i18n="canvas.wfFilterAll">全部</button>
-                              <button type="button" className="studio-filter-chip" data-wf-filter="builtin" data-i18n="canvas.wfFilterBuiltin">内置</button>
-                              <button type="button" className="studio-filter-chip" data-wf-filter="custom" data-i18n="canvas.wfFilterCustom">自定义</button>
-                          </div>
-                          <button id="saveWorkflowTemplateBtn" className="studio-modal-primary-btn" type="button" onClick={() => canvasWin["saveCurrentCanvasAsWorkflowTemplate"]?.()}>
-                              <i data-lucide="bookmark-plus" className="w-4 h-4" aria-hidden />
-                              <span data-i18n="canvas.saveWorkflowTemplate">保存当前为模板</span>
+                          <button type="button" className="workflow-template-nav-item" data-wf-filter="mine">
+                              <i data-lucide="folder" className="w-4 h-4" aria-hidden />
+                              <span data-i18n="canvas.wfNavMine">我的模板</span>
                           </button>
-                      </div>
-                      <div id="workflowTemplateSaveForm" className="workflow-template-save-form" hidden>
-                          <div className="workflow-template-save-grid">
-                              <label className="studio-modal-field">
-                                  <span data-i18n="canvas.wfTemplateName">模板名称</span>
-                                  <input id="workflowTemplateTitleInput" type="text" maxLength={80} placeholder="例如：九宫格批量复刻" data-i18n-placeholder="canvas.wfTemplateNamePlaceholder" />
+                          <div className="workflow-template-nav-group">
+                              <button type="button" className="workflow-template-nav-item workflow-template-nav-public is-active" data-wf-filter="public" data-wf-public-toggle="1" aria-expanded="true">
+                                  <i data-lucide="chevron-down" className="w-3.5 h-3.5 workflow-template-nav-chevron" aria-hidden />
+                                  <span data-i18n="canvas.wfNavPublic">公开</span>
+                              </button>
+                              <div id="workflowTemplatePublicCats" className="workflow-template-nav-sub is-open" />
+                          </div>
+                      </aside>
+                      <div className="workflow-template-main">
+                          <div className="workflow-template-main-head">
+                              <div id="workflowTemplateViewTitle" className="workflow-template-view-title">全部</div>
+                              <button className="studio-modal-close preview-icon-btn workflow-template-close" type="button" onClick={() => canvasWin["closeWorkflowTemplateModal"]?.()} title="关闭" data-i18n-title="common.close" aria-label="关闭">
+                                  <i data-lucide="x" className="w-4 h-4"></i>
+                              </button>
+                          </div>
+                          <div className="workflow-template-toolbar">
+                              <label className="workflow-template-search">
+                                  <input id="workflowTemplateSearchInput" type="search" placeholder="搜索 场景/平台/模型…" data-i18n-placeholder="canvas.wfSearchPlaceholder" autoComplete="off" />
                               </label>
-                              <label className="studio-modal-field">
-                                  <span data-i18n="canvas.wfTemplateDesc">模板说明</span>
-                                  <textarea id="workflowTemplateDescInput" rows={3} maxLength={240} placeholder="写给同事看的用途说明（可选）" data-i18n-placeholder="canvas.wfTemplateDescPlaceholder" />
-                              </label>
+                              <button id="workflowTemplateSearchBtn" className="workflow-template-tool-btn" type="button" title="搜索" aria-label="搜索">
+                                  <i data-lucide="search" className="w-4 h-4" aria-hidden />
+                              </button>
+                              <button id="saveWorkflowTemplateBtn" className="workflow-template-create-btn" type="button" onClick={() => canvasWin["saveCurrentCanvasAsWorkflowTemplate"]?.()}>
+                                  <span data-i18n="canvas.wfCreate">创建</span>
+                              </button>
                           </div>
-                          <div className="workflow-template-save-actions">
-                              <button id="workflowTemplateSaveCancel" type="button" className="studio-modal-ghost-btn" data-i18n="common.cancel">取消</button>
-                              <button id="workflowTemplateSaveConfirm" type="button" className="studio-modal-primary-btn" data-i18n="canvas.wfSave">保存模板</button>
+                          <div id="workflowTemplateSaveForm" className="workflow-template-save-form" hidden>
+                              <div className="workflow-template-save-grid">
+                                  <label className="studio-modal-field">
+                                      <span data-i18n="canvas.wfTemplateName">模板名称</span>
+                                      <input id="workflowTemplateTitleInput" type="text" maxLength={80} placeholder="例如：九宫格批量复刻" data-i18n-placeholder="canvas.wfTemplateNamePlaceholder" />
+                                  </label>
+                                  <label className="studio-modal-field">
+                                      <span data-i18n="canvas.wfTemplateDesc">模板说明</span>
+                                      <textarea id="workflowTemplateDescInput" rows={3} maxLength={240} placeholder="写给同事看的用途说明（可选）" data-i18n-placeholder="canvas.wfTemplateDescPlaceholder" />
+                                  </label>
+                              </div>
+                              <div className="workflow-template-save-actions">
+                                  <button id="workflowTemplateSaveCancel" type="button" className="studio-modal-ghost-btn" data-i18n="common.cancel">取消</button>
+                                  <button id="workflowTemplateSaveConfirm" type="button" className="studio-modal-primary-btn" data-i18n="canvas.wfSave">保存模板</button>
+                              </div>
                           </div>
+                          <div id="workflowTemplateDeleteBar" className="studio-modal-inline-confirm" hidden>
+                              <span id="workflowTemplateDeleteLabel" className="studio-modal-inline-confirm-text">确定删除该模板？</span>
+                              <div className="studio-modal-inline-confirm-actions">
+                                  <button id="workflowTemplateDeleteCancel" type="button" className="studio-modal-ghost-btn" data-i18n="common.cancel">取消</button>
+                                  <button id="workflowTemplateDeleteConfirm" type="button" className="studio-modal-danger-btn" data-i18n="common.delete">删除</button>
+                              </div>
+                          </div>
+                          <div id="workflowTemplateList" className="workflow-template-list" />
                       </div>
-                      <div id="workflowTemplateDeleteBar" className="studio-modal-inline-confirm" hidden>
-                          <span id="workflowTemplateDeleteLabel" className="studio-modal-inline-confirm-text">确定删除该模板？</span>
-                          <div className="studio-modal-inline-confirm-actions">
-                              <button id="workflowTemplateDeleteCancel" type="button" className="studio-modal-ghost-btn" data-i18n="common.cancel">取消</button>
-                              <button id="workflowTemplateDeleteConfirm" type="button" className="studio-modal-danger-btn" data-i18n="common.delete">删除</button>
-                          </div>
-                      </div>
-                      <div id="workflowTemplateList" className="workflow-template-list" />
                   </div>
               </div>
               <div id="logModal" className="log-modal studio-modal-backdrop history-hub-modal" onClick={() => canvasWin["closeCanvasLog"]?.()}>

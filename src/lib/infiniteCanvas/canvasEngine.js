@@ -438,11 +438,24 @@ let historyLibrarySortDesc = true; // true = 新→旧，对齐参考默认
 let workflowTemplateSearchInput, workflowTemplateTitleInput, workflowTemplateDescInput;
 let workflowTemplateSaveForm, workflowTemplateSaveCancel, workflowTemplateSaveConfirm;
 let workflowTemplateDeleteBar, workflowTemplateDeleteLabel, workflowTemplateDeleteCancel, workflowTemplateDeleteConfirm;
+let workflowTemplateViewTitle, workflowTemplateSearchBtn, workflowTemplatePublicCats;
 let logSearchQuery = '';
 let logStatusFilter = 'all';
 let workflowTemplateSearchQuery = '';
-let workflowTemplateKindFilter = 'all';
+/** recent | mine | public | all */
+let workflowTemplateKindFilter = 'public';
+let workflowTemplateCategoryFilter = '';
+let workflowTemplatePublicOpen = true;
 let workflowTemplateSaveMode = 'canvas';
+const WF_RECENT_KEY = 'canvas-wf-template-recent';
+const WF_RECENT_MAX = 24;
+const WF_CATEGORY_LABELS = {
+    replica: { zh: '复刻', en: 'Replica' },
+    storyboard: { zh: '分镜', en: 'Storyboard' },
+    video: { zh: '视频', en: 'Video' },
+    custom: { zh: '自定义', en: 'Custom' },
+    general: { zh: '通用', en: 'General' },
+};
 let pendingDeleteTemplateId = null;
 let outputLightboxAnchor = null;
 function resolveLiveShell(){
@@ -649,6 +662,9 @@ function bindDomElements(root) {
   workflowTemplateDeleteLabel = g('workflowTemplateDeleteLabel');
   workflowTemplateDeleteCancel = g('workflowTemplateDeleteCancel');
   workflowTemplateDeleteConfirm = g('workflowTemplateDeleteConfirm');
+  workflowTemplateViewTitle = g('workflowTemplateViewTitle');
+  workflowTemplateSearchBtn = g('workflowTemplateSearchBtn');
+  workflowTemplatePublicCats = g('workflowTemplatePublicCats');
   errorModal = g('errorModal');
   errorTitle = g('errorTitle');
   errorMessage = g('errorMessage');
@@ -2292,6 +2308,12 @@ function normalizeApiNodeLayout(node){
 }
 const GENERATOR_BASE_W = 260;
 const GENERATOR_MIN_W = 96;
+/** RH 三栏默认宽；拉伸时按此为 1×，整块 UI 等比缩放 */
+const RH_BASE_W = 820;
+const RH_MIN_W = 520;
+const RH_MAX_W = 1640;
+/** 1× 布局下壳高上限：更高工作流走三栏内滚，底栏始终可见 */
+const RH_MAX_BASE_H = 720;
 /** 对齐上游参考图时的展示宽度上限，避免撑爆画布 */
 const GEN_MATCH_MAX_W = 960;
 /**
@@ -2554,6 +2576,118 @@ function syncGeneratorNodeScale(node, el){
     const scale = generatorUiScale(node);
     el.style.setProperty('--generator-ui-scale', String(scale));
     return scale;
+}
+function rhUiScale(node){
+    const w = Math.max(RH_MIN_W, Math.min(RH_MAX_W, Number(node?.w || RH_BASE_W) || RH_BASE_W));
+    return w / RH_BASE_W;
+}
+/** 共用模版：清掉会裁切高工作流的旧固定高；宽≠基准则恢复为手改缩放 */
+function normalizeRhNodeLayout(node){
+    if(!node || node.type !== 'rh') return;
+    const w = Number(node.w || 0);
+    const h = Number(node.h || 0);
+    // 旧窄 RH → 三栏默认宽
+    if(w > 0 && w < 780) node.w = RH_BASE_W;
+    // 历史模板固定高（含 560）在字段一多就会截断
+    if(h === 560) delete node.h;
+    if(node._userSized) return;
+    if(Math.abs((w || RH_BASE_W) - RH_BASE_W) > 1){
+        // 重载后 _userSized 丢失：用非默认宽恢复等比缩放
+        node._userSized = true;
+        return;
+    }
+    if(h > 0) delete node.h;
+}
+function syncRhNodeScale(node, el){
+    if(!el || node?.type !== 'rh') return 1;
+    const scale = node._userSized ? rhUiScale(node) : 1;
+    el.style.setProperty('--rh-ui-scale', String(scale));
+    return scale;
+}
+/** 离屏克隆测高：不动真节点的 sized/height，避免换配置闪一下 */
+function measureRhBaseFrame(node, el){
+    const wrap = el?.querySelector?.('.rh-node-scale');
+    if(!wrap) return Number(node._rhBaseFrameH || 420);
+    const root = el.closest?.('.infinite-canvas-root') || document.body;
+    const probe = document.createElement('div');
+    probe.className = 'rh-node rh-measure rh-measure-probe';
+    probe.setAttribute('aria-hidden', 'true');
+    const clone = wrap.cloneNode(true);
+    clone.style.transform = 'none';
+    clone.style.setProperty('--rh-ui-scale', '1');
+    probe.appendChild(clone);
+    root.appendChild(probe);
+    const h = Math.max(120, Math.ceil(clone.scrollHeight || clone.offsetHeight || 420));
+    probe.remove();
+    return h;
+}
+let _rhFitRaf = 0;
+const _rhFitPending = new Set();
+function scheduleFitRhNodeFrame(node){
+    if(!node || node.type !== 'rh') return;
+    _rhFitPending.add(node.id);
+    if(_rhFitRaf) return;
+    _rhFitRaf = requestAnimationFrame(() => {
+        _rhFitRaf = 0;
+        const ids = [..._rhFitPending];
+        _rhFitPending.clear();
+        ids.forEach(id => {
+            const n = nodes.find(item => item.id === id);
+            if(n) fitRhNodeFrame(n);
+        });
+    });
+}
+/**
+ * RH 共用壳 + 真·等比缩放：
+ * - 内部永远按 RH_BASE_W 排版
+ * - 矮工作流：外壳随内容；高工作流：壳高封顶，三栏内滚，底栏常显
+ * - 手改宽：transform scale；外壳 = min(内容,上限) × scale
+ */
+function fitRhNodeFrame(node, elHint=null){
+    if(!node || node.type !== 'rh') return;
+    const el = elHint || nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
+    if(!el) return;
+    const contentH = measureRhBaseFrame(node, el);
+    const baseH = Math.min(RH_MAX_BASE_H, contentH);
+    const needsScroll = contentH > RH_MAX_BASE_H + 1;
+    node._rhBaseFrameH = baseH;
+    if(!node._userSized){
+        node.w = RH_BASE_W;
+        el.style.width = `${RH_BASE_W}px`;
+        el.style.setProperty('--rh-ui-scale', '1');
+        if(needsScroll){
+            node.h = baseH;
+            el.classList.add('sized', 'rh-content-scroll');
+            el.style.height = `${baseH}px`;
+        } else {
+            delete node.h;
+            el.classList.remove('sized', 'rh-content-scroll');
+            el.style.height = '';
+        }
+        scheduleLinkGeometryRefresh(new Set([node.id]));
+        return;
+    }
+    node.w = Math.max(RH_MIN_W, Math.min(RH_MAX_W, Math.round(Number(node.w || RH_BASE_W) || RH_BASE_W)));
+    const scale = syncRhNodeScale(node, el);
+    node.h = Math.max(120, Math.round(baseH * scale));
+    el.classList.add('sized');
+    el.classList.toggle('rh-content-scroll', needsScroll);
+    el.style.width = `${node.w}px`;
+    el.style.height = `${node.h}px`;
+    scheduleLinkGeometryRefresh(new Set([node.id]));
+}
+/** 换配置：只换 body，不整画布重绘，避免闪屏 */
+function rebuildRhNodeInPlace(node){
+    if(!node || node.type !== 'rh' || !nodesEl) return false;
+    const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
+    const body = el?.querySelector?.('.node-body');
+    if(!el || !body) return false;
+    body.replaceChildren(renderRhBody(node));
+    mountCanvasCustomSelects(el);
+    refreshIcons(el);
+    delete node._rhBaseFrameH;
+    scheduleFitRhNodeFrame(node);
+    return true;
 }
 function nodeCanvasSize(node){
     if(!node) return {w:0, h:0};
@@ -4433,13 +4567,108 @@ function formatWorkflowTemplateDate(ts){
     if(Number.isNaN(d.getTime())) return '';
     return d.toLocaleDateString(langIsEn() ? 'en-US' : 'zh-CN', { month:'2-digit', day:'2-digit' });
 }
+function readWorkflowTemplateRecentIds(){
+    try {
+        const raw = JSON.parse(localStorage.getItem(WF_RECENT_KEY) || '[]');
+        return Array.isArray(raw) ? raw.map(String).filter(Boolean) : [];
+    } catch {
+        return [];
+    }
+}
+function rememberWorkflowTemplateRecent(templateId){
+    const id = String(templateId || '').trim();
+    if(!id) return;
+    const next = [id, ...readWorkflowTemplateRecentIds().filter(x => x !== id)].slice(0, WF_RECENT_MAX);
+    try { localStorage.setItem(WF_RECENT_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+}
+function workflowTemplateCategoryLabel(cat){
+    const key = String(cat || 'general');
+    const hit = WF_CATEGORY_LABELS[key];
+    if(hit) return langIsEn() ? hit.en : hit.zh;
+    return key;
+}
+function workflowTemplateCoverStyle(item){
+    const seed = String(item?.id || item?.title || 'wf');
+    let hash = 0;
+    for(let i = 0; i < seed.length; i++) hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
+    const hues = [
+        ['#3a2a1c', '#1a1410', 'rgba(255,184,102,.35)'],
+        ['#2a2438', '#141018', 'rgba(196,168,255,.28)'],
+        ['#1c2a2e', '#0e1416', 'rgba(125,211,252,.28)'],
+        ['#2a1c22', '#140e12', 'rgba(251,146,160,.28)'],
+        ['#24301f', '#10160e', 'rgba(163,230,153,.26)'],
+    ];
+    const [a, b, c] = hues[Math.abs(hash) % hues.length];
+    return `background:radial-gradient(120% 90% at 18% 12%, ${c}, transparent 55%), linear-gradient(160deg, ${a} 0%, ${b} 72%);`;
+}
+function workflowTemplateViewTitleText(){
+    if(workflowTemplateKindFilter === 'recent') return langIsEn() ? 'Recent' : '最近使用';
+    if(workflowTemplateKindFilter === 'mine') return langIsEn() ? 'My templates' : '我的模板';
+    if(workflowTemplateKindFilter === 'public'){
+        if(workflowTemplateCategoryFilter) return workflowTemplateCategoryLabel(workflowTemplateCategoryFilter);
+        return langIsEn() ? 'All' : '全部';
+    }
+    return langIsEn() ? 'All' : '全部';
+}
+function syncWorkflowTemplateNav(){
+    if(!workflowTemplateModal) return;
+    workflowTemplateModal.querySelectorAll('[data-wf-filter]').forEach(btn => {
+        const key = btn.getAttribute('data-wf-filter') || '';
+        if(key === 'public'){
+            btn.classList.toggle('is-active', workflowTemplateKindFilter === 'public' && !workflowTemplateCategoryFilter);
+            btn.setAttribute('aria-expanded', workflowTemplatePublicOpen ? 'true' : 'false');
+        } else {
+            btn.classList.toggle('is-active', key === workflowTemplateKindFilter);
+        }
+    });
+    workflowTemplatePublicCats?.classList.toggle('is-open', workflowTemplatePublicOpen);
+    workflowTemplatePublicCats?.querySelectorAll('[data-wf-category]').forEach(btn => {
+        btn.classList.toggle(
+            'is-active',
+            workflowTemplateKindFilter === 'public'
+                && btn.getAttribute('data-wf-category') === workflowTemplateCategoryFilter,
+        );
+    });
+    if(workflowTemplateViewTitle) workflowTemplateViewTitle.textContent = workflowTemplateViewTitleText();
+}
+function renderWorkflowTemplatePublicCats(){
+    if(!workflowTemplatePublicCats) return;
+    const cats = [...new Set(
+        (workflowTemplates || [])
+            .filter(item => item.builtin)
+            .map(item => String(item.category || 'general'))
+    )].sort();
+    workflowTemplatePublicCats.innerHTML = cats.map(cat => `
+        <button type="button" class="workflow-template-nav-sub-item" data-wf-category="${escapeAttr(cat)}">${escapeHtml(workflowTemplateCategoryLabel(cat))}</button>
+    `).join('');
+    workflowTemplatePublicCats.querySelectorAll('[data-wf-category]').forEach(btn => {
+        bindClick(btn, () => {
+            workflowTemplateKindFilter = 'public';
+            workflowTemplateCategoryFilter = btn.getAttribute('data-wf-category') || '';
+            workflowTemplatePublicOpen = true;
+            syncWorkflowTemplateNav();
+            renderWorkflowTemplateLists();
+        });
+    });
+}
 function filteredWorkflowTemplates(){
     const q = workflowTemplateSearchQuery.trim().toLowerCase();
-    return (workflowTemplates || []).filter(item => {
-        if(workflowTemplateKindFilter === 'builtin' && !item.builtin) return false;
-        if(workflowTemplateKindFilter === 'custom' && item.builtin) return false;
-        if(!q) return true;
-        const hay = `${item.title || ''} ${item.description || ''} ${item.id || ''}`.toLowerCase();
+    const recentIds = readWorkflowTemplateRecentIds();
+    let list = (workflowTemplates || []).slice();
+    if(workflowTemplateKindFilter === 'recent'){
+        const map = new Map(list.map(item => [item.id, item]));
+        list = recentIds.map(id => map.get(id)).filter(Boolean);
+    } else if(workflowTemplateKindFilter === 'mine'){
+        list = list.filter(item => !item.builtin);
+    } else if(workflowTemplateKindFilter === 'public'){
+        list = list.filter(item => item.builtin);
+        if(workflowTemplateCategoryFilter){
+            list = list.filter(item => String(item.category || 'general') === workflowTemplateCategoryFilter);
+        }
+    }
+    if(!q) return list;
+    return list.filter(item => {
+        const hay = `${item.title || ''} ${item.description || ''} ${item.category || ''} ${item.id || ''}`.toLowerCase();
         return hay.includes(q);
     });
 }
@@ -4448,29 +4677,16 @@ function renderWorkflowTemplateCard(item){
     card.type = 'button';
     card.className = `workflow-template-card ${item.builtin ? 'is-builtin' : 'is-custom'}`;
     card.dataset.templateId = item.id;
-    const nodeCount = Number(item.node_count || 0);
-    const linkCount = Number(item.connection_count || 0);
-    const dateLabel = !item.builtin && item.updated_at ? formatWorkflowTemplateDate(item.updated_at) : '';
-    const metaParts = [
-        item.builtin ? (langIsEn() ? 'Built-in' : '内置') : (langIsEn() ? 'Custom' : '自定义'),
-        `${nodeCount} ${langIsEn() ? 'nodes' : '节点'}`,
-        linkCount ? `${linkCount} ${langIsEn() ? 'links' : '连线'}` : '',
-        dateLabel,
-    ].filter(Boolean);
+    card.title = item.description || item.title || item.id;
+    const cover = String(item.cover || item.cover_url || '').trim();
+    const coverHtml = cover
+        ? `<img src="${escapeAttr(cover)}" alt="" loading="lazy" />`
+        : `<div class="workflow-template-card-cover-fallback" style="${workflowTemplateCoverStyle(item)}"><i data-lucide="${escapeAttr(item.icon || 'layout-template')}" class="w-7 h-7"></i><span>${escapeHtml(workflowTemplateCategoryLabel(item.category || (item.builtin ? 'general' : 'custom')))}</span></div>`;
     card.innerHTML = `
-        <div class="workflow-template-card-top">
-            <div class="workflow-template-card-icon"><i data-lucide="${escapeAttr(item.icon || 'layout-template')}" class="w-4 h-4"></i></div>
-            <div class="workflow-template-card-body">
-                <div class="workflow-template-card-title">${escapeHtml(item.title || item.id)}</div>
-                <div class="workflow-template-card-desc">${escapeHtml(item.description || (langIsEn() ? 'No description' : '暂无说明'))}</div>
-                <div class="workflow-template-card-meta">
-                    <span class="workflow-template-card-badge ${item.builtin ? 'is-builtin' : ''}">${escapeHtml(metaParts[0])}</span>
-                    <span>${escapeHtml(metaParts.slice(1).join(' · '))}</span>
-                </div>
-            </div>
+        <div class="workflow-template-card-cover">${coverHtml}
+            ${!item.builtin ? `<span class="workflow-template-delete" data-delete-template="${escapeAttr(item.id)}" title="${tr('common.delete')}">×</span>` : ''}
         </div>
-        <span class="workflow-template-card-action">${langIsEn() ? 'Insert into canvas' : '插入到画布'}</span>
-        ${!item.builtin ? `<span class="workflow-template-delete" data-delete-template="${escapeAttr(item.id)}" title="${tr('common.delete')}">×</span>` : ''}
+        <div class="workflow-template-card-title">${escapeHtml(item.title || item.id)}</div>
     `;
     card.onclick = e => {
         if(e.target.closest('[data-delete-template]')) return;
@@ -4489,12 +4705,17 @@ function renderWorkflowTemplateCard(item){
 }
 function renderWorkflowTemplateLists(){
     if(!workflowTemplateList) return;
+    renderWorkflowTemplatePublicCats();
+    syncWorkflowTemplateNav();
     workflowTemplateList.innerHTML = '';
     const items = filteredWorkflowTemplates();
     if(!items.length){
-        const emptyText = workflowTemplates.length
-            ? (langIsEn() ? 'No templates match your filters' : '没有符合筛选条件的模板')
-            : tr('canvas.workflowTemplatesEmpty');
+        let emptyText = tr('canvas.workflowTemplatesEmpty');
+        if(workflowTemplates.length){
+            if(workflowTemplateKindFilter === 'recent') emptyText = langIsEn() ? 'No recently used templates' : '还没有最近使用的模板';
+            else if(workflowTemplateKindFilter === 'mine') emptyText = langIsEn() ? 'No custom templates yet — tap Create' : '还没有我的模板，点右上角「创建」保存当前画布';
+            else emptyText = langIsEn() ? 'No templates match your filters' : '没有符合筛选条件的模板';
+        }
         workflowTemplateList.innerHTML = `<div class="workflow-template-empty">${escapeHtml(emptyText)}</div>`;
         refreshIcons();
         return;
@@ -4591,6 +4812,7 @@ async function insertWorkflowTemplateIntoCanvas(templateId){
         syncGeneratorInputs();
         selected.clear();
         newNodes.forEach(n => selected.add(n.id));
+        rememberWorkflowTemplateRecent(templateId);
         closeWorkflowTemplateModal();
         render();
         scheduleSave();
@@ -4656,8 +4878,10 @@ function openWorkflowTemplateModal(){
     workflowTemplateModal?.classList.add('open');
     hideWorkflowTemplateDeleteConfirm();
     closeWorkflowTemplateSaveForm();
-    syncStudioFilterChips(workflowTemplateModal, 'data-wf-filter', workflowTemplateKindFilter);
+    syncWorkflowTemplateNav();
+    try { window.StudioI18n?.apply?.(workflowTemplateModal); } catch(_){ /* ignore */ }
     refreshIcons();
+    requestAnimationFrame(() => workflowTemplateSearchInput?.focus());
 }
 function closeWorkflowTemplateModal(){
     workflowTemplateModal?.classList.remove('open');
@@ -6738,7 +6962,7 @@ function addRhNode(point){
         type:'rh',
         x:p.x,
         y:p.y,
-        w:820,
+    w:820,
         h:0,
         rhMode:'app',
         rhPayment:'free',
@@ -11310,9 +11534,7 @@ const NODE_TYPE_ICON = {
 };
 function renderNode(node){
     normalizeApiNodeLayout(node);
-    if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
-    // 旧窄 RH 节点升到三栏默认宽
-    if(node.type === 'rh' && Number(node.w || 0) > 0 && Number(node.w) < 780) node.w = 820;
+    normalizeRhNodeLayout(node);
     const el = document.createElement('div');
     const size = defaultNodeSize(node.type);
     const hasFixedSize = Boolean(node.h || size.h);
@@ -11626,6 +11848,17 @@ function renderNode(node){
         scaleWrap.appendChild(el.querySelector('.node-head'));
         scaleWrap.appendChild(body);
         el.appendChild(scaleWrap);
+    } else if(node.type === 'rh'){
+        // 裁切槽按视觉尺寸；内部永远 820 宽再 scale，外壳才能套住
+        const slot = document.createElement('div');
+        slot.className = 'rh-scale-slot';
+        const scaleWrap = document.createElement('div');
+        scaleWrap.className = 'rh-node-scale';
+        const head = el.querySelector('.node-head');
+        if(head) scaleWrap.appendChild(head);
+        scaleWrap.appendChild(body);
+        slot.appendChild(scaleWrap);
+        el.appendChild(slot);
     } else {
         el.appendChild(body);
     }
@@ -11657,6 +11890,10 @@ function renderNode(node){
     el.ondragstart = e => { e.preventDefault(); e.stopPropagation(); };
     bindNodeLayoutObserver(el);
     if(isGenConsoleNode(node)) fitGeneratorNodeHeight(node, el);
+    if(node.type === 'rh'){
+        delete node._rhBaseFrameH;
+        scheduleFitRhNodeFrame(node);
+    }
     mountCanvasCustomSelects(el);
     return el;
 }
@@ -20973,7 +21210,8 @@ function renderRhBody(node){
         if(ref) applyRhEntrySelection(node, ref);
         node.rhParams = {};
         node.rhRandomValues = {};
-        render();
+        // 原地换字段；整页 render 会拆掉节点壳导致闪一下
+        if(!rebuildRhNodeInPlace(node)) render();
         scheduleSave();
     };
     const paymentSelect = wrap.querySelector('.rh-payment-select');
@@ -21007,6 +21245,9 @@ function renderRhBody(node){
             wrap.querySelector('.rh-advanced')?.classList.toggle('is-open', node.rhAdvancedOpen);
             advToggle.classList.toggle('is-open', node.rhAdvancedOpen);
             advToggle.setAttribute('aria-expanded', node.rhAdvancedOpen ? 'true' : 'false');
+            // 高级区开合改变内容高：合并到下一帧测高，避免连闪
+            delete node._rhBaseFrameH;
+            scheduleFitRhNodeFrame(node);
             scheduleSave();
         };
     }
@@ -21014,6 +21255,7 @@ function renderRhBody(node){
     renderRhPromptFields(wrap.querySelector('.rh-prompt-list'), node, fields);
     renderRhParams(wrap.querySelector('.rh-param-list'), node, fields, media);
     rhRenderOutputPane(wrap.querySelector('.rh-output-stage'), node);
+    scheduleFitRhNodeFrame(node);
     wrap.querySelector('.rh-run').onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
     bindCascadeButtons(wrap, node.id);
     refreshIcons();
@@ -21125,24 +21367,19 @@ function renderRhMediaFields(list, node, fields, media){
         const badge = field.required === true
             ? (langIsEn() ? 'Required' : '必选')
             : (langIsEn() ? 'Optional' : '可选');
+        // 操作说明提到格子下方统一写；卡内空槽只留槽名，有素材才显示来源状态
         const sourceHint = url
             ? (fromUpload
                 ? (langIsEn() ? 'Uploaded' : '已上传')
                 : (langIsEn() ? 'From link' : '来自连线'))
-            : (langIsEn() ? 'Drop or click' : '拖入或点击');
+            : '';
         const emptyIcon = kind === 'video' ? 'video' : kind === 'audio' ? 'music' : 'image';
-        const emptyHint = kind === 'video'
-            ? (langIsEn() ? 'Drop or upload video' : '拖入或上传视频')
-            : kind === 'audio'
-                ? (langIsEn() ? 'Drop or upload audio' : '拖入或上传音频')
-                : (langIsEn() ? 'Drop or upload image' : '拖入或上传图片');
         return `<div class="rh-media-tile ${url ? 'has-media' : 'empty'}" data-rh-slot-key="${escapeAttr(key)}" data-rh-slot-kind="${escapeAttr(kind)}" title="${escapeAttr(tech)}">
             <div class="rh-media-tile-frame">
                 ${url
                     ? `<div class="rh-media-tile-media">${rhMediaPreviewHtml(url, kind)}</div>`
                     : `<div class="rh-media-tile-empty">
                         <i data-lucide="${emptyIcon}" class="rh-media-ph-icon"></i>
-                        <span>${escapeHtml(emptyHint)}</span>
                     </div>`}
                 <div class="rh-media-tile-veil" aria-hidden="true"></div>
                 <div class="rh-media-tile-top">
@@ -21151,12 +21388,12 @@ function renderRhMediaFields(list, node, fields, media){
                 </div>
                 <div class="rh-media-tile-foot">
                     <span class="rh-media-tile-name">${escapeHtml(label)}</span>
-                    <span class="rh-media-tile-hint">${escapeHtml(sourceHint)}</span>
+                    ${sourceHint ? `<span class="rh-media-tile-hint">${escapeHtml(sourceHint)}</span>` : ''}
                 </div>
             </div>
             <input type="file" class="rh-media-tile-file" accept="${escapeAttr(rhAcceptForKind(kind))}" hidden>
         </div>`;
-    }).join('');
+    }).join('') + `<div class="rh-media-grid-hint">${langIsEn() ? 'Drop onto a slot or click to upload' : '拖入对应格子，或点击上传'}</div>`;
     bindRhMediaTiles(list, node);
     refreshIcons();
 }
@@ -21265,17 +21502,13 @@ function bindRhMediaTiles(list, node){
                 const mediaWrap = tile.querySelector('.rh-media-tile-media');
                 if(mediaWrap) mediaWrap.remove();
                 if(!tile.querySelector('.rh-media-tile-empty')){
-                    const kindLabel = kind === 'video'
-                        ? (langIsEn() ? 'Drop or upload video' : '拖入或上传视频')
-                        : (langIsEn() ? 'Drop or upload image' : '拖入或上传图片');
                     const empty = document.createElement('div');
                     empty.className = 'rh-media-tile-empty';
-                    empty.innerHTML = `<i data-lucide="${kind === 'video' ? 'video' : 'image'}" class="rh-media-ph-icon"></i><span>${escapeHtml(kindLabel)}</span>`;
+                    empty.innerHTML = `<i data-lucide="${kind === 'video' ? 'video' : 'image'}" class="rh-media-ph-icon"></i>`;
                     tile.querySelector('.rh-media-tile-frame')?.insertBefore(empty, tile.querySelector('.rh-media-tile-veil'));
                     refreshIcons();
                 }
-                const hint = tile.querySelector('.rh-media-tile-hint');
-                if(hint) hint.textContent = langIsEn() ? 'Drop or click' : '拖入或点击';
+                tile.querySelector('.rh-media-tile-hint')?.remove();
             };
             mediaEl.addEventListener('error', markBroken, { once:true });
             if(mediaEl.tagName === 'IMG' && mediaEl.complete && mediaEl.naturalWidth === 0) markBroken();
@@ -24588,11 +24821,32 @@ function bindStudioModalControls(){
             workflowTemplateSearchQuery = String(workflowTemplateSearchInput.value || '');
             renderWorkflowTemplateLists();
         });
+        on(workflowTemplateSearchInput, 'keydown', e => {
+            if(e.key === 'Enter'){
+                e.preventDefault();
+                workflowTemplateSearchQuery = String(workflowTemplateSearchInput.value || '');
+                renderWorkflowTemplateLists();
+            }
+        });
     }
+    bindClick(workflowTemplateSearchBtn, () => {
+        workflowTemplateSearchQuery = String(workflowTemplateSearchInput?.value || '');
+        renderWorkflowTemplateLists();
+        workflowTemplateSearchInput?.focus();
+    });
     workflowTemplateModal?.querySelectorAll('[data-wf-filter]').forEach(btn => {
         bindClick(btn, () => {
-            workflowTemplateKindFilter = btn.getAttribute('data-wf-filter') || 'all';
-            syncStudioFilterChips(workflowTemplateModal, 'data-wf-filter', workflowTemplateKindFilter);
+            const key = btn.getAttribute('data-wf-filter') || 'public';
+            if(key === 'public' && btn.hasAttribute('data-wf-public-toggle') && workflowTemplateKindFilter === 'public' && !workflowTemplateCategoryFilter){
+                // 再次点「公开」：只折叠/展开子类，不关掉公开库
+                workflowTemplatePublicOpen = !workflowTemplatePublicOpen;
+                syncWorkflowTemplateNav();
+                return;
+            }
+            workflowTemplateKindFilter = key;
+            workflowTemplateCategoryFilter = '';
+            if(key === 'public') workflowTemplatePublicOpen = true;
+            syncWorkflowTemplateNav();
             renderWorkflowTemplateLists();
         });
     });
@@ -26967,6 +27221,10 @@ function startNodeResize(e, node){
     e.stopPropagation();
     const el = nodesEl.querySelector(`.node[data-id="${node.id}"]`);
     const rect = el?.getBoundingClientRect();
+    if(node.type === 'rh' && el){
+        el.style.setProperty('--rh-ui-scale', '1');
+        node._rhBaseFrameH = Math.min(RH_MAX_BASE_H, measureRhBaseFrame(node, el));
+    }
     resizeNode = {
         node,
         sx:e.clientX,
@@ -26986,9 +27244,14 @@ function onNodeResize(e){
         withCanvasRootClass(list => list.add('canvas-node-resize'));
     }
     const min = defaultNodeSize(resizeNode.node.type);
-    const nextW = Math.max(Math.min(min.w, 220), resizeNode.sw + (e.clientX - resizeNode.sx) / viewport.scale);
+    const minW = resizeNode.node.type === 'rh'
+        ? RH_MIN_W
+        : Math.max(Math.min(min.w, 220), 96);
+    const nextW = Math.max(minW, resizeNode.sw + (e.clientX - resizeNode.sx) / viewport.scale);
     const nextH = Math.max(96, resizeNode.sh + (e.clientY - resizeNode.sy) / viewport.scale);
-    const nextWRounded = Math.round(nextW);
+    const nextWRounded = resizeNode.node.type === 'rh'
+        ? Math.max(RH_MIN_W, Math.min(RH_MAX_W, Math.round(nextW)))
+        : Math.round(nextW);
     resizeNode.node.w = nextWRounded;
     const autoFitGroupHeight = resizeNode.node.type === 'imageBatch' || resizeNode.node.type === 'promptGroup' || resizeNode.node.type === 'group';
     const el = nodesEl.querySelector(`.node[data-id="${resizeNode.node.id}"]`);
@@ -26996,6 +27259,13 @@ function onNodeResize(e){
         if(el && !resizeNode.node._baseFrameH) resizeNode.node._baseFrameH = measureGeneratorBaseFrame(resizeNode.node, el);
         const baseH = Number(resizeNode.node._baseFrameH || 320);
         resizeNode.node.h = Math.max(96, Math.round(baseH * (nextWRounded / GENERATOR_BASE_W)));
+        resizeNode.node._userSized = true;
+    } else if(resizeNode.node.type === 'rh'){
+        // 视觉等比：外壳 = min(内容,上限) × scale；内部布局仍是 820
+        const scale = nextWRounded / RH_BASE_W;
+        const baseH = Math.min(RH_MAX_BASE_H, Number(resizeNode.node._rhBaseFrameH || 420));
+        resizeNode.node._rhBaseFrameH = baseH;
+        resizeNode.node.h = Math.max(120, Math.round(baseH * scale));
         resizeNode.node._userSized = true;
     } else if(!autoFitGroupHeight){
         resizeNode.node.h = Math.round(nextH);
@@ -27008,6 +27278,7 @@ function onNodeResize(e){
             syncOutputNodeThumbVars(el, resizeNode.node);
         }
         if(resizeNode.node.type === 'generator') syncGeneratorNodeScale(resizeNode.node, el);
+        if(resizeNode.node.type === 'rh') syncRhNodeScale(resizeNode.node, el);
         if(resizeNode.node.type === 'imageBatch' || resizeNode.node.type === 'promptGroup' || resizeNode.node.type === 'group'){
             layoutGroupChildren(resizeNode.node, { resizeGroup: false, layoutAllItems: true, updateDom: true });
         }

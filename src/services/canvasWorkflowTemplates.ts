@@ -8,6 +8,8 @@ export type WorkflowTemplateRecord = {
   description: string;
   icon: string;
   category: string;
+  /** 可选封面图 URL；列表卡优先显示 */
+  cover?: string;
   builtin: boolean;
   created_at: number;
   updated_at: number;
@@ -366,6 +368,7 @@ function toListItem(doc: WorkflowTemplateRecord) {
     description: doc.description,
     icon: doc.icon || "workflow",
     category: doc.category || "custom",
+    cover: String(doc.cover || "").trim(),
     builtin: Boolean(doc.builtin),
     created_at: doc.created_at || 0,
     updated_at: doc.updated_at || 0,
