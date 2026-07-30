@@ -82,7 +82,7 @@ function HeroBackground({ reducedMotion }: { reducedMotion: boolean }) {
   );
 }
 
-const TITLE_WORDS = ["LHZ's", 'Studio'];
+const TITLE_WORDS = ['DreamGrid'];
 
 export const Hero: React.FC = () => {
   const prefersReducedMotion = usePrefersReducedMotion();

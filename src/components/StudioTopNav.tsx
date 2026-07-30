@@ -17,6 +17,7 @@ import {
   updateCurrentCanvasTitle,
 } from '../lib/infiniteCanvas/canvasEngine.js';
 import { StudioBackgroundRevealControl } from './StudioBackgroundRevealControl';
+import { StudioBrandMark, BRAND_NAME } from './StudioBrand';
 import { cn } from '../lib/utils';
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
@@ -221,19 +222,11 @@ function CanvasHeaderCluster({
             setMenuOpen(prev => !prev);
           }}
           className="studio-canvas-header-logo group flex shrink-0 min-w-0 cursor-pointer"
-          aria-label="LHZ's Studio 导航"
+          aria-label={`${BRAND_NAME} 导航`}
           aria-expanded={menuOpen}
           aria-haspopup="menu"
         >
-          <span
-            className={cn(
-              'cover-nav-brand transition-colors duration-150',
-              heroTone ? 'cover-nav-brand-hero' : 'text-on-surface',
-              menuOpen && 'text-[#ffb866]',
-            )}
-          >
-            LHZ&apos;s Studio
-          </span>
+          <StudioBrandMark heroTone={heroTone} menuOpen={menuOpen} showName={false} />
         </button>
 
         {meta ? (
@@ -321,16 +314,9 @@ function NavBrand({
       type="button"
       onClick={onHome}
       className={cn('group flex items-center shrink-0 min-w-0 cursor-pointer', className)}
-      aria-label="LHZ's Studio — 返回首页"
+      aria-label={`${BRAND_NAME} — 返回首页`}
     >
-      <span
-        className={cn(
-          'cover-nav-brand',
-          heroTone ? 'cover-nav-brand-hero' : 'text-on-surface',
-        )}
-      >
-        LHZ&apos;s Studio
-      </span>
+      <StudioBrandMark heroTone={heroTone} />
     </button>
   );
 }
@@ -534,7 +520,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
               )
             : 'justify-end gap-2 md:gap-3 flex-1 min-w-0',
         )}
-        aria-label="LHZ's Studio navigation"
+        aria-label={`${BRAND_NAME} navigation`}
       >
         <div
           className={cn(

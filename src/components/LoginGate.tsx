@@ -187,7 +187,7 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
             className="font-serif text-2xl tracking-[-0.02em] text-[#e5e2e1]"
             style={{ fontFamily: '"Noto Serif", ui-serif, Georgia, serif' }}
           >
-            登录 LHZ Studio
+            登录 DreamGrid
           </h1>
           <p className="max-w-[300px] text-sm leading-relaxed text-[#e5e2e1]/68">
             使用管理员分配的邮箱与密码登录，即可使用分镜、画布与生图等功能。
