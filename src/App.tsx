@@ -34,7 +34,6 @@ import { STYLES, STORYBOARD_TEXT_MODEL } from './constants';
 import { StoryboardCard } from './components/StoryboardCard';
 import { StoryboardGridCard } from './components/StoryboardGridCard';
 import { ProjectManager } from './components/ProjectManager';
-import { CoverPage } from './components/CoverPage';
 import { StudioTopNav } from './components/StudioTopNav';
 import { FrameDetail } from './components/FrameDetail';
 import { ImageEditorModal } from './components/ImageEditorModal';
@@ -43,9 +42,11 @@ import { NineGridPage } from './components/NineGridPage';
 import { DirectorWorkbenchPage } from './pages/DirectorWorkbenchPage';
 import { InfiniteCanvasPage } from './pages/InfiniteCanvasPage';
 import { MyFavoritesPage } from './pages/MyFavoritesPage';
+import { PersonalSpacePage } from './pages/PersonalSpacePage';
 import { GalleryPage } from './pages/GalleryPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
 import { AdminRunningHubWorkflowsPage } from './pages/AdminRunningHubWorkflowsPage';
+import { AdminHomeCarouselPage } from './pages/AdminHomeCarouselPage';
 import { ZoomableLightboxImage } from './components/ZoomableLightboxImage';
 import { GlobalNoticeCenter } from './components/GlobalNoticeCenter';
 import { Folder, Save } from 'lucide-react';
@@ -285,18 +286,24 @@ export default function App() {
   const showInfiniteCanvasPage = screen === 'infinite-canvas';
   const showMainStudio = screen === 'studio';
   const showMyFavoritesPage = screen === 'my-favorites';
+  const showPersonalPage = screen === 'personal';
   const showGalleryPage = screen === 'gallery';
   const showAdminUsersPage = screen === 'admin-users';
   const showAdminRhWorkflowsPage = screen === 'admin-rh-workflows';
+  const showAdminHomeCarouselPage = screen === 'admin-home-carousel';
   const subPage = showMyFavoritesPage
     ? 'my-favorites'
-    : showGalleryPage
-      ? 'gallery'
-      : showAdminUsersPage
-        ? 'admin-users'
-        : showAdminRhWorkflowsPage
-          ? 'admin-rh-workflows'
-          : undefined;
+    : showPersonalPage
+      ? 'personal'
+      : showGalleryPage
+        ? 'gallery'
+        : showAdminUsersPage
+          ? 'admin-users'
+          : showAdminRhWorkflowsPage
+            ? 'admin-rh-workflows'
+            : showAdminHomeCarouselPage
+              ? 'admin-home-carousel'
+              : undefined;
 
   /** 回到首页时确保画布层不挡滚轮（z-index + body 标记） */
   useEffect(() => {
@@ -655,9 +662,11 @@ export default function App() {
         onHome={showInfiniteCanvasPage && !showCoverPage ? handleCanvasExitHome : undefined}
       />
       <MyFavoritesPage shellActive={showMyFavoritesPage} />
+      <PersonalSpacePage shellActive={showPersonalPage} />
       <GalleryPage shellActive={showGalleryPage} />
       <AdminUsersPage shellActive={showAdminUsersPage} />
       <AdminRunningHubWorkflowsPage shellActive={showAdminRhWorkflowsPage} />
+      <AdminHomeCarouselPage shellActive={showAdminHomeCarouselPage} />
       {/* Keep editor mounted after first open (cover / main studio), so draft persists */}
       {(showImageEditorPage || imageEditorKeepAlive) && (
         <StudioHeroShell active={showImageEditorPage && !showCoverPage}>

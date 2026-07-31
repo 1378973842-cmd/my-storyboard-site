@@ -250,3 +250,5 @@
 - AG84: restore amber flowing waves on collapsed gen-stage busy overlay
 - AG84: gen-stage busy = blur cover + amber flowing waves + status bar
 - 选参考边缘流光：改 transform 扫光，去掉 @property/drop-shadow 卡顿
+- 已部署线上 19c26fd：nano-banana-2 + 生成中/选参考流光
+- 主页 TapNow 改版：四导航、新建进画布、个人空间占位、管理员轮播

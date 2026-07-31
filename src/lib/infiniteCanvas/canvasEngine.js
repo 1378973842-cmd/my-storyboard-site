@@ -60,6 +60,12 @@ let imageEditorUiWired = false;
 /** 拖节点/缩放/平移后：禁止 safeRender / 远程全量同步，避免闪屏 */
 const CANVAS_INTERACTION_COOLDOWN_MS = 8000;
 const LAST_CANVAS_ID_KEY = 'gemini-infinite-canvas-last-id';
+/** 壳层「工作空间」：下次挂载/进入时强制显示选择画布闸门，勿恢复上次画布 */
+let preferCanvasGateView = false;
+export function requestCanvasGateView(){
+    preferCanvasGateView = true;
+    writeLastCanvasId('');
+}
 export function readLastCanvasId(){
     try { return sessionStorage.getItem(LAST_CANVAS_ID_KEY) || ''; } catch(_) { return ''; }
 }
@@ -5264,7 +5270,7 @@ function buildCreateCanvasCardElement(){
             </button>`;
         el.querySelector('button')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            setCreateMode(true);
+            void createCanvas({ skipNamePrompt: true });
         });
     }
     return el;
@@ -5469,14 +5475,17 @@ function bindGateCollectionsIntegration(){
         openCanvas,
     });
 }
-async function createCanvas(){
+async function createCanvas(options = {}){
     if(createCanvasInFlight) return;
     createCanvasInFlight = true;
-    if(!creatingCanvas) setCreateMode(true, createCanvasKind);
-    const customTitle = getGateCreateTitleInput()?.value?.trim?.() || '';
+    // 默认直接创建并进入画布；仅在命名卡已打开时读取自定义标题
+    const skipNamePrompt = options?.skipNamePrompt !== false;
+    if(!skipNamePrompt && !creatingCanvas) setCreateMode(true, createCanvasKind);
+    const customTitle = creatingCanvas ? (getGateCreateTitleInput()?.value?.trim?.() || '') : '';
     const isSmart = createCanvasKind === 'smart';
     const titleBase = isSmart ? tr('canvas.newSmartCanvas') : tr('canvas.newCanvas');
     const title = customTitle || `${titleBase} ${new Date().toLocaleTimeString(window.StudioI18n?.lang() === 'en' ? 'en-US' : 'zh-CN', {hour:'2-digit', minute:'2-digit'})}`;
+    if(creatingCanvas) setCreateMode(false);
     trashMode = false;
     refreshGateViewControls();
     setStatus(langIsEn() ? 'Creating canvas…' : '正在创建画布…');
@@ -6229,7 +6238,7 @@ if(!wireCanvasUiEvents._collectionsWired){
     wireGateCollectionUi();
     wireCanvasUiEvents._collectionsWired = true;
 }
-bindClick(gateCreateBtn, () => setCreateMode(true));
+bindClick(gateCreateBtn, () => { void createCanvas({ skipNamePrompt: true }); });
 bindClick(gateCreateCollectionBtn, () => openCreateCollectionModal());
 bindClick(gateCreateSmartBtn, () => createSmartCanvas());
 bindClick(gateBackBtn, () => { gateFilterType = 'all'; setTrashMode(false); });
@@ -29693,8 +29702,13 @@ async function mountInfiniteCanvasEngineInner(root) {
   await loadConfig();
   if(!isMountGenerationCurrent(seq)) return disposeInfiniteCanvasEngine;
   pruneMissingComfyWorkflows();
-  // 有上次画布时先藏 gate，避免 loadCanvasList 期间闪到选画布页
-  const lastIdEarly = readLastCanvasId();
+  const forceGate = preferCanvasGateView;
+  if(forceGate){
+    preferCanvasGateView = false;
+    writeLastCanvasId('');
+  }
+  // 有上次画布时先藏 gate，避免 loadCanvasList 期间闪到选画布页（工作空间强制闸门时跳过）
+  const lastIdEarly = forceGate ? '' : readLastCanvasId();
   if(lastIdEarly && !canvas){
     const liveShell = resolveLiveShell();
     if(liveShell?.classList.contains('no-canvas')) liveShell.classList.remove('no-canvas');
@@ -29708,10 +29722,10 @@ async function mountInfiniteCanvasEngineInner(root) {
   }
   await loadCanvasList(false);
   if(!isMountGenerationCurrent(seq)) return disposeInfiniteCanvasEngine;
-  const lastId = readLastCanvasId();
+  const lastId = forceGate ? '' : readLastCanvasId();
   const lastMeta = lastId ? canvases.find(c => c.id === lastId) : null;
   // openCanvas 本身会拉详情；不必等列表 meta，否则列表慢/缺项时会误清 lastId 并闪 gate
-  if(!canvas && lastId){
+  if(!forceGate && !canvas && lastId){
     if(lastMeta && (lastMeta.kind || 'classic') === 'smart'){
       writeLastCanvasId('');
     } else {
@@ -29719,7 +29733,7 @@ async function mountInfiniteCanvasEngineInner(root) {
     }
   }
   if(!isMountGenerationCurrent(seq)) return disposeInfiniteCanvasEngine;
-  if(readCanvasFavoriteNavigation()?.canvasId){
+  if(!forceGate && readCanvasFavoriteNavigation()?.canvasId){
     await consumeQueuedCanvasFavoriteNavigation();
   }
   if(!canvas) {

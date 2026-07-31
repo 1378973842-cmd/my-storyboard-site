@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, ChevronDown, LogOut, Pencil, Shield, Users, Workflow } from 'lucide-react';
+import { Camera, ChevronDown, Images, LogOut, Pencil, Shield, Users, Workflow } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import type { AuthUser } from '../stores/authStore';
@@ -59,6 +59,7 @@ type StudioUserMenuProps = {
   heroTone?: boolean;
   onAdminUsers: () => void;
   onAdminRhWorkflows: () => void;
+  onAdminHomeCarousel?: () => void;
 };
 
 export const StudioUserMenu: React.FC<StudioUserMenuProps> = ({
@@ -66,6 +67,7 @@ export const StudioUserMenu: React.FC<StudioUserMenuProps> = ({
   isAdmin,
   onAdminUsers,
   onAdminRhWorkflows,
+  onAdminHomeCarousel,
 }) => {
   const setUser = useAuthStore((s) => s.setUser);
   const [open, setOpen] = useState(false);
@@ -368,6 +370,16 @@ export const StudioUserMenu: React.FC<StudioUserMenuProps> = ({
                           onAdminRhWorkflows();
                         }}
                       />
+                      {onAdminHomeCarousel ? (
+                        <MenuBtn
+                          icon={Images}
+                          label="主页轮播"
+                          onClick={() => {
+                            close();
+                            onAdminHomeCarousel();
+                          }}
+                        />
+                      ) : null}
                     </div>
                   ) : null}
 

@@ -20,6 +20,8 @@ export function refreshInfiniteCanvasLayout(): void;
 export function syncCanvasTopbarDom(): void;
 export function setCanvasBoardBackground(color: string): void;
 export function returnToCanvasManager(): Promise<void>;
+/** 下次进入画布壳时强制显示选择画布页（不恢复上次画布） */
+export function requestCanvasGateView(): void;
 export function renameCurrentCanvas(): Promise<void>;
 export function updateCurrentCanvasTitle(title: string): Promise<boolean>;
 

@@ -18,13 +18,28 @@ export type ShellScreen =
   | 'director'
   | 'infinite-canvas'
   | 'my-favorites'
+  | 'personal'
   | 'gallery'
   | 'admin-users'
-  | 'admin-rh-workflows';
+  | 'admin-rh-workflows'
+  | 'admin-home-carousel';
 
-type SubScreen = 'my-favorites' | 'gallery' | 'admin-users' | 'admin-rh-workflows';
+type SubScreen =
+  | 'my-favorites'
+  | 'personal'
+  | 'gallery'
+  | 'admin-users'
+  | 'admin-rh-workflows'
+  | 'admin-home-carousel';
 
-const SUB_SCREENS = new Set<ShellScreen>(['my-favorites', 'gallery', 'admin-users', 'admin-rh-workflows']);
+const SUB_SCREENS = new Set<ShellScreen>([
+  'my-favorites',
+  'personal',
+  'gallery',
+  'admin-users',
+  'admin-rh-workflows',
+  'admin-home-carousel',
+]);
 
 function isSubScreen(screen: ShellScreen): screen is SubScreen {
   return SUB_SCREENS.has(screen);
@@ -47,9 +62,11 @@ const VALID_SCREENS = new Set<ShellScreen>([
   'director',
   'infinite-canvas',
   'my-favorites',
+  'personal',
   'gallery',
   'admin-users',
   'admin-rh-workflows',
+  'admin-home-carousel',
 ]);
 
 function readSnap(): Snap | null {
@@ -102,10 +119,14 @@ type ShellNavigationValue = {
     directorNotes?: string;
   }) => void;
   openInfiniteCanvas: () => void;
+  /** 工作空间：打开选择画布闸门（不自动恢复上次画布） */
+  openCanvasWorkspace: () => void;
   openMyFavorites: () => void;
+  openPersonal: () => void;
   openGallery: () => void;
   openAdminUsers: () => void;
   openAdminRhWorkflows: () => void;
+  openAdminHomeCarousel: () => void;
   goBack: () => void;
   warmInfiniteCanvas: () => void;
 };
@@ -198,6 +219,18 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
     setInfiniteCanvasKeepAlive(true);
     setScreen('infinite-canvas');
   }, []);
+  const openCanvasWorkspace = useCallback(() => {
+    setInfiniteCanvasKeepAlive(true);
+    setScreen('infinite-canvas');
+    void import('../lib/homeCanvasBridge').then(({ openCanvasSelectionGate }) => {
+      void openCanvasSelectionGate({
+        warmInfiniteCanvas: () => setInfiniteCanvasKeepAlive(true),
+        openInfiniteCanvas: () => setScreen('infinite-canvas'),
+      }).catch((err) => {
+        console.warn('[shell] open canvas workspace failed', err);
+      });
+    });
+  }, []);
   const openMyFavorites = useCallback(() => {
     setInfiniteCanvasKeepAlive(true);
     setScreen('infinite-canvas');
@@ -206,9 +239,11 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
       window.dispatchEvent(new CustomEvent('canvas-open-material-library', { detail: { view: 'favorites' } }));
     }, 80);
   }, []);
+  const openPersonal = useCallback(() => openSubPage('personal'), [openSubPage]);
   const openGallery = useCallback(() => openSubPage('gallery'), [openSubPage]);
   const openAdminUsers = useCallback(() => openSubPage('admin-users'), [openSubPage]);
   const openAdminRhWorkflows = useCallback(() => openSubPage('admin-rh-workflows'), [openSubPage]);
+  const openAdminHomeCarousel = useCallback(() => openSubPage('admin-home-carousel'), [openSubPage]);
   const goBack = useCallback(() => {
     setScreen(returnToRef.current);
   }, []);
@@ -231,10 +266,13 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
       openDirectorWorkbench,
       openDirectorWithStoryboardShot,
       openInfiniteCanvas,
+      openCanvasWorkspace,
       openMyFavorites,
+      openPersonal,
       openGallery,
       openAdminUsers,
       openAdminRhWorkflows,
+      openAdminHomeCarousel,
       goBack,
       warmInfiniteCanvas,
     }),
@@ -252,10 +290,13 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
       openDirectorWorkbench,
       openDirectorWithStoryboardShot,
       openInfiniteCanvas,
+      openCanvasWorkspace,
       openMyFavorites,
+      openPersonal,
       openGallery,
       openAdminUsers,
       openAdminRhWorkflows,
+      openAdminHomeCarousel,
       goBack,
       warmInfiniteCanvas,
     ],

@@ -39,7 +39,13 @@ type StudioTopNavProps = {
   /** 功能页隐藏分镜/画布/九宫格等栏目，仅保留品牌返回 */
   hideFeatureNav?: boolean;
   /** 次级页：顶栏显示返回与标题 */
-  subPage?: 'my-favorites' | 'gallery' | 'admin-users' | 'admin-rh-workflows';
+  subPage?:
+    | 'my-favorites'
+    | 'personal'
+    | 'gallery'
+    | 'admin-users'
+    | 'admin-rh-workflows'
+    | 'admin-home-carousel';
   /** 画布页：Logo 下拉导航 */
   showCanvasBrandMenu?: boolean;
 };
@@ -52,9 +58,20 @@ const CANVAS_BRAND_MENU = [
 
 const SUB_PAGE_TITLES: Record<NonNullable<StudioTopNavProps['subPage']>, string> = {
   'my-favorites': '我的收藏',
+  personal: '个人空间',
   gallery: '公共画廊',
   'admin-users': '用户管理',
   'admin-rh-workflows': 'RunningHub 工作流',
+  'admin-home-carousel': '主页轮播',
+};
+
+type CoverCenterNavId = 'home' | 'workspace' | 'personal' | 'gallery';
+
+type CoverCenterNavItem = {
+  id: CoverCenterNavId;
+  label: string;
+  onClick: () => void;
+  active: boolean;
 };
 
 function CanvasHeaderCluster({
@@ -321,31 +338,15 @@ function NavBrand({
   );
 }
 
-function NavTextLink({
-  item,
-  active,
-  heroTone = false,
-}: {
-  item: NavItem;
-  active: StudioNavId;
-  heroTone?: boolean;
-}) {
-  const isActive = active === item.id;
-
+function CoverCenterLink({ item }: { item: CoverCenterNavItem }) {
   return (
     <button
       type="button"
       onClick={item.onClick}
-      aria-current={isActive ? 'page' : undefined}
+      aria-current={item.active ? 'page' : undefined}
       className={cn(
         'cover-nav-text-link shrink-0 cursor-pointer',
-        heroTone
-          ? isActive
-            ? 'cover-nav-text-link-active'
-            : 'cover-nav-text-link-muted'
-          : isActive
-            ? 'text-on-surface transition-colors duration-150'
-            : 'text-on-surface/52 hover:text-on-surface transition-colors duration-150',
+        item.active ? 'cover-nav-text-link-active' : 'cover-nav-text-link-muted',
       )}
     >
       {item.label}
@@ -407,33 +408,70 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
     screen,
     openCover,
     openInfiniteCanvas,
+    openCanvasWorkspace,
+    openPersonal,
     openGallery,
     openAdminUsers,
     openAdminRhWorkflows,
+    openAdminHomeCarousel,
     goBack,
   } = useShellNavigation();
   const user = useAuthStore((s) => s.user);
   const isAdmin = useAuthStore((s) => s.isAdmin());
   const [coverNavGlass, setCoverNavGlass] = useState(false);
 
+  const isOverlayNav = variant === 'overlay';
+  const isCoverHomeNav = isOverlayNav && active === 'cover' && !subPage && !hideFeatureNav;
+
   useEffect(() => {
-    if (variant !== 'overlay' || active !== 'cover') {
+    if (!isCoverHomeNav) {
       setCoverNavGlass(false);
       return;
     }
     const scroller = document.querySelector('[data-cover-scroll-root]');
     if (!scroller) return;
     const onScroll = () => {
-      setCoverNavGlass(scroller.scrollTop > window.innerHeight * 0.5);
+      setCoverNavGlass(scroller.scrollTop > window.innerHeight * 0.35);
     };
     onScroll();
     scroller.addEventListener('scroll', onScroll, { passive: true });
     return () => scroller.removeEventListener('scroll', onScroll);
-  }, [variant, active]);
+  }, [isCoverHomeNav]);
 
-  // 产品收缩：主入口只推画布；分镜/九宫格/修图/导演台路由暂留，顶栏不再露出
+  // 非封面：保留画布快捷入口（分镜/九宫格等暂不露出）
   const navItems: NavItem[] = [
     { id: 'canvas', label: '画布', icon: Workflow, onClick: openInfiniteCanvas },
+  ];
+
+  const coverCenterItems: CoverCenterNavItem[] = [
+    {
+      id: 'home',
+      label: '主页',
+      onClick: () => {
+        openCover();
+        const scroller = document.querySelector('[data-cover-scroll-root]');
+        scroller?.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+      active: screen === 'cover',
+    },
+    {
+      id: 'workspace',
+      label: '工作空间',
+      onClick: openCanvasWorkspace,
+      active: screen === 'infinite-canvas',
+    },
+    {
+      id: 'personal',
+      label: '个人空间',
+      onClick: openPersonal,
+      active: screen === 'personal',
+    },
+    {
+      id: 'gallery',
+      label: '公共画廊',
+      onClick: openGallery,
+      active: screen === 'gallery',
+    },
   ];
 
   const handleHome = () => {
@@ -442,15 +480,12 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
       return;
     }
     if (screen === 'cover') {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      const scroller = document.querySelector('[data-cover-scroll-root]');
+      scroller?.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
     openCover();
   };
-
-  const isOverlayNav = variant === 'overlay';
-  /** 与功能页共用同一套图标顶栏，避免封面↔分镜切换时顶栏布局跳动 */
-  const isCoverHomeNav = false;
 
   return (
     <header
@@ -509,81 +544,72 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
         </div>
       ) : null}
 
-      {!hideFeatureNav ? (
+      {isCoverHomeNav ? (
+        <nav
+          className={cn(
+            'pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-6 pt-5 md:px-10 md:pt-7 lg:px-14',
+          )}
+          aria-label={`${BRAND_NAME} navigation`}
+        >
+          <div
+            className={cn(
+              'pointer-events-auto absolute left-1/2 top-5 z-[3] hidden -translate-x-1/2 items-center gap-6 md:top-7 md:flex md:gap-8 lg:gap-10',
+              coverNavGlass && 'cover-glass-nav cover-hero-nav-pill !px-5 !py-2.5',
+            )}
+          >
+            {coverCenterItems.map((item) => (
+              <CoverCenterLink key={item.id} item={item} />
+            ))}
+          </div>
+
+          <div className="pointer-events-auto ml-auto flex items-center gap-1.5">
+            <div className="flex items-center gap-3 overflow-x-auto custom-scrollbar md:hidden">
+              {coverCenterItems.map((item) => (
+                <CoverCenterLink key={item.id} item={item} />
+              ))}
+            </div>
+            {user ? (
+              <div className="hidden shrink-0 items-center gap-1.5 md:flex">
+                <StudioAnnouncementsBell isAdmin={isAdmin} heroTone />
+                <StudioUserMenu
+                  user={user}
+                  isAdmin={isAdmin}
+                  heroTone
+                  onAdminUsers={openAdminUsers}
+                  onAdminRhWorkflows={openAdminRhWorkflows}
+                  onAdminHomeCarousel={openAdminHomeCarousel}
+                />
+              </div>
+            ) : null}
+          </div>
+        </nav>
+      ) : null}
+
+      {!hideFeatureNav && !isCoverHomeNav ? (
       <nav
         className={cn(
           'pointer-events-auto flex w-full items-center transition-[background,box-shadow,outline-color,padding] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
           isOverlayNav
-            ? cn(
-                'justify-end gap-2 px-6 pt-5 md:gap-3 md:px-10 md:pt-7 lg:px-14',
-                coverNavGlass && 'cover-glass-nav cover-hero-nav-pill !px-4 !py-2 md:!px-5 md:!pt-2.5 md:!pb-2.5',
-              )
+            ? 'justify-end gap-2 px-6 pt-5 md:gap-3 md:px-10 md:pt-7 lg:px-14'
             : 'justify-end gap-2 md:gap-3 flex-1 min-w-0',
         )}
         aria-label={`${BRAND_NAME} navigation`}
       >
-        <div
-          className={cn(
-            'flex min-w-0 items-center',
-            isCoverHomeNav ? 'gap-8 md:gap-10 lg:gap-12' : 'gap-2 md:gap-3',
-          )}
-        >
-          <div
-            className={cn(
-              'hidden min-w-0 items-center',
-              isCoverHomeNav ? 'lg:flex gap-7 xl:gap-9' : 'md:flex gap-1.5',
-            )}
-          >
-            {navItems.map((item) =>
-              isCoverHomeNav ? (
-                <NavTextLink key={item.id} item={item} active={active} heroTone />
-              ) : (
-                <NavAction key={item.id} item={item} active={active} />
-              ),
-            )}
+        <div className="flex min-w-0 items-center gap-2 md:gap-3">
+          <div className="hidden min-w-0 items-center gap-1.5 md:flex">
+            {navItems.map((item) => (
+              <NavAction key={item.id} item={item} active={active} />
+            ))}
           </div>
 
-          <div
-            className={cn(
-              'flex min-w-0 flex-1 items-center',
-              isCoverHomeNav ? 'gap-5 md:gap-6 lg:gap-7' : 'gap-1.5 overflow-x-auto custom-scrollbar',
-            )}
-          >
-            <div className={cn('flex items-center', isCoverHomeNav ? 'lg:hidden gap-3' : 'md:hidden gap-1.5')}>
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto custom-scrollbar">
+            <div className="flex items-center gap-1.5 md:hidden">
               {navItems.map((item) => (
                 <NavAction key={item.id} item={item} active={active} compact />
               ))}
             </div>
 
-            {isCoverHomeNav ? (
-              <>
-                <a href="#tools" className="cover-nav-text-link cover-nav-text-link-muted hidden sm:inline-flex">
-                  工具
-                </a>
-                <button
-                  type="button"
-                  onClick={openInfiniteCanvas}
-                  className="cover-nav-auth-pill hidden md:inline-flex items-center px-5 py-2 text-[13px] font-medium cursor-pointer"
-                >
-                  进入画布
-                </button>
-              </>
-            ) : null}
-
-            {!isCoverHomeNav && isOverlayNav ? (
-              <StudioBackgroundRevealControl heroTone />
-            ) : null}
-
-            <button
-              type="button"
-              onClick={openGallery}
-              className={cn(
-                'cover-nav-icon-btn cover-nav-icon-btn-muted hidden h-9 items-center rounded-full px-3.5 text-[12px] font-label tracking-[0.04em] md:inline-flex',
-                subPage === 'gallery' && 'cover-nav-icon-btn-active',
-              )}
-            >
-              公共画廊
-            </button>
+            {isOverlayNav ? <StudioBackgroundRevealControl heroTone /> : null}
           </div>
 
           {user ? (
@@ -595,6 +621,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
                 heroTone={isOverlayNav}
                 onAdminUsers={openAdminUsers}
                 onAdminRhWorkflows={openAdminRhWorkflows}
+                onAdminHomeCarousel={openAdminHomeCarousel}
               />
             </div>
           ) : null}

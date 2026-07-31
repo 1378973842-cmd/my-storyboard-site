@@ -44,6 +44,10 @@ import {
   registerStudioAnnouncementRoutes,
 } from "./src/services/studioAnnouncements.js";
 import {
+  initHomeCarouselSchema,
+  registerHomeCarouselRoutes,
+} from "./src/services/homeCarousel.js";
+import {
   initCanvasGenerationsSchema,
   registerCanvasGenerationsRoutes,
   createPersistImageHandler,
@@ -638,6 +642,7 @@ async function startServer() {
 
   initUserAuthSchema(db);
   initStudioAnnouncementsSchema(db);
+  initHomeCarouselSchema(db);
   bootstrapAdminUser(db);
   const adminBootstrap = db.prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY created_at ASC LIMIT 1").get() as
     | { id: string }
@@ -685,6 +690,7 @@ async function startServer() {
 
   registerUserAuthRoutes(app, db, projectRoot);
   registerStudioAnnouncementRoutes(app, db, requireAuth, requireAdmin);
+  registerHomeCarouselRoutes(app, db, requireAdmin, projectRoot);
   registerCanvasGenerationsRoutes(app, db, projectRoot);
 
   // Project Management Routes

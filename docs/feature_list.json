@@ -183,7 +183,10 @@
         { "id": "AG81", "desc": "修：生图控制台参考图 xx 删不掉——合成 id（nodeId:preview）映射回真实连线 from 再断线", "status": "done", "priority": 102 },
         { "id": "AG82", "desc": "修：点参考图 xx 后缩略图残留——勿把按钮焦点当成打字而跳过 softRefresh", "status": "done", "priority": 103 },
         { "id": "AG83", "desc": "生图：下拉新增 nano-banana-2（RH g31-flash I2I/T2I，UI 能力对齐 nano-banana-pro）", "status": "done", "priority": 104 },
-        { "id": "AG84", "desc": "UI：生成中收起态主图模糊 + 选参考同款白流光扫边 + 底部状态条", "status": "done", "priority": 105 }
+        { "id": "AG84", "desc": "UI：生成中收起态主图模糊 + 选参考同款白流光扫边 + 底部状态条", "status": "done", "priority": 105 },
+        { "id": "HOME1", "desc": "主页 TapNow 布局：顶栏 主页/工作空间/个人空间/公共画廊 + 保留背景品牌", "status": "done", "priority": 106 },
+        { "id": "HOME2", "desc": "主页：中央输入框（未接模型）+ 新建项目直接进画布 + 最近 3 项目", "status": "done", "priority": 107 },
+        { "id": "HOME3", "desc": "个人空间占位页 + 管理员主页轮播 API/管理页 + 底部自动滑动条", "status": "done", "priority": 108 }
       ]
     },
     {
