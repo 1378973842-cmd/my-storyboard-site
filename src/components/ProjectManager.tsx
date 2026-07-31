@@ -336,7 +336,7 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
               IMPORT_JSON
             </button>
             <input type="file" ref={fileInputRef} onChange={handleImport} accept=".json" className="hidden" />
-            <button onClick={onClose} className="p-3 hover:bg-white/5 rounded-full transition-colors text-slate-400 hover:text-white cursor-pointer">
+            <button onClick={onClose} className="p-3 hover:bg-white/5 rounded-full transition-colors text-on-surface/45 hover:text-on-surface cursor-pointer">
               <X className="w-6 h-6" />
             </button>
           </div>
@@ -393,8 +393,8 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
 
             <div className="pt-10 space-y-6">
               <div className="flex items-center gap-2">
-                <Box className="w-3.5 h-3.5 text-slate-500" />
-                <h4 className="text-[10px] font-label tracking-[0.3em] text-slate-500 uppercase">Session_Metrics</h4>
+                <Box className="w-3.5 h-3.5 text-on-surface/40" />
+                <h4 className="text-[10px] font-label tracking-[0.3em] text-on-surface/40 uppercase">Session_Metrics</h4>
               </div>
               <div className="space-y-4">
                 {[
@@ -404,10 +404,10 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
                   { label: 'Target_Res', value: imageSize, isMono: true }
                 ].map((stat) => (
                   <div key={stat.label} className="flex justify-between items-center group/stat">
-                    <span className="text-[9px] font-label text-slate-500 uppercase group-hover/stat:text-slate-300 transition-colors">{stat.label}</span>
+                    <span className="text-[9px] font-label text-on-surface/40 uppercase group-hover/stat:text-on-surface/75 transition-colors">{stat.label}</span>
                     <span className={cn(
                       "text-[10px] transition-all",
-                      stat.isMono ? "font-mono text-slate-300" : "font-label uppercase tracking-widest text-primary",
+                      stat.isMono ? "font-mono text-on-surface/80" : "font-label uppercase tracking-widest text-primary",
                       "group-hover/stat:scale-110"
                     )}>{stat.value}</span>
                   </div>
@@ -421,13 +421,13 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
             <div className="flex items-center justify-between mb-8">
               <div className="flex items-center gap-3">
                 <div className="w-1 h-4 bg-primary rounded-full" />
-                <h3 className="text-[11px] font-label tracking-[0.3em] text-slate-300 uppercase">Historical_Archive</h3>
+                <h3 className="text-[11px] font-label tracking-[0.3em] text-on-surface/75 uppercase">Historical_Archive</h3>
               </div>
-              <span className="text-[9px] font-label text-slate-600 uppercase tracking-[0.2em]">{filteredProjects.length} Records Found</span>
+              <span className="text-[9px] font-label text-on-surface/35 uppercase tracking-[0.2em]">{filteredProjects.length} Records Found</span>
             </div>
             
             {isLoading ? (
-              <div className="flex flex-col items-center justify-center py-32 text-slate-600">
+              <div className="flex flex-col items-center justify-center py-32 text-on-surface/35">
                 <div className="relative">
                   <Loader2 className="w-12 h-12 animate-spin mb-6 text-primary/40" />
                   <div className="absolute inset-0 bg-primary/10 blur-2xl animate-pulse" />
@@ -467,17 +467,17 @@ export const ProjectManager = ({ isOpen, onClose }: { isOpen: boolean, onClose: 
                         )}>
                           <FileText className={cn(
                             "w-6 h-6 transition-colors",
-                            currentProjectId === p.id ? "text-primary" : "text-slate-500 group-hover:text-slate-300"
+                            currentProjectId === p.id ? "text-primary" : "text-on-surface/40 group-hover:text-on-surface/75"
                           )} />
                         </div>
                         <div className="min-w-0">
                           <h4 className="text-lg font-headline italic text-on-surface truncate group-hover:text-primary transition-colors">{p.title}</h4>
-                          <div className="flex items-center gap-5 text-[10px] font-label tracking-[0.2em] text-slate-500 mt-2 uppercase">
-                            <div className="flex items-center gap-2 group-hover:text-slate-400 transition-colors">
+                          <div className="flex items-center gap-5 text-[10px] font-label tracking-[0.2em] text-on-surface/40 mt-2 uppercase">
+                            <div className="flex items-center gap-2 group-hover:text-on-surface/60 transition-colors">
                               <Clock className="w-3.5 h-3.5" />
                               {new Date(p.updatedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
                             </div>
-                            <div className="w-1 h-1 rounded-full bg-slate-800" />
+                            <div className="w-1 h-1 rounded-full bg-white/15" />
                             <span className="font-mono opacity-40 group-hover:opacity-80 transition-opacity">ID: {p.id.toUpperCase()}</span>
                           </div>
                         </div>

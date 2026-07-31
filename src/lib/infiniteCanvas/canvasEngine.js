@@ -132,15 +132,76 @@ function markLinkOriginPort(originId, originKind){
     resetPortMagnet(port);
     port.classList.add('is-link-origin');
 }
+/** 拉线能量段：rAF 推 dashoffset，避免每帧改 path d 打断 CSS 动画 */
+let tempLinkEnergyRAF = 0;
+const TEMP_LINK_ENERGY_PERIOD = 110;
+const TEMP_LINK_LAYERS = [
+    { key:'base', cls:'link temp' },
+    { key:'bloom', cls:'link-temp-bloom' },
+    { key:'energy', cls:'link-temp-energy' },
+    { key:'core', cls:'link-temp-core' },
+];
+function clearTempLinkDom(){
+    if(!linksEl) return;
+    linksEl.querySelectorAll('path[data-temp-link]').forEach(el => el.remove());
+    // 兼容旧单层 temp
+    linksEl.querySelectorAll('path.link.temp').forEach(el => {
+        if(!el.dataset.tempLink) el.remove();
+    });
+}
+function stopTempLinkEnergyLoop(){
+    if(!tempLinkEnergyRAF) return;
+    cancelAnimationFrame(tempLinkEnergyRAF);
+    tempLinkEnergyRAF = 0;
+}
+function startTempLinkEnergyLoop(){
+    if(tempLinkEnergyRAF) return;
+    const prefersReduce = typeof matchMedia === 'function'
+        && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const tick = () => {
+        tempLinkEnergyRAF = 0;
+        if(!tempLink || !linksEl) return;
+        if(!prefersReduce){
+            const flow = -((performance.now() * 0.12) % TEMP_LINK_ENERGY_PERIOD);
+            const off = `${flow.toFixed(1)}`;
+            linksEl.querySelectorAll('path[data-temp-link="bloom"], path[data-temp-link="energy"], path[data-temp-link="core"]').forEach(p => {
+                p.style.strokeDashoffset = off;
+            });
+        }
+        tempLinkEnergyRAF = requestAnimationFrame(tick);
+    };
+    tempLinkEnergyRAF = requestAnimationFrame(tick);
+}
+function syncTempLinkDom(){
+    ensureLiveCanvasDom();
+    if(!linksEl || !tempLink) return;
+    setTempLinkLayerActive(true);
+    const d = linkPathD(tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2);
+    for(const layer of TEMP_LINK_LAYERS){
+        let p = linksEl.querySelector(`path[data-temp-link="${layer.key}"]`);
+        if(!p){
+            p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            p.setAttribute('class', layer.cls);
+            p.dataset.tempLink = layer.key;
+            linksEl.appendChild(p);
+        }
+        if(p.getAttribute('d') !== d) p.setAttribute('d', d);
+    }
+    startTempLinkEnergyLoop();
+}
 function cancelTempLink(){
     endLinkDragListeners();
-    if(!tempLink) return;
+    stopTempLinkEnergyLoop();
+    if(!tempLink){
+        clearTempLinkDom();
+        setTempLinkLayerActive(false);
+        withCanvasRootClass(list => list.remove('canvas-linking'));
+        return;
+    }
     tempLink = null;
     clearLinkOriginPort();
-    if(linksEl){
-        linksEl.classList.remove('is-dragging-link');
-        linksEl.querySelector('path.link.temp')?.remove();
-    }
+    clearTempLinkDom();
+    setTempLinkLayerActive(false);
     withCanvasRootClass(list => list.remove('canvas-linking'));
 }
 function setTempLinkLayerActive(active){
@@ -148,17 +209,7 @@ function setTempLinkLayerActive(active){
     withCanvasRootClass(list => list.toggle('canvas-linking', Boolean(active)));
 }
 function refreshTempLinkDom(){
-    ensureLiveCanvasDom();
-    if(!linksEl || !tempLink) return;
-    setTempLinkLayerActive(true);
-    const d = linkPathD(tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2);
-    let tempPath = linksEl.querySelector('path.link.temp');
-    if(!tempPath){
-        tempPath = pathEl(tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2, 'link temp');
-        linksEl.appendChild(tempPath);
-    } else {
-        tempPath.setAttribute('d', d);
-    }
+    syncTempLinkDom();
 }
 function resetCanvasInteractionForEdit(){
     pendingNodeDrag = null;
@@ -1353,6 +1404,15 @@ let connHoverLastAt = 0;
 // 悬停检测节流：mousemove 太密会和主线程 SVG 能量动画抢时间
 const CONN_HOVER_MIN_MS = 48;
 const CONN_HOVER_FLOWING_MIN_MS = 120;
+/** 掠过连线不立刻出 X；停稳后再显示 */
+const CONN_HOVER_SHOW_DELAY_MS = 500;
+const CONN_HOVER_HIDE_DELAY_MS = 160;
+let connHoverArmTimer = 0;
+let connHoverArmedId = '';
+let connHoverArmPoint = null;
+let connHoverHideTimer = 0;
+/** 删除钮上次跟手位置：淡出/几何刷新时禁止吸回中点 */
+const linkDeletePosById = new Map();
 let lastMouseBoard = {x: 0, y: 0};
 let undoStack = [];
 let redoStack = [];
@@ -2318,9 +2378,9 @@ const RH_MAX_BASE_H = 720;
 const GEN_MATCH_MAX_W = 960;
 /**
  * 画布媒体标准最长边（world px）。
- * 对标常见创作台在 ~43% 缩放下的体量：260 过小 → 520 仍偏小 → 680。
+ * 对标画布 51%：屏幕最长边约 450px → world ≈ 450/0.51 ≈ 882（此前 680≈347px@51%）。
  */
-const CANVAS_MEDIA_MAX_EDGE = 680;
+const CANVAS_MEDIA_MAX_EDGE = 882;
 function canvasFitByMaxEdge(nw, nh, maxEdge = CANVAS_MEDIA_MAX_EDGE){
     const W = Math.max(1, Number(nw) || 1);
     const H = Math.max(1, Number(nh) || 1);
@@ -2350,6 +2410,10 @@ let imageActionBarUrl = '';
 /** 展开结果「加入图片组」选图态（不进持久化） */
 let genBatchPick = null; // { nodeId, urls: Set<string>, targetBatchId: 'new'|string }
 let genBatchPickBarEl = null;
+/** 控制台「+」：从画布点选参考图连到生成节点 */
+let genRefPick = null; // { genId: string }
+let genRefPickBannerEl = null;
+let genRefPickHoverId = '';
 function isGenBatchPicking(node){
     return Boolean(genBatchPick && node?.id && genBatchPick.nodeId === node.id);
 }
@@ -2364,6 +2428,148 @@ function clearGenBatchPick(opts={}){
         genBatchPickBarEl = null;
     }
     if(opts.refresh && id) refreshNodes([id]);
+}
+function isGenRefPicking(node){
+    return Boolean(genRefPick?.genId && node?.id && genRefPick.genId === node.id);
+}
+function isGenRefPickCandidate(node, genId){
+    if(!node || !genId || node.id === genId) return false;
+    if(!canConnect(node.id, genId)) return false;
+    if(connections.some(c => c.from === node.id && c.to === genId)) return false;
+    if(node.type === 'image'){
+        if(!node.url || isMissingAssetUrl(node.url)) return false;
+        if(mediaKindForNode(node) === 'video') return false;
+    }
+    return true;
+}
+function clearGenRefPickHover(){
+    genRefPickHoverId = '';
+    nodesEl?.querySelectorAll?.('.is-gen-ref-pick-hover').forEach(el => {
+        el.classList.remove('is-gen-ref-pick-hover');
+        el.querySelector('.gen-ref-pick-select-label')?.remove();
+        el.querySelectorAll('.gen-ref-pick-flow, .gen-ref-pick-flow-bloom').forEach(fx => fx.remove());
+    });
+}
+function mountGenRefPickFlow(el){
+    if(!el || el.querySelector('.gen-ref-pick-flow')) return;
+    const host = el.querySelector('.image-preview-wrap, .gen-stage-frame, .media-card') || el;
+    const bloom = document.createElement('div');
+    bloom.className = 'gen-ref-pick-flow-bloom';
+    bloom.setAttribute('aria-hidden', 'true');
+    const flow = document.createElement('div');
+    flow.className = 'gen-ref-pick-flow';
+    flow.setAttribute('aria-hidden', 'true');
+    host.appendChild(bloom);
+    host.appendChild(flow);
+}
+function clearGenRefPick(opts={}){
+    const id = genRefPick?.genId || null;
+    genRefPick = null;
+    clearGenRefPickHover();
+    if(genRefPickBannerEl){
+        genRefPickBannerEl.remove();
+        genRefPickBannerEl = null;
+    }
+    withCanvasRootClass(list => list.remove('canvas-gen-ref-picking'));
+    if(opts.refresh && id){
+        refreshNodes([id]);
+        syncImageGenDock();
+    }
+}
+function syncGenRefPickBanner(){
+    if(!genRefPick){
+        if(genRefPickBannerEl){
+            genRefPickBannerEl.remove();
+            genRefPickBannerEl = null;
+        }
+        return;
+    }
+    const gen = nodes.find(n => n.id === genRefPick.genId);
+    if(!gen || !board){
+        clearGenRefPick();
+        return;
+    }
+    const en = langIsEn();
+    if(!genRefPickBannerEl){
+        genRefPickBannerEl = document.createElement('div');
+        genRefPickBannerEl.className = 'gen-ref-pick-banner';
+        genRefPickBannerEl.onpointerdown = e => e.stopPropagation();
+        genRefPickBannerEl.onmousedown = e => e.stopPropagation();
+        board.appendChild(genRefPickBannerEl);
+    }
+    genRefPickBannerEl.innerHTML = `
+        <span class="gen-ref-pick-banner-text">${escapeHtml(en ? 'Select reference from canvas' : '从画布选择参考')}</span>
+        <span class="gen-ref-pick-banner-aim" aria-hidden="true"><i data-lucide="crosshair"></i></span>
+        <button type="button" class="gen-ref-pick-banner-exit">${escapeHtml(en ? 'Exit' : '退出')}</button>
+    `;
+    genRefPickBannerEl.querySelector('.gen-ref-pick-banner-exit')?.addEventListener('click', e => {
+        e.stopPropagation();
+        clearGenRefPick({refresh:true});
+    });
+    refreshIcons(genRefPickBannerEl);
+}
+function startGenRefPick(genId){
+    const node = nodes.find(n => n.id === genId);
+    if(!node || !isGenConsoleNode(node)) return;
+    if(genBatchPick) clearGenBatchPick({refresh:true});
+    genRefPick = { genId };
+    clearGenRefPickHover();
+    withCanvasRootClass(list => list.add('canvas-gen-ref-picking'));
+    selected.clear();
+    selected.add(genId);
+    refreshSelectionVisuals();
+    refreshNodes([genId]);
+    syncGenRefPickBanner();
+    syncImageGenDock();
+}
+function updateGenRefPickHover(clientX, clientY){
+    if(!genRefPick || !nodesEl) return;
+    const under = document.elementFromPoint(clientX, clientY);
+    const el = under?.closest?.('.node');
+    const id = el?.dataset?.id || '';
+    if(id === genRefPickHoverId) return;
+    clearGenRefPickHover();
+    if(!id || id === genRefPick.genId) return;
+    if(under?.closest?.('.image-gen-dock-host, .gen-ref-pick-banner, .gen-dock')) return;
+    const node = nodes.find(n => n.id === id);
+    if(!isGenRefPickCandidate(node, genRefPick.genId)) return;
+    genRefPickHoverId = id;
+    el.classList.add('is-gen-ref-pick-hover');
+    mountGenRefPickFlow(el);
+    if(!el.querySelector('.gen-ref-pick-select-label')){
+        const label = document.createElement('div');
+        label.className = 'gen-ref-pick-select-label';
+        label.textContent = langIsEn() ? 'Select Image' : '选择 Image';
+        el.appendChild(label);
+    }
+}
+function completeGenRefPick(sourceId){
+    const genId = genRefPick?.genId;
+    if(!genId) return false;
+    const source = nodes.find(n => n.id === sourceId);
+    if(!isGenRefPickCandidate(source, genId)) return false;
+    pushUndo();
+    connections.push({id:uid('c'), from:sourceId, to:genId});
+    syncGeneratorInputs();
+    clearGenRefPick({refresh:false});
+    refreshNodes([genId, sourceId]);
+    scheduleLinkGeometryRefresh(new Set([genId, sourceId]));
+    scheduleSave();
+    syncImageGenDock();
+    setStatus(langIsEn() ? 'Reference linked' : '已连接参考图');
+    setTimeout(() => { if(canvas) setStatus('Ready'); }, 1400);
+    return true;
+}
+function tryHandleGenRefPickPointer(e, node){
+    if(!genRefPick) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    if(node?.id === genRefPick.genId){
+        clearGenRefPick({refresh:true});
+        return true;
+    }
+    if(node) completeGenRefPick(node.id);
+    return true;
 }
 /** 本生成节点已连出的图片组（优先作加入目标） */
 function imageBatchesLinkedFromGen(genId){
@@ -3177,6 +3383,10 @@ function preventCanvasMiddleMouseDefault(e){
 const PORT_HIT_SCREEN_PX = 80;
 const PORT_HIT_WORLD_MIN = 72;
 const PORT_HIT_WORLD_MAX = 240;
+/** 选中描边目标屏幕像素；缩小时加粗世界坐标描边，避免白环「消失」 */
+const SELECT_STROKE_SCREEN_PX = 2;
+const SELECT_STROKE_WORLD_MIN = 1.5;
+const SELECT_STROKE_WORLD_MAX = 8;
 function syncPortHitForScale(){
     if(!world) return;
     const scale = Math.max(0.08, viewport.scale || 1);
@@ -3185,6 +3395,12 @@ function syncPortHitForScale(){
         ? PORT_HIT_WORLD_MIN
         : Math.min(PORT_HIT_WORLD_MAX, Math.round(PORT_HIT_SCREEN_PX / scale));
     world.style.setProperty('--canvas-port-hit', `${hit}px`);
+    const stroke = scale >= 1
+        ? SELECT_STROKE_WORLD_MIN
+        : Math.min(SELECT_STROKE_WORLD_MAX, Math.round((SELECT_STROKE_SCREEN_PX / scale) * 100) / 100);
+    world.style.setProperty('--canvas-select-stroke', `${stroke}px`);
+    // 连线 X：缩小时抵消 world scale（放大不额外缩小），避免缩到点不着
+    world.style.setProperty('--canvas-link-delete-inv', String(Math.max(1, 1 / scale)));
 }
 function applyViewport(){
     if(!world) return;
@@ -3239,8 +3455,7 @@ function cullNodesOutsideViewport(){
     });
 }
 /** 与 infinite-canvas.css .port 定位一致：圆点中心在节点边缘外 var(--port-dot-outset) */
-const PORT_DOT_OUTSET = 14;
-const PORT_ANCHOR_DX = { in: -PORT_DOT_OUTSET, out: PORT_DOT_OUTSET };
+const PORT_DOT_OUTSET = 34.5;
 
 /** 端口圆点磁吸：靠近后圆点吸到十字光标中心，明确「可拉线」 */
 const PORT_MAGNET_ENTER = 55; // 屏幕像素，进入外侧半圆
@@ -3288,6 +3503,14 @@ function resetPortMagnet(port){
         dot.style.removeProperty('--dot-x');
         dot.style.removeProperty('--dot-y');
     }
+    const nodeEl = port.closest?.('.node');
+    const id = nodeEl?.dataset?.id;
+    if(nodeEl && id && !selected.has(id) && !nodeEl.matches(':hover') && !nodeEl.querySelector('.port.is-magnetic')){
+        if(nodeEl.classList.contains('ports-open')){
+            nodeEl.classList.remove('ports-open');
+            scheduleLinkGeometryRefresh(new Set([id]));
+        }
+    }
 }
 function clearAllPortMagnet(){
     portMagnetMouse = null;
@@ -3326,7 +3549,8 @@ function runPortMagnetUpdate(){
             const dot = port.querySelector('.port-dot');
             if(!dot) return;
             const kind = port.classList.contains('in') ? 'in' : 'out';
-            const wp = portPointFromLayout(n, kind, el);
+            // 磁吸始终按展开位计算（圆环落点），与连线收起态解耦
+            const wp = portPointFromLayout(n, kind, el, { expanded:true });
             const sp = worldToScreen(wp.x, wp.y, boardRect);
             const dx = mouse.x - sp.x;
             const dy = mouse.y - sp.y;
@@ -3342,9 +3566,11 @@ function runPortMagnetUpdate(){
             if(!wasActive){
                 // 首次吸附：弹簧飞向光标，结束后再零延迟跟随
                 port.classList.add('is-magnetic');
+                el.classList.add('ports-open');
                 beginPortMagnetSnap(port);
                 // 强制从原点起算，避免同帧无过渡硬切
                 void dot.offsetWidth;
+                scheduleLinkGeometryRefresh(new Set([n.id]));
             } else {
                 port.classList.add('is-magnetic');
             }
@@ -8133,7 +8359,7 @@ function linkCreateOptions(state){
     }
     if(CANVAS_GENERATOR_TYPES.includes(node.type) || node.type === 'llm'){
         return [
-            {type:'image', label:tr('canvas.imageCard'), icon:'image-plus'},
+            {type:'imageBatch', label:tr('canvas.imageBatchNode'), icon:'images'},
             {type:'prompt', label:tr('canvas.prompt'), icon:'text-cursor-input'},
             {type:'loop', label:tr('canvas.loopNode'), icon:'repeat-2'},
             {type:'group', label:tr('canvas.group'), icon:'group'},
@@ -8216,6 +8442,7 @@ function closeLinkCreateMenu(){
     if(tempLink?.pendingMenu) cancelTempLink();
 }
 function openImageNodeMenu(nodeId, clientX, clientY){
+    ensureImageNodeMenuOutsideDismiss();
     const node = nodes.find(n => n.id === nodeId);
     if(!node || node.type !== 'image') return;
     closeCreateMenu();
@@ -8280,6 +8507,7 @@ function openImageNodeMenu(nodeId, clientX, clientY){
 function openFrameStackImageMenu(ownerNodeId, imageUrl, imageName, clientX, clientY){
     const owner = nodes.find(n => n.id === ownerNodeId);
     if(!owner || !isImageStackNode(owner) || !imageUrl || isMissingAssetUrl(imageUrl)) return;
+    ensureImageNodeMenuOutsideDismiss();
     closeCreateMenu();
     imageNodeMenu.innerHTML = `
         <button class="menu-btn" data-frame-edit="1"><i data-lucide="image" class="w-4 h-4"></i><span>${escapeHtml(tr('canvas.editImage'))}</span></button>
@@ -8298,6 +8526,7 @@ function openOutputImageMenu(nodeId, imageUrl, clientX, clientY){
     const node = nodes.find(n => n.id === nodeId);
     const url = String(imageUrl || '').trim();
     if(!node || node.type !== 'output' || !url || isMissingAssetUrl(url)) return;
+    ensureImageNodeMenuOutsideDismiss();
     closeCreateMenu();
     const imageName = outputImageName(url);
     imageNodeMenu.classList.add('output-node-menu');
@@ -8325,6 +8554,17 @@ function closeImageNodeMenu(){
     imageNodeMenu.classList.remove('open');
     imageNodeMenu.classList.remove('output-node-menu');
     imageNodeMenu.innerHTML = '';
+}
+/** 左键点菜单外任意处：关掉结果图右键菜单（节点上 stopPropagation 时 board 收不到） */
+function ensureImageNodeMenuOutsideDismiss(){
+    if(ensureImageNodeMenuOutsideDismiss._wired || !imageNodeMenu) return;
+    ensureImageNodeMenuOutsideDismiss._wired = true;
+    on(document, 'pointerdown', e => {
+        if(!imageNodeMenu.classList.contains('open')) return;
+        if(e.button !== 0) return;
+        if(imageNodeMenu.contains(e.target)) return;
+        closeImageNodeMenu();
+    }, true);
 }
 function outputImageUrls(node){
     return (node?.images || []).filter(item => mediaKindForOutputItem(item) === 'image').map(outputUrlValue).filter(Boolean);
@@ -10045,7 +10285,15 @@ function setGridCustomLinePos(index, point){
         : Math.max(0.001, Math.min(0.999, point.x / Math.max(1, canvasEl.width)));
 }
 function editBrushSize(){
-    return Number(domGet('paintBrushSizeInline')?.value || domGet('paintBrushSize')?.value || 20);
+    // 滑条按屏幕像素手感（min=1 ≈ 1px 细线）；画布缓冲是原图像素，按显示缩放换算
+    const raw = Number(domGet('paintBrushSizeInline')?.value || domGet('paintBrushSize')?.value || 14);
+    const visual = Number.isFinite(raw) && raw > 0 ? raw : 14;
+    const canvasEl = editDrawCanvas();
+    const rect = canvasEl?.getBoundingClientRect?.();
+    const displayW = rect?.width || 0;
+    const canvasW = canvasEl?.width || 0;
+    if(displayW < 2 || canvasW < 2) return Math.max(1, visual);
+    return Math.max(0.5, visual * (canvasW / displayW));
 }
 function brushColor(){
     return domGet('paintBrushColorInline')?.value || domGet('paintBrushColor')?.value || '#ff2d55';
@@ -11823,19 +12071,21 @@ function renderNode(node){
         const skippedN = allImgs.length - activeImgs.length;
         let text = tr('canvas.groupEmpty');
         if(allImgs.length){
-            text = `${activeImgs.length} ${tr('canvas.imageCount')} ${tr('canvas.grouped')}`;
+            text = `${activeImgs.length} ${tr('canvas.imageCount')}`;
             if(skippedN > 0) text += ` · ${trf('canvas.imageBatchSkippedMeta', {n: skippedN})}`;
         }
         body.innerHTML = `
             <div class="image-batch-body">
-                <div class="group-panel-chrome">
-                    <div class="image-batch-meta text-[11px] text-gray-400">${escapeHtml(text)}</div>
+                <div class="image-batch-bar">
+                    <div class="image-batch-meta">${escapeHtml(text)}</div>
                     <div class="image-batch-actions">
-                        <button type="button" class="secondary-btn image-batch-upload-btn"><i data-lucide="image-plus" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Upload' : '上传图片'}</span></button>
-                        <button type="button" class="secondary-btn group-tidy-btn" title="${escapeAttr(tr('canvas.organizeGroupChildrenHint'))}"><i data-lucide="layout-grid" class="w-3.5 h-3.5"></i><span>${escapeHtml(tr('canvas.organizeGroupChildren'))}</span></button>
+                        <button type="button" class="image-batch-icon-btn image-batch-upload-btn" title="${escapeAttr(langIsEn() ? 'Upload images' : '上传图片')}" aria-label="${escapeAttr(langIsEn() ? 'Upload images' : '上传图片')}">
+                            <i data-lucide="image-plus" class="w-3.5 h-3.5"></i>
+                        </button>
+                        <button type="button" class="image-batch-icon-btn group-tidy-btn" title="${escapeAttr(tr('canvas.organizeGroupChildrenHint'))}" aria-label="${escapeAttr(tr('canvas.organizeGroupChildren'))}">
+                            <i data-lucide="layout-grid" class="w-3.5 h-3.5"></i>
+                        </button>
                     </div>
-                    <div class="image-batch-hint text-[10px] text-gray-500">${escapeHtml(tr('canvas.imageBatchConnectHint'))}</div>
-                    <div class="image-batch-hint text-[10px] text-gray-500">${escapeHtml(tr('canvas.imageBatchSkipHint'))}</div>
                 </div>
             </div>
         `;
@@ -12011,6 +12261,14 @@ async function toggleFavoriteForUrl(url, meta={}, node=null, btn=null){
                 }
             });
             refreshIcons(genHistoryPanelEl);
+        }
+        if(nodesEl){
+            nodesEl.querySelectorAll('.gen-stage-cover-fav[data-url], .gen-stage-tile [data-action="fav"][data-url]').forEach(el => {
+                const u = el.dataset.url || '';
+                if(u && (normalizeFavoritePath(u) === canonical || u === url || normalizeFavoritePath(u) === normalizeFavoritePath(url))){
+                    syncOutputFavoriteBtn(el, url);
+                }
+            });
         }
         setStatus(data.favorited ? (langIsEn() ? 'Added to favorites' : '已加入我的收藏') : (langIsEn() ? 'Removed from favorites' : '已取消收藏'));
     } catch(e) {
@@ -18073,14 +18331,12 @@ function showGenHistoryDetail(node, historyIndex){
                 <button type="button" class="gen-history-action secondary" data-action="download" data-url="${escapeAttr(item.url)}">${langIsEn() ? 'Download' : '下载'}</button>
                 <button type="button" class="gen-history-action secondary" data-action="use-prompt"${prompt ? '' : ' disabled'}>${langIsEn() ? 'Use prompt' : '回填提示词'}</button>
                 <button type="button" class="gen-history-action secondary" data-action="copy-prompt"${prompt ? '' : ' disabled'}>${langIsEn() ? 'Copy' : '复制'}</button>
-                <button type="button" class="gen-history-action secondary" data-action="set-primary">${langIsEn() ? 'Set as preview' : '设为主图'}</button>
             </div>
         </div>
     `;
     bindGenHistoryMediaActions(detail, node);
     const useBtn = detail.querySelector('[data-action="use-prompt"]');
     const copyBtn = detail.querySelector('[data-action="copy-prompt"]');
-    const primaryBtn = detail.querySelector('[data-action="set-primary"]');
     if(useBtn){
         useBtn.onclick = e => {
             e.stopPropagation();
@@ -18104,17 +18360,6 @@ function showGenHistoryDetail(node, historyIndex){
                 setStatus(langIsEn() ? 'Copy failed' : '复制失败');
             }
             setTimeout(() => { if(canvas) setStatus('Ready'); }, 1600);
-        };
-    }
-    if(primaryBtn){
-        primaryBtn.onclick = e => {
-            e.stopPropagation();
-            setGeneratorPrimaryFromHistory(node, historyIndex);
-            const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
-            if(el) refreshGenStage(el, node);
-            syncImageGenDock();
-            scheduleSave();
-            renderGenHistoryPanelContent(node);
         };
     }
     refreshIcons(detail);
@@ -18237,7 +18482,20 @@ function bindGenStageInteractions(root, node){
         const item = generatorHistoryItems(node).find(x => x.url === url) || {url};
         bindCanvasImageDragCopy(media, url, String(item.prompt || ''));
     });
-    root?.querySelectorAll?.('.gen-stage-tile [data-action]').forEach(btn => {
+    root?.querySelectorAll?.('.gen-stage-cover-fav[data-action="fav"], .gen-stage-tile [data-action="fav"]').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            applyNodeSelection(node.id, e);
+            const url = btn.getAttribute('data-url')
+                || btn.closest('[data-preview-url]')?.getAttribute('data-preview-url')
+                || '';
+            const item = generatorHistoryItems(node).find(x => x.url === url) || {url};
+            void toggleFavoriteForUrl(url, item, node, btn);
+        };
+    });
+    root?.querySelectorAll?.('.gen-stage-tile [data-action]:not([data-action="fav"])').forEach(btn => {
         btn.onmousedown = e => e.stopPropagation();
         btn.onclick = e => {
             e.preventDefault();
@@ -18251,16 +18509,19 @@ function bindGenStageInteractions(root, node){
                 if(url) downloadUrl(url, outputDownloadName(url)).catch(err => softAlert(err.message || tr('canvas.outputDownloadEmpty')));
                 return;
             }
+            if(action === 'set-primary'){
+                try { pushUndo(); } catch(_){ /* ignore */ }
+                setGeneratorPrimaryByDisplaySwap(node, idx, url);
+                refreshDownstreamGenConsumers(node.id);
+                // 设为主图后立刻收起网格，回到叠卡封面
+                setGenStageHistoryOpen(node, false);
+                scheduleSave();
+                syncImageGenDock();
+                return;
+            }
             if(action === 'collapse'){
                 setGenStageHistoryOpen(node, false);
                 return;
-            }
-            if(action === 'set-primary'){
-                // 按格子真实 URL 钉住，避免 previewRoundUrls 与网格下标错位后收起封面仍是最新张
-                setGeneratorPrimaryByDisplaySwap(node, idx, url);
-                refresh();
-                refreshDownstreamGenConsumers(node.id);
-                scheduleSave();
             }
         };
     });
@@ -18287,6 +18548,14 @@ function genStageTileAspectCss(node){
     }
     return '2 / 3';
 }
+function genStageCoverFavHtml(url){
+    if(!url || isMissingAssetUrl(url)) return '';
+    const active = isOutputUrlFavorited(url);
+    const title = active
+        ? (langIsEn() ? 'Remove from favorites' : '取消收藏')
+        : (langIsEn() ? 'Add to favorites' : '收藏');
+    return `<button type="button" class="gen-stage-cover-fav${active ? ' is-active' : ''}" data-action="fav" data-url="${escapeAttr(url)}" title="${escapeAttr(title)}" aria-pressed="${active ? 'true' : 'false'}"><i data-lucide="star" class="w-4 h-4"></i></button>`;
+}
 function renderGenStageTileHtml(node, url, previewIndex, primaryUrl){
     const isPrimary = url === primaryUrl;
     const picking = isGenBatchPicking(node);
@@ -18299,15 +18568,18 @@ function renderGenStageTileHtml(node, url, previewIndex, primaryUrl){
     }
     const downloadLabel = langIsEn() ? 'Download' : '下载';
     const primaryLabel = langIsEn() ? 'Set primary' : '设为主图';
-    // 网格「收起」只保留右上角全局按钮，避免与格子内操作叠住
-    const actionBtn = isPrimary
-        ? ''
-        : `<button type="button" class="gen-stage-tile-btn is-accent" data-action="set-primary"><span>${escapeHtml(primaryLabel)}</span></button>`;
+    const favActive = isOutputUrlFavorited(url);
+    const favTitle = favActive
+        ? (langIsEn() ? 'Remove from favorites' : '取消收藏')
+        : (langIsEn() ? 'Add to favorites' : '收藏');
     return `<div class="gen-stage-tile ${isPrimary ? 'is-primary' : ''}" data-preview-url="${escapeAttr(url)}" data-preview-index="${previewIndex}" role="button" tabindex="0">
         <div class="gen-stage-tile-media">${genStageMediaHtml(url)}</div>
-        <div class="gen-stage-tile-actions">
-            <button type="button" class="gen-stage-tile-btn" data-action="download" data-url="${escapeAttr(url)}"><i data-lucide="download"></i><span>${escapeHtml(downloadLabel)}</span></button>
-            ${actionBtn}
+        <div class="gen-stage-tile-actions gen-stage-tile-actions-left">
+            <button type="button" class="gen-stage-tile-btn gen-stage-tile-btn-icon${favActive ? ' is-active' : ''}" data-action="fav" data-url="${escapeAttr(url)}" title="${escapeAttr(favTitle)}" aria-pressed="${favActive ? 'true' : 'false'}"><i data-lucide="star" class="w-5 h-5"></i></button>
+            <button type="button" class="gen-stage-tile-btn gen-stage-tile-btn-icon" data-action="download" data-url="${escapeAttr(url)}" title="${escapeAttr(downloadLabel)}"><i data-lucide="download" class="w-5 h-5"></i></button>
+        </div>
+        <div class="gen-stage-tile-actions gen-stage-tile-actions-right">
+            <button type="button" class="gen-stage-tile-btn is-accent" data-action="set-primary" data-url="${escapeAttr(url)}" title="${escapeAttr(primaryLabel)}"><span>${escapeHtml(primaryLabel)}</span></button>
         </div>
     </div>`;
 }
@@ -18354,19 +18626,25 @@ function renderGenStageStackHtml(node, urls, primary, busyOverlay, pendingCount 
         : (langIsEn() ? `${count}` : `${count}张`);
     const busyClass = waiting || busyOverlay ? ' is-busy' : '';
     const peekN = Math.min(3, Math.max(0, totalShown - 1));
-    return `<div class="gen-stage has-images is-stack${busyClass}" style="--stack-peeks:${peekN}">
+    const refPickClass = isGenRefPicking(node) ? ' is-ref-picking' : '';
+    const refPickOverlay = isGenRefPicking(node)
+        ? `<div class="gen-stage-ref-pick-dim" aria-live="polite"><span class="gen-stage-ref-pick-exit">${escapeHtml(langIsEn() ? 'esc Exit' : 'esc 退出')}</span></div>`
+        : '';
+    return `<div class="gen-stage has-images is-stack${busyClass}${refPickClass}" style="--stack-peeks:${peekN}">
         <div class="gen-stage-frame is-stack">
             <div class="gen-stage-stack">
                 ${peekHtml}
                 <div class="gen-stage-stack-hero" data-preview-url="${escapeAttr(primary)}" role="img" style="--gen-tile-ar:${ar}">
                     ${genStageMediaHtml(primary)}
+                    ${genStageCoverFavHtml(primary)}
                     <button type="button" class="gen-stage-stack-expand" data-action="expand-grid" title="${escapeAttr(expandTitle)}">
-                        <i data-lucide="maximize-2" class="w-3 h-3"></i>
+                        <i data-lucide="maximize-2" class="w-6 h-6"></i>
                         <span>${escapeHtml(badgeText)}</span>
                     </button>
                     ${busyOverlay}
                 </div>
             </div>
+            ${refPickOverlay}
         </div>
     </div>`;
 }
@@ -18399,6 +18677,10 @@ function renderGenStageHtml(node){
         </div>`
         : '';
     const emptyIcon = node.type === 'video' ? 'clapperboard' : 'image';
+    const refPickClass = isGenRefPicking(node) ? ' is-ref-picking' : '';
+    const refPickOverlay = isGenRefPicking(node)
+        ? `<div class="gen-stage-ref-pick-dim" aria-live="polite"><span class="gen-stage-ref-pick-exit">${escapeHtml(langIsEn() ? 'esc Exit' : 'esc 退出')}</span></div>`
+        : '';
     if(urls.length) ensureGeneratorPrimaryAtAnchor(node);
     if(showGrid){
         const list = generatorPreviewUrls(node);
@@ -18439,22 +18721,24 @@ function renderGenStageHtml(node){
         const cols = genStageGridCols(total);
         const ar = genStageTileAspectCss(node);
         const collapseTitle = langIsEn() ? 'Collapse' : '收起';
-        return `<div class="gen-stage has-images history-open is-grid ${isBusy ? 'is-busy' : ''}${isGenBatchPicking(node) ? ' is-batch-picking' : ''}">
+        return `<div class="gen-stage has-images history-open is-grid ${isBusy ? 'is-busy' : ''}${isGenBatchPicking(node) ? ' is-batch-picking' : ''}${refPickClass}">
             <div class="gen-stage-frame is-grid" style="--gen-tile-ar:${ar}; --gen-grid-cols:${cols}">
                 <button type="button" class="gen-stage-grid-collapse" data-action="collapse-grid" title="${escapeAttr(collapseTitle)}">
-                    <i data-lucide="minimize-2" class="w-3 h-3"></i>
+                    <i data-lucide="minimize-2" class="w-6 h-6"></i>
                     <span>${escapeHtml(collapseTitle)}</span>
                 </button>
                 <div class="gen-stage-grid" role="listbox">${tiles}${orphanPending}</div>
+                ${refPickOverlay}
             </div>
         </div>`;
     }
     if(!urls.length){
         const ar = genStageTileAspectCss(node);
-        return `<div class="gen-stage is-empty ${isBusy ? 'is-busy' : ''}">
+        return `<div class="gen-stage is-empty ${isBusy ? 'is-busy' : ''}${refPickClass}">
             <div class="gen-stage-frame" style="aspect-ratio:${ar}">
                 <div class="gen-stage-empty"><i data-lucide="${emptyIcon}" class="w-10 h-10"></i></div>
                 ${busyOverlay}
+                ${refPickOverlay}
             </div>
         </div>`;
     }
@@ -18466,12 +18750,14 @@ function renderGenStageHtml(node){
     if(coverUrls.length > 1 || pendings.length > 0){
         return renderGenStageStackHtml(node, coverUrls, primary, busyOverlay, pendings.length);
     }
-    return `<div class="gen-stage has-images ${isBusy ? 'is-busy' : ''}">
+    return `<div class="gen-stage has-images ${isBusy ? 'is-busy' : ''}${refPickClass}">
         <div class="gen-stage-frame">
             <div class="gen-stage-hero" data-preview-url="${escapeAttr(primary)}" role="img">
                 ${genStageMediaHtml(primary)}
+                ${genStageCoverFavHtml(primary)}
             </div>
             ${busyOverlay}
+            ${refPickOverlay}
         </div>
     </div>`;
 }
@@ -18827,6 +19113,7 @@ function openGenStageResultMenu(nodeId, clientX, clientY, opts={}){
     if(!node || !isGenConsoleNode(node)) return;
     const urls = generatorPreviewUrls(node);
     if(!urls.length) return;
+    ensureImageNodeMenuOutsideDismiss();
     closeCreateMenu();
     closeLinkCreateMenu();
     let url = String(opts.url || '').trim();
@@ -18842,17 +19129,11 @@ function openGenStageResultMenu(nodeId, clientX, clientY, opts={}){
         previewIndex = urls.indexOf(url);
     }
     const multi = urls.length > 1;
-    const pinnedIdx = Number(node.previewIndex);
-    // 未钉主图时收起态跟最新图走，「设为主图」应对任意张可见（含当前连线位）
-    const isPrimary = !multi
-        ? true
-        : Boolean(node.primaryPinned && Number.isFinite(pinnedIdx) && previewIndex === pinnedIdx);
     const favorited = isOutputUrlFavorited(url);
     const histItem = generatorHistoryItems(node).find(x => x.url === url) || {url};
     const en = langIsEn();
     imageNodeMenu.classList.remove('output-node-menu');
     imageNodeMenu.innerHTML = `
-        ${multi && !isPrimary ? `<button class="menu-btn" type="button" data-gen-set-primary="1"><i data-lucide="pin" class="w-4 h-4"></i><span>${en ? 'Set as primary' : '设为主图'}</span></button>` : ''}
         <button class="menu-btn" type="button" data-gen-preview="1"><i data-lucide="maximize-2" class="w-4 h-4"></i><span>${en ? 'Open preview' : '进入预览'}</span></button>
         <button class="menu-btn" type="button" data-gen-favorite="1"><i data-lucide="star" class="w-4 h-4"></i><span>${favorited ? (en ? 'Remove favorite' : '取消收藏') : (en ? 'Save to favorites' : '保存到我的收藏')}</span></button>
         <button class="menu-btn" type="button" data-gen-copy-image="1"><i data-lucide="copy" class="w-4 h-4"></i><span>${en ? 'Copy image' : '复制图片'}</span></button>
@@ -18880,13 +19161,6 @@ function openGenStageResultMenu(nodeId, clientX, clientY, opts={}){
         refreshNodes([node.id]);
         scheduleSave();
     };
-    imageNodeMenu.querySelector('[data-gen-set-primary]')?.addEventListener('click', e => {
-        e.stopPropagation();
-        closeImageNodeMenu();
-        setGeneratorPrimaryByDisplaySwap(node, previewIndex, url);
-        refreshAfter();
-        refreshDownstreamGenConsumers(node.id);
-    });
     imageNodeMenu.querySelector('[data-gen-preview]')?.addEventListener('click', e => {
         e.stopPropagation();
         closeImageNodeMenu();
@@ -19694,22 +19968,24 @@ function syncImageGenDock(){
         const orphanCount = canvasRoot
             ? canvasRoot.querySelectorAll('.image-gen-dock-host').length
             : (board?.querySelectorAll('.image-gen-dock-host').length || 0);
-        const editingHere = imageGenDockEl?.contains?.(document.activeElement);
+        // 仅「输入框打字」时避免 remount 冲掉光标；点 xx/按钮也算 contains(active)，不能挡参考图刷新
+        const active = document.activeElement;
+        const textEditingHere = Boolean(imageGenDockEl?.contains?.(active) && isEditableTarget(active));
         if(imageGenDockNodeId === only.id && imageGenDockEl?.isConnected){
             const wasHidden = Boolean(imageGenDockEl.hidden);
             imageGenDockEl.hidden = false;
             imageGenDockEl.removeAttribute('aria-hidden');
             imageGenDockEl.style.pointerEvents = 'auto';
-            // 从禁用展开：只定位；常态刷新仍可 softRefresh；孤儿宿主则 remount
-            if(wasHidden || editingHere){
+            // 从禁用展开：只定位；常态/点 xx 都 softRefresh；孤儿宿主且未打字才 remount
+            if(wasHidden){
                 positionImageGenDock(only);
-            } else if(orphanCount > 1){
+            } else if(orphanCount > 1 && !textEditingHere){
                 remountImageGenDock(only);
             } else {
                 softRefreshGeneratorInputLists(only);
                 positionImageGenDock(only);
             }
-        } else if(!editingHere){
+        } else if(!textEditingHere){
             remountImageGenDock(only);
         }
     }
@@ -20296,11 +20572,42 @@ function renderPromptPreview(container, promptInputs){
         ? `<div class="canvas-prompt-preview-label">Prompts</div>${promptInputs.map(src => `<div class="canvas-prompt-preview-item line-clamp-2">${escapeHtml(src.label)}</div>`).join('')}`
         : '';
 }
+/** 控制台参考项 id → 真实连线 from；合成 id 形如 `nodeId:preview` / `batchId:imgId` */
+function connectionFromIdForGenSource(sourceId){
+    const raw = String(sourceId || '').trim();
+    if(!raw) return '';
+    if(nodes.some(n => n.id === raw)) return raw;
+    // ponytail: 合成 id 约定「节点id:后缀」；节点 id 本身不含冒号
+    const head = raw.split(':')[0];
+    return head || raw;
+}
+function unlinkGenDockRef(genId, sourceId, event){
+    event?.preventDefault();
+    event?.stopPropagation();
+    if(!genId || !sourceId) return;
+    // 上游主图等参考项用合成 id（nodeId:preview），连线 from 仍是节点 id
+    const fromId = connectionFromIdForGenSource(sourceId);
+    const conn = connections.find(c => c.from === fromId && c.to === genId);
+    if(!conn) return;
+    deleteConnection(conn.id, event);
+    // 断线后立刻刷参考缩略图（勿只靠 sync：按钮焦点曾被误判为「打字中」而跳过 softRefresh）
+    const gen = nodes.find(n => n.id === genId);
+    if(gen && imageGenDockNodeId === genId){
+        softRefreshGeneratorInputLists(gen);
+        positionImageGenDock(gen);
+    }
+}
 function renderImageInputList(list, node, imageInputs, emptyText=null, opts={}){
     if(!list) return;
-    list.innerHTML = imageInputs.length ? '' : `<div class="text-[11px] text-gray-300 py-2">${escapeHtml(emptyText || tr('canvas.inputImagesEmpty'))}</div>`;
+    // 控制台参考区：空列表不写占位文案，留给「+」
+    list.innerHTML = imageInputs.length || opts.allowEmpty
+        ? ''
+        : `<div class="text-[11px] text-gray-300 py-2">${escapeHtml(emptyText || tr('canvas.inputImagesEmpty'))}</div>`;
     const startIndex = Math.max(1, Number(opts.startIndex) || 1);
     const asFigure = Boolean(opts.figureIndex);
+    const hideIndex = Boolean(opts.hideIndex);
+    const showUnlink = Boolean(opts.showUnlink);
+    const unlinkTitle = langIsEn() ? 'Remove reference' : '取消参考';
     imageInputs.forEach((src, i) => {
         const item = document.createElement('div');
         item.className = 'input-item';
@@ -20309,11 +20616,38 @@ function renderImageInputList(list, node, imageInputs, emptyText=null, opts={}){
         const indexText = asFigure ? trf('canvas.figureIndex', {n}) : String(n);
         const indexCls = asFigure ? 'input-index is-figure' : 'input-index';
         const previewHtml = src.preview && !isMissingAssetUrl(src.preview) ? `<img src="${escapeAttr(src.preview)}" draggable="false">` : (src.preview ? missingAssetHtml(src.preview, true) : '<i data-lucide="image" class="w-6 h-6 text-slate-400"></i>');
-        item.innerHTML = `<span class="${indexCls}">${escapeHtml(indexText)}</span>${previewHtml}<span class="input-label">${escapeHtml(src.label)}</span>`;
+        const unlinkHtml = showUnlink
+            ? `<button type="button" class="gen-dock-ref-unlink" title="${escapeAttr(unlinkTitle)}" aria-label="${escapeAttr(unlinkTitle)}"><i data-lucide="x"></i></button>`
+            : '';
+        item.innerHTML = `${hideIndex ? '' : `<span class="${indexCls}">${escapeHtml(indexText)}</span>`}${previewHtml}<span class="input-label">${escapeHtml(src.label)}</span>${unlinkHtml}`;
+        if(showUnlink){
+            const btn = item.querySelector('.gen-dock-ref-unlink');
+            if(btn){
+                btn.onmousedown = e => e.stopPropagation();
+                btn.onclick = e => unlinkGenDockRef(node.id, src.id, e);
+            }
+        }
         list.appendChild(item);
     });
     bindInputListPointerReorder(list, node, opts);
     refreshIcons();
+}
+function appendGenDockRefAdd(list, node){
+    if(!list || !node) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'gen-dock-ref-add';
+    btn.title = langIsEn() ? 'Pick reference from canvas' : '从画布选择参考';
+    btn.setAttribute('aria-label', btn.title);
+    btn.innerHTML = `<i data-lucide="plus"></i>`;
+    btn.onmousedown = e => e.stopPropagation();
+    btn.onclick = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        startGenRefPick(node.id);
+    };
+    list.appendChild(btn);
+    refreshIcons(btn);
 }
 const PER_ITEM_GROUP_IMAGE_TYPES = new Set(['batch-image', 'group-image']);
 /** 控制台：图片组逐张 vs 共享参考分开展示，避免混编成同一队列序号 */
@@ -20334,9 +20668,12 @@ function renderGenDockImageInputs(container, node, imageInputs){
     const perItemHint = part.batch.length
         ? `<div class="gen-dock-refs-hint gen-dock-refs-batch-hint">${escapeHtml(trf('canvas.imageBatchPerItemHint', {n: part.batch.length}))}</div>`
         : '';
+    const listOpts = { allowEmpty:true, hideIndex:true, showUnlink:true };
     if(part.mode === 'flat'){
-        container.innerHTML = `<div class="input-list"></div>${perItemHint}`;
-        renderImageInputList(container.querySelector('.input-list'), node, part.all);
+        container.innerHTML = `<div class="input-list gen-dock-refs-list"></div>${perItemHint}`;
+        const list = container.querySelector('.input-list');
+        renderImageInputList(list, node, part.all, null, listOpts);
+        appendGenDockRefAdd(list, node);
         return;
     }
     // 与 jobRefs=[队列当前张, ...共享] 对齐：队列序≠图N；共享从 图2 起
@@ -20356,18 +20693,22 @@ function renderGenDockImageInputs(container, node, imageInputs){
             ${perItemHint}
         </div>
         ${sharedBlock}
+        <div class="input-list gen-dock-refs-list gen-dock-refs-add-row"></div>
     `;
     renderImageInputList(container.querySelector('.gen-dock-batch-list'), node, part.batch, null, {
+        ...listOpts,
         subsetIds: part.batch.map(s => s.id),
         startIndex: 1,
     });
     if(part.shared.length){
         renderImageInputList(container.querySelector('.gen-dock-shared-list'), node, part.shared, null, {
+            ...listOpts,
             subsetIds: part.shared.map(s => s.id),
             startIndex: 2,
             figureIndex: true,
         });
     }
+    appendGenDockRefAdd(container.querySelector('.gen-dock-refs-add-row'), node);
 }
 function renderVideoImageInputs(list, node, imageInputs){
     if(!list) return;
@@ -24430,6 +24771,8 @@ function deleteConnection(id, event){
     try { pushUndo(); } catch(err) { console.warn('[infinite-canvas] undo snapshot failed', err); }
     connections = connections.filter(c => c.id !== id);
     if(hoveredConnectionId === id) hoveredConnectionId = '';
+    if(connHoverArmedId === id) clearConnHoverArm();
+    linkDeletePosById.delete(id);
     syncGeneratorInputs();
     const refreshIds = [removed.from, removed.to].filter(nid => {
         const n = nodes.find(x => x.id === nid);
@@ -27152,6 +27495,7 @@ function onNodePointerUp(e){
 }
 function startNodeDrag(e, node){
     if(e.button !== 0) return;
+    if(tryHandleGenRefPickPointer(e, node)) return;
     if(dragNode || resizeNode || pendingNodeDrag) return;
     if(startKnifeDrag(e)) return;
     e.preventDefault();
@@ -27886,11 +28230,20 @@ function updateGroupMembership(movedNodes){
     }
 }
 
-function portPointFromLayout(n, kind, el){
+/** 端口是否展开（悬停/选中/磁吸）：展开时连线锚在圆环中心，否则贴节点边（图1） */
+function nodePortsExpanded(nodeId, el){
+    if(nodeId && selected.has(nodeId)) return true;
+    if(el?.classList?.contains('ports-open') || el?.classList?.contains('selected')) return true;
+    if(el?.querySelector?.('.port.is-magnetic')) return true;
+    return false;
+}
+function portPointFromLayout(n, kind, el, opts={}){
     const { w, h } = nodeLayoutSizeForPort(n, el);
     const y = n.y + h / 2;
-    if(kind === 'out') return { x: n.x + w + PORT_ANCHOR_DX.out, y };
-    return { x: n.x + PORT_ANCHOR_DX.in, y };
+    const expanded = opts.expanded === true || nodePortsExpanded(n.id, el);
+    const o = expanded ? PORT_DOT_OUTSET : 0;
+    if(kind === 'out') return { x: n.x + w + o, y };
+    return { x: n.x - o, y };
 }
 /**
  * 端口锚点尺寸：优先用 ResizeObserver 缓存的真实布局（_layoutW/H），
@@ -27948,7 +28301,10 @@ function pruneOrphanLinkDom(){
         if(!ids.has(path.dataset.connectionId)) path.remove();
     });
     linkControlsEl.querySelectorAll('.link-delete[data-connection-id]').forEach(btn => {
-        if(!ids.has(btn.dataset.connectionId)) btn.remove();
+        if(!ids.has(btn.dataset.connectionId)){
+            linkDeletePosById.delete(btn.dataset.connectionId);
+            btn.remove();
+        }
     });
 }
 function isNodeLinkFlowing(node){
@@ -27961,8 +28317,11 @@ function isNodeLinkFlowing(node){
 }
 function linkClassForConnection(fromNode, toNode){
     if(isNodeDisabled(fromNode) || isNodeDisabled(toNode)) return 'link link-inactive';
-    if(isNodeLinkFlowing(fromNode) || isNodeLinkFlowing(toNode)) return 'link link-flowing';
-    return 'link';
+    let cls = 'link';
+    if(isNodeLinkFlowing(fromNode) || isNodeLinkFlowing(toNode)) cls += ' link-flowing';
+    // 选中端点节点：两侧连线加亮（图3）
+    if((fromNode && selected.has(fromNode.id)) || (toNode && selected.has(toNode.id))) cls += ' link-lit';
+    return cls;
 }
 function syncLinkEnergyOverlay(connectionId, d, flowing){
     if(!linksEl || !connectionId) return;
@@ -28027,13 +28386,14 @@ function ensureConnectionLinkDom(c){
         btn = linkDeleteButton(c, a, b);
         linkControlsEl.appendChild(btn);
     } else {
-        // 固定曲线中点，避免跟着指针跑导致点不中
-        const mid = cubicPoint(a, b, 0.5);
-        const left = `${mid.x}px`;
-        const top = `${mid.y}px`;
-        if(btn.style.left !== left) btn.style.left = left;
-        if(btn.style.top !== top) btn.style.top = top;
-        btn.classList.toggle('visible', isConnectionSelected(c));
+        // 禁止在非 hover / 延迟出现 / 淡出期间把钮刷回中点（那是「跳到中点」的主因）
+        const anchor = linkDeleteAnchorPoint(c, a, b);
+        if(hoveredConnectionId === c.id || connHoverArmedId === c.id || linkDeletePosById.has(c.id)){
+            const left = `${anchor.x}px`;
+            const top = `${anchor.y}px`;
+            if(btn.style.left !== left) btn.style.left = left;
+            if(btn.style.top !== top) btn.style.top = top;
+        }
         btn.classList.toggle('hover', hoveredConnectionId === c.id);
     }
 }
@@ -28055,16 +28415,7 @@ function syncLinkDomToConnections(){
     pruneOrphanLinkDom();
     connections.forEach(c => ensureConnectionLinkDom(c));
     syncWiredPortVisibility();
-    if(tempLink){
-        let tempPath = linksEl.querySelector('path.link.temp');
-        const d = linkPathD(tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2);
-        if(!tempPath){
-            tempPath = pathEl(tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2, 'link temp');
-            linksEl.appendChild(tempPath);
-        } else {
-            tempPath.setAttribute('d', d);
-        }
-    }
+    if(tempLink) syncTempLinkDom();
     if(knifeActive) renderKnifeTrail();
 }
 function updateLinksGeometry(onlyNodeIds=null){
@@ -28087,11 +28438,7 @@ function updateLinksGeometry(onlyNodeIds=null){
         return;
     }
     targetConnections.forEach(c => ensureConnectionLinkDom(c));
-    if(tempLink){
-        const d = linkPathD(tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2);
-        const tempPath = linksEl.querySelector('path.link.temp');
-        if(tempPath) tempPath.setAttribute('d', d);
-    }
+    if(tempLink) syncTempLinkDom();
     if(knifeActive) renderKnifeTrail();
 }
 function scheduleLinkGeometryRefresh(onlyNodeIds=null){
@@ -28125,12 +28472,8 @@ function renderLinks(){
         linksEl.appendChild(linkHitEl(a.x, a.y, b.x, b.y, c.id));
     });
     syncWiredPortVisibility();
-    if(tempLink){
-        setTempLinkLayerActive(true);
-        linksEl.appendChild(pathEl(tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2, 'link temp'));
-    } else {
-        setTempLinkLayerActive(false);
-    }
+    if(tempLink) syncTempLinkDom();
+    else setTempLinkLayerActive(false);
     renderKnifeTrail();
 }
 function renderKnifeTrail(){
@@ -28140,30 +28483,39 @@ function renderKnifeTrail(){
     poly.setAttribute('class', 'link knife-trail');
     linksEl.appendChild(poly);
 }
+function linkDeleteAnchorPoint(connection, a, b){
+    const last = linkDeletePosById.get(connection.id);
+    if(last && Number.isFinite(last.x) && Number.isFinite(last.y)) return last;
+    if(connHoverArmedId === connection.id && connHoverArmPoint) return connHoverArmPoint;
+    return cubicPoint(a, b, 0.5);
+}
+function positionLinkDeleteAt(connectionId, x, y){
+    if(!linkControlsEl || !connectionId || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    linkDeletePosById.set(connectionId, {x, y});
+    const btn = linkControlsEl.querySelector(`.link-delete[data-connection-id="${CSS.escape(connectionId)}"]`);
+    if(!btn) return;
+    const left = `${x}px`;
+    const top = `${y}px`;
+    if(btn.style.left !== left) btn.style.left = left;
+    if(btn.style.top !== top) btn.style.top = top;
+}
 function linkDeleteButton(connection, a, b){
-    const mid = cubicPoint(a, b, 0.5);
+    const anchor = linkDeleteAnchorPoint(connection, a, b);
     const btn = document.createElement('button');
-    btn.className = `link-delete ${isConnectionSelected(connection) ? 'visible' : ''} ${hoveredConnectionId === connection.id ? 'hover' : ''}`;
+    // 仅 hover 显示：选中常显中点会和跟手抢位置，造成「吸回中点」
+    btn.className = `link-delete ${hoveredConnectionId === connection.id ? 'hover' : ''}`;
     btn.type = 'button';
     btn.title = tr('canvas.deleteLink');
     btn.setAttribute('aria-label', tr('canvas.deleteLink'));
     btn.dataset.connectionId = connection.id;
-    btn.style.left = `${mid.x}px`;
-    btn.style.top = `${mid.y}px`;
-    btn.textContent = '×';
-    btn.onmousedown = e => {
-        e.preventDefault();
-        e.stopPropagation();
-    };
-    btn.onpointerdown = e => {
-        e.preventDefault();
-        e.stopPropagation();
-    };
-    btn.onclick = e => {
-        e.preventDefault();
-        e.stopPropagation();
-        deleteConnection(connection.id, e);
-    };
+    btn.style.left = `${anchor.x}px`;
+    btn.style.top = `${anchor.y}px`;
+    btn.innerHTML = `<i data-lucide="scissors" aria-hidden="true"></i>`;
+    // 实际删除在 canvasRoot capture pointerdown（避免 click 偶发丢失）
+    btn.onmousedown = e => { e.preventDefault(); e.stopPropagation(); };
+    btn.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); };
+    btn.onclick = e => { e.preventDefault(); e.stopPropagation(); };
+    refreshIcons(btn);
     return btn;
 }
 function linkHitEl(x1,y1,x2,y2,id){
@@ -28171,35 +28523,88 @@ function linkHitEl(x1,y1,x2,y2,id){
     p.dataset.connectionId = id;
     return p;
 }
-function restoreLinkDeleteToMidpoint(connectionId){
-    if(!linkControlsEl || !connectionId) return;
-    const btn = linkControlsEl.querySelector(`.link-delete[data-connection-id="${CSS.escape(connectionId)}"]`);
-    const conn = connections.find(c => c.id === connectionId);
-    if(!btn || !conn) return;
-    const a = portPoint(conn.from, 'out');
-    const b = portPoint(conn.to, 'in');
-    const mid = cubicPoint(a, b, 0.5);
-    btn.style.left = `${mid.x}px`;
-    btn.style.top = `${mid.y}px`;
+function clearConnHoverArm(){
+    if(connHoverArmTimer){
+        clearTimeout(connHoverArmTimer);
+        connHoverArmTimer = 0;
+    }
+    connHoverArmedId = '';
+    connHoverArmPoint = null;
 }
-function setHoveredConnection(id){
+function cancelConnHoverHide(){
+    if(connHoverHideTimer){
+        clearTimeout(connHoverHideTimer);
+        connHoverHideTimer = 0;
+    }
+}
+function scheduleConnHoverHide(){
+    if(connHoverHideTimer) return;
+    connHoverHideTimer = setTimeout(() => {
+        connHoverHideTimer = 0;
+        setHoveredConnection('');
+    }, CONN_HOVER_HIDE_DELAY_MS);
+}
+/** 停稳在连线上再显示 X；移动中只更新预备落点 */
+function armConnHoverShow(id, hit){
+    if(!id || !hit) return;
+    cancelConnHoverHide();
+    // 延迟出现期间也写入落点，防止几何刷新把钮刷去中点
+    linkDeletePosById.set(id, {x:hit.x, y:hit.y});
+    if(hoveredConnectionId === id){
+        positionLinkDeleteAt(id, hit.x, hit.y);
+        return;
+    }
+    if(connHoverArmedId === id && connHoverArmTimer){
+        connHoverArmPoint = hit;
+        positionLinkDeleteAt(id, hit.x, hit.y);
+        return;
+    }
+    clearConnHoverArm();
+    connHoverArmedId = id;
+    connHoverArmPoint = hit;
+    positionLinkDeleteAt(id, hit.x, hit.y);
+    connHoverArmTimer = setTimeout(() => {
+        connHoverArmTimer = 0;
+        const armId = connHoverArmedId;
+        const p = connHoverArmPoint || linkDeletePosById.get(armId);
+        connHoverArmedId = '';
+        connHoverArmPoint = null;
+        if(armId && p) setHoveredConnection(armId, p);
+    }, CONN_HOVER_SHOW_DELAY_MS);
+}
+/** 指针是否在 X 按钮屏幕矩形附近（含扩大热区）——避免移向按钮时被判定离线而吸回中点 */
+function isPointerNearLinkDeleteBtn(connectionId, clientX, clientY){
+    if(!linkControlsEl || !connectionId) return false;
+    const btn = linkControlsEl.querySelector(`.link-delete[data-connection-id="${CSS.escape(connectionId)}"]`);
+    if(!btn) return false;
+    const r = btn.getBoundingClientRect();
+    if(r.width < 2 || r.height < 2) return false;
+    const pad = 14;
+    return clientX >= r.left - pad && clientX <= r.right + pad && clientY >= r.top - pad && clientY <= r.bottom + pad;
+}
+function setHoveredConnection(id, hitPoint=null){
     const nextId = id || '';
     const prevId = hoveredConnectionId;
     if(prevId === nextId){
-        // 已是同一条：勿反复写 DOM，否则会拖卡 CSS 能量动画
+        // 同一条：只更新跟手位置，勿反复折腾 class（能量线动画）
+        if(nextId && hitPoint) positionLinkDeleteAt(nextId, hitPoint.x, hitPoint.y);
         return;
     }
     if(prevId){
-        const oldBtn = linkControlsEl?.querySelector(`[data-connection-id="${CSS.escape(prevId)}"]`);
+        const oldBtn = linkControlsEl?.querySelector(`.link-delete[data-connection-id="${CSS.escape(prevId)}"]`);
         if(oldBtn) oldBtn.classList.remove('hover');
-        restoreLinkDeleteToMidpoint(prevId);
     }
     hoveredConnectionId = nextId;
     if(!nextId) return;
-    const btn = linkControlsEl?.querySelector(`[data-connection-id="${CSS.escape(nextId)}"]`);
+    cancelConnHoverHide();
+    clearConnHoverArm();
+    const btn = linkControlsEl?.querySelector(`.link-delete[data-connection-id="${CSS.escape(nextId)}"]`);
     if(btn){
+        // 先落到指针投影点再淡入，避免从中点飞过去
+        if(hitPoint) positionLinkDeleteAt(nextId, hitPoint.x, hitPoint.y);
+        btn.classList.remove('hover');
+        void btn.offsetWidth;
         btn.classList.add('hover');
-        restoreLinkDeleteToMidpoint(nextId);
     }
 }
 function connectionDistanceToPoint(connection, point, from=null, to=null){
@@ -28257,6 +28662,11 @@ function scheduleConnectionHoverUpdate(e){
         const event = connHoverPendingEvent;
         connHoverPendingEvent = null;
         if(!event) return;
+        // 已悬停：每帧跟手，不节流；全量扫描仍节流
+        if(hoveredConnectionId){
+            updateConnectionHoverFromMouse(event);
+            return;
+        }
         const now = Date.now();
         const minMs = hasFlowingLinkEnergy() ? CONN_HOVER_FLOWING_MIN_MS : CONN_HOVER_MIN_MS;
         if(minMs > 0 && now - connHoverLastAt < minMs){
@@ -28269,42 +28679,61 @@ function scheduleConnectionHoverUpdate(e){
 }
 function updateConnectionHoverFromMouse(e){
     if(!canvas || tempLink || dragNode || dragBoard || resizeNode || knifeActive){
+        clearConnHoverArm();
+        cancelConnHoverHide();
         setHoveredConnection('');
         return;
     }
     if(!connections.length){
+        clearConnHoverArm();
+        cancelConnHoverHide();
         setHoveredConnection('');
         return;
     }
     const point = screenToWorld(e.clientX, e.clientY);
     const enter = Math.max(18, 22 / Math.max(0.08, viewport.scale || 1));
     const leave = enter * 1.8;
-    const midSticky = Math.max(28, 36 / Math.max(0.08, viewport.scale || 1));
     const flowing = hasFlowingLinkEnergy();
-    // 已悬停：只做几何粘滞（禁止 elementsFromPoint，避免强制布局冻动画）
+    // 指针在 X / 热区上：锁住位置，绝不吸回中点
+    if(!flowing){
+        const overDelete = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.link-delete');
+        const nearId = overDelete?.dataset?.connectionId
+            || (hoveredConnectionId && isPointerNearLinkDeleteBtn(hoveredConnectionId, e.clientX, e.clientY) ? hoveredConnectionId : '');
+        if(nearId){
+            cancelConnHoverHide();
+            clearConnHoverArm();
+            if(hoveredConnectionId !== nearId){
+                // 点到的是选中常显中点钮：以当前按钮位置进入 hover，勿先 teleport
+                const btn = linkControlsEl?.querySelector(`.link-delete[data-connection-id="${CSS.escape(nearId)}"]`);
+                const hit = btn ? { x:parseFloat(btn.style.left) || 0, y:parseFloat(btn.style.top) || 0 } : null;
+                setHoveredConnection(nearId, hit);
+            }
+            return;
+        }
+    }
+    // 已悬停：沿曲线跟手
     if(hoveredConnectionId){
         const cur = connections.find(c => c.id === hoveredConnectionId);
         if(cur){
             const from = portPoint(cur.from, 'out');
             const to = portPoint(cur.to, 'in');
-            const mid = cubicPoint(from, to, 0.5);
-            const hit = nearestCubicPointOnLink(from, to, point, flowing ? 12 : 16);
-            const nearMid = Math.hypot(point.x - mid.x, point.y - mid.y) <= midSticky;
-            if(nearMid || (!isLinkDeleteBlockedNearPort(from, to, hit) && hit.dist <= leave)){
+            const hit = nearestCubicPointOnLink(from, to, point, flowing ? 12 : 20);
+            if(!isLinkDeleteBlockedNearPort(from, to, hit) && hit.dist <= leave){
+                cancelConnHoverHide();
+                positionLinkDeleteAt(hoveredConnectionId, hit.x, hit.y);
                 return;
             }
         }
+        clearConnHoverArm();
+        scheduleConnHoverHide();
+        return;
     }
     // 能量流动时：跳过昂贵的 elementsFromPoint，只靠几何命中
     if(!flowing){
-        const overDelete = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.link-delete');
-        if(overDelete?.dataset?.connectionId){
-            setHoveredConnection(overDelete.dataset.connectionId);
-            return;
-        }
         const topEl = pointerElIgnoringLinkDelete(e.clientX, e.clientY);
         if(isPointerOverLinkUiChrome(topEl)){
-            setHoveredConnection('');
+            clearConnHoverArm();
+            scheduleConnHoverHide();
             return;
         }
     }
@@ -28316,7 +28745,7 @@ function updateConnectionHoverFromMouse(e){
         const pad = enter;
         if(point.x < Math.min(from.x, to.x) - pad || point.x > Math.max(from.x, to.x) + pad ||
             point.y < Math.min(from.y, to.y) - pad || point.y > Math.max(from.y, to.y) + pad) return;
-        const hit = nearestCubicPointOnLink(from, to, point, flowing ? 12 : 16);
+        const hit = nearestCubicPointOnLink(from, to, point, flowing ? 12 : 20);
         if(isLinkDeleteBlockedNearPort(from, to, hit)) return;
         if(hit.dist < (bestHit?.dist ?? Infinity)){
             bestHit = hit;
@@ -28324,19 +28753,24 @@ function updateConnectionHoverFromMouse(e){
         }
     });
     if(bestId && bestHit && bestHit.dist <= enter){
-        setHoveredConnection(bestId);
+        armConnHoverShow(bestId, bestHit);
     } else {
-        setHoveredConnection('');
+        clearConnHoverArm();
+        if(hoveredConnectionId) scheduleConnHoverHide();
     }
 }
 function isConnectionSelected(connection){
     return selected.has(connection.from) || selected.has(connection.to);
 }
 function updateLinkSelectionState(){
-    if(!linkControlsEl) return;
-    linkControlsEl.querySelectorAll('.link-delete').forEach(btn => {
-        const conn = connections.find(c => c.id === btn.dataset.connectionId);
-        if(conn) btn.classList.toggle('visible', isConnectionSelected(conn));
+    // 同步选中加亮 class；删除钮仍仅悬停显示
+    if(!linksEl) return;
+    connections.forEach(c => {
+        const fromNode = nodes.find(n => n.id === c.from);
+        const toNode = nodes.find(n => n.id === c.to);
+        const cls = linkClassForConnection(fromNode, toNode);
+        const visible = linksEl.querySelector(`path.link[data-connection-id="${CSS.escape(c.id)}"]:not(.link-hit)`);
+        if(visible && visible.getAttribute('class') !== cls) visible.setAttribute('class', cls);
     });
 }
 function updateMinimapSelection(){
@@ -28347,13 +28781,31 @@ function updateMinimapSelection(){
     });
 }
 function refreshSelectionVisuals(){
-    nodesEl.querySelectorAll('.node').forEach(el => {
-        const should = selected.has(el.dataset.id);
+    const touch = new Set();
+    nodesEl?.querySelectorAll?.('.node').forEach(el => {
+        const id = el.dataset.id;
+        const should = selected.has(id);
         if(el.classList.contains('selected') !== should) el.classList.toggle('selected', should);
+        if(should){
+            el.classList.add('ports-open');
+            if(id) touch.add(id);
+        } else if(!el.matches(':hover') && !el.querySelector('.port.is-magnetic')){
+            if(el.classList.contains('ports-open')){
+                el.classList.remove('ports-open');
+                if(id) touch.add(id);
+            }
+        }
+    });
+    connections.forEach(c => {
+        if(selected.has(c.from) || selected.has(c.to)){
+            touch.add(c.from);
+            touch.add(c.to);
+        }
     });
     updateLinkSelectionState();
     updateMinimapSelection();
     syncImageGenDock();
+    if(touch.size) scheduleLinkGeometryRefresh(touch);
 }
 /** 单击/拖拽前更新选中态（Ctrl/Cmd 多选） */
 function applyNodeSelection(nodeId, e){
@@ -28568,12 +29020,43 @@ function startBoardPan(e, opts={}){
     return true;
 }
 
+function setNodePortsOpen(el, open){
+    if(!el?.dataset?.id) return;
+    const id = el.dataset.id;
+    if(open){
+        if(el.classList.contains('ports-open')) return;
+        el.classList.add('ports-open');
+        scheduleLinkGeometryRefresh(new Set([id]));
+        return;
+    }
+    if(selected.has(id) || el.querySelector('.port.is-magnetic')) return;
+    if(!el.classList.contains('ports-open')) return;
+    el.classList.remove('ports-open');
+    scheduleLinkGeometryRefresh(new Set([id]));
+}
 function wireBoardEvents() {
 if(!board || boardEventsWired) return;
 boardEventsWired = true;
 if(canvasRoot){
     // 委托到 root：不依赖模块求值时 #minimap 是否已存在
     on(canvasRoot, 'mousedown', onMinimapNavigateDown, true);
+    // 端口弹出：移入节点展开，移出收起（连线锚点同步贴边/外伸）
+    on(canvasRoot, 'pointerover', e => {
+        if(!canvas || !nodesEl) return;
+        const node = e.target.closest?.('.node');
+        if(!node || !nodesEl.contains(node)) return;
+        const from = e.relatedTarget?.closest?.('.node');
+        if(from === node) return;
+        setNodePortsOpen(node, true);
+    }, true);
+    on(canvasRoot, 'pointerout', e => {
+        if(!canvas || !nodesEl) return;
+        const node = e.target.closest?.('.node');
+        if(!node || !nodesEl.contains(node)) return;
+        const to = e.relatedTarget?.closest?.('.node');
+        if(to === node) return;
+        setNodePortsOpen(node, false);
+    }, true);
     on(canvasRoot, 'pointerdown', e => {
         if(!e.target.closest?.('.node-delete-btn')) return;
         e.stopPropagation();
@@ -28589,20 +29072,19 @@ if(canvasRoot){
         startLink(e, id, port.classList.contains('in') ? 'in' : 'out');
     }, true);
     on(canvasRoot, 'pointerdown', e => {
-        if(!e.target.closest?.('.link-delete')) return;
+        const linkBtn = e.target.closest?.('.link-delete');
+        if(!linkBtn || !canvas || e.button !== 0) return;
+        // capture 阶段直接删：原先 stopPropagation 会拦掉按钮自身 handler，只靠 click 偶发丢事件
         e.preventDefault();
         e.stopPropagation();
+        const connId = linkBtn.dataset.connectionId;
+        if(connId) deleteConnection(connId, e);
     }, true);
     on(canvasRoot, 'click', e => {
-        const linkBtn = e.target.closest?.('.link-delete');
-        if(linkBtn && canvas){
-            const connId = linkBtn.dataset.connectionId;
-            if(connId){
-                e.preventDefault();
-                e.stopPropagation();
-                deleteConnection(connId, e);
-                return;
-            }
+        if(e.target.closest?.('.link-delete')){
+            e.preventDefault();
+            e.stopPropagation();
+            return;
         }
         const btn = e.target.closest?.('.node-delete-btn');
         if(!btn || !canvas) return;
@@ -28659,6 +29141,10 @@ board.onmousedown = e => {
     closeCreateMenu();
     collapseOpenGenStagesOnBoardClick();
     if(genBatchPick) clearGenBatchPick({refresh:true});
+    if(genRefPick){
+        clearGenRefPick({refresh:true});
+        return;
+    }
     if(e.ctrlKey || e.metaKey){
         e.preventDefault();
         startSelection(e);
@@ -28678,6 +29164,7 @@ const trackBoardPointer = e => {
 on(board, 'pointermove', trackBoardPointer, {capture: true});
 on(board, 'mousemove', e => {
     trackBoardPointer(e);
+    if(genRefPick) updateGenRefPickHover(e.clientX, e.clientY);
     scheduleConnectionHoverUpdate(e);
     schedulePortMagnetUpdate(e.clientX, e.clientY);
     if(canvas && knifeActive && !isEditableTarget(e.target) && !dragNode && !dragBoard && !resizeNode && !tempLink){
@@ -28686,7 +29173,11 @@ on(board, 'mousemove', e => {
         setKnifeMode(false);
     }
 });
-on(board, 'mouseleave', () => { setHoveredConnection(''); clearAllPortMagnet(); });
+on(board, 'mouseleave', () => {
+    setHoveredConnection('');
+    clearAllPortMagnet();
+    if(genRefPick) clearGenRefPickHover();
+});
 board.ondblclick = null;
 on(board, 'contextmenu', e => {
     if(!canvas) return;
@@ -28878,6 +29369,11 @@ on(window, 'keydown', e => {
     if(e.key === 'Escape' && genBatchPick){
         e.preventDefault();
         clearGenBatchPick({refresh:true});
+        return;
+    }
+    if(e.key === 'Escape' && genRefPick){
+        e.preventDefault();
+        clearGenRefPick({refresh:true});
         return;
     }
     if(e.key === 'Escape' && genHistoryPanelEl) { closeGenHistoryPanel(); return; }

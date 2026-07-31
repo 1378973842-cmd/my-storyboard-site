@@ -117,6 +117,7 @@
         "canvas.genDockBatchQueueLabel": { zh: "逐张队列（每次=图1）", en: "Per-item queue (each run = Image 1)" },
         "canvas.genDockSharedRefsLabel": { zh: "共享参考（图2起，每次附带）", en: "Shared refs (Image 2+, every run)" },
         "canvas.genDockFigureHint": { zh: "提示词：图1=队列当前张；共享参考从第2张起（图2、图3…）", en: "Prompt: Image 1 = current queue item; shared refs start at Image 2" },
+        "canvas.genDockPickRef": { zh: "从画布选择参考", en: "Select reference from canvas" },
         "canvas.figureIndex": { zh: "图{n}", en: "Img {n}" },
         "canvas.promptGroupNode": { zh: "提示词组", en: "Prompt group" },
         "canvas.trashSubtitle": { zh: "已删除画布可恢复，30 天后自动清理。", en: "Deleted canvases can be restored and are cleaned after 30 days." },

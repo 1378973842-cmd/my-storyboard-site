@@ -1,15 +1,15 @@
 # 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  1. **品牌**：站点 logo 换成 `public/brand-logo.png`；主页/顶栏为 logo + **DreamGrid** 字标；页脚/标题/favicon 同步。
-  2. **AG74 工作流模版库 / AG73 RH 共用壳**仍在。
-- **验证状态**：硬刷新首页 → 左上角应见新 logo + DreamGrid；Hero 大标题为 DreamGrid。
-- **明日焦点**：按导演下一条反馈继续。
-- **Blockers**：无。
+  1. **AG82**：点参考图 xx 后连线断了但缩略图还在——不是延迟，是 `syncImageGenDock` 把 dock 内按钮焦点当成「打字中」跳过了 softRefresh；改为仅 INPUT/TEXTAREA 才保护，并在 unlink 后强制刷参考列表。
+  2. AG81 合成 id 断线映射仍在。
+- **验证状态**：`node init.mjs` 通过。
+- **明日焦点**：硬刷新后点 xx，确认缩略图与连线同帧消失。
+- **Blockers**：无。请导演 Git Commit。
 
 ## 新对话开场白（复制给 Agent）
 
 ```
 继续 gemini-deploy。先读 docs/HANDOFF.md。
-品牌已换成 DreamGrid + brand-logo。按导演下一条反馈继续。
+AG82 参考图 xx 后缩略图即时刷新已修。按导演下一条反馈继续。
 ```

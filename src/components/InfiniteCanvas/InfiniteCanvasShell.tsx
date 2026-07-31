@@ -88,7 +88,6 @@ const NODE_FLYOUT_GROUPS: FlyoutGroup[] = [
     heading: '添加节点',
     items: [
       { icon: 'align-left', label: '提示词', desc: '脚本、广告词、品牌文案', action: () => canvasWin['addPromptNode']?.() },
-      { icon: 'image', label: '图片', desc: '宣传图、海报、封面', action: () => canvasWin['addImageNode']?.() },
       { icon: 'circle-play', label: '视频生成', desc: '文生视频 / 图生视频', action: () => canvasWin['addVideoNode']?.() },
       { icon: 'repeat-2', label: '循环', desc: '批量循环执行', action: () => canvasWin['addLoopNode']?.() },
       { icon: 'message-square-text', label: 'LLM', desc: '文本推理与改写', action: () => canvasWin['addLLMNode']?.() },
@@ -682,13 +681,6 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                               <span className="menu-btn-desc">脚本、广告词、品牌文案</span>
                           </span>
                       </button>
-                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('image')}>
-                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="image" className="w-4 h-4"></i></span>
-                          <span className="menu-btn-copy">
-                              <span className="menu-btn-title" data-i18n="canvas.imageCard">图片卡片</span>
-                              <span className="menu-btn-desc">宣传图、海报、封面</span>
-                          </span>
-                      </button>
                       <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('imageBatch')}>
                           <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="images" className="w-4 h-4"></i></span>
                           <span className="menu-btn-copy">
@@ -1055,7 +1047,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                           <button className="image-edit-btn secondary" type="button" data-brush-tool="text" onClick={(e) => { e.stopPropagation(); setBrushTool('text'); }} title="文字"><i data-lucide="type" className="w-4 h-4"></i></button>
                           <button className="image-edit-btn secondary" type="button" data-brush-tool="label" onClick={(e) => { e.stopPropagation(); setBrushTool('label'); }} title="标注序号"><i data-lucide="list-ordered" className="w-4 h-4"></i></button>
                           <label><span data-i18n="canvas.color">颜色</span> <input id="paintBrushColor" type="color" defaultValue="#ff2d55" /></label>
-                          <label><span data-i18n="canvas.brushSize">笔刷</span> <input id="paintBrushSize" type="range" min={2} max={80} defaultValue={14} /></label>
+                          <label><span data-i18n="canvas.brushSize">笔刷</span> <input id="paintBrushSize" type="range" min={1} max={80} step={1} defaultValue={14} /></label>
                           <button id="brushUndoBtn" className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); undoEditDrawing(); }} title="撤销"><i data-lucide="undo-2" className="w-4 h-4"></i></button>
                           <button id="brushRedoBtn" className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); redoEditDrawing(); }} title="恢复"><i data-lucide="redo-2" className="w-4 h-4"></i></button>
                           <button className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); clearEditDrawing(); }}><i data-lucide="eraser" className="w-4 h-4"></i><span data-i18n="canvas.clear">清空</span></button>
@@ -1078,7 +1070,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                               </div>
                               <div id="annotationLabelPickInline" className="annotation-label-pick annotation-label-pick-inline" hidden />
                               <label className="image-edit-dock-color" title="颜色"><input id="paintBrushColorInline" type="color" defaultValue="#ff2d55" onChange={(e) => { const m = document.getElementById('paintBrushColor') as HTMLInputElement | null; if (m) { m.value = e.target.value; m.dispatchEvent(new Event('input', { bubbles: true })); } }} /></label>
-                              <label className="image-edit-dock-size" title="笔刷大小"><input id="paintBrushSizeInline" type="range" min={2} max={80} defaultValue={14} onChange={(e) => { const m = document.getElementById('paintBrushSize') as HTMLInputElement | null; if (m) { m.value = e.target.value; m.dispatchEvent(new Event('input', { bubbles: true })); } }} /></label>
+                              <label className="image-edit-dock-size" title="笔刷大小"><input id="paintBrushSizeInline" type="range" min={1} max={80} step={1} defaultValue={14} onChange={(e) => { const m = document.getElementById('paintBrushSize') as HTMLInputElement | null; if (m) { m.value = e.target.value; m.dispatchEvent(new Event('input', { bubbles: true })); } }} /></label>
                               <button type="button" className="image-edit-dock-tool" onClick={() => undoEditDrawing()} title="撤销"><i data-lucide="undo-2" className="w-4 h-4"></i></button>
                               <button type="button" className="image-edit-dock-tool" onClick={() => redoEditDrawing()} title="恢复"><i data-lucide="redo-2" className="w-4 h-4"></i></button>
                               <button id="annotationRestoreBtnInline" className="image-edit-dock-tool" type="button" onClick={() => restoreAnnotationBase()} title="恢复原图"><i data-lucide="rotate-ccw" className="w-4 h-4"></i></button>

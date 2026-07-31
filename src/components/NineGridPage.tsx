@@ -418,7 +418,7 @@ export const NineGridPage: React.FC<Props> = ({ enterKey = 0 }) => {
               </button>
               <button
                 onClick={download}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/90 text-[#1d1d1f] text-[12px] font-medium outline outline-[0.5px] outline-white/30 hover:bg-white transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/10 text-[#e5e2e1] text-[12px] font-medium outline outline-[0.5px] outline-white/15 backdrop-blur-[20px] hover:bg-white/16 transition-colors cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 下载
@@ -475,7 +475,7 @@ export const NineGridPage: React.FC<Props> = ({ enterKey = 0 }) => {
                             cellEditingSet.has(idx)
                               ? 'ai-editor-btn-disabled'
                               : (croppedUrls[idx] || resultUrl)
-                                ? 'bg-white/90 text-[#1d1d1f] hover:bg-white cursor-pointer'
+                                ? 'bg-white/10 text-[#e5e2e1] outline outline-[0.5px] outline-white/15 hover:bg-white/16 cursor-pointer'
                                 : 'ai-editor-btn-disabled',
                           )}
                           title={croppedUrls[idx] ? '使用当前提示词编辑该格' : '自动裁切失败时，将基于主图对该格进行定向编辑'}
@@ -505,7 +505,7 @@ export const NineGridPage: React.FC<Props> = ({ enterKey = 0 }) => {
                                 e.stopPropagation();
                                 downloadCropped(idx);
                               }}
-                              className="absolute bottom-1 right-1 px-2 py-0.5 rounded-full bg-white/90 text-[#1d1d1f] text-[10px] font-medium hover:bg-white transition-all cursor-pointer"
+                              className="absolute bottom-1 right-1 px-2 py-0.5 rounded-full bg-black/55 text-[#e5e2e1] text-[10px] font-medium outline outline-[0.5px] outline-white/15 backdrop-blur-[12px] hover:bg-black/70 transition-all cursor-pointer"
                               title={`下载 图${idx + 1}`}
                             >
                               下载

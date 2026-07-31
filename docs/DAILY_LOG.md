@@ -233,3 +233,16 @@
 - RH素材格：操作说明提到网格底部统一显示
 - RH换配置：原地重建+离屏测高，消除闪屏
 - 补全工作流模版库 i18n key（最近/我的/公开/创建）
+- AG75 炭灰玻璃：节点壳/分组/Loop/选画布新建/九宫格pill/项目管理统一冷炭灰
+- AG76 移除上传卡片创建入口，保留拖放/粘贴/图片组
+
+## 2026-07-31
+
+### 记录 / 说明
+- 端口：默认隐藏贴边；hover/选中弹出；选中连线加亮；环/加号约4.5px
+- 拉线预览：青蓝多层能量段流动
+- AG79: 保存到素材库等面板琥珀改冷炭灰
+- 修：图片历史/本板日志 theme-dark.log-panel 琥珀壳盖掉炭灰
+- AG80: gen-stage cover fav; tile fav+download left / set-primary right collapses; left-click dismisses result context menu
+- AG81: fix gen-dock ref xx unlink — map synthetic source id (nodeId:preview) to real connection.from
+- AG82: unlink ref thumb refreshes immediately — do not treat button focus as text editing skip

@@ -173,7 +173,15 @@
         { "id": "AG71", "desc": "UI：生图叠卡展开铺开 / 收起叠合幽灵 FLIP 动画（尊重 reduced-motion）", "status": "done", "priority": 92 },
         { "id": "AG72", "desc": "RH：真等比缩放——内部固定820排版+transform，外壳按视觉尺寸套住（不撑裂节点壳）", "status": "done", "priority": 93 },
         { "id": "AG73", "desc": "RH共用壳：矮工作流随内容长高；高工作流壳高封顶+三栏内滚；底栏（运行/高级）始终可见", "status": "done", "priority": 94 },
-        { "id": "AG74", "desc": "工作流模版库UI：侧栏（最近/我的/公开）+搜索+创建+封面网格卡（对齐导演稿）", "status": "done", "priority": 95 }
+        { "id": "AG74", "desc": "工作流模版库UI：侧栏（最近/我的/公开）+搜索+创建+封面网格卡（对齐导演稿）", "status": "done", "priority": 95 },
+        { "id": "AG75", "desc": "UI：画布节点壳/分组/Loop/选画布新建/九宫格pill/项目管理 统一冷炭灰玻璃（去暖棕虚线橙）", "status": "done", "priority": 96 },
+        { "id": "AG76", "desc": "画布：移除「上传卡片」创建入口（菜单/飞出/拉线）；保留拖放粘贴与图片组", "status": "done", "priority": 97 },
+        { "id": "AG77", "desc": "交互：端口默认隐藏贴边连线；hover/选中丝滑弹出圆环+加号(4.5px)；选中两侧连线加亮", "status": "done", "priority": 98 },
+        { "id": "AG78", "desc": "交互：端口拉线预览改为青蓝多层能量段流动（无 SVG filter，rAF dashoffset）", "status": "done", "priority": 99 },
+        { "id": "AG79", "desc": "UI：保存到素材库/历史/快捷键/素材库等面板琥珀强调改冷炭灰（生图主按钮保留琥珀）", "status": "done", "priority": 100 },
+        { "id": "AG80", "desc": "生图台：主图左上收藏；展开格左上收藏+下载、右上设为主图且设后立即收起；右键菜单左键外点关闭", "status": "done", "priority": 101 },
+        { "id": "AG81", "desc": "修：生图控制台参考图 xx 删不掉——合成 id（nodeId:preview）映射回真实连线 from 再断线", "status": "done", "priority": 102 },
+        { "id": "AG82", "desc": "修：点参考图 xx 后缩略图残留——勿把按钮焦点当成打字而跳过 softRefresh", "status": "done", "priority": 103 }
       ]
     },
     {
