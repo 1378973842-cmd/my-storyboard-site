@@ -2319,12 +2319,12 @@
   background:transparent;
   backdrop-filter:none;
 }
-/* 收起态：底图清晰，仅底部压暗 + 状态条 */
+/* 收起态生成中：主图模糊 + 选参考同款白流光（左→右）+ 底部状态条 */
 .gen-stage-busy.gen-stage-busy-collapsed {
   align-items:flex-end;
   justify-content:center;
   padding:0 12px 12px;
-  background:linear-gradient(to top, rgba(14,14,14,.58) 0%, rgba(14,14,14,.18) 38%, transparent 62%);
+  background:rgba(14,14,14,.28);
   backdrop-filter:none;
 }
 .gen-stage-stack-hero > .gen-stage-busy {
@@ -2332,21 +2332,75 @@
   border-radius:inherit;
 }
 .gen-stage-stack-hero > .gen-stage-busy.gen-stage-busy-collapsed {
-  background:linear-gradient(to top, rgba(14,14,14,.58) 0%, rgba(14,14,14,.18) 38%, transparent 62%);
+  background:rgba(14,14,14,.28);
 }
-/* 生成中不再糊掉主图 */
+/* 第一张主图：生成中模糊，衬托白流光 */
 .gen-stage.is-busy:not(.is-grid) .gen-stage-stack-hero img,
 .gen-stage.is-busy:not(.is-grid) .gen-stage-stack-hero video,
 .gen-stage.is-busy:not(.is-grid) .gen-stage-hero img,
 .gen-stage.is-busy:not(.is-grid) .gen-stage-hero video {
-  filter:none;
-  transform:none;
-  transition:filter .25s ease, transform .25s ease;
+  filter:blur(8px) brightness(.72) saturate(.88);
+  transform:scale(1.05);
+  transition:filter .28s ease, transform .28s ease;
 }
 .gen-stage.is-busy.is-empty .gen-stage-empty {
   opacity:.7;
 }
 .gen-stage-busy .output-pending-waves { opacity:.9; }
+/* 与 gen-ref-pick-flow 同套路：@property 驱动亮段左→右扫边 */
+.gen-stage-busy-flow-bloom {
+  position:absolute;
+  inset:-2px;
+  border-radius:inherit;
+  pointer-events:none;
+  z-index:1;
+  background:linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent calc(var(--gen-ref-flow-x) - 24%),
+    rgba(255,255,255,.5) calc(var(--gen-ref-flow-x) - 8%),
+    rgba(255,255,255,.95) var(--gen-ref-flow-x),
+    rgba(255,255,255,.5) calc(var(--gen-ref-flow-x) + 8%),
+    transparent calc(var(--gen-ref-flow-x) + 24%),
+    transparent 100%
+  );
+  filter:blur(14px);
+  opacity:.95;
+  animation:gen-ref-pick-flow 2s linear infinite;
+}
+.gen-stage-busy-flow {
+  position:absolute;
+  inset:0;
+  border-radius:inherit;
+  padding:4px;
+  pointer-events:none;
+  z-index:2;
+  background:linear-gradient(
+    90deg,
+    rgba(255,255,255,.22) 0%,
+    rgba(255,255,255,.22) calc(var(--gen-ref-flow-x) - 34%),
+    rgba(255,255,255,.62) calc(var(--gen-ref-flow-x) - 16%),
+    rgba(255,255,255,.98) calc(var(--gen-ref-flow-x) - 6%),
+    #fff calc(var(--gen-ref-flow-x) - 1.5%),
+    #fff calc(var(--gen-ref-flow-x) + 1.5%),
+    rgba(255,255,255,.98) calc(var(--gen-ref-flow-x) + 6%),
+    rgba(255,255,255,.62) calc(var(--gen-ref-flow-x) + 16%),
+    rgba(255,255,255,.22) calc(var(--gen-ref-flow-x) + 34%),
+    rgba(255,255,255,.22) 100%
+  );
+  animation:gen-ref-pick-flow 2s linear infinite;
+  -webkit-mask:linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask:linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite:xor;
+  mask-composite:exclude;
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,.35),
+    0 0 22px rgba(255,255,255,.28);
+}
+@media (prefers-reduced-motion: reduce) {
+  .gen-stage-busy-flow-bloom,
+  .gen-stage-busy-flow { animation:none; opacity:.55; }
+}
 .gen-stage-busy-bar {
   position:relative; z-index:3;
   display:inline-flex; align-items:center; gap:8px;
@@ -3741,9 +3795,9 @@
   backdrop-filter:blur(12px);
   -webkit-backdrop-filter:blur(12px);
 }
-/* 选参考悬停：白流光，上下边缘同步从左→右像水流动
-   用 @property 驱动亮段位移（旧双层白底几乎无对比，看起来“不流动”）
-   mask 勿与 filter 同元素叠用；辉光挂父级 */
+/* 选参考悬停：仅边缘白流光（左→右）
+   卡顿根因：@property 改 gradient + drop-shadow 每帧重绘
+   现改：固定边框环 + ::before 用 transform 扫光（走合成层） */
 @property --gen-ref-flow-x {
   syntax:'<percentage>';
   inherits:false;
@@ -3752,6 +3806,10 @@
 @keyframes gen-ref-pick-flow {
   from { --gen-ref-flow-x:-18%; }
   to { --gen-ref-flow-x:118%; }
+}
+@keyframes gen-ref-pick-edge-sweep {
+  from { transform:translate3d(-70%, 0, 0); }
+  to { transform:translate3d(320%, 0, 0); }
 }
 .infinite-canvas-root.canvas-gen-ref-picking .node.is-gen-ref-pick-hover {
   z-index:6 !important;
@@ -3764,72 +3822,62 @@
   position:relative;
   overflow:visible !important;
   box-shadow:
-    0 0 0 1.5px rgba(255,255,255,.65),
-    0 0 18px rgba(255,255,255,.75),
-    0 0 40px rgba(255,255,255,.4),
-    0 0 72px rgba(255,255,255,.22) !important;
+    0 0 0 2px rgba(255,255,255,.78),
+    0 0 16px rgba(255,255,255,.55),
+    0 0 36px rgba(255,255,255,.28) !important;
 }
-/* 无 mask 的柔光条：可跟亮段一起扫，并安全使用 blur */
 .infinite-canvas-root.canvas-gen-ref-picking .gen-ref-pick-flow-bloom {
-  position:absolute;
-  inset:-10px;
-  border-radius:28px;
-  pointer-events:none;
-  z-index:8;
-  background:linear-gradient(
-    90deg,
-    transparent 0%,
-    transparent calc(var(--gen-ref-flow-x) - 22%),
-    rgba(255,255,255,.55) calc(var(--gen-ref-flow-x) - 6%),
-    rgba(255,255,255,.9) var(--gen-ref-flow-x),
-    rgba(255,255,255,.55) calc(var(--gen-ref-flow-x) + 6%),
-    transparent calc(var(--gen-ref-flow-x) + 22%),
-    transparent 100%
-  );
-  filter:blur(12px);
-  opacity:.85;
-  animation:gen-ref-pick-flow 2.2s linear infinite;
+  display:none !important;
 }
 .infinite-canvas-root.canvas-gen-ref-picking .gen-ref-pick-flow {
   position:absolute;
-  inset:-5px;
-  border-radius:23px;
-  padding:5px;
+  inset:-7px;
+  border-radius:25px;
+  padding:7px;
   pointer-events:none;
   z-index:9;
-  /* 底环压暗 + 更宽更亮的白水头，扫过时对比更强 */
-  background:linear-gradient(
-    90deg,
-    rgba(255,255,255,.16) 0%,
-    rgba(255,255,255,.16) calc(var(--gen-ref-flow-x) - 32%),
-    rgba(255,255,255,.55) calc(var(--gen-ref-flow-x) - 16%),
-    rgba(255,255,255,.95) calc(var(--gen-ref-flow-x) - 7%),
-    #fff calc(var(--gen-ref-flow-x) - 2%),
-    #fff calc(var(--gen-ref-flow-x) + 2%),
-    rgba(255,255,255,.95) calc(var(--gen-ref-flow-x) + 7%),
-    rgba(255,255,255,.55) calc(var(--gen-ref-flow-x) + 16%),
-    rgba(255,255,255,.16) calc(var(--gen-ref-flow-x) + 32%),
-    rgba(255,255,255,.16) 100%
-  );
-  animation:gen-ref-pick-flow 2.2s linear infinite;
+  overflow:hidden;
+  /* 底环固定，不参与逐帧动画 */
+  background:rgba(255,255,255,.3);
   -webkit-mask:linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask:linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite:xor;
   mask-composite:exclude;
 }
+.infinite-canvas-root.canvas-gen-ref-picking .gen-ref-pick-flow::before {
+  content:"";
+  position:absolute;
+  top:0;
+  left:0;
+  width:42%;
+  height:100%;
+  background:linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255,255,255,.55) 28%,
+    #fff 50%,
+    rgba(255,255,255,.55) 72%,
+    transparent 100%
+  );
+  animation:gen-ref-pick-edge-sweep 1.55s linear infinite;
+  will-change:transform;
+}
 .infinite-canvas-root.canvas-gen-ref-picking .node > .gen-ref-pick-flow {
-  border-radius:calc(var(--radius-node, 22px) + 4px);
+  border-radius:calc(var(--radius-node, 22px) + 6px);
   z-index:8;
 }
-.infinite-canvas-root.canvas-gen-ref-picking .node > .gen-ref-pick-flow-bloom {
-  border-radius:calc(var(--radius-node, 22px) + 10px);
-  z-index:7;
-}
 .infinite-canvas-root.canvas-gen-ref-picking .media-card > .gen-ref-pick-flow {
-  border-radius:19px;
+  border-radius:21px;
 }
 .infinite-canvas-root.canvas-gen-ref-picking .gen-stage-frame > .gen-ref-pick-flow {
-  border-radius:15px;
+  border-radius:17px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .infinite-canvas-root.canvas-gen-ref-picking .gen-ref-pick-flow::before {
+    animation:none;
+    opacity:.7;
+    left:30%;
+  }
 }
 .gen-ref-pick-select-label {
   position:absolute;

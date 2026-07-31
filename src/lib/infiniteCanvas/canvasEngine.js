@@ -938,7 +938,7 @@ let remoteSyncInterval = null;
 let remoteSyncBusy = false;
 let lastCanvasUpdatedAt = 0;
 let models = {gpt:'gpt-image-2', nano:'nano-banana-pro'};
-let imageModels = ['gpt-image-2', 'gpt-image-2-稳定', 'nano-banana-pro'];
+let imageModels = ['gpt-image-2', 'gpt-image-2-稳定', 'nano-banana-pro', 'nano-banana-2'];
 const BATCH_POSTER_BASE_PROMPT = '【标题文字规则 — 结构锁定 / 视觉随主题 / 分层配色】必须完全保留参考海报上所有标题的字面文案（逐字一致，不得增删改字、不得翻译、不得改大小写或标点）；必须完全保留标题在画面中的位置、行数、对齐方式与排版层级（不得移动、合并或拆分标题区域）；必须重新设计标题的字体风格与配色，使其与下方场景主题的世界观和主色系统一；同一海报内主标题、促销高亮词/数字（FREE/TRILLION/BONUS/JACKPOT/%/纯数字）、副文案（如 up to）、CTA 按钮文字须使用不同配色层级，至少 3 种可区分的填充/发光色，禁止所有标题区块同一渐变色；含数字或 FREE 类促销词须用最高对比度高亮色；禁止照搬参考图标题的字体外观与颜色；参考图仅用于标题文案与排版参考，不复制参考图的背景、角色或整体配色。\n\n博弈游戏美术风格，老虎机手游广告，2D美式卡通风格，粗黑的闭合轮廓线，矢量插画，平涂赛璐璐风格，高饱和度，鲜艳的色彩，高对比度。\n\n场景：{theme_prompt}\n\n{title_style}';
 const BATCH_POSTER_PLAN_B_SCENE_BASE = '博弈游戏美术风格，老虎机手游广告，2D美式卡通风格，粗黑的闭合轮廓线，矢量插画，平涂赛璐璐风格，高饱和度，鲜艳的色彩，高对比度。';
 const BATCH_POSTER_DEFAULT_TITLE_STYLE_LAYERS = {
@@ -2159,7 +2159,7 @@ function exceedsFourKStandard(width, height){
 }
 const GENERATOR_ALL_RATIO_KEYS = ['square','portrait','landscape','portrait43','landscape43','story','wide','source','custom'];
 const GENERATOR_ALL_RESOLUTION_KEYS = ['1k','2k','4k','custom'];
-/** 图1：nano-banana-pro / 稳定版 aspectRatio 枚举 */
+/** 图1：nano-banana-pro / nano-banana-2 / 稳定版 aspectRatio 枚举 */
 const GENERATOR_NANO_RATIO_KEYS = ['1:1','16:9','9:16','4:3','3:4','3:2','2:3','5:4','4:5','21:9'];
 /** 图2：gpt-image-2 aspectRatio 枚举 */
 const GENERATOR_G2_RATIO_KEYS = ['1:1','2:3','3:2','4:5','5:4','4:3','3:4','16:9','9:16','21:9','9:21','2:1','1:2','3:1','1:3'];
@@ -2206,7 +2206,8 @@ function isGptImage2Model(model){
 }
 function isNanoBananaModel(model){
     const m = String(normalizeLegacyImageModelId(resolveImageModel(model) || '')).trim();
-    return /^nano-banana-pro/i.test(m);
+    // nano-banana-pro / nano-banana-pro-稳定 / nano-banana-2
+    return /^nano-banana-(pro|2)/i.test(m);
 }
 function normalizeLegacyImageModelId(value){
     const v = String(value || '').trim();
@@ -2453,13 +2454,10 @@ function clearGenRefPickHover(){
 function mountGenRefPickFlow(el){
     if(!el || el.querySelector('.gen-ref-pick-flow')) return;
     const host = el.querySelector('.image-preview-wrap, .gen-stage-frame, .media-card') || el;
-    const bloom = document.createElement('div');
-    bloom.className = 'gen-ref-pick-flow-bloom';
-    bloom.setAttribute('aria-hidden', 'true');
+    // 仅边缘流光环，不挂扫画面的 bloom
     const flow = document.createElement('div');
     flow.className = 'gen-ref-pick-flow';
     flow.setAttribute('aria-hidden', 'true');
-    host.appendChild(bloom);
     host.appendChild(flow);
 }
 function clearGenRefPick(opts={}){
@@ -18667,9 +18665,11 @@ function renderGenStageHtml(node){
         : (pendingN > 1
             ? (langIsEn() ? `Generating (${pendingN})…` : `生成中 (${pendingN})…`)
             : (langIsEn() ? 'Generating…' : '生成中…'));
-    // 收起态：底图保持可读，底部状态条（不糊整图、不居中小胶囊）
+    // 收起态：主图模糊 + 选参考同款白流光（左→右扫边）+ 底部状态条
     const busyOverlay = (isBusy && !showGrid)
         ? `<div class="gen-stage-busy gen-stage-busy-collapsed" aria-live="polite">
+            <div class="gen-stage-busy-flow-bloom" aria-hidden="true"></div>
+            <div class="gen-stage-busy-flow" aria-hidden="true"></div>
             <div class="gen-stage-busy-bar">
                 <span class="gen-stage-busy-dot" aria-hidden="true"></span>
                 <span class="gen-stage-busy-label">${escapeHtml(busyLabel)}</span>

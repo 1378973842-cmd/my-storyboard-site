@@ -181,7 +181,9 @@
         { "id": "AG79", "desc": "UI：保存到素材库/历史/快捷键/素材库等面板琥珀强调改冷炭灰（生图主按钮保留琥珀）", "status": "done", "priority": 100 },
         { "id": "AG80", "desc": "生图台：主图左上收藏；展开格左上收藏+下载、右上设为主图且设后立即收起；右键菜单左键外点关闭", "status": "done", "priority": 101 },
         { "id": "AG81", "desc": "修：生图控制台参考图 xx 删不掉——合成 id（nodeId:preview）映射回真实连线 from 再断线", "status": "done", "priority": 102 },
-        { "id": "AG82", "desc": "修：点参考图 xx 后缩略图残留——勿把按钮焦点当成打字而跳过 softRefresh", "status": "done", "priority": 103 }
+        { "id": "AG82", "desc": "修：点参考图 xx 后缩略图残留——勿把按钮焦点当成打字而跳过 softRefresh", "status": "done", "priority": 103 },
+        { "id": "AG83", "desc": "生图：下拉新增 nano-banana-2（RH g31-flash I2I/T2I，UI 能力对齐 nano-banana-pro）", "status": "done", "priority": 104 },
+        { "id": "AG84", "desc": "UI：生成中收起态主图模糊 + 选参考同款白流光扫边 + 底部状态条", "status": "done", "priority": 105 }
       ]
     },
     {

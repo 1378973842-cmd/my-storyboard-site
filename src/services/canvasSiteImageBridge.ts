@@ -3,9 +3,12 @@ import { v4 as uuidv4 } from "uuid";
 import { augmentImagePromptWithReferenceCostumeLock } from "../lib/nineGrid/nineGridCore.js";
 import {
   getG2TextToImagePath,
+  getNanoBanana2I2IPath,
+  getNanoBanana2T2IPath,
   getNineGridG2Path,
   getStoryboardImageEnv,
   isMidjourneyV81Model,
+  isNanoBanana2Model,
   isNiji7Model,
   RUNNINGHUB_G2_OFFICIAL_I2I_PATH,
   RUNNINGHUB_G2_RATIOS,
@@ -436,13 +439,22 @@ async function executeCanvasGeneration(
           pathOverride: g2Path,
         });
       } else {
-        console.log("[canvas-image/runninghub]", { resolution: image_size, aspect_ratio, images: imageUrls.length });
+        const nano2 = isNanoBanana2Model(model);
+        const nano2Path = nano2 ? getNanoBanana2I2IPath() : undefined;
+        console.log("[canvas-image/runninghub]", {
+          model,
+          resolution: image_size,
+          aspect_ratio,
+          images: imageUrls.length,
+          path: nano2Path || rhEnv.editPath,
+        });
         upstreamUrl = await runStoryboardRunningHubJob({
           prompt: enrichedPrompt,
           images: imageUrls,
           image_size,
           aspect_ratio,
           projectRoot: deps.projectRoot,
+          pathOverride: nano2Path,
         });
       }
     } else {
@@ -486,13 +498,23 @@ async function executeCanvasGeneration(
       const localUrl = await deps.persistImage(upstreamUrl, persistMeta);
       return { images: [localUrl], url: localUrl };
     }
-    console.log("[canvas-image/runninghub-t2i]", { model, resolution: image_size, aspect_ratio });
+    const nano2 = isNanoBanana2Model(model);
+    const nano2T2i = nano2 ? getNanoBanana2T2IPath() : undefined;
+    const nano2I2i = nano2 ? getNanoBanana2I2IPath() : undefined;
+    console.log("[canvas-image/runninghub-t2i]", {
+      model,
+      resolution: image_size,
+      aspect_ratio,
+      path: nano2T2i || rhEnv.t2iPath,
+    });
     const upstreamUrl = await runStoryboardRunningHubGenerateJob({
       prompt,
       image_size,
       aspect_ratio,
       references: [],
       projectRoot: deps.projectRoot,
+      pathOverride: nano2T2i,
+      pathOverrideI2I: nano2I2i,
     });
     const localUrl = await deps.persistImage(upstreamUrl, persistMeta);
     return { images: [localUrl], url: localUrl };

@@ -462,6 +462,7 @@ export function registerInfiniteCanvasRoutes(
         "gpt-image-2-稳定",
         "nano-banana-pro",
         "nano-banana-pro-稳定",
+        "nano-banana-2",
         "midjourneyV8.1",
         "niji7",
       ].filter(Boolean))

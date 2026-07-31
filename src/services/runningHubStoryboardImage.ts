@@ -18,6 +18,28 @@ export const RUNNINGHUB_G2_OFFICIAL_I2I_PATH = "/openapi/v2/rhart-image-g-2-offi
 /** gpt-image-2 文生图（无参考图时禁止误走 nano T2I） */
 export const RUNNINGHUB_G2_T2I_PATH = "/openapi/v2/rhart-image-g-2/text-to-image";
 export const RUNNINGHUB_G2_OFFICIAL_T2I_PATH = "/openapi/v2/rhart-image-g-2-official/text-to-image";
+/** nano-banana-2（Gemini 3.1 Flash / 低价渠道）图生图 */
+export const RUNNINGHUB_NANO2_I2I_PATH = "/openapi/v2/rhart-image-n-g31-flash/image-to-image";
+/** nano-banana-2 文生图（与 I2I 同渠道） */
+export const RUNNINGHUB_NANO2_T2I_PATH = "/openapi/v2/rhart-image-n-g31-flash/text-to-image";
+
+export function isNanoBanana2Model(model?: string): boolean {
+  return /^nano-banana-2$/i.test(String(model || "").trim());
+}
+
+export function getNanoBanana2I2IPath(): string {
+  return (
+    (process.env.STORYBOARD_IMAGE_NANO2_I2I_PATH ?? RUNNINGHUB_NANO2_I2I_PATH).trim() ||
+    RUNNINGHUB_NANO2_I2I_PATH
+  );
+}
+
+export function getNanoBanana2T2IPath(): string {
+  return (
+    (process.env.STORYBOARD_IMAGE_NANO2_T2I_PATH ?? RUNNINGHUB_NANO2_T2I_PATH).trim() ||
+    RUNNINGHUB_NANO2_T2I_PATH
+  );
+}
 
 export function getNineGridG2Path(): string {
   return (
@@ -405,6 +427,8 @@ export async function runStoryboardRunningHubJob(opts: {
   image_size?: unknown;
   aspect_ratio?: unknown;
   projectRoot: string;
+  /** 覆盖 STORYBOARD_IMAGE_EDIT_PATH（如 nano-banana-2 → g31-flash/image-to-image） */
+  pathOverride?: string;
 }): Promise<string> {
   const env = getStoryboardImageEnv();
   if (!env) throw new Error("未配置 STORYBOARD_IMAGE_API_KEY");
@@ -416,7 +440,8 @@ export async function runStoryboardRunningHubJob(opts: {
     resolution: mapRunningHubResolution(opts.image_size),
     aspectRatio: String(opts.aspect_ratio || "1:1").trim() || "1:1",
   };
-  return submitAndPollRunningHub(env, env.editPath, body, "edit-image/runninghub");
+  const path = (opts.pathOverride?.trim() || env.editPath).trim() || env.editPath;
+  return submitAndPollRunningHub(env, path, body, "edit-image/runninghub");
 }
 
 export async function runStoryboardRunningHubG2Job(opts: {
@@ -487,6 +512,9 @@ export async function runStoryboardRunningHubGenerateJob(opts: {
   aspect_ratio?: unknown;
   references?: Array<{ url?: string } | string>;
   projectRoot: string;
+  /** 文生图路径覆盖；有引用图时回落到 editPath（可用 pathOverrideI2I） */
+  pathOverride?: string;
+  pathOverrideI2I?: string;
 }): Promise<string> {
   const env = getStoryboardImageEnv();
   if (!env) throw new Error("未配置 STORYBOARD_IMAGE_API_KEY");
@@ -502,11 +530,14 @@ export async function runStoryboardRunningHubGenerateJob(opts: {
     const urls = cited.map((i) => refs[i]).filter(Boolean);
     const imageUrls = await resolveInputsToRunningHubUrls(urls, opts.projectRoot, env);
     const body = { prompt: opts.prompt.trim(), imageUrls, resolution, aspectRatio };
-    return submitAndPollRunningHub(env, env.editPath, body, "generate-image/runninghub-edit");
+    const path =
+      (opts.pathOverrideI2I?.trim() || env.editPath).trim() || env.editPath;
+    return submitAndPollRunningHub(env, path, body, "generate-image/runninghub-edit");
   }
 
   const body = { prompt: opts.prompt.trim(), resolution, aspectRatio };
-  return submitAndPollRunningHub(env, env.t2iPath, body, "generate-image/runninghub-t2i");
+  const path = (opts.pathOverride?.trim() || env.t2iPath).trim() || env.t2iPath;
+  return submitAndPollRunningHub(env, path, body, "generate-image/runninghub-t2i");
 }
 
 export const RUNNINGHUB_YOUCHUAN_RATIOS = ["1:1", "4:3", "3:2", "16:9", "3:4", "2:3", "9:16"] as const;

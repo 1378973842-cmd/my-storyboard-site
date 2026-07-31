@@ -246,3 +246,7 @@
 - AG80: gen-stage cover fav; tile fav+download left / set-primary right collapses; left-click dismisses result context menu
 - AG81: fix gen-dock ref xx unlink — map synthetic source id (nodeId:preview) to real connection.from
 - AG82: unlink ref thumb refreshes immediately — do not treat button focus as text editing skip
+- AG83: add nano-banana-2 (RH rhart-image-n-g31-flash i2i/t2i), same UI caps as nano-banana-pro
+- AG84: restore amber flowing waves on collapsed gen-stage busy overlay
+- AG84: gen-stage busy = blur cover + amber flowing waves + status bar
+- 选参考边缘流光：改 transform 扫光，去掉 @property/drop-shadow 卡顿

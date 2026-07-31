@@ -1,15 +1,17 @@
 # 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  1. **AG82**：点参考图 xx 后连线断了但缩略图还在——不是延迟，是 `syncImageGenDock` 把 dock 内按钮焦点当成「打字中」跳过了 softRefresh；改为仅 INPUT/TEXTAREA 才保护，并在 unlink 后强制刷参考列表。
-  2. AG81 合成 id 断线映射仍在。
-- **验证状态**：`node init.mjs` 通过。
-- **明日焦点**：硬刷新后点 xx，确认缩略图与连线同帧消失。
+  1. **选参考悬停**：仅边缘流光；卡顿已修（`transform` 扫光，去掉 `@property` 渐变 + `drop-shadow` 每帧重绘）。生成中未动。
+  2. AG84 / AG83 / 参考图 xx 仍在。
+- **验证状态**：硬刷后进选参考悬停，确认是否还卡。
+- **明日焦点**：导演确认流畅度。
 - **Blockers**：无。请导演 Git Commit。
 
 ## 新对话开场白（复制给 Agent）
 
 ```
 继续 gemini-deploy。先读 docs/HANDOFF.md。
-AG82 参考图 xx 后缩略图即时刷新已修。按导演下一条反馈继续。
+选参考边缘流光卡顿已按 transform 方案修。按导演下一条反馈继续。
 ```
+
+
