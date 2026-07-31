@@ -247,7 +247,7 @@ function CanvasHeaderCluster({
           aria-expanded={menuOpen}
           aria-haspopup="menu"
         >
-          <StudioBrandMark heroTone={heroTone} menuOpen={menuOpen} showName />
+          <StudioBrandMark heroTone={heroTone} menuOpen={menuOpen} showName={false} />
         </button>
 
         {meta ? (
@@ -428,12 +428,9 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
   const [coverNavGlass, setCoverNavGlass] = useState(false);
 
   const isOverlayNav = variant === 'overlay';
-  /** 四个主入口共用同一顶栏：左品牌锚点固定，中四链，右用户区 */
+  /** 主页/个人/画廊共用四链顶栏；画布页不显示中右区 */
   const isFourTabShell =
-    screen === 'cover' ||
-    screen === 'infinite-canvas' ||
-    screen === 'personal' ||
-    screen === 'gallery';
+    screen === 'cover' || screen === 'personal' || screen === 'gallery';
   const isCoverHomeNav = isOverlayNav && isFourTabShell && !subPage && !hideFeatureNav;
 
   useEffect(() => {

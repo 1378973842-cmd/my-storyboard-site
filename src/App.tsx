@@ -291,12 +291,8 @@ export default function App() {
   const showAdminUsersPage = screen === 'admin-users';
   const showAdminRhWorkflowsPage = screen === 'admin-rh-workflows';
   const showAdminHomeCarouselPage = screen === 'admin-home-carousel';
-  /** 四入口（主页/工作空间/个人/画廊）共用顶栏，不当作次级「返回」页 */
-  const showFourTabNav =
-    showCoverPage ||
-    showInfiniteCanvasPage ||
-    showPersonalPage ||
-    showGalleryPage;
+  /** 主页/个人/画廊共用四链顶栏；进入画布后不显示（只留左上品牌） */
+  const showFourTabNav = showCoverPage || showPersonalPage || showGalleryPage;
   const subPage = showMyFavoritesPage
     ? 'my-favorites'
     : showAdminUsersPage
