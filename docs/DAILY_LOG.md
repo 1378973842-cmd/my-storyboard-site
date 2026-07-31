@@ -252,3 +252,5 @@
 - 选参考边缘流光：改 transform 扫光，去掉 @property/drop-shadow 卡顿
 - 已部署线上 19c26fd：nano-banana-2 + 生成中/选参考流光
 - 主页 TapNow 改版：四导航、新建进画布、个人空间占位、管理员轮播
+- 已部署 969ed07：主页 TapNow 改版上线
+- 画布冷启动黑底 logo 开屏已实现（CanvasBootSplash），本地 init 通过，未 commit

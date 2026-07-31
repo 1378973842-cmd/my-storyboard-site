@@ -1,5 +1,6 @@
 import { memo, useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { InfiniteCanvasShell } from './InfiniteCanvasShell';
+import { BRAND_BOOT_SPLASH_SRC, CanvasBootSplash } from './CanvasBootSplash';
 import { installStudioI18n } from '../../lib/infiniteCanvas/studioI18n';
 import {
   disposeInfiniteCanvasEngine,
@@ -73,6 +74,17 @@ async function bootEngineOnRoot(root: HTMLDivElement): Promise<void> {
   }
 }
 
+/** 仅整页刷新（F5 / reload）才播开屏；SPA 从主页进画布、keep-alive 回切都不播 */
+function isDocumentReload(): boolean {
+  if (typeof performance === 'undefined') return false;
+  const nav = performance.getEntriesByType?.('navigation')?.[0] as
+    | PerformanceNavigationTiming
+    | undefined;
+  if (nav?.type === 'reload') return true;
+  const legacy = (performance as Performance & { navigation?: { type?: number } }).navigation;
+  return legacy?.type === 1;
+}
+
 export const InfiniteCanvas = memo(function InfiniteCanvas({
   shellActive = false,
 }: {
@@ -80,10 +92,18 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [materialLibraryOpen, setMaterialLibraryOpen] = useState(false);
+  /** 仅画布页整页刷新：黑底开屏视频；播完即渐隐揭开 */
+  const [bootSplash, setBootSplash] = useState(
+    () => Boolean(shellActive) && isDocumentReload(),
+  );
   const rootRef = useRef<HTMLDivElement | null>(null);
   /** 避免 boot 回调闭包读到过期的 shellActive=false，把已打开的 canvas 再次挂起 */
   const shellActiveRef = useRef(shellActive);
   shellActiveRef.current = shellActive;
+
+  const dismissBootSplash = useCallback(() => {
+    setBootSplash(false);
+  }, []);
 
   const applyShellActiveState = useCallback((active: boolean) => {
     const root = rootRef.current;
@@ -122,6 +142,16 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
     };
   }, []);
 
+  // 仅刷新场景预载开屏片
+  useLayoutEffect(() => {
+    if (!bootSplash) return;
+    const v = document.createElement('video');
+    v.preload = 'auto';
+    v.muted = true;
+    v.src = BRAND_BOOT_SPLASH_SRC;
+    v.load();
+  }, [bootSplash]);
+
   useLayoutEffect(() => {
     if (!shellActive) return;
 
@@ -154,6 +184,11 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
     };
   }, [shellActive]);
 
+  // 离开画布台前时收起；进入不重开（避免主页↔画布也播）
+  useLayoutEffect(() => {
+    if (!shellActive) setBootSplash(false);
+  }, [shellActive]);
+
   const assignRootRef = useCallback((node: HTMLDivElement | null) => {
     rootRef.current = node;
     if (!node) {
@@ -178,6 +213,7 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : '画布初始化失败');
+        setBootSplash(false);
       });
   }, [applyShellActiveState]);
 
@@ -202,6 +238,10 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
         open={materialLibraryOpen}
         onOpenChange={setMaterialLibraryOpen}
         active={shellActive}
+      />
+      <CanvasBootSplash
+        visible={bootSplash && shellActive}
+        onCanDismiss={dismissBootSplash}
       />
     </div>
   );

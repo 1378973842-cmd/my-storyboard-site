@@ -12,12 +12,15 @@ const SLIDE_MS = 560;
 export function HomeCarouselStrip() {
   const [items, setItems] = useState<HomeCarouselItem[]>([]);
   const [index, setIndex] = useState(0);
-  const [animate, setAnimate] = useState(true);
   const [reducedMotion, setReducedMotion] = useState(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const trackRef = useRef<HTMLDivElement | null>(null);
   const [cardW, setCardW] = useState(0);
   const timerRef = useRef<number | null>(null);
   const indexRef = useRef(0);
+  /** 循环跳回原点期间禁止过渡，避免「向右滑回去」的反向动画 */
+  const suppressTransitionRef = useRef(false);
+  const wrappingRef = useRef(false);
 
   useEffect(() => {
     indexRef.current = index;
@@ -33,24 +36,30 @@ export function HomeCarouselStrip() {
 
   useEffect(() => {
     let cancelled = false;
-    const load = () => {
+    const load = (opts?: { resetIndex?: boolean }) => {
       void fetchHomeCarousel()
         .then((list) => {
-          if (!cancelled) {
-            setItems(list);
+          if (cancelled) return;
+          setItems(list);
+          // 重新拉取时禁止带动画跳回 0，否则会突然反向滑
+          if (opts?.resetIndex) {
+            suppressTransitionRef.current = true;
             setIndex(0);
-            setAnimate(true);
+            requestAnimationFrame(() => {
+              suppressTransitionRef.current = false;
+            });
           }
         })
         .catch(() => {
           if (!cancelled) setItems([]);
         });
     };
-    load();
-    window.addEventListener('focus', load);
+    load({ resetIndex: true });
+    const onFocus = () => load({ resetIndex: false });
+    window.addEventListener('focus', onFocus);
     return () => {
       cancelled = true;
-      window.removeEventListener('focus', load);
+      window.removeEventListener('focus', onFocus);
     };
   }, []);
 
@@ -63,7 +72,6 @@ export function HomeCarouselStrip() {
   const measure = useCallback(() => {
     const vp = viewportRef.current;
     if (!vp) return;
-    // 用精确内容宽，避免亚像素导致「三张装不满」
     const w = vp.getBoundingClientRect().width;
     if (w <= 0) return;
     const next = Math.floor(((w - GAP_PX * (VISIBLE - 1)) / VISIBLE) * 100) / 100;
@@ -88,6 +96,27 @@ export function HomeCarouselStrip() {
 
   const stepPx = cardW > 0 ? cardW + GAP_PX : 0;
 
+  const applyTransform = useCallback(
+    (nextIndex: number, withTransition: boolean) => {
+      const el = trackRef.current;
+      if (!el || stepPx <= 0) return;
+      const enable =
+        withTransition && !suppressTransitionRef.current && !reducedMotion && !wrappingRef.current;
+      el.style.transitionProperty = 'transform';
+      el.style.transitionTimingFunction = 'cubic-bezier(0.22, 1, 0.36, 1)';
+      el.style.transitionDuration = enable ? `${SLIDE_MS}ms` : '0ms';
+      el.style.transform = `translate3d(${-nextIndex * stepPx}px, 0, 0)`;
+    },
+    [reducedMotion, stepPx],
+  );
+
+  // index / step 变化时同步位移；循环复位走 0ms
+  useLayoutEffect(() => {
+    if (stepPx <= 0) return;
+    const withTransition = !suppressTransitionRef.current && !wrappingRef.current;
+    applyTransform(index, withTransition);
+  }, [applyTransform, index, stepPx]);
+
   const clearTimer = () => {
     if (timerRef.current != null) {
       window.clearInterval(timerRef.current);
@@ -99,7 +128,7 @@ export function HomeCarouselStrip() {
     clearTimer();
     if (reducedMotion || items.length <= 1 || stepPx <= 0) return;
     timerRef.current = window.setInterval(() => {
-      setAnimate(true);
+      if (wrappingRef.current) return;
       setIndex((i) => i + 1);
     }, STEP_MS);
   }, [items.length, reducedMotion, stepPx]);
@@ -109,25 +138,71 @@ export function HomeCarouselStrip() {
     return clearTimer;
   }, [armTimer]);
 
-  const go = (delta: number) => {
-    if (!items.length || stepPx <= 0) return;
-    setAnimate(true);
-    setIndex((i) => {
-      if (delta < 0 && i <= 0) return 0;
-      return i + delta;
+  const snapLoopToStart = useCallback(() => {
+    if (wrappingRef.current) return;
+    wrappingRef.current = true;
+    suppressTransitionRef.current = true;
+
+    const el = trackRef.current;
+    if (el) {
+      el.style.transitionDuration = '0ms';
+      el.style.transform = 'translate3d(0, 0, 0)';
+      // 强制重绘，确保浏览器吃掉 0ms 跳变，不会带着旧 transition 反向滑
+      void el.offsetHeight;
+    }
+
+    setIndex(0);
+    indexRef.current = 0;
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        wrappingRef.current = false;
+        suppressTransitionRef.current = false;
+      });
     });
-    armTimer();
-  };
+  }, []);
 
   const onTransitionEnd = (e: React.TransitionEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return;
     if (e.propertyName !== 'transform') return;
-    if (indexRef.current < items.length) return;
-    setAnimate(false);
-    setIndex(0);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => setAnimate(true));
-    });
+    if (wrappingRef.current) return;
+    // 滑进克隆区后，无动画跳回真实起点（视觉上仍是左滑循环）
+    if (indexRef.current >= items.length) {
+      snapLoopToStart();
+    }
+  };
+
+  const go = (delta: number) => {
+    if (!items.length || stepPx <= 0 || wrappingRef.current) return;
+    if (delta < 0) {
+      // 从 0 再往左：先无动画跳到克隆尾，再左滑一格，避免反向
+      if (indexRef.current <= 0) {
+        wrappingRef.current = true;
+        suppressTransitionRef.current = true;
+        const el = trackRef.current;
+        const tail = items.length;
+        if (el) {
+          el.style.transitionDuration = '0ms';
+          el.style.transform = `translate3d(${-tail * stepPx}px, 0, 0)`;
+          void el.offsetHeight;
+        }
+        indexRef.current = tail;
+        setIndex(tail);
+        requestAnimationFrame(() => {
+          wrappingRef.current = false;
+          suppressTransitionRef.current = false;
+          setIndex(tail - 1);
+          indexRef.current = tail - 1;
+        });
+        armTimer();
+        return;
+      }
+      setIndex((i) => i - 1);
+      armTimer();
+      return;
+    }
+    setIndex((i) => i + 1);
+    armTimer();
   };
 
   if (!items.length) return null;
@@ -153,7 +228,6 @@ export function HomeCarouselStrip() {
             className="cover-home-carousel-nav is-prev"
             aria-label="上一张"
             onClick={() => go(-1)}
-            disabled={index <= 0}
           >
             <ChevronLeft className="h-5 w-5" strokeWidth={1.75} />
           </button>
@@ -169,14 +243,9 @@ export function HomeCarouselStrip() {
           <div ref={viewportRef} className="cover-home-carousel-viewport">
             {cardW > 0 ? (
               <div
+                ref={trackRef}
                 className="cover-home-carousel-track"
-                style={{
-                  gap: GAP_PX,
-                  transform: `translate3d(${-index * stepPx}px, 0, 0)`,
-                  transitionProperty: 'transform',
-                  transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
-                  transitionDuration: animate && !reducedMotion ? `${SLIDE_MS}ms` : '0ms',
-                }}
+                style={{ gap: GAP_PX }}
                 onTransitionEnd={onTransitionEnd}
               >
                 {trackItems.map((item, i) => (

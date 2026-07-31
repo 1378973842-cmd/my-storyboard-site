@@ -22,6 +22,10 @@ import { cn } from '../lib/utils';
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
+/** 主页 / 工作空间 / 个人 / 画廊：左上品牌锚点统一（对齐工作空间） */
+const OVERLAY_BRAND_CLASS =
+  'pointer-events-auto z-[2] absolute left-3 top-3 md:left-5 md:top-3.5 max-w-[min(560px,calc(100vw-1.5rem))]';
+
 export type StudioNavId = 'cover' | 'storyboard' | 'canvas' | 'grid' | 'editor' | 'director';
 
 type NavItem = {
@@ -243,7 +247,7 @@ function CanvasHeaderCluster({
           aria-expanded={menuOpen}
           aria-haspopup="menu"
         >
-          <StudioBrandMark heroTone={heroTone} menuOpen={menuOpen} showName={false} />
+          <StudioBrandMark heroTone={heroTone} menuOpen={menuOpen} showName />
         </button>
 
         {meta ? (
@@ -330,10 +334,13 @@ function NavBrand({
     <button
       type="button"
       onClick={onHome}
-      className={cn('group flex items-center shrink-0 min-w-0 cursor-pointer', className)}
+      className={cn(
+        'studio-top-brand-hit group flex items-center shrink-0 min-w-0 cursor-pointer',
+        className,
+      )}
       aria-label={`${BRAND_NAME} — 返回首页`}
     >
-      <StudioBrandMark heroTone={heroTone} />
+      <StudioBrandMark heroTone={heroTone} showName />
     </button>
   );
 }
@@ -421,7 +428,13 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
   const [coverNavGlass, setCoverNavGlass] = useState(false);
 
   const isOverlayNav = variant === 'overlay';
-  const isCoverHomeNav = isOverlayNav && active === 'cover' && !subPage && !hideFeatureNav;
+  /** 四个主入口共用同一顶栏：左品牌锚点固定，中四链，右用户区 */
+  const isFourTabShell =
+    screen === 'cover' ||
+    screen === 'infinite-canvas' ||
+    screen === 'personal' ||
+    screen === 'gallery';
+  const isCoverHomeNav = isOverlayNav && isFourTabShell && !subPage && !hideFeatureNav;
 
   useEffect(() => {
     if (!isCoverHomeNav) {
@@ -502,23 +515,15 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
         <CanvasHeaderCluster
           onHome={handleHome}
           heroTone={isOverlayNav}
-          className={cn(
-            'pointer-events-auto z-[2]',
-            isOverlayNav
-              ? 'absolute left-3 top-3 md:left-5 md:top-3.5 max-w-[min(560px,calc(100vw-1.5rem))]'
-              : 'shrink-0',
-          )}
+          className={cn(isOverlayNav ? OVERLAY_BRAND_CLASS : 'pointer-events-auto shrink-0')}
         />
       ) : (
         <NavBrand
           onHome={handleHome}
           heroTone={isOverlayNav}
           className={cn(
-            'pointer-events-auto',
-            subPage ? 'z-[4]' : 'z-[2]',
-            isOverlayNav
-              ? 'absolute left-6 top-5 md:left-10 md:top-7 lg:left-14'
-              : 'shrink-0',
+            isOverlayNav ? OVERLAY_BRAND_CLASS : 'pointer-events-auto shrink-0',
+            subPage && 'z-[4]',
           )}
         />
       )}
@@ -547,13 +552,13 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
       {isCoverHomeNav ? (
         <nav
           className={cn(
-            'pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-6 pt-5 md:px-10 md:pt-7 lg:px-14',
+            'pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-3 pt-3 md:px-5 md:pt-3.5',
           )}
           aria-label={`${BRAND_NAME} navigation`}
         >
           <div
             className={cn(
-              'pointer-events-auto absolute left-1/2 top-5 z-[3] hidden -translate-x-1/2 items-center gap-6 md:top-7 md:flex md:gap-8 lg:gap-10',
+              'pointer-events-auto absolute left-1/2 top-3 z-[3] hidden -translate-x-1/2 items-center gap-6 md:top-3.5 md:flex md:gap-8 lg:gap-10',
               coverNavGlass && 'cover-glass-nav cover-hero-nav-pill !px-5 !py-2.5',
             )}
           >

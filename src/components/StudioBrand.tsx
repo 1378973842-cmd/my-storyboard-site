@@ -23,7 +23,7 @@ export function StudioBrandMark({
   className?: string;
   heroTone?: boolean;
   menuOpen?: boolean;
-  /** 画布顶栏只留图标，不显示 DreamGrid */
+  /** 顶栏是否显示 DreamGrid 字标（工作空间/主页默认显示） */
   showName?: boolean;
 }) {
   return (
@@ -88,7 +88,7 @@ export const StudioBrand: React.FC<StudioBrandProps> = ({
           className="studio-brand-mark-logo"
           draggable={false}
         />
-        <span className="cover-display text-[1.125rem] tracking-[-0.03em]">
+        <span className="cover-nav-brand text-[1.05rem]">
           {BRAND_NAME}
         </span>
       </span>

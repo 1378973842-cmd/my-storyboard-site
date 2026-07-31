@@ -29,6 +29,7 @@ export const InfiniteCanvasPage = memo(function InfiniteCanvasPage({
           origin="center"
           enterKey={enterKey}
           delay={0.05}
+          fade={false}
           preserveChildren
           className="flex flex-1 flex-col min-h-0 w-full"
         >

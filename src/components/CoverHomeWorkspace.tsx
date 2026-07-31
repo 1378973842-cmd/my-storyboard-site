@@ -117,7 +117,7 @@ export function CoverHomeWorkspace() {
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ ...spring, delay: 0.06 }}
-          className="cover-home-project-row mt-6 flex flex-wrap items-start gap-3.5 md:mt-7 md:gap-4"
+          className="cover-home-project-row mt-6 md:mt-7"
         >
           <button
             type="button"

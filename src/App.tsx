@@ -291,19 +291,21 @@ export default function App() {
   const showAdminUsersPage = screen === 'admin-users';
   const showAdminRhWorkflowsPage = screen === 'admin-rh-workflows';
   const showAdminHomeCarouselPage = screen === 'admin-home-carousel';
+  /** 四入口（主页/工作空间/个人/画廊）共用顶栏，不当作次级「返回」页 */
+  const showFourTabNav =
+    showCoverPage ||
+    showInfiniteCanvasPage ||
+    showPersonalPage ||
+    showGalleryPage;
   const subPage = showMyFavoritesPage
     ? 'my-favorites'
-    : showPersonalPage
-      ? 'personal'
-      : showGalleryPage
-        ? 'gallery'
-        : showAdminUsersPage
-          ? 'admin-users'
-          : showAdminRhWorkflowsPage
-            ? 'admin-rh-workflows'
-            : showAdminHomeCarouselPage
-              ? 'admin-home-carousel'
-              : undefined;
+    : showAdminUsersPage
+      ? 'admin-users'
+      : showAdminRhWorkflowsPage
+        ? 'admin-rh-workflows'
+        : showAdminHomeCarouselPage
+          ? 'admin-home-carousel'
+          : undefined;
 
   /** 回到首页时确保画布层不挡滚轮（z-index + body 标记） */
   useEffect(() => {
@@ -656,7 +658,7 @@ export default function App() {
       <StudioTopNav
         active={resolveStudioNavActive(screen)}
         variant="overlay"
-        hideFeatureNav={!showCoverPage}
+        hideFeatureNav={!showFourTabNav}
         subPage={subPage}
         showCanvasBrandMenu={showInfiniteCanvasPage && !showCoverPage}
         onHome={showInfiniteCanvasPage && !showCoverPage ? handleCanvasExitHome : undefined}

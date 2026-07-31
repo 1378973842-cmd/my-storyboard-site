@@ -186,7 +186,8 @@
         { "id": "AG84", "desc": "UI：生成中收起态主图模糊 + 选参考同款白流光扫边 + 底部状态条", "status": "done", "priority": 105 },
         { "id": "HOME1", "desc": "主页 TapNow 布局：顶栏 主页/工作空间/个人空间/公共画廊 + 保留背景品牌", "status": "done", "priority": 106 },
         { "id": "HOME2", "desc": "主页：中央输入框（未接模型）+ 新建项目直接进画布 + 最近 3 项目", "status": "done", "priority": 107 },
-        { "id": "HOME3", "desc": "个人空间占位页 + 管理员主页轮播 API/管理页 + 底部自动滑动条", "status": "done", "priority": 108 }
+        { "id": "HOME3", "desc": "个人空间占位页 + 管理员主页轮播 API/管理页 + 底部自动滑动条", "status": "done", "priority": 108 },
+        { "id": "HOME4", "desc": "仅画布页整页刷新：黑底 LHZ→logo 视频开屏；播完渐隐揭开（SPA 进出不播）", "status": "done", "priority": 109 }
       ]
     },
     {

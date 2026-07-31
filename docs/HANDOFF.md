@@ -1,18 +1,16 @@
 # 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  1. **主页改版（TapNow 布局）已落地**：封面单屏 = 背景图 + 中央输入框 + 新建项目/最近 3 画布 + 底部管理员轮播；顶栏四导航（主页 / 工作空间 / 个人空间 / 公共画廊）。
-  2. **新建项目**：`POST /api/canvases` 默认名后直接 `openCanvas`，命名留在画布内。
-  3. **个人空间**：占位页「即将开放」。
-  4. **主页轮播**：`GET /api/home-carousel` + admin POST/DELETE；头像菜单「主页轮播」管理。
-  5. `node init.mjs` 已通过（typecheck + build）。
-- **验证状态**：本地 `init.mjs` 绿；尚未部署。
-- **明日焦点**：导演硬刷主页手感；接主输入模型；个人空间真实数据；部署上线。
+  1. **已部署上线** `969ed07`：主页 TapNow 布局（四导航、新建进画布、工作空间=选画布闸门、个人空间占位、16:9 三图轮播 + 管理员拖拽更新）。
+  2. **本会话本地完成（未提交）**：画布冷启动开屏改为即梦 LHZ→logo 视频（`public/brand-boot-splash.mp4`）；双门闩=视频播完（停末帧）+ 画布视觉就绪再淡出。
+  3. 自检：`node scripts/check-canvas-boot-splash.mjs` + typecheck 通过。
+- **验证状态**：本地 typecheck 通过；开屏尚未 commit / 部署。
+- **明日焦点**：导演硬刷画布验收开屏视频；按需 commit + deploy；主输入模型接线；个人空间真实数据。
 - **Blockers**：无。
 
 ## 新对话开场白（复制给 Agent）
 
 ```
 继续 gemini-deploy。先读 docs/HANDOFF.md。
-主页 TapNow 改版已完成（HOME1–HOME3），待 Git Commit / 部署。按导演下一条反馈继续。
+969ed07 已上线；画布刷新 logo 开屏已在本地实现（未 commit）。按导演下一条反馈继续。
 ```

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700&family=Manrope:wght@400;500;600;700&family=Noto+Serif:ital,wght@0,300;0,400;0,700;1,300;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700&family=Manrope:wght@400;500;600;700&family=Noto+Serif:ital,wght@0,300;0,400;0,700;1,300;1,400&family=Poppins:wght@600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
@@ -6,6 +6,8 @@
   --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-headline: "Noto Serif", serif;
   --font-label: "Manrope", sans-serif;
+  /* 品牌字标：TapNow 式几何无衬线 */
+  --font-brand: "Poppins", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   
   --color-primary: #ffb866;
@@ -765,14 +767,12 @@ html[data-theme="light"] body {
   }
 
   .cover-nav-brand {
-    font-family:
-      -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Segoe UI", var(--font-sans),
-      sans-serif;
-    font-size: 0.8125rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    line-height: 1.2;
+    font-family: var(--font-brand);
+    font-size: 0.9375rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-transform: none;
+    line-height: 1.15;
     white-space: nowrap;
   }
 
@@ -800,7 +800,7 @@ html[data-theme="light"] body {
 
   @media (min-width: 768px) {
     .cover-nav-brand {
-      font-size: 0.875rem;
+      font-size: 1rem;
     }
     .studio-brand-mark-logo {
       width: 34px;
@@ -810,7 +810,7 @@ html[data-theme="light"] body {
   }
 
   .cover-nav-brand-hero {
-    color: #ffffff;
+    color: #e5e2e1;
     font-weight: 700;
     text-shadow:
       0 1px 2px rgba(0, 0, 0, 0.92),
@@ -853,11 +853,17 @@ html[data-theme="light"] body {
     transition: transform 0.18s cubic-bezier(0.22, 0.61, 0.36, 1);
   }
 
-  /* 画布顶栏：logo ≈ 两行字总高；与标题拉开体量差（参考稿） */
-  .studio-canvas-header-logo .studio-brand-mark-logo {
+  /* 叠层顶栏品牌：主页/工作空间/个人/画廊共用工作空间尺寸 */
+  .cover-hero-nav-bar .studio-top-brand-hit .studio-brand-mark-logo,
+  .cover-hero-nav-bar .studio-canvas-header-logo .studio-brand-mark-logo {
     width: 40px;
     height: 40px;
     border-radius: 12px;
+  }
+
+  .cover-hero-nav-bar .studio-top-brand-hit .cover-nav-brand,
+  .cover-hero-nav-bar .studio-canvas-header-logo .cover-nav-brand {
+    font-size: 1rem;
   }
 
   .studio-canvas-header-logo:hover {
@@ -1025,7 +1031,7 @@ html[data-theme="light"] body {
     font-family:
       -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", var(--font-body),
       sans-serif;
-    font-size: 0.8125rem;
+    font-size: 0.9375rem;
     font-weight: 500;
     letter-spacing: 0.01em;
     line-height: 1.2;
@@ -1035,7 +1041,7 @@ html[data-theme="light"] body {
 
   @media (min-width: 768px) {
     .cover-nav-text-link {
-      font-size: 0.875rem;
+      font-size: 1.0625rem;
     }
   }
 
@@ -1184,10 +1190,25 @@ html[data-theme="light"] body {
     transform: translateY(-1px);
   }
 
+  /* 与上方输入框同宽：四列等分，左右贴齐，不再固定宽左漂 */
+  .cover-home-project-row {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.875rem;
+  }
+
+  @media (max-width: 767px) {
+    .cover-home-project-row {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.75rem;
+    }
+  }
+
   .cover-home-project-card {
     display: flex;
     min-width: 0;
-    width: 188px;
+    width: 100%;
     aspect-ratio: 1 / 1;
     flex-direction: column;
     gap: 0.55rem;
@@ -1207,7 +1228,6 @@ html[data-theme="light"] body {
 
   @media (min-width: 768px) {
     .cover-home-project-card {
-      width: 204px;
       border-radius: 1.55rem;
       padding: 0.9rem;
     }
