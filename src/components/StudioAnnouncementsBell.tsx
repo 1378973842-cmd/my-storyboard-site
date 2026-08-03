@@ -39,7 +39,7 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
     const el = triggerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    setMenuPos({ top: rect.bottom + 8, right: Math.max(16, window.innerWidth - rect.right) });
+    setMenuPos({ top: rect.bottom + 10, right: Math.max(12, window.innerWidth - rect.right) });
   }, []);
 
   const load = useCallback(async () => {
@@ -130,19 +130,18 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
     }
   }, [body, posting, title]);
 
-  const btnClass = cn(
-    'cover-nav-icon-btn cover-nav-icon-btn-muted relative inline-flex h-9 w-9 items-center justify-center rounded-full',
-    open && 'cover-nav-icon-btn-active',
-  );
-
   return (
     <div className="relative shrink-0">
       <button
         ref={triggerRef}
         type="button"
-        className={btnClass}
-        title="站内公告"
-        aria-label={unreadCount > 0 ? `公告，${unreadCount} 条未读` : '公告'}
+        className={cn(
+          'relative inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#242424] text-[#e5e2e1]/75 transition-colors',
+          'outline outline-0.5 outline-white/10',
+          open ? 'bg-[#2c2c2c] text-[#e5e2e1] outline-[#ffb866]/35' : 'hover:bg-[#2c2c2c] hover:text-[#e5e2e1]',
+        )}
+        title="消息"
+        aria-label={unreadCount > 0 ? `消息，${unreadCount} 条未读` : '消息'}
         onClick={(e) => {
           e.stopPropagation();
           if (!open) syncMenuPos();
@@ -150,9 +149,9 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
           setComposeOpen(false);
         }}
       >
-        <Bell className="h-4 w-4" aria-hidden />
+        <Bell className="h-4 w-4" strokeWidth={1.7} aria-hidden />
         {unreadCount > 0 ? (
-          <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#ff6b6b] shadow-[0_0_6px_rgba(255,107,107,.65)]" />
+          <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[#ff6b6b]" />
         ) : null}
       </button>
 
@@ -165,115 +164,121 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
                   ref={menuRef}
                   initial={{ opacity: 0, y: 10, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 8, scale: 0.98 }}
+                  exit={{ opacity: 0, y: 6, scale: 0.98 }}
                   transition={spring}
-                  className="fixed z-[200] w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-[20px] bg-[#1c1b1b]/92 backdrop-blur-[28px] shadow-[0_24px_64px_rgba(0,0,0,.45)]"
+                  className="fixed z-[200] w-[min(300px,calc(100vw-2rem))] overflow-hidden rounded-2xl bg-[#1a1a1a] shadow-[0_20px_56px_-16px_rgba(0,0,0,.7)]"
                   style={{
                     top: menuPos.top,
                     right: menuPos.right,
-                    outline: '0.5px solid rgba(255,184,102,.14)',
+                    outline: '0.5px solid rgba(69,70,77,.28)',
                     outlineOffset: '-0.5px',
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
-            <div className="flex items-center justify-between gap-3 px-4 py-3">
-              <span className="font-serif text-[15px] tracking-[-0.02em] text-[#e5e2e1]">站内公告</span>
-              {isAdmin ? (
-                <button
-                  type="button"
-                  onClick={() => setComposeOpen((v) => !v)}
-                  className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold text-[#ffb866] transition-colors hover:bg-[#ffb866]/10"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  发布公告
-                </button>
-              ) : null}
-            </div>
-
-            {composeOpen && isAdmin ? (
-              <div className="space-y-2 border-t border-white/[0.06] px-4 py-3">
-                <input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="标题（例如：RH 工作流已更新）"
-                  className="w-full rounded-xl bg-[#131313]/80 px-3 py-2 text-[12px] text-[#e5e2e1] placeholder:text-[#e5e2e1]/35 focus:outline-none"
-                  style={{ outline: '0.5px solid rgba(255,255,255,.08)', outlineOffset: '-0.5px' }}
-                />
-                <textarea
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  placeholder="写给同事看的更新说明…"
-                  rows={4}
-                  className="w-full resize-none rounded-xl bg-[#131313]/80 px-3 py-2 text-[12px] leading-relaxed text-[#e5e2e1] placeholder:text-[#e5e2e1]/35 focus:outline-none"
-                  style={{ outline: '0.5px solid rgba(255,255,255,.08)', outlineOffset: '-0.5px' }}
-                />
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setComposeOpen(false)}
-                    className="rounded-full px-3 py-1.5 text-[11px] font-bold text-[#e5e2e1]/55 hover:text-[#e5e2e1]"
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    disabled={posting || !title.trim() || !body.trim()}
-                    onClick={() => void onPost()}
-                    className="rounded-full bg-[#ffb866] px-3.5 py-1.5 text-[11px] font-bold text-[#1a1410] disabled:opacity-45"
-                  >
-                    {posting ? '发布中…' : '发布'}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="max-h-[min(360px,50vh)] overflow-y-auto border-t border-white/[0.06]">
-              {loading && !items.length ? (
-                <p className="px-4 py-6 text-center text-[12px] text-[#e5e2e1]/45">加载中…</p>
-              ) : null}
-              {error ? (
-                <p className="px-4 py-4 text-[12px] text-[#fca5a5]">{error}</p>
-              ) : null}
-              {!loading && !items.length && !error ? (
-                <p className="px-4 py-8 text-center text-[12px] text-[#e5e2e1]/40">暂无公告</p>
-              ) : null}
-              {items.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => void onOpenItem(item)}
-                  className={cn(
-                    'w-full px-4 py-3 text-left transition-colors hover:bg-white/[0.04]',
-                    !item.read && 'bg-[#ffb866]/[0.04]',
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <span
-                      className={cn(
-                        'text-[13px] font-bold leading-snug',
-                        item.read ? 'text-[#e5e2e1]/42' : 'text-[#e5e2e1]',
-                      )}
-                    >
-                      {item.title}
-                    </span>
-                    {!item.read ? (
-                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#ff6b6b]" />
+                  <div className="flex items-center justify-between gap-3 px-4 pt-4 pb-3">
+                    <div className="min-w-0">
+                      <p className="text-[14px] font-semibold text-[#e5e2e1]">消息</p>
+                      <p className="mt-0.5 text-[12px] text-[#e5e2e1]/40">
+                        {unreadCount > 0 ? `${unreadCount} 条未读` : '暂无未读'}
+                      </p>
+                    </div>
+                    {isAdmin ? (
+                      <button
+                        type="button"
+                        onClick={() => setComposeOpen((v) => !v)}
+                        className="inline-flex items-center gap-1 text-[13px] font-medium text-[#ffb866] transition-opacity hover:opacity-80"
+                      >
+                        <Plus className="h-4 w-4" strokeWidth={1.75} />
+                        {composeOpen ? '收起' : '发布'}
+                      </button>
                     ) : null}
                   </div>
-                  <p
-                    className={cn(
-                      'mt-1 line-clamp-3 text-[11px] leading-relaxed',
-                      item.read ? 'text-[#e5e2e1]/32' : 'text-[#e5e2e1]/68',
-                    )}
-                  >
-                    {item.body}
-                  </p>
-                  <p className="mt-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[#e5e2e1]/30">
-                    {item.author_name} · {formatAnnouncementTime(item.created_at)}
-                  </p>
-                </button>
-              ))}
-            </div>
+
+                  {composeOpen && isAdmin ? (
+                    <div className="mx-3 mb-2 space-y-2.5 rounded-xl bg-[#242424] px-3.5 py-3">
+                      <input
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                        placeholder="标题"
+                        className="w-full rounded-lg bg-[#1a1a1a] px-3 py-2 text-[12px] text-[#e5e2e1] placeholder:text-[#e5e2e1]/30 focus:outline-none"
+                        style={{ outline: '0.5px solid rgba(69,70,77,.35)', outlineOffset: '-0.5px' }}
+                      />
+                      <textarea
+                        value={body}
+                        onChange={(e) => setBody(e.target.value)}
+                        placeholder="公告内容…"
+                        rows={3}
+                        className="w-full resize-none rounded-lg bg-[#1a1a1a] px-3 py-2 text-[12px] leading-relaxed text-[#e5e2e1] placeholder:text-[#e5e2e1]/30 focus:outline-none"
+                        style={{ outline: '0.5px solid rgba(69,70,77,.35)', outlineOffset: '-0.5px' }}
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setComposeOpen(false)}
+                          className="rounded-lg px-2.5 py-1.5 text-[11px] text-[#e5e2e1]/45 hover:text-[#e5e2e1]"
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          disabled={posting || !title.trim() || !body.trim()}
+                          onClick={() => void onPost()}
+                          className="rounded-lg bg-[#ffb866] px-3 py-1.5 text-[11px] font-semibold text-[#1a1410] disabled:opacity-45"
+                        >
+                          {posting ? '发布中…' : '发布'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="mx-3 h-px bg-white/[0.07]" />
+
+                  <div className="max-h-[min(320px,46vh)] overflow-y-auto py-1.5">
+                    {loading && !items.length ? (
+                      <p className="px-4 py-8 text-center text-[12px] text-[#e5e2e1]/40">加载中…</p>
+                    ) : null}
+                    {error ? <p className="px-4 py-4 text-[12px] text-[#fca5a5]">{error}</p> : null}
+                    {!loading && !items.length && !error ? (
+                      <p className="px-4 py-10 text-center text-[12px] text-[#e5e2e1]/40">暂无消息</p>
+                    ) : null}
+                    {items.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => void onOpenItem(item)}
+                        className="flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.04]"
+                      >
+                        <span
+                          className={cn(
+                            'mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full',
+                            item.read ? 'bg-transparent' : 'bg-[#ffb866]',
+                          )}
+                          aria-hidden
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span
+                            className={cn(
+                              'block text-[13px] font-medium leading-snug',
+                              item.read ? 'text-[#e5e2e1]/45' : 'text-[#e5e2e1]',
+                            )}
+                          >
+                            {item.title}
+                          </span>
+                          <span
+                            className={cn(
+                              'mt-1 block line-clamp-2 text-[12px] leading-relaxed',
+                              item.read ? 'text-[#e5e2e1]/28' : 'text-[#e5e2e1]/55',
+                            )}
+                          >
+                            {item.body}
+                          </span>
+                          <span className="mt-1.5 block text-[11px] text-[#e5e2e1]/28">
+                            {item.author_name} · {formatAnnouncementTime(item.created_at)}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                 </motion.div>
               ) : null}
             </AnimatePresence>,

@@ -58,6 +58,7 @@ import { resolveStudioNavActive } from './shell/resolveStudioNavActive';
 import { StudioHeroShell } from './components/StudioHeroShell';
 import { StudioConvergePiece } from './components/motion/StudioConverge';
 import { CoverPageTransition } from './components/motion/CoverPageTransition';
+import { installShellAutohideScrollbar } from './lib/shellAutohideScrollbar';
 
 const ReferenceItem = ({ 
   asset, 
@@ -291,8 +292,12 @@ export default function App() {
   const showAdminUsersPage = screen === 'admin-users';
   const showAdminRhWorkflowsPage = screen === 'admin-rh-workflows';
   const showAdminHomeCarouselPage = screen === 'admin-home-carousel';
-  /** 主页/个人/画廊共用四链顶栏；进入画布后不显示（只留左上品牌） */
-  const showFourTabNav = showCoverPage || showPersonalPage || showGalleryPage;
+  /** 主页/工作空间/个人/画廊共用四链顶栏（进到具体画布板后由 TopNav 再藏） */
+  const showFourTabNav =
+    showCoverPage ||
+    showInfiniteCanvasPage ||
+    showPersonalPage ||
+    showGalleryPage;
   const subPage = showMyFavoritesPage
     ? 'my-favorites'
     : showAdminUsersPage
@@ -309,6 +314,9 @@ export default function App() {
       document.body.dataset.infiniteCanvasEditor = '0';
     }
   }, [showCoverPage]);
+
+  /** 主壳细滚动条：静止隐藏 */
+  useEffect(() => installShellAutohideScrollbar(), []);
 
   const jumpByNotice = (notice: SystemNotice) => {
     const action = notice.action;

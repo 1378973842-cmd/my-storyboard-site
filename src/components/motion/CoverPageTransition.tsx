@@ -49,7 +49,7 @@ export function CoverPageTransition({
       return null;
     }
     return (
-      <div className="fixed inset-0 z-[60] h-dvh max-h-dvh overflow-x-hidden overflow-y-auto overscroll-y-auto custom-scrollbar bg-[#0e0e0e] pointer-events-auto" data-cover-scroll-root="">
+      <div className="fixed inset-0 z-[60] h-dvh max-h-dvh overflow-x-hidden overflow-y-auto overscroll-y-auto shell-slim-scrollbar bg-[#0e0e0e] pointer-events-auto" data-cover-scroll-root="">
         <CoverPage
           onStart={onStart}
           onOpenImageEditor={onOpenImageEditor}
@@ -66,7 +66,7 @@ export function CoverPageTransition({
       data-cover-scroll-root=""
       className={cn(
         'fixed inset-0 overflow-x-hidden bg-[#0e0e0e]',
-        'h-dvh max-h-dvh overflow-y-auto overscroll-y-auto custom-scrollbar',
+        'h-dvh max-h-dvh overflow-y-auto overscroll-y-auto shell-slim-scrollbar',
       )}
       initial={false}
       animate={{

@@ -408,7 +408,14 @@ function ToolbarFlyout({
             setOpen((value) => !value);
           }}
         >
-          <span className="toolbar-flyout-trigger-spin" aria-hidden="true">
+          <span
+            className={
+              triggerClassName?.includes('toolbar-flyout-trigger-primary')
+                ? 'toolbar-flyout-trigger-spin'
+                : 'toolbar-flyout-trigger-spin dock-icon-anim dock-icon-anim--bot'
+            }
+            aria-hidden="true"
+          >
             <i data-lucide={triggerIcon} className="w-4 h-4"></i>
           </span>
           <span>{triggerLabel}</span>
@@ -494,7 +501,26 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                     aria-pressed={materialLibraryOpen}
                     onClick={() => onMaterialLibraryOpenChange?.(!materialLibraryOpen)}
                   >
-                      <i data-lucide="library" className="w-4 h-4"></i>
+                      <span className="dock-icon-anim dock-icon-anim--library" aria-hidden="true">
+                        {/* 自定义书架：右侧书脊可倾倒叠到左侧书上 */}
+                        <svg
+                          className="dock-lib-svg"
+                          viewBox="0 0 24 24"
+                          width="18"
+                          height="18"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path className="dock-lib-book" d="M4 4v16" />
+                          <path className="dock-lib-book" d="M8 8v12" />
+                          <path className="dock-lib-book dock-lib-book--mid" d="M12 6v14" />
+                          {/* 稍靠右，倒下后书脚仍在邻书右侧，书脊靠上去而非底边重叠 */}
+                          <path className="dock-lib-book dock-lib-book--tip" d="M17.5 6v14" />
+                        </svg>
+                      </span>
                       <span data-i18n="canvas.materialLibrary">素材库</span>
                   </button>
                   <span className="canvas-side-dock-sep" aria-hidden="true" />
@@ -505,7 +531,9 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                     aria-label="历史"
                     onClick={() => canvasWin["openCanvasHistoryHub"]?.()}
                   >
-                      <History className="w-4 h-4" aria-hidden />
+                      <span className="dock-icon-anim dock-icon-anim--history" aria-hidden="true">
+                        <History className="w-4 h-4" aria-hidden />
+                      </span>
                       <span>历史</span>
                   </button>
                   <button
@@ -516,7 +544,9 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                     aria-pressed={shortcutsOpen}
                     onClick={() => setShortcutsOpen((value) => !value)}
                   >
-                      <Keyboard className="w-4 h-4" aria-hidden />
+                      <span className="dock-icon-anim dock-icon-anim--keyboard" aria-hidden="true">
+                        <Keyboard className="w-4 h-4" aria-hidden />
+                      </span>
                       <span>快捷键</span>
                   </button>
               </motion.div>

@@ -15,6 +15,42 @@ import { cn } from '../lib/utils';
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
+function toMs(ts?: number): number {
+  const raw = Number(ts || 0);
+  if (!raw) return 0;
+  return raw < 10000000000 ? raw * 1000 : raw;
+}
+
+/** 标题右侧短日期，对齐参考站 (MMDD) */
+function formatHomeParenDate(ts?: number): string {
+  const ms = toMs(ts);
+  if (!ms) return '';
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return '';
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `(${m}${d})`;
+}
+
+/** 与画布闸门「编辑于…」口径一致的相对时间 */
+function formatHomeEditedLabel(ts?: number): string {
+  const ms = toMs(ts);
+  if (!ms) return '编辑于 --';
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return '编辑于 --';
+  const diff = Date.now() - date.getTime();
+  if (diff < 0) return '编辑于 刚刚';
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return '编辑于 几秒前';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `编辑于 ${min} 分钟前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `编辑于 ${hr} 小时前`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `编辑于 ${day} 天前`;
+  return `编辑于 ${date.toLocaleDateString('zh-CN')}`;
+}
+
 export function CoverHomeWorkspace() {
   const { openInfiniteCanvas, warmInfiniteCanvas } = useShellNavigation();
   const user = useAuthStore((s) => s.user);
@@ -140,31 +176,41 @@ export function CoverHomeWorkspace() {
             ? Array.from({ length: 3 }).map((_, i) => (
                 <div key={`sk-${i}`} className="cover-home-project-card cover-home-project-skeleton" />
               ))
-            : recent.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => void handleOpen(item.id)}
-                  disabled={openingId === item.id}
-                  className="cover-home-project-card"
-                >
-                  <div
-                    className={cn(
-                      'cover-home-project-thumb',
-                      !item.preview_url && 'cover-home-project-thumb-empty',
-                    )}
+            : recent.map((item) => {
+                const parenDate = formatHomeParenDate(item.created_at || item.updated_at);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => void handleOpen(item.id)}
+                    disabled={openingId === item.id}
+                    className="cover-home-project-card"
                   >
-                    {item.preview_url ? (
-                      <img src={item.preview_url} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <span>{item.icon || '🧩'}</span>
-                    )}
-                  </div>
-                  <span className="cover-home-project-title truncate">
-                    {openingId === item.id ? '打开中…' : item.title || '未命名画布'}
-                  </span>
-                </button>
-              ))}
+                    <div
+                      className={cn(
+                        'cover-home-project-thumb',
+                        !item.preview_url && 'cover-home-project-thumb-empty',
+                      )}
+                    >
+                      {item.preview_url ? (
+                        <img src={item.preview_url} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <span>{item.icon || '🧩'}</span>
+                      )}
+                    </div>
+                    <span className="cover-home-project-copy">
+                      <span className="cover-home-project-title truncate">
+                        {openingId === item.id
+                          ? '打开中…'
+                          : `${item.title || '未命名画布'}${parenDate ? ` ${parenDate}` : ''}`}
+                      </span>
+                      <span className="cover-home-project-meta">
+                        {formatHomeEditedLabel(item.updated_at || item.created_at)}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
 
           {!loadingRecent && user && recent.length === 0 ? (
             <div className="cover-home-project-card cover-home-project-empty pointer-events-none">

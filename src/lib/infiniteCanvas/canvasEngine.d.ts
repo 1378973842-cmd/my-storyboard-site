@@ -16,6 +16,9 @@ export function subscribeCanvasViewportScale(listener: (scale: number) => void):
 export function resetCanvasViewportZoom(): void;
 export function zoomCanvasViewport(factor: number): void;
 export function fitCanvasViewportAll(): void;
+export function isCanvasMinimapVisible(): boolean;
+export function setCanvasMinimapVisible(visible: boolean): boolean;
+export function toggleCanvasMinimapVisible(): boolean;
 export function refreshInfiniteCanvasLayout(): void;
 export function syncCanvasTopbarDom(): void;
 export function setCanvasBoardBackground(color: string): void;

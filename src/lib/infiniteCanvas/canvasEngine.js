@@ -620,6 +620,7 @@ function bindDomElements(root) {
   nodesEl = g('nodes');
   minimap = g('minimap');
   minimapContent = g('minimapContent');
+  applyMinimapVisibility();
   linksEl = g('links');
   linkControlsEl = g('linkControls');
   dropOverlay = g('dropOverlay');
@@ -760,6 +761,35 @@ let dragBoard = null;
 let minimapDrag = false;
 let minimapState = null;
 let minimapRenderQueued = false;
+const MINIMAP_VISIBLE_KEY = 'infinite-canvas-minimap-visible';
+function readMinimapVisiblePref(){
+    try {
+        const v = localStorage.getItem(MINIMAP_VISIBLE_KEY);
+        if(v === '0' || v === 'false') return false;
+    } catch(_) {}
+    return true;
+}
+let minimapVisible = readMinimapVisiblePref();
+function applyMinimapVisibility(){
+    const el = minimap || (typeof document !== 'undefined' ? document.getElementById('minimap') : null);
+    if(el) el.classList.toggle('is-hidden', !minimapVisible);
+}
+export function isCanvasMinimapVisible(){
+    return minimapVisible;
+}
+export function setCanvasMinimapVisible(visible){
+    minimapVisible = Boolean(visible);
+    try { localStorage.setItem(MINIMAP_VISIBLE_KEY, minimapVisible ? '1' : '0'); } catch(_) {}
+    applyMinimapVisibility();
+    if(minimapVisible) scheduleMinimapRender();
+    if(typeof window !== 'undefined'){
+        window.dispatchEvent(new CustomEvent('canvas-minimap-visibility', { detail: { visible: minimapVisible } }));
+    }
+    return minimapVisible;
+}
+export function toggleCanvasMinimapVisible(){
+    return setCanvasMinimapVisible(!minimapVisible);
+}
 let linkGeomQueued = false;
 let linkGeomFilter = null;
 let layoutLinkRefreshToken = 0;
@@ -889,22 +919,6 @@ function patchNodeDisabledVisual(id){
             else headRight.insertAdjacentHTML('beforeend', html);
         } else if(!disabled && badge){
             badge.remove();
-        }
-        if(node.type === 'imageBatch'){
-            const toggle = headRight.querySelector('[data-ibatch-head-toggle]');
-            if(toggle){
-                const state = imageBatchHeadToggleState(node);
-                const title = imageBatchHeadToggleTitle(node, state);
-                toggle.className = `node-enable-toggle ${state}`;
-                toggle.title = title;
-                toggle.setAttribute('aria-label', title);
-                toggle.disabled = state === 'empty';
-                const icon = toggle.querySelector('i[data-lucide]');
-                if(icon){
-                    icon.setAttribute('data-lucide', state === 'off' ? 'toggle-left' : 'toggle-right');
-                    refreshIcons(toggle);
-                }
-            }
         }
     }
 }
@@ -2384,19 +2398,26 @@ const RH_MAX_BASE_H = 720;
 /** 对齐上游参考图时的展示宽度上限，避免撑爆画布 */
 const GEN_MATCH_MAX_W = 960;
 /**
- * 画布媒体标准最长边（world px）。
- * 对标画布 51%：屏幕最长边约 450px → world ≈ 450/0.51 ≈ 882（此前 680≈347px@51%）。
+ * 画布媒体标准最短边（world px）。
+ * 对标竞品：1:1 边长 = 任意比例图的最短边（如 9:16 的宽）。
+ * 取 496，使 9:16 最长边仍约 882（旧最长边标准 @51%≈450px 屏）。
  */
-const CANVAS_MEDIA_MAX_EDGE = 882;
-function canvasFitByMaxEdge(nw, nh, maxEdge = CANVAS_MEDIA_MAX_EDGE){
+const CANVAS_MEDIA_MIN_EDGE = 496;
+/** @deprecated 旧名：曾表示最长边；现为最短边别名，避免散落调用断裂 */
+const CANVAS_MEDIA_MAX_EDGE = CANVAS_MEDIA_MIN_EDGE;
+function canvasFitByMinEdge(nw, nh, minEdge = CANVAS_MEDIA_MIN_EDGE){
     const W = Math.max(1, Number(nw) || 1);
     const H = Math.max(1, Number(nh) || 1);
-    const edge = Math.max(48, Number(maxEdge) || CANVAS_MEDIA_MAX_EDGE);
-    const scale = edge / Math.max(W, H);
+    const edge = Math.max(48, Number(minEdge) || CANVAS_MEDIA_MIN_EDGE);
+    const scale = edge / Math.min(W, H);
     return {
         w: Math.max(48, Math.round(W * scale)),
         h: Math.max(48, Math.round(H * scale)),
     };
+}
+/** @deprecated 改走最短边归一；保留函数名兼容旧调用 */
+function canvasFitByMaxEdge(nw, nh, edge = CANVAS_MEDIA_MIN_EDGE){
+    return canvasFitByMinEdge(nw, nh, edge);
 }
 function parseAspectRatioParts(ar){
     if(typeof ar === 'number' && ar > 0) return {nw: ar, nh: 1};
@@ -2404,9 +2425,9 @@ function parseAspectRatioParts(ar){
     if(m) return {nw: Number(m[1]) || 1, nh: Number(m[2]) || 1};
     return {nw: 1, nh: 1};
 }
-function canvasFitFromAspect(ar, maxEdge = CANVAS_MEDIA_MAX_EDGE){
+function canvasFitFromAspect(ar, minEdge = CANVAS_MEDIA_MIN_EDGE){
     const {nw, nh} = parseAspectRatioParts(ar);
-    return canvasFitByMaxEdge(nw, nh, maxEdge);
+    return canvasFitByMinEdge(nw, nh, minEdge);
 }
 let imageGenDockEl = null;
 let imageGenDockNodeId = null;
@@ -2954,9 +2975,9 @@ function genStageGridCols(count){
     // 趋近方阵：列数 ≈ ceil(√n)，少图不留空列；上限 8，避免锁死 4 列变成细长条
     return Math.min(8, Math.max(2, Math.min(n, Math.ceil(Math.sqrt(n)))));
 }
-/** 展开：每格按比例最长边归一，整体按列数铺开 */
+/** 展开：每格按比例最短边归一，整体按列数铺开 */
 function genStageGridCellWidth(node){
-    return canvasFitFromAspect(genStageTileAspectCss(node), CANVAS_MEDIA_MAX_EDGE).w;
+    return canvasFitFromAspect(genStageTileAspectCss(node), CANVAS_MEDIA_MIN_EDGE).w;
 }
 function genStageGridLayoutWidth(count, node=null){
     const cols = genStageGridCols(count);
@@ -2977,14 +2998,15 @@ function genStageDisplayWidth(node, urls){
     }
     if(!node._userSized){
         const up = upstreamReferenceNodeSize(node);
-        const maxEdge = (up.w > 0)
-            ? Math.max(48, Math.min(GEN_MATCH_MAX_W, Math.max(up.w, up.h || 0)))
-            : CANVAS_MEDIA_MAX_EDGE;
+        // 对齐上游：取其最短边，保证 1:1 边长 = 9:16 宽
+        const minEdge = (up.w > 0)
+            ? Math.max(48, Math.min(GEN_MATCH_MAX_W, Math.min(up.w, up.h || up.w)))
+            : CANVAS_MEDIA_MIN_EDGE;
         // 有结果图自然比例时优先；否则用控制台比例设定
         // 叠卡扇出溢出绘制，不占节点宽——否则右端口会被垫宽拉远
         return (node._stageAspect?.nw && node._stageAspect?.nh)
-            ? canvasFitByMaxEdge(node._stageAspect.nw, node._stageAspect.nh, maxEdge).w
-            : canvasFitFromAspect(genStageTileAspectCss(node), maxEdge).w;
+            ? canvasFitByMinEdge(node._stageAspect.nw, node._stageAspect.nh, minEdge).w
+            : canvasFitFromAspect(genStageTileAspectCss(node), minEdge).w;
     }
     return GENERATOR_BASE_W;
 }
@@ -3651,17 +3673,19 @@ function minimapBounds(){
     return {x:minX - pad, y:minY - pad, w:Math.max(1, maxX - minX + pad * 2), h:Math.max(1, maxY - minY + pad * 2)};
 }
 function scheduleMinimapRender({ positionsOnly = false } = {}){
+    if(!minimapVisible) return;
     if(minimapRenderQueued) return;
     minimapRenderQueued = true;
     requestAnimationFrame(() => {
         minimapRenderQueued = false;
+        if(!minimapVisible) return;
         if(dragBoard) updateMinimapViewport();
         else if(dragNode || (positionsOnly && minimapState)) updateMinimapNodePositions();
         else renderMinimap();
     });
 }
 function updateMinimapNodePositions(){
-    if(!minimapContent || !minimapState) return;
+    if(!minimapVisible || !minimapContent || !minimapState) return;
     const {bounds, scale, ox, oy} = minimapState;
     (nodes || []).forEach(n => {
         const el = minimapContent.querySelector(`.minimap-node[data-node-id="${CSS.escape(n.id)}"]`);
@@ -3675,7 +3699,7 @@ function updateMinimapNodePositions(){
     updateMinimapViewport();
 }
 function renderMinimap(){
-    if(!minimapContent || !minimapViewport) return;
+    if(!minimapVisible || !minimapContent || !minimapViewport) return;
     const bounds = minimapBounds();
     const cw = minimapContent.clientWidth || 172;
     const ch = minimapContent.clientHeight || 110;
@@ -5300,6 +5324,7 @@ function buildCanvasItemElement(item, { collectionId = '' } = {}){
     const hasPreview = previewUrl && !isVideoUrl(previewUrl) && !isAudioUrl(previewUrl);
     const createdLabel = formatCanvasCreatedLabel(item.created_at);
     const editedLabel = formatCanvasEditedLabel(item.updated_at || item.created_at);
+    const parenDate = formatCanvasDateParen(item.created_at || item.updated_at);
     const typeLabel = langIsEn() ? 'Project' : '项目';
     row.className = `canvas-item ${isSmartCanvas ? 'smart-canvas' : ''} ${canvas?.id === item.id ? 'active' : ''} ${isDeletePending ? 'is-delete-pending' : ''}`;
     row.dataset.canvasId = item.id;
@@ -5312,7 +5337,9 @@ function buildCanvasItemElement(item, { collectionId = '' } = {}){
                     ${isSmartCanvas ? `<span class="canvas-kind-chip">${tr('canvas.smartCanvasShort')}</span>` : ''}
                 </div>
                 <div class="canvas-card-foot">
-                    <div class="canvas-card-title">${escapeHtml(item.title)}</div>
+                    <div class="canvas-card-title">
+                        <span class="canvas-card-title-text">${escapeHtml(item.title)}</span>${parenDate ? ` <span class="canvas-card-date">${escapeHtml(parenDate)}</span>` : ''}
+                    </div>
                     <div class="canvas-card-edited">${trashMode ? `${tr('canvas.deletedAt')} ${formatCanvasTime(item.deleted_at)}` : editedLabel}</div>
                 </div>
             </div>
@@ -5601,7 +5628,8 @@ async function setCanvasIcon(id, icon, event){
 function startTitleEdit(id, titleEl){
     if(!titleEl || titleEl.querySelector('input')) return;
     const item = canvases.find(c => c.id === id);
-    const current = item?.title || titleEl.textContent || '';
+    const nameEl = titleEl.querySelector('.canvas-card-title-text');
+    const current = item?.title || nameEl?.textContent || titleEl.textContent || '';
     const input = document.createElement('input');
     input.type = 'text';
     input.maxLength = 80;
@@ -7793,7 +7821,7 @@ const GROUP_RESIZE_HANDLE_INSET = 32;
 const GROUP_DEFAULT_W = 380;
 const GROUP_DEFAULT_H_IMAGE_BATCH = 300;
 const GROUP_DEFAULT_H_PROMPT_GROUP = 380;
-const GROUP_PANEL_HEAD_IMAGE_BATCH = 156;
+const GROUP_PANEL_HEAD_IMAGE_BATCH = 72;
 const GROUP_PANEL_HEAD_PROMPT_GROUP = 228;
 function groupPanelHeadInset(group){
     if(!group) return GROUP_DROP_HEAD_INSET;
@@ -11831,12 +11859,11 @@ function renderNode(node){
         ? `<span class="node-disabled-badge" title="${escapeAttr(tr('canvas.nodeDisableHint'))}">${escapeHtml(tr('canvas.nodeDisabled'))}</span>`
         : '';
     const promptGroupHeadToggle = node.type === 'promptGroup' ? promptGroupHeadToggleHtml(node) : '';
-    const imageBatchHeadToggle = node.type === 'imageBatch' ? imageBatchHeadToggleHtml(node) : '';
     const headIcon = NODE_TYPE_ICON[node.type] || 'zap';
     const rhLiveDot = node.type === 'rh'
         ? `<span class="rh-status-dot rh-head-dot ${(agentPendingCount(node.id) > 0 || Boolean(node.running)) ? 'is-on' : ''}" aria-hidden="true"></span>`
         : '';
-    el.innerHTML = `<div class="node-head"><span class="node-head-icon"><i data-lucide="${headIcon}" class="w-3 h-3"></i></span><span class="node-title">${displayTitle}</span>${rhLiveDot}<div style="display:flex;align-items:center;gap:8px;margin-left:auto">${promptGroupHeadToggle}${imageBatchHeadToggle}${disabledBadge}${statusHtml}<button type="button" class="node-delete-btn text-gray-300 hover:text-red-500" aria-label="${escapeAttr(tr('common.delete'))}"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
+    el.innerHTML = `<div class="node-head"><span class="node-head-icon"><i data-lucide="${headIcon}" class="${node.type === 'imageBatch' ? 'w-5 h-5' : 'w-3 h-3'}"></i></span><span class="node-title">${displayTitle}</span>${rhLiveDot}<div style="display:flex;align-items:center;gap:8px;margin-left:auto">${promptGroupHeadToggle}${disabledBadge}${statusHtml}<button type="button" class="node-delete-btn text-gray-300 hover:text-red-500" aria-label="${escapeAttr(tr('common.delete'))}"><i data-lucide="x" class="${node.type === 'imageBatch' ? 'w-5 h-5' : 'w-4 h-4'}"></i></button></div></div>`;
     const deleteBtn = el.querySelector('.node-delete-btn');
     if(deleteBtn){
         deleteBtn.onmousedown = e => e.stopPropagation();
@@ -11848,16 +11875,6 @@ function renderNode(node){
             headToggle.onclick = e => {
                 e.stopPropagation();
                 togglePromptGroupAllChildren(node);
-            };
-        }
-    }
-    if(node.type === 'imageBatch'){
-        const headToggle = el.querySelector('[data-ibatch-head-toggle]');
-        if(headToggle){
-            headToggle.onmousedown = e => e.stopPropagation();
-            headToggle.onclick = e => {
-                e.stopPropagation();
-                toggleNodesDisabled([node.id]);
             };
         }
     }
@@ -12073,31 +12090,9 @@ function renderNode(node){
         bindFrameStackUpload(body, node);
     }
     if(node.type === 'imageBatch') {
-        const allImgs = imageBatchAllChildImages(node);
-        const activeImgs = allImgs.filter(isNodeEnabled);
-        const skippedN = allImgs.length - activeImgs.length;
-        let text = tr('canvas.groupEmpty');
-        if(allImgs.length){
-            text = `${activeImgs.length} ${tr('canvas.imageCount')}`;
-            if(skippedN > 0) text += ` · ${trf('canvas.imageBatchSkippedMeta', {n: skippedN})}`;
-        }
-        body.innerHTML = `
-            <div class="image-batch-body">
-                <div class="image-batch-bar">
-                    <div class="image-batch-meta">${escapeHtml(text)}</div>
-                    <div class="image-batch-actions">
-                        <button type="button" class="image-batch-icon-btn image-batch-upload-btn" title="${escapeAttr(langIsEn() ? 'Upload images' : '上传图片')}" aria-label="${escapeAttr(langIsEn() ? 'Upload images' : '上传图片')}">
-                            <i data-lucide="image-plus" class="w-3.5 h-3.5"></i>
-                        </button>
-                        <button type="button" class="image-batch-icon-btn group-tidy-btn" title="${escapeAttr(tr('canvas.organizeGroupChildrenHint'))}" aria-label="${escapeAttr(tr('canvas.organizeGroupChildren'))}">
-                            <i data-lucide="layout-grid" class="w-3.5 h-3.5"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
+        // 顶栏只留标题/删除；张数提示、上传/整理钮、整组禁用开关已去掉（右键仍可禁单张；拖入仍可上传）
+        body.innerHTML = `<div class="image-batch-body"></div>`;
         bindImageBatchUpload(body, node);
-        bindGroupTidyButton(body, node);
     }
     if(node.type === 'generator' || node.type === 'msgen' || node.type === 'video'){
         const scaleWrap = document.createElement('div');
@@ -12653,26 +12648,6 @@ function promptGroupHeadToggleHtml(node){
     const title = promptGroupHeadToggleTitle(node, state);
     const icon = state === 'off' ? 'toggle-left' : 'toggle-right';
     return `<button type="button" class="node-enable-toggle ${state}" data-pg-head-toggle="${escapeAttr(node.id)}" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}" ${state === 'empty' ? 'disabled' : ''}><i data-lucide="${icon}" class="w-4 h-4"></i></button>`;
-}
-function imageBatchHeadToggleState(batch){
-    const all = imageBatchAllChildImages(batch);
-    if(!all.length) return 'empty';
-    if(imageBatchEffectivelyDisabled(batch)) return 'off';
-    const active = all.filter(isNodeEnabled).length;
-    if(active === all.length) return 'on';
-    return 'mixed';
-}
-function imageBatchHeadToggleTitle(batch, state){
-    if(state === 'empty') return langIsEn() ? 'No images inside group' : '组内无图片';
-    if(state === 'off') return langIsEn() ? 'Enable image group (restore all)' : '恢复图片组（全部子图启用）';
-    if(state === 'mixed') return langIsEn() ? 'Disable all images in group' : '禁用整组（全部子图）';
-    return langIsEn() ? 'Disable image group (all images)' : '禁用图片组（全部子图）';
-}
-function imageBatchHeadToggleHtml(node){
-    const state = imageBatchHeadToggleState(node);
-    const title = imageBatchHeadToggleTitle(node, state);
-    const icon = state === 'off' ? 'toggle-left' : 'toggle-right';
-    return `<button type="button" class="node-enable-toggle ${state}" data-ibatch-head-toggle="${escapeAttr(node.id)}" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}" ${state === 'empty' ? 'disabled' : ''}><i data-lucide="${icon}" class="w-4 h-4"></i></button>`;
 }
 function setPromptGroupChildEnabled(prompt, enabled){
     if(!prompt || prompt.type !== 'prompt') return;
@@ -18027,8 +18002,8 @@ function fitImageNodeToNaturalAspect(node, el, img){
     if(!nw || !nh) return;
     // 手动拉过大小则只保留框内 contain，不改写比例驱动尺寸
     if(node._userSized) return;
-    // 最长边 = CANVAS_MEDIA_MAX_EDGE：9:16 / 16:9 只差方向，忽略源图像素分辨率
-    const {w, h} = canvasFitByMaxEdge(nw, nh, CANVAS_MEDIA_MAX_EDGE);
+    // 最短边 = CANVAS_MEDIA_MIN_EDGE：1:1 边长 = 9:16 宽；忽略源图像素分辨率
+    const {w, h} = canvasFitByMinEdge(nw, nh, CANVAS_MEDIA_MIN_EDGE);
     const prevW = Number(node.w) || 0;
     const prevH = Number(node.h) || 0;
     node.w = w;
@@ -28955,7 +28930,7 @@ function isEditableTarget(target){
 }
 /** 导航地图：点击/拖拽定位视口（挂在 wireBoardEvents，避免模块加载时 minimap 仍为 null） */
 function onMinimapNavigateDown(e){
-    if(!canvas || e.button !== 0 || isImageEditOpen()) return;
+    if(!canvas || !minimapVisible || e.button !== 0 || isImageEditOpen()) return;
     if(!e.target.closest?.('#minimap, .minimap')) return;
     // 点在地图空白/节点/视口框上都可导航
     e.preventDefault();

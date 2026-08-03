@@ -49,7 +49,7 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
   if (!shellActive) return null;
 
   return (
-    <div className="fixed inset-0 z-[62] min-h-[100dvh] overflow-y-auto overscroll-y-auto bg-[#0e0e0e] text-[#e5e2e1] custom-scrollbar">
+    <div className="shell-slim-scrollbar fixed inset-0 z-[62] min-h-[100dvh] overflow-y-auto overscroll-y-auto bg-[#0e0e0e] text-[#e5e2e1]">
       <main className="mx-auto max-w-6xl px-6 pb-10 pt-[5.5rem] md:px-10 md:pt-24">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
           <span className="font-label text-[10px] font-semibold uppercase tracking-[0.28em] text-primary/80">

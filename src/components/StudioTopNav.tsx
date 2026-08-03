@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { motion } from 'motion/react';
+import { LayoutGroup, motion } from 'motion/react';
 import {
   ArrowLeft,
   Home,
+  Images,
+  Layers2,
   Pencil,
+  UserRound,
   Workflow,
   type LucideIcon,
 } from 'lucide-react';
@@ -24,7 +27,7 @@ const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
 /** 主页 / 工作空间 / 个人 / 画廊：左上品牌锚点统一（对齐工作空间） */
 const OVERLAY_BRAND_CLASS =
-  'pointer-events-auto z-[2] absolute left-3 top-3 md:left-5 md:top-3.5 max-w-[min(560px,calc(100vw-1.5rem))]';
+  'pointer-events-auto z-[2] absolute left-3 top-5 md:left-5 md:top-6 max-w-[min(560px,calc(100vw-1.5rem))]';
 
 export type StudioNavId = 'cover' | 'storyboard' | 'canvas' | 'grid' | 'editor' | 'director';
 
@@ -74,6 +77,7 @@ type CoverCenterNavId = 'home' | 'workspace' | 'personal' | 'gallery';
 type CoverCenterNavItem = {
   id: CoverCenterNavId;
   label: string;
+  icon: LucideIcon;
   onClick: () => void;
   active: boolean;
 };
@@ -325,10 +329,12 @@ function NavBrand({
   onHome,
   heroTone,
   className,
+  showName = true,
 }: {
   onHome: () => void;
   heroTone?: boolean;
   className?: string;
+  showName?: boolean;
 }) {
   return (
     <button
@@ -340,12 +346,26 @@ function NavBrand({
       )}
       aria-label={`${BRAND_NAME} — 返回首页`}
     >
-      <StudioBrandMark heroTone={heroTone} showName />
+      <StudioBrandMark heroTone={heroTone} showName={showName} />
     </button>
   );
 }
 
-function CoverCenterLink({ item }: { item: CoverCenterNavItem }) {
+const COVER_NAV_ORDER: CoverCenterNavId[] = ['home', 'workspace', 'personal', 'gallery'];
+
+function CoverCenterLink({
+  item,
+  pillLayoutId,
+  flowDir,
+  flowing,
+}: {
+  item: CoverCenterNavItem;
+  pillLayoutId: string;
+  /** 1=向右滑，-1=向左滑；仅切换瞬间播一次流光 */
+  flowDir: 1 | -1;
+  flowing: boolean;
+}) {
+  const Icon = item.icon;
   return (
     <button
       type="button"
@@ -356,7 +376,17 @@ function CoverCenterLink({ item }: { item: CoverCenterNavItem }) {
         item.active ? 'cover-nav-text-link-active' : 'cover-nav-text-link-muted',
       )}
     >
-      {item.label}
+      {item.active ? (
+        <motion.span
+          layoutId={pillLayoutId}
+          className={cn('cover-nav-glass-pill', flowing && 'is-flowing')}
+          style={{ ['--cover-nav-flow' as string]: flowDir }}
+          transition={{ type: 'spring', stiffness: 380, damping: 34, mass: 0.85 }}
+          aria-hidden
+        />
+      ) : null}
+      <Icon className="cover-nav-text-link-icon relative z-[1]" strokeWidth={1.7} aria-hidden />
+      <span className="cover-nav-text-link-label relative z-[1]">{item.label}</span>
     </button>
   );
 }
@@ -426,11 +456,36 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
   const user = useAuthStore((s) => s.user);
   const isAdmin = useAuthStore((s) => s.isAdmin());
   const [coverNavGlass, setCoverNavGlass] = useState(false);
+  /** 已打开具体画布板时隐藏四链，选画布闸门仍保留 */
+  const [canvasBoardOpen, setCanvasBoardOpen] = useState(() => isInfiniteCanvasEditorOpen());
+  const [coverNavFlowDir, setCoverNavFlowDir] = useState<1 | -1>(1);
+  const [coverNavFlowing, setCoverNavFlowing] = useState(false);
+  const coverNavPrevIdRef = useRef<CoverCenterNavId | null>(null);
+  const coverNavFlowTimerRef = useRef<number | null>(null);
 
   const isOverlayNav = variant === 'overlay';
-  /** 主页/个人/画廊共用四链顶栏；画布页不显示中右区 */
+  useEffect(() => {
+    const sync = () => setCanvasBoardOpen(isInfiniteCanvasEditorOpen());
+    sync();
+    const obs = new MutationObserver(sync);
+    obs.observe(document.body, {
+      attributes: true,
+      attributeFilter: ['data-infinite-canvas-editor', 'data-canvas-open'],
+    });
+    window.addEventListener('focus', sync);
+    return () => {
+      obs.disconnect();
+      window.removeEventListener('focus', sync);
+    };
+  }, []);
+
+  /** 主页/工作空间/个人/画廊共用四链；进板后只留左上 logo */
   const isFourTabShell =
-    screen === 'cover' || screen === 'personal' || screen === 'gallery';
+    (screen === 'cover' ||
+      screen === 'personal' ||
+      screen === 'gallery' ||
+      screen === 'infinite-canvas') &&
+    !(screen === 'infinite-canvas' && canvasBoardOpen);
   const isCoverHomeNav = isOverlayNav && isFourTabShell && !subPage && !hideFeatureNav;
 
   useEffect(() => {
@@ -457,6 +512,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
     {
       id: 'home',
       label: '主页',
+      icon: Home,
       onClick: () => {
         openCover();
         const scroller = document.querySelector('[data-cover-scroll-root]');
@@ -467,22 +523,56 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
     {
       id: 'workspace',
       label: '工作空间',
+      icon: Layers2,
       onClick: openCanvasWorkspace,
       active: screen === 'infinite-canvas',
     },
     {
       id: 'personal',
       label: '个人空间',
+      icon: UserRound,
       onClick: openPersonal,
       active: screen === 'personal',
     },
     {
       id: 'gallery',
       label: '公共画廊',
+      icon: Images,
       onClick: openGallery,
       active: screen === 'gallery',
     },
   ];
+
+  const coverNavActiveId =
+    coverCenterItems.find((item) => item.active)?.id ?? null;
+
+  useEffect(() => {
+    if (!coverNavActiveId) return;
+    const prev = coverNavPrevIdRef.current;
+    coverNavPrevIdRef.current = coverNavActiveId;
+    if (!prev || prev === coverNavActiveId) return;
+    const from = COVER_NAV_ORDER.indexOf(prev);
+    const to = COVER_NAV_ORDER.indexOf(coverNavActiveId);
+    if (from < 0 || to < 0 || from === to) return;
+    setCoverNavFlowDir(to > from ? 1 : -1);
+    // 先摘掉再挂上，保证每次切换都能重播一次流光
+    setCoverNavFlowing(false);
+    if (coverNavFlowTimerRef.current) window.clearTimeout(coverNavFlowTimerRef.current);
+    const startId = window.requestAnimationFrame(() => {
+      setCoverNavFlowing(true);
+      coverNavFlowTimerRef.current = window.setTimeout(() => {
+        setCoverNavFlowing(false);
+        coverNavFlowTimerRef.current = null;
+      }, 760);
+    });
+    return () => {
+      window.cancelAnimationFrame(startId);
+      if (coverNavFlowTimerRef.current) {
+        window.clearTimeout(coverNavFlowTimerRef.current);
+        coverNavFlowTimerRef.current = null;
+      }
+    };
+  }, [coverNavActiveId]);
 
   const handleHome = () => {
     if (onHome) {
@@ -508,7 +598,8 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
         className,
       )}
     >
-      {showCanvasBrandMenu ? (
+      {/* 工作空间闸门：点 logo 直接回主页，不弹下拉；进板后仍用画布菜单（无品牌名） */}
+      {showCanvasBrandMenu && canvasBoardOpen ? (
         <CanvasHeaderCluster
           onHome={handleHome}
           heroTone={isOverlayNav}
@@ -518,6 +609,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
         <NavBrand
           onHome={handleHome}
           heroTone={isOverlayNav}
+          showName
           className={cn(
             isOverlayNav ? OVERLAY_BRAND_CLASS : 'pointer-events-auto shrink-0',
             subPage && 'z-[4]',
@@ -549,27 +641,43 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
       {isCoverHomeNav ? (
         <nav
           className={cn(
-            'pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-3 pt-3 md:px-5 md:pt-3.5',
+            'pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-3 pt-5 md:px-5 md:pt-6',
           )}
           aria-label={`${BRAND_NAME} navigation`}
         >
-          <div
-            className={cn(
-              'pointer-events-auto absolute left-1/2 top-3 z-[3] hidden -translate-x-1/2 items-center gap-6 md:top-3.5 md:flex md:gap-8 lg:gap-10',
-              coverNavGlass && 'cover-glass-nav cover-hero-nav-pill !px-5 !py-2.5',
-            )}
-          >
-            {coverCenterItems.map((item) => (
-              <CoverCenterLink key={item.id} item={item} />
-            ))}
-          </div>
-
-          <div className="pointer-events-auto ml-auto flex items-center gap-1.5">
-            <div className="flex items-center gap-3 overflow-x-auto custom-scrollbar md:hidden">
+          <LayoutGroup id="cover-center-nav-desktop">
+            <div
+              className={cn(
+                'pointer-events-auto absolute left-1/2 top-5 z-[3] hidden -translate-x-1/2 items-center gap-5 md:top-6 md:flex md:gap-6 lg:gap-7',
+                coverNavGlass && 'cover-glass-nav cover-hero-nav-pill !px-4 !py-2',
+              )}
+            >
               {coverCenterItems.map((item) => (
-                <CoverCenterLink key={item.id} item={item} />
+                <CoverCenterLink
+                  key={item.id}
+                  item={item}
+                  pillLayoutId="cover-nav-glass-pill-desktop"
+                  flowDir={coverNavFlowDir}
+                  flowing={coverNavFlowing}
+                />
               ))}
             </div>
+          </LayoutGroup>
+
+          <div className="pointer-events-auto ml-auto flex items-center gap-1.5">
+            <LayoutGroup id="cover-center-nav-mobile">
+              <div className="flex items-center gap-2.5 overflow-x-auto custom-scrollbar md:hidden">
+                {coverCenterItems.map((item) => (
+                  <CoverCenterLink
+                    key={item.id}
+                    item={item}
+                    pillLayoutId="cover-nav-glass-pill-mobile"
+                    flowDir={coverNavFlowDir}
+                    flowing={coverNavFlowing}
+                  />
+                ))}
+              </div>
+            </LayoutGroup>
             {user ? (
               <div className="hidden shrink-0 items-center gap-1.5 md:flex">
                 <StudioAnnouncementsBell isAdmin={isAdmin} heroTone />
@@ -577,6 +685,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
                   user={user}
                   isAdmin={isAdmin}
                   heroTone
+                  onPersonal={openPersonal}
                   onAdminUsers={openAdminUsers}
                   onAdminRhWorkflows={openAdminRhWorkflows}
                   onAdminHomeCarousel={openAdminHomeCarousel}
@@ -587,7 +696,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
         </nav>
       ) : null}
 
-      {!hideFeatureNav && !isCoverHomeNav ? (
+      {!hideFeatureNav && !isCoverHomeNav && !(screen === 'infinite-canvas' && canvasBoardOpen) ? (
       <nav
         className={cn(
           'pointer-events-auto flex w-full items-center transition-[background,box-shadow,outline-color,padding] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
@@ -621,6 +730,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
                 user={user}
                 isAdmin={isAdmin}
                 heroTone={isOverlayNav}
+                onPersonal={openPersonal}
                 onAdminUsers={openAdminUsers}
                 onAdminRhWorkflows={openAdminRhWorkflows}
                 onAdminHomeCarousel={openAdminHomeCarousel}

@@ -212,11 +212,11 @@ export function HomeCarouselStrip() {
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={spring}
-      className="cover-home-carousel mt-auto w-full pb-8 pt-4 md:pb-10"
+      className="cover-home-carousel mt-auto w-full pt-5 pb-0"
       aria-label="精选推荐"
     >
       <div className="cover-home-carousel-shell">
-        <div className="mb-3 flex items-end justify-between md:mb-4">
+        <div className="mb-3 flex items-end justify-between md:mb-3.5">
           <h2 className="font-headline text-[1.05rem] tracking-[-0.02em] text-[#e5e2e1]/9 md:text-[1.2rem]">
             精选推荐
           </h2>

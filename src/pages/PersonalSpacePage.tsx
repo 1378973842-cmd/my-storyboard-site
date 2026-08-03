@@ -14,7 +14,7 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
   if (!shellActive) return null;
 
   return (
-    <div className="fixed inset-0 z-[62] min-h-[100dvh] overflow-y-auto overscroll-y-auto bg-[#0e0e0e] text-[#e5e2e1] custom-scrollbar">
+    <div className="shell-slim-scrollbar fixed inset-0 z-[62] min-h-[100dvh] overflow-y-auto overscroll-y-auto bg-[#0e0e0e] text-[#e5e2e1]">
       <main className="mx-auto flex min-h-[100dvh] max-w-3xl flex-col justify-center px-6 pb-16 pt-[5.5rem] md:px-10 md:pt-24">
         <motion.div
           initial={{ opacity: 0, y: 20 }}

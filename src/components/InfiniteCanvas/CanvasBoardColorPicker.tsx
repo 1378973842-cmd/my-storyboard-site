@@ -1,15 +1,16 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LayoutTemplate, Maximize2, Minus, Plus, X } from 'lucide-react';
+import { LayoutTemplate, Map, Maximize2, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import {
   fitCanvasViewportAll,
   getCanvasBoardBackground,
+  isCanvasMinimapVisible,
   isInfiniteCanvasEditorOpen,
   resetCanvasViewportZoom,
   setCanvasBoardBackground,
   subscribeCanvasViewportScale,
-  zoomCanvasViewport,
+  toggleCanvasMinimapVisible,
 } from '../../lib/infiniteCanvas/canvasEngine.js';
 import {
   BOARD_BG_PRESETS,
@@ -51,10 +52,12 @@ function DockIconButton({
   label,
   onClick,
   children,
+  pressed,
 }: {
   label: string;
   onClick: () => void;
   children: ReactNode;
+  pressed?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   return (
@@ -65,7 +68,8 @@ function DockIconButton({
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         aria-label={label}
-        className="canvas-left-dock-icon"
+        aria-pressed={pressed}
+        className={cn('canvas-left-dock-icon', pressed && 'is-active')}
       >
         {children}
       </button>
@@ -204,6 +208,7 @@ export const CanvasLeftDock = memo(function CanvasLeftDock({
   const [hsv, setHsv] = useState<Hsv>(() => hexToHsv('#12100E'));
   const [hexDraft, setHexDraft] = useState('12100E');
   const [zoomPct, setZoomPct] = useState(100);
+  const [minimapOn, setMinimapOn] = useState(() => isCanvasMinimapVisible());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const boardDark = isDarkBoardHex(hex);
 
@@ -239,10 +244,18 @@ export const CanvasLeftDock = memo(function CanvasLeftDock({
     const unsubViewport = subscribeCanvasViewportScale((scale) => {
       setZoomPct(Math.round(scale * 100));
     });
+    const onMinimapVis = (e: Event) => {
+      const detail = (e as CustomEvent<{ visible?: boolean }>).detail;
+      if (typeof detail?.visible === 'boolean') setMinimapOn(detail.visible);
+      else setMinimapOn(isCanvasMinimapVisible());
+    };
+    setMinimapOn(isCanvasMinimapVisible());
     window.addEventListener('canvas-board-bg-change', onExternal);
+    window.addEventListener('canvas-minimap-visibility', onMinimapVis);
     return () => {
       unsubViewport();
       window.removeEventListener('canvas-board-bg-change', onExternal);
+      window.removeEventListener('canvas-minimap-visibility', onMinimapVis);
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
   }, [editorVisible, commitColor]);
@@ -366,10 +379,6 @@ export const CanvasLeftDock = memo(function CanvasLeftDock({
 
         <span className="canvas-left-dock-sep" aria-hidden />
 
-        <DockIconButton label="缩小画布" onClick={() => zoomCanvasViewport(1 / 1.12)}>
-          <Minus className={DOCK_ICON} strokeWidth={1.5} />
-        </DockIconButton>
-
         <button
           type="button"
           className="canvas-left-dock-zoom"
@@ -380,12 +389,16 @@ export const CanvasLeftDock = memo(function CanvasLeftDock({
           {zoomPct}%
         </button>
 
-        <DockIconButton label="放大画布" onClick={() => zoomCanvasViewport(1.12)}>
-          <Plus className={DOCK_ICON} strokeWidth={1.5} />
-        </DockIconButton>
-
         <DockIconButton label="适配全部节点" onClick={() => fitCanvasViewportAll()}>
           <Maximize2 className={DOCK_ICON} strokeWidth={1.25} />
+        </DockIconButton>
+
+        <DockIconButton
+          label={minimapOn ? '隐藏小地图' : '显示小地图'}
+          pressed={minimapOn}
+          onClick={() => setMinimapOn(toggleCanvasMinimapVisible())}
+        >
+          <Map className={DOCK_ICON} strokeWidth={1.25} />
         </DockIconButton>
       </div>
     </div>
