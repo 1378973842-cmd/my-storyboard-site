@@ -55,6 +55,10 @@ import {
   recordFileOwnership,
 } from "./src/services/canvasGenerations.js";
 import {
+  initGalleryWorksSchema,
+  registerGalleryWorksRoutes,
+} from "./src/services/galleryWorks.js";
+import {
   registerProtectedUploadRoutes,
   publicStaticExceptUploads,
 } from "./src/services/protectedUploads.js";
@@ -652,6 +656,7 @@ async function startServer() {
     if (n > 0) console.log(`[auth] 已为 ${n} 张历史 AI 图片登记文件归属（管理员）`);
   }
   initCanvasGenerationsSchema(db);
+  initGalleryWorksSchema(db);
   const requireAuth = createRequireAuth(db);
   const requireAdmin = createRequireAdmin(db);
 
@@ -692,6 +697,7 @@ async function startServer() {
   registerStudioAnnouncementRoutes(app, db, requireAuth, requireAdmin);
   registerHomeCarouselRoutes(app, db, requireAdmin, projectRoot);
   registerCanvasGenerationsRoutes(app, db, projectRoot);
+  registerGalleryWorksRoutes(app, db, projectRoot);
 
   // Project Management Routes
   app.get("/api/projects", requireAuth, (req, res) => {

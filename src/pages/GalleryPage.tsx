@@ -1,131 +1,338 @@
-import React, { memo, useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { Loader2 } from 'lucide-react';
-import { CopyablePromptText } from '../components/CopyablePromptText';
-import { ReferenceImageLightbox } from '../components/ReferenceImageLightbox';
+import { Loader2, Plus, Search, Star } from 'lucide-react';
+import { cn } from '../lib/utils';
+import { useStore } from '../store/useStore';
+import { GALLERY_FILTER_CATEGORIES } from '../lib/galleryCategories';
+import {
+  fetchGalleryWorks,
+  toggleGalleryFavorite,
+  type GalleryWork,
+} from '../lib/galleryWorksApi';
+import { PublishWorkModal } from '../components/PublishWorkModal';
+import { GalleryWorkDetailModal } from '../components/GalleryWorkDetailModal';
 
-type GalleryItem = {
-  id: string;
-  thumbnail_path: string;
-  preview_path?: string;
-  prompt: string;
-  model: string;
-  params: Record<string, unknown>;
-  owner_name?: string;
-  shared_at: string | null;
-  created_at: string;
-};
+type FeedTab = 'featured' | 'following' | 'hot' | 'latest';
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
+const FEED_TABS: { id: FeedTab; label: string }[] = [
+  { id: 'featured', label: '编辑精选' },
+  { id: 'following', label: '关注' },
+  { id: 'hot', label: '热门推荐' },
+  { id: 'latest', label: '最新发布' },
+];
+
+function ownerHandle(name?: string): string {
+  const raw = String(name || '同事').trim() || '同事';
+  return `@${raw.replace(/\s+/g, '_')}`;
+}
+
 export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellActive: boolean }) {
-  const [items, setItems] = useState<GalleryItem[]>([]);
+  const addNotice = useStore((s) => s.addNotice);
+  const [items, setItems] = useState<GalleryWork[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [detail, setDetail] = useState<GalleryWork | null>(null);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [feedTab, setFeedTab] = useState<FeedTab>('featured');
+  const [category, setCategory] = useState('all');
+  const [query, setQuery] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setItems(await fetchGalleryWorks());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '加载失败');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!shellActive) return;
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch('/api/gallery', { credentials: 'same-origin' });
-        const data = (await res.json()) as { items?: GalleryItem[]; error?: string };
-        if (!res.ok) throw new Error(data.error || '加载失败');
-        if (!cancelled) setItems(Array.isArray(data.items) ? data.items : []);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : '加载失败');
-      } finally {
-        if (!cancelled) setLoading(false);
+    void load();
+  }, [shellActive, load]);
+
+  const onToggleFavorite = useCallback(
+    async (item: GalleryWork, e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      e?.preventDefault();
+      if (String(item.id).startsWith('legacy:')) {
+        addNotice('旧分享条目暂不支持收藏', 'info');
+        return;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [shellActive]);
+      try {
+        const result = await toggleGalleryFavorite(item.id);
+        setItems((prev) =>
+          prev.map((x) =>
+            x.id === item.id
+              ? {
+                  ...x,
+                  ...result.item,
+                  favorited: result.favorited,
+                  favorite_count: result.favorite_count,
+                }
+              : x,
+          ),
+        );
+        setDetail((cur) =>
+          cur?.id === item.id
+            ? {
+                ...cur,
+                ...result.item,
+                favorited: result.favorited,
+                favorite_count: result.favorite_count,
+              }
+            : cur,
+        );
+        addNotice(result.favorited ? '已加入个人空间「画廊收藏」' : '已取消收藏', 'success');
+      } catch (err) {
+        addNotice(err instanceof Error ? err.message : '收藏失败', 'error');
+      }
+    },
+    [addNotice],
+  );
+
+  const visible = useMemo(() => {
+    if (feedTab === 'following') return [];
+
+    let list = [...items];
+    if (feedTab === 'latest') {
+      list.sort((a, b) => {
+        const ta = Date.parse(a.published_at || a.created_at) || 0;
+        const tb = Date.parse(b.published_at || b.created_at) || 0;
+        return tb - ta;
+      });
+    } else if (feedTab === 'hot') {
+      list.sort((a, b) => {
+        const score = (x: GalleryWork) =>
+          (Number(x.favorite_count) || 0) * 1e12 +
+          (Date.parse(x.published_at || x.created_at) || 0);
+        return score(b) - score(a);
+      });
+    }
+
+    const q = query.trim().toLowerCase();
+    if (q) {
+      list = list.filter((item) => {
+        const hay = `${item.title} ${item.description} ${item.owner_name || ''} ${item.category}`.toLowerCase();
+        return hay.includes(q);
+      });
+    }
+
+    if (category !== 'all') {
+      list = list.filter((item) => item.category === category);
+    }
+
+    return list;
+  }, [items, feedTab, query, category]);
 
   if (!shellActive) return null;
 
   return (
     <div className="shell-slim-scrollbar fixed inset-0 z-[62] min-h-[100dvh] overflow-y-auto overscroll-y-auto bg-[#0e0e0e] text-[#e5e2e1]">
-      <main className="mx-auto max-w-6xl px-6 pb-10 pt-[5.5rem] md:px-10 md:pt-24">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
-          <span className="font-label text-[10px] font-semibold uppercase tracking-[0.28em] text-primary/80">
-            Gallery
-          </span>
-          <h1 className="mt-3 font-headline text-3xl tracking-[-0.02em] text-on-surface md:text-[2.15rem]">
-            公共画廊
-          </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-on-surface/65">
-            同事主动分享的优秀案例。点击图片可放大查看，学习 Prompt 与模型参数，激发创作灵感。
-          </p>
-        </motion.div>
+      <main className="mx-auto w-full max-w-[1280px] px-5 pb-20 pt-[5.75rem] md:px-8 md:pt-24 lg:px-10">
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={spring}
+          className="flex flex-col gap-5 md:gap-6"
+        >
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex flex-wrap items-end gap-6 md:gap-8" role="tablist" aria-label="画廊信息流">
+              {FEED_TABS.map((tab) => {
+                const active = feedTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setFeedTab(tab.id)}
+                    className={cn(
+                      'relative pb-2.5 text-[15px] font-medium tracking-[-0.01em] transition-colors',
+                      active ? 'text-[#e5e2e1]' : 'text-[#e5e2e1]/42 hover:text-[#e5e2e1]/72',
+                    )}
+                  >
+                    {tab.label}
+                    {active ? (
+                      <motion.span
+                        layoutId="gallery-feed-underline"
+                        className="absolute inset-x-0 bottom-0 h-[2px] rounded-full bg-[#e5e2e1]"
+                        transition={spring}
+                      />
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
 
-        {error ? (
-          <p className="mt-6 text-sm text-red-400/95" role="alert">
-            {error}
-          </p>
-        ) : null}
-
-        {loading ? (
-          <div className="mt-16 flex justify-center text-[#e5e2e1]/60">
-            <Loader2 className="h-8 w-8 animate-spin" aria-hidden />
-          </div>
-        ) : items.length === 0 ? (
-          <div className="mt-16 flex flex-col items-center justify-center rounded-[2rem] bg-surface-container-low/40 px-6 py-20 text-center outline outline-[0.5px] outline-white/10">
-            <p className="font-headline text-lg tracking-tight text-on-surface/80">画廊还是空的</p>
-            <p className="mt-3 max-w-md text-sm leading-relaxed text-on-surface/50">
-              还没有同事分享作品。在「我的收藏」里把满意的成片分享到这里。
-            </p>
-          </div>
-        ) : (
-          <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 lg:gap-8">
-            {items.map((item) => (
-              <motion.article
-                key={item.id}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                whileHover={{ y: -4 }}
-                transition={spring}
-                className="overflow-hidden rounded-[1.5rem] bg-[#131313]/80 outline outline-[0.5px] outline-[#45464d]/20 transition-shadow duration-300 hover:shadow-[0_48px_96px_-56px_rgba(0,0,0,0.6)]"
+            <div className="flex flex-wrap items-center gap-2.5">
+              <label className="relative min-w-[200px] flex-1 sm:max-w-[260px] sm:flex-none">
+                <Search
+                  className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#e5e2e1]/40"
+                  strokeWidth={1.75}
+                  aria-hidden
+                />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="搜索作品、作者或分类"
+                  className="h-10 w-full rounded-full bg-[#1c1b1b] pl-10 pr-4 text-[13.5px] text-[#e5e2e1] placeholder:text-[#e5e2e1]/35 outline-none transition-[background] focus:bg-[#222221]"
+                  style={{ outline: '0.5px solid rgba(255,255,255,0.08)', outlineOffset: '-0.5px' }}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => setPublishOpen(true)}
+                className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[#e5e2e1] px-4 text-[13.5px] font-medium text-[#141414] transition-[transform,background] hover:bg-white active:scale-[0.98]"
               >
-                <button
-                  type="button"
-                  className="group relative block aspect-[4/3] w-full cursor-zoom-in overflow-hidden bg-[#1c1b1b] text-left"
-                  onClick={() => setPreviewUrl(item.preview_path || item.thumbnail_path)}
-                  aria-label="放大查看图片"
-                >
-                  <img
-                    src={item.thumbnail_path}
-                    alt=""
-                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-                    loading="lazy"
-                    draggable={false}
-                  />
-                  <span className="absolute left-3 top-3 rounded-full bg-black/45 px-3 py-1 text-[11px] uppercase tracking-[0.14em] text-[#f5f0eb] backdrop-blur-md">
-                    {item.owner_name || '同事'}
-                  </span>
-                </button>
-                <div className="space-y-3 p-5">
-                  <CopyablePromptText text={item.prompt} lineClamp={5} />
-                  <p className="text-xs uppercase tracking-[0.12em] text-[#e5e2e1]/45">
-                    {item.model || '未知模型'}
-                  </p>
-                  {Object.keys(item.params || {}).length > 0 ? (
-                    <pre className="max-h-28 overflow-auto rounded-xl bg-[#1c1b1b]/85 p-3 text-[11px] leading-relaxed text-[#e5e2e1]/55">
-                      {JSON.stringify(item.params, null, 2)}
-                    </pre>
-                  ) : null}
-                </div>
-              </motion.article>
-            ))}
+                <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
+                发布作品
+              </button>
+            </div>
           </div>
-        )}
+
+          <div
+            className="flex gap-1.5 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            role="tablist"
+            aria-label="作品分类"
+          >
+            {GALLERY_FILTER_CATEGORIES.map((cat) => {
+              const active = category === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setCategory(cat.id)}
+                  className={cn(
+                    'shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors',
+                    active
+                      ? 'bg-[#d8d4d2] text-[#141414]'
+                      : 'text-[#e5e2e1]/48 hover:text-[#e5e2e1]/8',
+                  )}
+                >
+                  {cat.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {error ? (
+            <p className="text-sm text-red-400/95" role="alert">
+              {error}
+            </p>
+          ) : null}
+
+          {loading ? (
+            <div className="flex min-h-[280px] items-center justify-center text-[#e5e2e1]/55">
+              <Loader2 className="h-8 w-8 animate-spin" aria-hidden />
+            </div>
+          ) : feedTab === 'following' ? (
+            <div className="flex min-h-[280px] flex-col items-center justify-center gap-2 rounded-[22px] bg-[#1c1b1b]/55 px-6 py-16 text-center">
+              <p className="text-[15px] font-medium text-[#e5e2e1]/75">关注功能即将开放</p>
+              <p className="max-w-sm text-[13px] leading-relaxed text-[#e5e2e1]/40">
+                之后可以在这里看你关注的作者新作。
+              </p>
+            </div>
+          ) : visible.length === 0 ? (
+            <div className="flex min-h-[280px] flex-col items-center justify-center gap-2 rounded-[22px] bg-[#1c1b1b]/55 px-6 py-16 text-center">
+              <p className="text-[15px] font-medium text-[#e5e2e1]/75">
+                {items.length === 0 ? '画廊还是空的' : '没有符合筛选的作品'}
+              </p>
+              <p className="max-w-md text-[13px] leading-relaxed text-[#e5e2e1]/40">
+                {items.length === 0
+                  ? '点击右上角「发布作品」投稿到公共画廊。'
+                  : '试试换个分类，或清空搜索关键词。'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 md:grid-cols-3 md:gap-4 xl:grid-cols-4">
+              {visible.map((item) => {
+                const src = item.thumbnail_path || item.preview_path || item.image_path;
+                const starred = Boolean(item.favorited);
+                return (
+                  <motion.article
+                    key={item.id}
+                    initial={{ opacity: 0, y: 14 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={spring}
+                    className="group relative overflow-hidden rounded-[18px] bg-[#161616] md:rounded-[20px]"
+                  >
+                    <button
+                      type="button"
+                      className="relative block aspect-[4/3] w-full cursor-zoom-in text-left"
+                      onClick={() => setDetail(item)}
+                      aria-label={`查看 ${item.title}`}
+                    >
+                      <img
+                        src={src}
+                        alt=""
+                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                        loading="lazy"
+                        draggable={false}
+                      />
+                      <span
+                        className="pointer-events-none absolute inset-x-0 bottom-0 h-[46%] bg-gradient-to-t from-black/75 via-black/35 to-transparent"
+                        aria-hidden
+                      />
+                      <span className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 px-3.5 pb-3.5 pt-10">
+                        <span className="min-w-0">
+                          <span className="block truncate text-[11.5px] text-white/70">
+                            {ownerHandle(item.owner_name)}
+                          </span>
+                          <span className="mt-0.5 block truncate text-[14px] font-semibold tracking-[-0.01em] text-[#f2efee]">
+                            {item.title || '未命名作品'}
+                          </span>
+                        </span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => void onToggleFavorite(item, e)}
+                      className={cn(
+                        'absolute bottom-3 right-3 z-[1] inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] tabular-nums backdrop-blur-[16px] transition-colors',
+                        starred
+                          ? 'bg-[#ffb866]/20 text-[#ffb866]'
+                          : 'bg-black/50 text-white/85 hover:bg-black/65',
+                      )}
+                      style={{ outline: '0.5px solid rgba(255,255,255,0.16)', outlineOffset: '-0.5px' }}
+                      aria-label={starred ? '取消收藏' : '收藏作品'}
+                    >
+                      <Star
+                        className="h-3.5 w-3.5"
+                        strokeWidth={1.75}
+                        fill={starred ? 'currentColor' : 'none'}
+                      />
+                      {item.favorite_count ?? 0}
+                    </button>
+                  </motion.article>
+                );
+              })}
+            </div>
+          )}
+        </motion.div>
       </main>
 
-      <ReferenceImageLightbox url={previewUrl} onClose={() => setPreviewUrl(null)} />
+      <PublishWorkModal
+        open={publishOpen}
+        onClose={() => setPublishOpen(false)}
+        onSaved={(work) => {
+          setItems((prev) => [work, ...prev.filter((x) => x.id !== work.id)]);
+          addNotice('已发布到公共画廊', 'success');
+        }}
+      />
+      <GalleryWorkDetailModal
+        work={detail}
+        onClose={() => setDetail(null)}
+        onToggleFavorite={(work) => void onToggleFavorite(work)}
+      />
     </div>
   );
 });

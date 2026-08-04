@@ -314,8 +314,8 @@ export function canAccessUploadPath(
   if (!p) return false;
   if (!userId) return false;
 
-  // 团队成员头像：任一已登录用户可读
-  if (p.startsWith("/uploads/avatars/")) return true;
+  // 团队成员头像 / 个人空间封面：任一已登录用户可读
+  if (p.startsWith("/uploads/avatars/") || p.startsWith("/uploads/covers/")) return true;
 
   const owner = db
     .prepare("SELECT user_id FROM file_ownership WHERE relative_path = ?")
@@ -341,6 +341,20 @@ export function canAccessUploadPath(
       )
       .get(galleryThumb);
     if (linked) return true;
+  }
+
+  // 已发布的公共画廊作品：任一已登录用户可读
+  try {
+    const work = db
+      .prepare(
+        `SELECT id FROM gallery_works
+         WHERE published = 1 AND (image_path = ? OR images_json LIKE ?)
+         LIMIT 1`
+      )
+      .get(p, `%${p}%`);
+    if (work) return true;
+  } catch {
+    /* schema 尚未初始化时忽略 */
   }
 
   return false;
@@ -445,20 +459,7 @@ export function registerCanvasGenerationsRoutes(
     }
   });
 
-  app.get("/api/gallery", requireAuth, (_req, res) => {
-    const rows = db
-      .prepare(
-        `SELECT g.id, g.user_id, g.thumbnail_path, g.prompt, g.model, g.params_json,
-                g.canvas_id, g.node_id, g.shared_at, g.created_at, u.display_name AS owner_name
-         FROM canvas_generations g
-         JOIN users u ON u.id = g.user_id
-         WHERE g.shared_at IS NOT NULL AND u.disabled = 0
-         ORDER BY g.shared_at DESC
-         LIMIT 300`
-      )
-      .all() as CanvasGenerationRow[];
-    res.json({ items: rows.map((row) => parseGenerationRow(row, projectRoot)) });
-  });
+  // GET /api/gallery 已迁至 galleryWorks.ts（含 gallery_works + 旧分享兼容）
 
   app.post("/api/my-favorites/:id/share", requireAuth, async (req, res) => {
     try {

@@ -262,3 +262,33 @@
 - 图片组去掉张数提示、上传/整理钮、整组禁用开关
 - 画布媒体改最短边归一：1:1边长对齐9:16最短边
 - 左下工具栏去掉缩放±，加小地图显隐
+- ca2aeab 已 deploy:safe 上线
+- 图片组顶栏再放大约2.5倍
+- 视频生成 dock 对齐图片 Gen Console 芯片底栏
+- 视频反推对齐 RH 壳与默认 2.5× 缩放
+- 视频反推：挂 rh-node 防底栏裁切；左侧改为上传/预览视频井
+- RH/视频反推外轮廓圆角32px+井区18px；agent不全量改RH壳
+- Agent Premium Chrome：呼吸间距+炭灰玻璃壳+加宽；重启本地站
+- AG96：Premium Agent（复刻/修图/海报/九宫格/Slots/Mx/DeepWhite/编剧/皮克斯）默认视觉 2.5×，与 RH 同 scale 壳
+- AG97：Premium Agent 横向两栏壳（左主内容|右参数|底运行）
+- AG98: fix node select flash (spring overshoot + drag/selected shadow mismatch + agent-result glow)
+- AG99: Agent select ring match RH (literal white stroke + ::after + 32px radius)
+- AG100: imageBatch/group/promptGroup select ring (split ring/selected rules + ::after)
+- AG101: imageBatch/agent outer radius 40px (softer, closer to gen-stage feel)
+- AG102: imageBatch top gap — head inset measured (~52) instead of legacy 144 fallback
+- AG103: gen grid per-result aspect stamp (pending/history); old tiles natural backfill; console ratio no longer rewrites existing tiles
+- AG104: link energy flow only when target node is running (not source)
+- AG105: gen node context menu Set as primary
+- AG106: wheel zoom step slightly higher (.90/1.11)
+- AG107: video dock remove max-width 560 so long model names don't overflow shell
+
+## 2026-08-04
+
+### 记录 / 说明
+- HOME5: cover home stage depth — tonal lift, prompt/card shadows, new-project dashed slot
+- HOME5: personal space UI — portfolio/favorites tabs, featured empty, publish card
+- HOME6 个人空间顶部可换背景（cover_url + /api/auth/cover）
+- HOME7 公共画廊按参考稿重做（信息流/搜索/分类 pill/叠字卡片）
+- HOME8 发布作品：gallery_works + 弹窗投稿/分类/个人空间可编辑
+- 发布弹窗：有图去掉上传遮罩、收藏导入对比度、支持最多9张多图
+- HOME9 画廊点星收藏：我的创作/画廊收藏分类，展示描述与来源

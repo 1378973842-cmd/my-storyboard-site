@@ -22,6 +22,7 @@ export type AuthUser = {
   email: string;
   display_name: string;
   avatar_url: string | null;
+  cover_url: string | null;
   role: UserRole;
 };
 
@@ -30,6 +31,7 @@ type UserRow = {
   email: string;
   display_name: string;
   avatar_url?: string | null;
+  cover_url?: string | null;
   password_hash: string;
   role: UserRole;
   disabled: number;
@@ -37,17 +39,28 @@ type UserRow = {
 };
 
 const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+const COVER_MAX_BYTES = 8 * 1024 * 1024;
+const imageUploadFilter = (
+  _req: Request,
+  file: Express.Multer.File,
+  cb: multer.FileFilterCallback
+) => {
+  const mime = (file.mimetype || "").toLowerCase();
+  if (["image/jpeg", "image/png", "image/webp", "image/gif"].includes(mime)) {
+    cb(null, true);
+    return;
+  }
+  cb(new Error("仅支持 JPG / PNG / WebP / GIF"));
+};
 const avatarUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: AVATAR_MAX_BYTES },
-  fileFilter: (_req, file, cb) => {
-    const mime = (file.mimetype || "").toLowerCase();
-    if (["image/jpeg", "image/png", "image/webp", "image/gif"].includes(mime)) {
-      cb(null, true);
-      return;
-    }
-    cb(new Error("仅支持 JPG / PNG / WebP / GIF"));
-  },
+  fileFilter: imageUploadFilter,
+});
+const coverUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: COVER_MAX_BYTES },
+  fileFilter: imageUploadFilter,
 });
 
 const AUTH_WINDOW_MS = Math.max(
@@ -199,6 +212,7 @@ function rowToAuthUser(row: UserRow): AuthUser {
     email: row.email,
     display_name: row.display_name || row.email,
     avatar_url: row.avatar_url ? String(row.avatar_url) : null,
+    cover_url: row.cover_url ? String(row.cover_url) : null,
     role: row.role === "admin" ? "admin" : "user",
   };
 }
@@ -246,6 +260,25 @@ function saveUserAvatarFile(
   return url;
 }
 
+function saveUserCoverFile(
+  db: InstanceType<typeof Database>,
+  projectRoot: string,
+  userId: string,
+  buffer: Buffer,
+  mime: string
+): string {
+  const ext = avatarExtFromMime(mime);
+  const safeId = userId.replace(/[^a-zA-Z0-9_-]/g, "");
+  // ponytail: overwrite same path; clients bust cache with ?v=
+  const filename = `${safeId}${ext}`;
+  const dir = path.join(projectRoot, "public", "uploads", "covers");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, filename), buffer);
+  const url = `/uploads/covers/${filename}`;
+  recordFileOwnership(db, url, userId);
+  return url;
+}
+
 export function validateAuthForDeploy(): void {
   const isProd = process.env.NODE_ENV === "production";
   const secret = sessionSecret();
@@ -285,6 +318,11 @@ export function initUserAuthSchema(db: InstanceType<typeof Database>): void {
   `);
   try {
     db.prepare("ALTER TABLE users ADD COLUMN avatar_url TEXT").run();
+  } catch {
+    /* column exists */
+  }
+  try {
+    db.prepare("ALTER TABLE users ADD COLUMN cover_url TEXT").run();
   } catch {
     /* column exists */
   }
@@ -444,6 +482,41 @@ export function registerUserAuthRoutes(
         return res.json({ ok: true, user: rowToAuthUser(updated) });
       } catch (e) {
         const message = e instanceof Error ? e.message : "上传头像失败";
+        return res.status(400).json({ error: message });
+      }
+    });
+  });
+
+  app.post("/api/auth/cover", requireAuth, (req, res) => {
+    coverUpload.single("cover")(req, res, (err) => {
+      if (err) {
+        const message = err instanceof Error ? err.message : "上传背景失败";
+        return res.status(400).json({ error: message });
+      }
+
+      try {
+        const file = req.file;
+        if (!file?.buffer?.length) {
+          return res.status(400).json({ error: "请选择背景图片" });
+        }
+
+        const userId = req.authUser!.id;
+        const row = findUserById(db, userId);
+        if (!row) return res.status(404).json({ error: "用户不存在" });
+
+        const mime = (file.mimetype || "image/jpeg").toLowerCase();
+        const nextUrl = saveUserCoverFile(db, projectRoot, userId, file.buffer, mime);
+        db.prepare("UPDATE users SET cover_url = ? WHERE id = ?").run(nextUrl, userId);
+
+        if (row.cover_url && row.cover_url !== nextUrl) {
+          removeLocalUpload(projectRoot, row.cover_url);
+        }
+
+        const updated = findUserById(db, userId);
+        if (!updated) return res.status(404).json({ error: "用户不存在" });
+        return res.json({ ok: true, user: rowToAuthUser(updated) });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "上传背景失败";
         return res.status(400).json({ error: message });
       }
     });

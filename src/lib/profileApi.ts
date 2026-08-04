@@ -26,3 +26,17 @@ export async function uploadAvatar(file: File): Promise<AuthUser> {
   if (!data.user) throw new Error('上传头像失败');
   return data.user;
 }
+
+export async function uploadCover(file: File): Promise<AuthUser> {
+  const form = new FormData();
+  form.append('cover', file);
+  const res = await fetch('/api/auth/cover', {
+    method: 'POST',
+    credentials: 'same-origin',
+    body: form,
+  });
+  const data = (await res.json()) as { user?: AuthUser; error?: string };
+  if (!res.ok) throw new Error(data.error || '上传背景失败');
+  if (!data.user) throw new Error('上传背景失败');
+  return data.user;
+}
