@@ -54,6 +54,15 @@ export async function markAnnouncementRead(id: string): Promise<void> {
   if (!res.ok) throw new Error(data.error || "标记已读失败");
 }
 
+export async function markAllAnnouncementsRead(): Promise<void> {
+  const res = await fetch("/api/announcements/read-all", {
+    method: "POST",
+    credentials: "same-origin",
+  });
+  const data = (await res.json()) as { error?: string };
+  if (!res.ok) throw new Error(data.error || "全部已读失败");
+}
+
 export async function createAnnouncement(title: string, body: string): Promise<StudioAnnouncement> {
   const res = await fetch("/api/admin/announcements", {
     method: "POST",
@@ -70,13 +79,6 @@ export async function createAnnouncement(title: string, body: string): Promise<S
 export function formatAnnouncementTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  if (sameDay) {
-    return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-  }
-  return d.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }

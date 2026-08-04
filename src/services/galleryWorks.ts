@@ -17,8 +17,18 @@ import { createRequireAuth } from "./userAuth.js";
 
 const TITLE_MAX = 80;
 const DESC_MAX = 500;
+const STEP_NOTE_MAX = 1000;
 const IMAGE_MAX_BYTES = 12 * 1024 * 1024;
 const MAX_IMAGES = 9;
+const MAX_PROCESS_STEPS = 6;
+const MAX_IMAGES_PER_STEP = 3;
+
+export type GalleryProcessStep = {
+  /** 兼容字段：等同 images[0] */
+  image_path: string;
+  images: string[];
+  note: string;
+};
 
 type GalleryWorkRow = {
   id: string;
@@ -28,6 +38,7 @@ type GalleryWorkRow = {
   category: string;
   image_path: string;
   images_json?: string | null;
+  process_steps_json?: string | null;
   source_favorite_id: string | null;
   published: number;
   created_at: string;
@@ -43,6 +54,7 @@ export type GalleryWorkDto = {
   category: string;
   image_path: string;
   images: string[];
+  process_steps: GalleryProcessStep[];
   preview_path: string;
   thumbnail_path: string;
   source_favorite_id: string | null;
@@ -62,7 +74,7 @@ export type GalleryWorkDto = {
 
 const imageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: IMAGE_MAX_BYTES, files: MAX_IMAGES },
+  limits: { fileSize: IMAGE_MAX_BYTES, files: MAX_IMAGES + MAX_PROCESS_STEPS * MAX_IMAGES_PER_STEP },
   fileFilter: (_req, file, cb) => {
     const mime = (file.mimetype || "").toLowerCase();
     if (["image/jpeg", "image/png", "image/webp", "image/gif"].includes(mime)) {
@@ -133,6 +145,43 @@ function parseImagesJson(raw: string | null | undefined, fallback: string): stri
   return list.slice(0, MAX_IMAGES);
 }
 
+function stepImagePaths(step: GalleryProcessStep): string[] {
+  const list = Array.isArray(step.images) ? step.images.filter(Boolean) : [];
+  if (list.length) return list;
+  return step.image_path ? [step.image_path] : [];
+}
+
+function parseProcessStepsJson(raw: string | null | undefined): GalleryProcessStep[] {
+  try {
+    const parsed = JSON.parse(String(raw || "[]")) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const steps: GalleryProcessStep[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const note = String(row.note || "")
+        .trim()
+        .slice(0, STEP_NOTE_MAX);
+      const fromArray = Array.isArray(row.images)
+        ? row.images
+            .map((p) => normalizeUploadPath(String(p || "")) || "")
+            .filter(Boolean)
+        : [];
+      const primary = normalizeUploadPath(String(row.image_path || "")) || "";
+      const images = (fromArray.length ? fromArray : primary ? [primary] : []).slice(
+        0,
+        MAX_IMAGES_PER_STEP
+      );
+      if (!images.length) continue;
+      steps.push({ image_path: images[0], images, note });
+      if (steps.length >= MAX_PROCESS_STEPS) break;
+    }
+    return steps;
+  } catch {
+    return [];
+  }
+}
+
 function rowToDto(
   projectRoot: string,
   row: GalleryWorkRow
@@ -140,6 +189,7 @@ function rowToDto(
   const images = parseImagesJson(row.images_json, row.image_path);
   const image = images[0] || normalizeUploadPath(row.image_path) || row.image_path;
   const preview = resolveFullUploadPath(projectRoot, image);
+  const process_steps = parseProcessStepsJson(row.process_steps_json);
   return {
     id: row.id,
     title: row.title,
@@ -147,6 +197,7 @@ function rowToDto(
     category: row.category || "",
     image_path: image,
     images,
+    process_steps,
     preview_path: preview,
     thumbnail_path: image,
     source_favorite_id: row.source_favorite_id,
@@ -204,6 +255,13 @@ export function initGalleryWorksSchema(db: InstanceType<typeof Database>): void 
   } catch {
     /* column exists */
   }
+  try {
+    db.prepare(
+      "ALTER TABLE gallery_works ADD COLUMN process_steps_json TEXT NOT NULL DEFAULT '[]'"
+    ).run();
+  } catch {
+    /* column exists */
+  }
   db.exec(`
     CREATE TABLE IF NOT EXISTS gallery_favorites (
       id TEXT PRIMARY KEY,
@@ -235,9 +293,10 @@ export function isPublishedGalleryWorkPath(
     const byJson = db
       .prepare(
         `SELECT id FROM gallery_works
-         WHERE published = 1 AND images_json LIKE ? LIMIT 1`
+         WHERE published = 1 AND (images_json LIKE ? OR process_steps_json LIKE ?)
+         LIMIT 1`
       )
-      .get(`%${p}%`);
+      .get(`%${p}%`, `%${p}%`);
     return Boolean(byJson);
   } catch {
     return false;
@@ -377,6 +436,7 @@ export function registerGalleryWorksRoutes(
           category: "",
           image_path: image,
           images: [preview],
+          process_steps: [],
           preview_path: preview,
           thumbnail_path: image,
           source_favorite_id: row.id,
@@ -512,7 +572,10 @@ export function registerGalleryWorksRoutes(
   });
 
   const handleUpsert = (mode: "create" | "update") => (req: Request, res: Response) => {
-    imageUpload.array("images", MAX_IMAGES)(req, res, (err) => {
+    imageUpload.fields([
+      { name: "images", maxCount: MAX_IMAGES },
+      { name: "step_images", maxCount: MAX_PROCESS_STEPS * MAX_IMAGES_PER_STEP },
+    ])(req, res, (err) => {
       if (err) {
         const message = err instanceof Error ? err.message : "上传失败";
         return res.status(400).json({ error: message });
@@ -520,14 +583,22 @@ export function registerGalleryWorksRoutes(
 
       try {
         const userId = req.authUser!.id;
-        const title = parseTitle(req.body?.title);
+        const asDraft =
+          /^(1|true|yes)$/i.test(String(req.body?.as_draft || "").trim());
+        let title = parseTitle(req.body?.title);
         if (!title) {
-          return res.status(400).json({ error: `请填写作品名称（最多 ${TITLE_MAX} 字）` });
+          if (asDraft) title = "未命名草稿";
+          else {
+            return res.status(400).json({ error: `请填写作品名称（最多 ${TITLE_MAX} 字）` });
+          }
         }
         const description = parseDescription(req.body?.description);
-        const category = parseCategory(req.body?.category);
+        let category = parseCategory(req.body?.category);
         if (!category) {
-          return res.status(400).json({ error: "请选择作品分类" });
+          if (asDraft) category = "original";
+          else {
+            return res.status(400).json({ error: "请选择作品分类" });
+          }
         }
 
         let existing: GalleryWorkRow | undefined;
@@ -560,8 +631,11 @@ export function registerGalleryWorksRoutes(
         const singleFav = String(req.body?.favorite_id || "").trim();
         if (singleFav && !favoriteIds.includes(singleFav)) favoriteIds.push(singleFav);
 
-        const files = (Array.isArray(req.files) ? req.files : []) as Express.Multer.File[];
-        const uploaded = files
+        const fileMap = (req.files || {}) as Record<string, Express.Multer.File[]>;
+        const coverFiles = Array.isArray(fileMap.images) ? fileMap.images : [];
+        const stepFiles = Array.isArray(fileMap.step_images) ? fileMap.step_images : [];
+
+        const uploaded = coverFiles
           .filter((f) => f?.buffer?.length)
           .map((f) =>
             saveWorkImage(
@@ -582,7 +656,6 @@ export function registerGalleryWorksRoutes(
           if (!fromFavs.includes(fromFav)) fromFavs.push(fromFav);
         }
 
-        // 编辑未传新图时：沿用 keep_paths；都空则保留旧图
         if (
           mode === "update" &&
           !keepPaths.length &&
@@ -603,15 +676,119 @@ export function registerGalleryWorksRoutes(
           return res.status(400).json({ error: "请至少上传或导入一张图片" });
         }
 
+        // process_steps:
+        // 新格式 [{ note, images: [{ path?|favorite_id?|file?:true }, ...] }, ...]
+        // 旧格式 [{ note, path?, favorite_id?, file?: true }, ...] 仍兼容（一步一图）
+        type StepImageSpec = {
+          path?: string;
+          favorite_id?: string;
+          file?: boolean;
+        };
+        type StepSpec = { note: string; images: StepImageSpec[] };
+        let stepSpecs: StepSpec[] = [];
+        try {
+          const parsed = JSON.parse(String(req.body?.process_steps || "[]")) as unknown;
+          if (Array.isArray(parsed)) {
+            stepSpecs = parsed
+              .filter((x) => x && typeof x === "object")
+              .map((x) => {
+                const row = x as Record<string, unknown>;
+                const note = String(row.note || "")
+                  .trim()
+                  .slice(0, STEP_NOTE_MAX);
+                let images: StepImageSpec[] = [];
+                if (Array.isArray(row.images)) {
+                  images = row.images
+                    .filter((img) => img && typeof img === "object")
+                    .map((img) => {
+                      const item = img as Record<string, unknown>;
+                      return {
+                        path: String(item.path || "").trim() || undefined,
+                        favorite_id: String(item.favorite_id || "").trim() || undefined,
+                        file: Boolean(item.file),
+                      };
+                    })
+                    .slice(0, MAX_IMAGES_PER_STEP);
+                } else {
+                  // legacy flat one-image step
+                  images = [
+                    {
+                      path: String(row.path || "").trim() || undefined,
+                      favorite_id: String(row.favorite_id || "").trim() || undefined,
+                      file: Boolean(row.file),
+                    },
+                  ].filter((img) => img.file || img.path || img.favorite_id);
+                }
+                return { note, images };
+              })
+              .filter((s) => s.images.length > 0)
+              .slice(0, MAX_PROCESS_STEPS);
+          }
+        } catch {
+          stepSpecs = [];
+        }
+
+        let stepFileCursor = 0;
+        const processSteps: GalleryProcessStep[] = [];
+        for (const spec of stepSpecs) {
+          const images: string[] = [];
+          for (const imgSpec of spec.images) {
+            let imagePath = "";
+            if (imgSpec.file) {
+              const f = stepFiles[stepFileCursor++];
+              if (!f?.buffer?.length) {
+                return res.status(400).json({ error: "创作过程步骤图片缺失" });
+              }
+              imagePath = saveWorkImage(
+                db,
+                projectRoot,
+                userId,
+                f.buffer,
+                (f.mimetype || "image/jpeg").toLowerCase()
+              );
+            } else if (imgSpec.favorite_id) {
+              const fromFav = getOwnedFavoriteImage(db, imgSpec.favorite_id, userId);
+              if (!fromFav) {
+                return res.status(400).json({ error: "创作过程引用的收藏无效" });
+              }
+              imagePath = fromFav;
+            } else if (imgSpec.path) {
+              imagePath = normalizeUploadPath(imgSpec.path) || "";
+            }
+            if (!imagePath) {
+              return res.status(400).json({ error: "创作过程每张步骤图都需要有效来源" });
+            }
+            images.push(imagePath);
+          }
+          if (!images.length) {
+            return res.status(400).json({ error: "创作过程每一步都需要至少一张图片" });
+          }
+          processSteps.push({
+            image_path: images[0],
+            images,
+            note: spec.note,
+          });
+        }
+
+        const processStepsJson = JSON.stringify(processSteps);
+
         const imagePath = imagePaths[0];
         const imagesJson = JSON.stringify(imagePaths);
         const favoriteId = favoriteIds[0] || null;
 
         if (existing) {
           const prev = parseImagesJson(existing.images_json, existing.image_path);
-          for (const oldPath of prev) {
+          const prevSteps = parseProcessStepsJson(existing.process_steps_json);
+          const stillUsed = new Set([
+            ...imagePaths,
+            ...processSteps.flatMap((s) => stepImagePaths(s)),
+          ]);
+          for (const oldPath of [
+            ...prev,
+            ...prevSteps.flatMap((s) => stepImagePaths(s)),
+          ]) {
             if (
-              !imagePaths.includes(oldPath) &&
+              !stillUsed.has(oldPath) &&
               String(oldPath).startsWith("/uploads/gallery-works/")
             ) {
               removeLocalUpload(projectRoot, oldPath);
@@ -620,13 +797,15 @@ export function registerGalleryWorksRoutes(
         }
 
         const now = new Date().toISOString();
+        const publishedFlag = asDraft ? 0 : 1;
+        const publishedAt = asDraft ? null : now;
         if (mode === "create") {
           const id = uuidv4();
           db.prepare(
             `INSERT INTO gallery_works
-              (id, user_id, title, description, category, image_path, images_json, source_favorite_id,
-               published, created_at, updated_at, published_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
+              (id, user_id, title, description, category, image_path, images_json, process_steps_json,
+               source_favorite_id, published, created_at, updated_at, published_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           ).run(
             id,
             userId,
@@ -635,28 +814,39 @@ export function registerGalleryWorksRoutes(
             category,
             imagePath,
             imagesJson,
+            processStepsJson,
             favoriteId,
+            publishedFlag,
             now,
             now,
-            now
+            publishedAt
           );
-          for (const fid of favoriteIds) {
-            db.prepare(
-              `UPDATE canvas_generations SET shared_at = COALESCE(shared_at, CURRENT_TIMESTAMP)
-               WHERE id = ? AND user_id = ?`
-            ).run(fid, userId);
+          if (!asDraft) {
+            for (const fid of favoriteIds) {
+              db.prepare(
+                `UPDATE canvas_generations SET shared_at = COALESCE(shared_at, CURRENT_TIMESTAMP)
+                 WHERE id = ? AND user_id = ?`
+              ).run(fid, userId);
+            }
           }
           const created = getWorkById(db, id);
           if (!created) return res.status(500).json({ error: "创建失败" });
-          return res.json({ ok: true, item: rowToDto(projectRoot, created) });
+          return res.json({
+            ok: true,
+            item: withFavoriteMeta(db, projectRoot, created, userId),
+          });
         }
 
         db.prepare(
           `UPDATE gallery_works
            SET title = ?, description = ?, category = ?, image_path = ?, images_json = ?,
+               process_steps_json = ?,
                source_favorite_id = COALESCE(?, source_favorite_id),
-               published = 1,
-               published_at = COALESCE(published_at, ?),
+               published = ?,
+               published_at = CASE
+                 WHEN ? = 1 THEN COALESCE(published_at, ?)
+                 ELSE published_at
+               END,
                updated_at = ?
            WHERE id = ? AND user_id = ?`
         ).run(
@@ -665,15 +855,29 @@ export function registerGalleryWorksRoutes(
           category,
           imagePath,
           imagesJson,
+          processStepsJson,
           favoriteId,
+          publishedFlag,
+          publishedFlag,
           now,
           now,
           existing!.id,
           userId
         );
+        if (!asDraft) {
+          for (const fid of favoriteIds) {
+            db.prepare(
+              `UPDATE canvas_generations SET shared_at = COALESCE(shared_at, CURRENT_TIMESTAMP)
+               WHERE id = ? AND user_id = ?`
+            ).run(fid, userId);
+          }
+        }
         const updated = getWorkById(db, existing!.id);
         if (!updated) return res.status(500).json({ error: "更新失败" });
-        return res.json({ ok: true, item: rowToDto(projectRoot, updated) });
+        return res.json({
+          ok: true,
+          item: withFavoriteMeta(db, projectRoot, updated, userId),
+        });
       } catch (e) {
         const message = e instanceof Error ? e.message : "发布失败";
         return res.status(400).json({ error: message });
@@ -688,7 +892,10 @@ export function registerGalleryWorksRoutes(
     try {
       const row = getWorkForUser(db, String(req.params.id || ""), req.authUser!.id);
       if (!row) return res.status(404).json({ error: "作品不存在" });
-      const paths = parseImagesJson(row.images_json, row.image_path);
+      const paths = [
+        ...parseImagesJson(row.images_json, row.image_path),
+        ...parseProcessStepsJson(row.process_steps_json).flatMap((s) => stepImagePaths(s)),
+      ];
       db.prepare(`DELETE FROM gallery_favorites WHERE work_id = ?`).run(row.id);
       db.prepare(`DELETE FROM gallery_works WHERE id = ?`).run(row.id);
       for (const p of paths) {

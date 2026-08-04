@@ -134,7 +134,7 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
 
   return (
     <div className="shell-slim-scrollbar fixed inset-0 z-[62] min-h-[100dvh] overflow-y-auto overscroll-y-auto bg-[#0e0e0e] text-[#e5e2e1]">
-      <main className="mx-auto w-full max-w-[1280px] px-5 pb-20 pt-[5.75rem] md:px-8 md:pt-24 lg:px-10">
+      <main className="mx-auto w-full max-w-[1520px] px-5 pb-20 pt-[5.75rem] md:px-8 md:pt-24 lg:px-10">
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -198,7 +198,7 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
           </div>
 
           <div
-            className="flex gap-1.5 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             role="tablist"
             aria-label="作品分类"
           >
@@ -212,9 +212,9 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
                   aria-selected={active}
                   onClick={() => setCategory(cat.id)}
                   className={cn(
-                    'shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors',
+                    'shrink-0 rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition-colors',
                     active
-                      ? 'bg-[#d8d4d2] text-[#141414]'
+                      ? 'bg-[#2a2a2a] text-[#e5e2e1] outline outline-[0.5px] outline-offset-[-0.5px] outline-white/22'
                       : 'text-[#e5e2e1]/48 hover:text-[#e5e2e1]/8',
                   )}
                 >
@@ -253,7 +253,7 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 md:grid-cols-3 md:gap-4 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 md:grid-cols-3 md:gap-4 lg:grid-cols-4 xl:grid-cols-5">
               {visible.map((item) => {
                 const src = item.thumbnail_path || item.preview_path || item.image_path;
                 const starred = Boolean(item.favorited);
@@ -263,33 +263,34 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
                     initial={{ opacity: 0, y: 14 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={spring}
-                    className="group relative overflow-hidden rounded-[18px] bg-[#161616] md:rounded-[20px]"
+                    className="group relative isolate overflow-hidden rounded-[18px] bg-[#161616] md:rounded-[20px]"
                   >
                     <button
                       type="button"
-                      className="relative block aspect-[4/3] w-full cursor-zoom-in text-left"
+                      className="relative block aspect-[4/3] w-full cursor-zoom-in overflow-hidden text-left"
                       onClick={() => setDetail(item)}
                       aria-label={`查看 ${item.title}`}
                     >
-                      <img
-                        src={src}
-                        alt=""
-                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-                        loading="lazy"
-                        draggable={false}
-                      />
+                      <span className="absolute inset-0 overflow-hidden">
+                        <img
+                          src={src}
+                          alt=""
+                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                          loading="lazy"
+                          draggable={false}
+                        />
+                      </span>
+                      {/* 底部毛玻璃：圆角贴齐卡片底边，略向下延伸 1px 消掉发丝缝 */}
                       <span
-                        className="pointer-events-none absolute inset-x-0 bottom-0 h-[46%] bg-gradient-to-t from-black/75 via-black/35 to-transparent"
+                        className="pointer-events-none absolute inset-x-0 -bottom-px z-[1] rounded-b-[18px] bg-black/50 px-3.5 pb-[calc(0.875rem+1px)] pt-3 backdrop-blur-[28px] md:rounded-b-[20px]"
+                        style={{ WebkitBackdropFilter: 'blur(28px)' }}
                         aria-hidden
-                      />
-                      <span className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 px-3.5 pb-3.5 pt-10">
-                        <span className="min-w-0">
-                          <span className="block truncate text-[11.5px] text-white/70">
-                            {ownerHandle(item.owner_name)}
-                          </span>
-                          <span className="mt-0.5 block truncate text-[14px] font-semibold tracking-[-0.01em] text-[#f2efee]">
-                            {item.title || '未命名作品'}
-                          </span>
+                      >
+                        <span className="block truncate text-[11.5px] text-white/70">
+                          {ownerHandle(item.owner_name)}
+                        </span>
+                        <span className="mt-0.5 block truncate pr-14 text-[14px] font-semibold tracking-[-0.01em] text-[#f2efee]">
+                          {item.title || '未命名作品'}
                         </span>
                       </span>
                     </button>
@@ -297,12 +298,12 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
                       type="button"
                       onClick={(e) => void onToggleFavorite(item, e)}
                       className={cn(
-                        'absolute bottom-3 right-3 z-[1] inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] tabular-nums backdrop-blur-[16px] transition-colors',
+                        'absolute bottom-3 right-3 z-[2] inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] tabular-nums backdrop-blur-[20px] transition-colors',
                         starred
-                          ? 'bg-[#ffb866]/20 text-[#ffb866]'
-                          : 'bg-black/50 text-white/85 hover:bg-black/65',
+                          ? 'bg-[#ffb866]/22 text-[#ffb866]'
+                          : 'bg-white/10 text-white/88 hover:bg-white/16',
                       )}
-                      style={{ outline: '0.5px solid rgba(255,255,255,0.16)', outlineOffset: '-0.5px' }}
+                      style={{ outline: '0.5px solid rgba(255,255,255,0.18)', outlineOffset: '-0.5px' }}
                       aria-label={starred ? '取消收藏' : '收藏作品'}
                     >
                       <Star

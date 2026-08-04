@@ -746,6 +746,33 @@ html[data-theme="light"] body {
     isolation: isolate;
   }
 
+  /* 顶栏黑色渐变：抬白字对比度（对齐参考图1） */
+  .cover-hero-nav-bar.fixed::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: min(148px, 22vh);
+    z-index: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.72) 0%,
+      rgba(0, 0, 0, 0.38) 42%,
+      transparent 100%
+    );
+    opacity: 1;
+    transition: opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* 个人空间：壁纸自带顶部阴影；悬停壁纸时与壁纸阴影一并收起 */
+  .cover-hero-nav-bar.fixed.cover-hero-nav-bar--personal::before {
+    opacity: 0;
+  }
+
+  html[data-personal-cover-hover='1'] .cover-hero-nav-bar.fixed::before {
+    opacity: 0;
+  }
+
   .cover-hero-nav-bar nav {
     position: relative;
     z-index: 1;
@@ -1021,16 +1048,16 @@ html[data-theme="light"] body {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.35em;
-    /* 上下等距、左右等距；高度由内容 + padding 决定 */
-    padding: 0.45em 0.9em;
+    gap: 0.4em;
+    /* 上下留白更饱满，胶囊不贴字 */
+    padding: 0.72em 1.15em;
     border-radius: 999px;
     box-sizing: border-box;
     font-family:
       -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", var(--font-body),
       sans-serif;
-    font-size: 0.8125rem;
-    font-weight: 500;
+    font-size: 0.875rem;
+    font-weight: 600;
     letter-spacing: 0.01em;
     line-height: 1;
     white-space: nowrap;
@@ -1040,10 +1067,10 @@ html[data-theme="light"] body {
 
   .cover-nav-text-link-icon {
     display: block;
-    width: 1em;
-    height: 1em;
+    width: 1.05em;
+    height: 1.05em;
     flex: 0 0 auto;
-    opacity: 0.92;
+    opacity: 0.94;
   }
 
   .cover-nav-text-link-label {
@@ -1053,8 +1080,8 @@ html[data-theme="light"] body {
 
   @media (min-width: 768px) {
     .cover-nav-text-link {
-      font-size: 0.9rem;
-      padding: 0.48em 0.95em;
+      font-size: 0.95rem;
+      padding: 0.78em 1.25em;
     }
   }
 
@@ -1071,29 +1098,30 @@ html[data-theme="light"] body {
     color: #ffffff;
   }
 
-  /* 共享滑动玻璃胶囊（layoutId 在分支间位移） */
+  /* 半透明玻璃胶囊：默认隐藏，悬停/聚焦才显现 */
   .cover-nav-glass-pill {
     position: absolute;
     inset: 0;
     z-index: 0;
     border-radius: 999px;
-    background: rgba(34, 34, 34, 0.82);
-    backdrop-filter: blur(16px) saturate(140%);
-    -webkit-backdrop-filter: blur(16px) saturate(140%);
-    outline: 0.5px solid rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(18px) saturate(130%);
+    -webkit-backdrop-filter: blur(18px) saturate(130%);
+    outline: 0.5px solid rgba(255, 255, 255, 0.18);
     outline-offset: -0.5px;
-    box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.035),
-      0 0 10px rgba(255, 255, 255, 0.08),
-      0 0 20px rgba(255, 255, 255, 0.035),
-      inset 0 1px 0 rgba(255, 255, 255, 0.28),
-      inset 0 -1px 0 rgba(255, 255, 255, 0.07);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
     overflow: hidden;
     pointer-events: none;
-    --cover-nav-flow: 1;
+    opacity: 0;
+    transition: opacity 0.18s ease-out;
   }
 
-  /* 静止：仅保留柔边与上沿高光，不循环流光 */
+  .cover-nav-text-link:hover .cover-nav-glass-pill,
+  .cover-nav-text-link:focus-visible .cover-nav-glass-pill {
+    opacity: 1;
+  }
+
+  /* 极淡描边高光，避免把胶囊衬实 */
   .cover-nav-glass-pill::before {
     content: "";
     position: absolute;
@@ -1102,10 +1130,9 @@ html[data-theme="light"] body {
     pointer-events: none;
     background: linear-gradient(
       180deg,
-      rgba(255, 255, 255, 0.3) 0%,
-      rgba(255, 255, 255, 0.08) 42%,
-      rgba(255, 255, 255, 0.04) 58%,
-      rgba(255, 255, 255, 0.14) 100%
+      rgba(255, 255, 255, 0.16) 0%,
+      rgba(255, 255, 255, 0.04) 45%,
+      rgba(255, 255, 255, 0.08) 100%
     );
     -webkit-mask:
       linear-gradient(#000 0 0) content-box,
@@ -1116,74 +1143,57 @@ html[data-theme="light"] body {
     -webkit-mask-composite: xor;
     mask-composite: exclude;
     padding: 1px;
-    filter: blur(0.35px);
-    opacity: 0.9;
+    opacity: 0.55;
   }
 
   .cover-nav-glass-pill::after {
+    content: none;
+    display: none;
+  }
+
+  /* 切换时挂载的流光层：单层扫光，与胶囊 tween 同时长，淡出到 0 再卸 */
+  .cover-nav-glass-pill-flow {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .cover-nav-glass-pill-flow::after {
     content: "";
     position: absolute;
-    top: -35%;
-    width: 42%;
-    height: 170%;
+    top: -40%;
+    left: 0;
+    width: 55%;
+    height: 180%;
     border-radius: 999px;
     pointer-events: none;
     background: linear-gradient(
-      100deg,
+      105deg,
       transparent 0%,
-      rgba(255, 255, 255, 0.22) 48%,
-      transparent 78%
+      rgba(255, 255, 255, 0.08) 32%,
+      rgba(255, 255, 255, 0.34) 50%,
+      rgba(255, 255, 255, 0.08) 68%,
+      transparent 100%
     );
-    filter: blur(7px);
-    opacity: 0;
-    transform: translateX(calc(var(--cover-nav-flow, 1) * -140%));
+    filter: blur(6px);
+    will-change: transform, opacity;
+    animation: cover-nav-pill-sheen 0.34s cubic-bezier(0.22, 1, 0.36, 1) 1 forwards;
   }
 
-  /* 仅切换分支时播一次：光斑沿滑动方向扫过 */
   @keyframes cover-nav-pill-sheen {
     0% {
-      opacity: 0;
-      transform: translateX(calc(var(--cover-nav-flow, 1) * -140%));
+      opacity: 0.35;
+      transform: translateX(calc(var(--cover-nav-flow, 1) * -120%));
     }
-    18% {
-      opacity: 0.75;
-    }
-    100% {
-      opacity: 0;
-      transform: translateX(calc(var(--cover-nav-flow, 1) * 160%));
-    }
-  }
-
-  @keyframes cover-nav-pill-rim-flow {
-    0% {
-      background-position: calc(var(--cover-nav-flow, 1) * -40%) 50%;
-      opacity: 0.55;
-    }
-    40% {
-      opacity: 1;
-    }
-    100% {
-      background-position: calc(var(--cover-nav-flow, 1) * 140%) 50%;
+    35% {
       opacity: 0.85;
     }
-  }
-
-  .cover-nav-glass-pill.is-flowing::after {
-    animation: cover-nav-pill-sheen 0.72s cubic-bezier(0.22, 1, 0.36, 1) 1 both;
-  }
-
-  .cover-nav-glass-pill.is-flowing::before {
-    background: linear-gradient(
-      115deg,
-      rgba(255, 255, 255, 0.06) 0%,
-      rgba(255, 255, 255, 0.1) 22%,
-      rgba(255, 255, 255, 0.55) 40%,
-      rgba(255, 255, 255, 0.1) 58%,
-      rgba(255, 255, 255, 0.35) 76%,
-      rgba(255, 255, 255, 0.08) 100%
-    );
-    background-size: 220% 100%;
-    animation: cover-nav-pill-rim-flow 0.72s cubic-bezier(0.22, 1, 0.36, 1) 1 both;
+    100% {
+      opacity: 0;
+      transform: translateX(calc(var(--cover-nav-flow, 1) * 130%));
+    }
   }
 
   .cover-nav-icon-btn {

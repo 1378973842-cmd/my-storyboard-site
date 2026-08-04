@@ -1,5 +1,11 @@
 import type { GalleryWorkCategoryId } from './galleryCategories';
 
+export type GalleryProcessStep = {
+  image_path: string;
+  images?: string[];
+  note: string;
+};
+
 export type GalleryWork = {
   id: string;
   title: string;
@@ -7,6 +13,7 @@ export type GalleryWork = {
   category: string;
   image_path: string;
   images: string[];
+  process_steps?: GalleryProcessStep[];
   preview_path: string;
   thumbnail_path: string;
   source_favorite_id: string | null;
@@ -30,6 +37,17 @@ export type FavoritePick = {
   prompt: string;
 };
 
+export type ProcessStepImageInput = {
+  file?: File | null;
+  path?: string | null;
+  favoriteId?: string | null;
+};
+
+export type ProcessStepInput = {
+  note: string;
+  images: ProcessStepImageInput[];
+};
+
 export type UpsertGalleryWorkInput = {
   title: string;
   description: string;
@@ -37,7 +55,15 @@ export type UpsertGalleryWorkInput = {
   files?: File[];
   favoriteIds?: string[];
   keepPaths?: string[];
+  processSteps?: ProcessStepInput[];
+  /** true = 仅存个人空间，不进公共画廊 */
+  asDraft?: boolean;
 };
+
+export function processStepImages(step: GalleryProcessStep): string[] {
+  if (Array.isArray(step.images) && step.images.length) return step.images.filter(Boolean);
+  return step.image_path ? [step.image_path] : [];
+}
 
 async function readWorkResponse(res: Response): Promise<GalleryWork> {
   const data = (await res.json()) as { item?: GalleryWork; error?: string };
@@ -52,9 +78,30 @@ function appendUpsertForm(form: FormData, input: UpsertGalleryWorkInput): void {
   form.append('category', input.category);
   form.append('keep_paths', JSON.stringify(input.keepPaths || []));
   form.append('favorite_ids', JSON.stringify(input.favoriteIds || []));
+  form.append('as_draft', input.asDraft ? '1' : '0');
   for (const file of input.files || []) {
     form.append('images', file);
   }
+
+  const stepSpecs: Array<{
+    note: string;
+    images: Array<{ path?: string; favorite_id?: string; file?: boolean }>;
+  }> = [];
+  for (const step of input.processSteps || []) {
+    const images: Array<{ path?: string; favorite_id?: string; file?: boolean }> = [];
+    for (const img of step.images || []) {
+      if (img.file) {
+        form.append('step_images', img.file);
+        images.push({ file: true });
+      } else if (img.favoriteId) {
+        images.push({ favorite_id: img.favoriteId });
+      } else if (img.path) {
+        images.push({ path: img.path });
+      }
+    }
+    if (images.length) stepSpecs.push({ note: step.note, images });
+  }
+  form.append('process_steps', JSON.stringify(stepSpecs));
 }
 
 export async function fetchGalleryWorks(): Promise<GalleryWork[]> {
@@ -101,6 +148,15 @@ export async function updateGalleryWork(
     body: form,
   });
   return readWorkResponse(res);
+}
+
+export async function deleteGalleryWork(id: string): Promise<void> {
+  const res = await fetch(`/api/gallery/works/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  });
+  const data = (await res.json()) as { error?: string };
+  if (!res.ok) throw new Error(data.error || '删除失败');
 }
 
 export async function toggleGalleryFavorite(

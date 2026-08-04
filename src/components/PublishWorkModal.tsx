@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, ImagePlus, Loader2, Plus, Upload, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, ImagePlus, Loader2, Plus, Upload, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
   GALLERY_WORK_CATEGORIES,
@@ -10,6 +10,7 @@ import {
 import {
   createGalleryWork,
   fetchMyFavoritesForPicker,
+  processStepImages,
   updateGalleryWork,
   type FavoritePick,
   type GalleryWork,
@@ -18,7 +19,10 @@ import {
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 const TITLE_MAX = 80;
 const DESC_MAX = 500;
+const STEP_NOTE_MAX = 1000;
 const MAX_IMAGES = 9;
+const MAX_STEPS = 6;
+const MAX_IMAGES_PER_STEP = 3;
 
 type DraftImage = {
   key: string;
@@ -27,6 +31,12 @@ type DraftImage = {
   path?: string;
   favoriteId?: string;
   revoke?: boolean;
+};
+
+type ProcessDraft = {
+  key: string;
+  note: string;
+  images: DraftImage[];
 };
 
 type Props = {
@@ -42,10 +52,15 @@ function newKey(): string {
 
 export function PublishWorkModal({ open, onClose, onSaved, editing = null }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const stepFileRef = useRef<HTMLInputElement>(null);
+  const stepImageTargetRef = useRef<string | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<GalleryWorkCategoryId>('original');
   const [drafts, setDrafts] = useState<DraftImage[]>([]);
+  const [steps, setSteps] = useState<ProcessDraft[]>([]);
+  const [showProcess, setShowProcess] = useState(false);
+  const [activeStepKey, setActiveStepKey] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<FavoritePick[]>([]);
   const [showFavPicker, setShowFavPicker] = useState(false);
   const [favLoading, setFavLoading] = useState(false);
@@ -56,6 +71,10 @@ export function PublishWorkModal({ open, onClose, onSaved, editing = null }: Pro
     for (const d of list) {
       if (d.revoke && d.preview.startsWith('blob:')) URL.revokeObjectURL(d.preview);
     }
+  };
+
+  const revokeSteps = (list: ProcessDraft[]) => {
+    for (const s of list) revokeDrafts(s.images);
   };
 
   useEffect(() => {
@@ -79,14 +98,39 @@ export function PublishWorkModal({ open, onClose, onSaved, editing = null }: Pro
       revokeDrafts(prev);
       return existing;
     });
+    const existingSteps = (editing?.process_steps || [])
+      .slice(0, MAX_STEPS)
+      .map((s) => ({
+        key: newKey(),
+        note: s.note || '',
+        images: processStepImages(s)
+          .slice(0, MAX_IMAGES_PER_STEP)
+          .map((path) => ({
+            key: newKey(),
+            preview: path,
+            path,
+          })),
+      }))
+      .filter((s) => s.images.length > 0);
+    setSteps((prev) => {
+      revokeSteps(prev);
+      return existingSteps;
+    });
+    setShowProcess(existingSteps.length > 0);
+    setActiveStepKey(existingSteps[0]?.key || null);
     setShowFavPicker(false);
     setError(null);
   }, [open, editing]);
 
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
+  const stepsRef = useRef(steps);
+  stepsRef.current = steps;
   useEffect(() => {
-    return () => revokeDrafts(draftsRef.current);
+    return () => {
+      revokeDrafts(draftsRef.current);
+      revokeSteps(stepsRef.current);
+    };
   }, []);
 
   const loadFavorites = useCallback(async () => {
@@ -161,13 +205,129 @@ export function PublishWorkModal({ open, onClose, onSaved, editing = null }: Pro
     });
   };
 
-  const canSubmit = useMemo(() => {
-    if (!title.trim() || !category) return false;
-    return drafts.length > 0;
-  }, [title, category, drafts.length]);
+  const addEmptyStep = () => {
+    const key = newKey();
+    setSteps((prev) => {
+      if (prev.length >= MAX_STEPS) {
+        setError(`创作过程最多 ${MAX_STEPS} 步`);
+        return prev;
+      }
+      setError(null);
+      return [...prev, { key, note: '', images: [] }];
+    });
+    setActiveStepKey(key);
+    setShowProcess(true);
+  };
 
-  const submit = async () => {
-    if (!canSubmit || submitting) return;
+  const addImagesToStep = (stepKey: string, fileList: FileList | File[] | null | undefined) => {
+    const incoming = Array.from(fileList || []).filter((f) => f.type.startsWith('image/'));
+    if (!incoming.length) return;
+    setActiveStepKey(stepKey);
+    setSteps((prev) =>
+      prev.map((step) => {
+        if (step.key !== stepKey) return step;
+        const room = MAX_IMAGES_PER_STEP - step.images.length;
+        if (room <= 0) {
+          setError(`每一步最多 ${MAX_IMAGES_PER_STEP} 张图`);
+          return step;
+        }
+        setError(null);
+        return {
+          ...step,
+          images: [
+            ...step.images,
+            ...incoming.slice(0, room).map((file) => ({
+              key: newKey(),
+              preview: URL.createObjectURL(file),
+              file,
+              revoke: true,
+            })),
+          ],
+        };
+      }),
+    );
+  };
+
+  const addCoverImageToStep = (stepKey: string, draft: DraftImage) => {
+    setSteps((prev) =>
+      prev.map((step) => {
+        if (step.key !== stepKey) return step;
+        if (step.images.length >= MAX_IMAGES_PER_STEP) {
+          setError(`每一步最多 ${MAX_IMAGES_PER_STEP} 张图`);
+          return step;
+        }
+        setError(null);
+        return {
+          ...step,
+          images: [
+            ...step.images,
+            {
+              key: newKey(),
+              preview: draft.preview,
+              path: draft.path,
+              file: draft.file,
+              favoriteId: draft.favoriteId,
+              revoke: false,
+            },
+          ],
+        };
+      }),
+    );
+  };
+
+  const removeStepImage = (stepKey: string, imageKey: string) => {
+    setSteps((prev) =>
+      prev.map((step) => {
+        if (step.key !== stepKey) return step;
+        const hit = step.images.find((d) => d.key === imageKey);
+        if (hit?.revoke && hit.preview.startsWith('blob:')) URL.revokeObjectURL(hit.preview);
+        return { ...step, images: step.images.filter((d) => d.key !== imageKey) };
+      }),
+    );
+  };
+
+  const removeStep = (key: string) => {
+    setSteps((prev) => {
+      const hit = prev.find((d) => d.key === key);
+      if (hit) revokeDrafts(hit.images);
+      const next = prev.filter((d) => d.key !== key);
+      setActiveStepKey((cur) => {
+        if (cur !== key) return cur;
+        return next[Math.max(0, prev.findIndex((s) => s.key === key) - 1)]?.key || next[0]?.key || null;
+      });
+      return next;
+    });
+  };
+
+  const moveStep = (key: string, dir: -1 | 1) => {
+    setSteps((prev) => {
+      const idx = prev.findIndex((s) => s.key === key);
+      if (idx < 0) return prev;
+      const next = idx + dir;
+      if (next < 0 || next >= prev.length) return prev;
+      const copy = [...prev];
+      const tmp = copy[idx];
+      copy[idx] = copy[next];
+      copy[next] = tmp;
+      return copy;
+    });
+  };
+
+  const canSubmitDraft = useMemo(() => drafts.length > 0, [drafts.length]);
+
+  const canSubmitPublish = useMemo(() => {
+    if (!title.trim() || !category) return false;
+    if (drafts.length === 0) return false;
+    const filledSteps = steps.filter((s) => s.images.length > 0);
+    if (filledSteps.some((s) => s.images.some((img) => !img.file && !img.path && !img.favoriteId))) {
+      return false;
+    }
+    return true;
+  }, [title, category, drafts.length, steps]);
+
+  const submit = async (asDraft: boolean) => {
+    const canGo = asDraft ? canSubmitDraft : canSubmitPublish;
+    if (!canGo || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -176,13 +336,25 @@ export function PublishWorkModal({ open, onClose, onSaved, editing = null }: Pro
         .map((d) => d.path!);
       const favoriteIds = drafts.filter((d) => d.favoriteId).map((d) => d.favoriteId!);
       const files = drafts.filter((d) => d.file).map((d) => d.file!);
+      const processSteps = steps
+        .filter((s) => s.images.length > 0)
+        .map((s) => ({
+          note: s.note.trim(),
+          images: s.images.map((img) => ({
+            file: img.file || null,
+            path: img.path || null,
+            favoriteId: img.favoriteId || null,
+          })),
+        }));
       const payload = {
-        title: title.trim(),
+        title: title.trim() || (asDraft ? '未命名草稿' : ''),
         description: description.trim(),
         category,
         files,
         favoriteIds,
         keepPaths,
+        processSteps,
+        asDraft,
       };
 
       const item = editing
@@ -191,7 +363,7 @@ export function PublishWorkModal({ open, onClose, onSaved, editing = null }: Pro
       onSaved(item);
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '发布失败');
+      setError(e instanceof Error ? e.message : asDraft ? '保存草稿失败' : '发布失败');
     } finally {
       setSubmitting(false);
     }
@@ -232,10 +404,14 @@ export function PublishWorkModal({ open, onClose, onSaved, editing = null }: Pro
                   id="publish-work-title"
                   className="text-[22px] font-semibold tracking-[-0.02em] text-[#e5e2e1] md:text-[24px]"
                 >
-                  {editing ? '编辑并重新发布' : '发布作品到公共画廊'}
+                  {editing?.published === false
+                    ? '编辑草稿'
+                    : editing
+                      ? '编辑并重新发布'
+                      : '发布作品到公共画廊'}
                 </h2>
-                <p className="mt-1.5 text-[13px] leading-relaxed text-[#e5e2e1]/45">
-                  最多 {MAX_IMAGES} 张图。可本地上传，也可从收藏多选导入。
+                <p className="mt-1.5 text-[13px] leading-relaxed text-[#e5e2e1]/55">
+                  可先保存草稿（仅自己可见），确认后再发布到画廊。
                 </p>
               </div>
               <button
@@ -481,9 +657,242 @@ export function PublishWorkModal({ open, onClose, onSaved, editing = null }: Pro
                   ) : null}
                 </div>
               </div>
+
+              {/* 创作过程：轻量节点流（比表单卡更直观） */}
+              <div className="mt-6 rounded-[18px] bg-[#121212] p-4 md:p-5" style={{ outline: '0.5px solid rgba(255,255,255,0.08)', outlineOffset: '-0.5px' }}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[13.5px] font-medium text-[#e5e2e1]/9">
+                    创作过程（可选）
+                    <span className="ml-2 text-[12px] font-normal text-[#e5e2e1]/55">
+                      节点从左到右 · 点节点加图
+                    </span>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (showProcess) {
+                        setShowProcess(false);
+                        return;
+                      }
+                      setShowProcess(true);
+                      if (steps.length === 0) addEmptyStep();
+                    }}
+                    className="rounded-full bg-[#2a2a2a] px-3 py-1.5 text-[12.5px] font-medium text-[#e5e2e1]/85 hover:bg-[#333]"
+                  >
+                    {showProcess ? '收起' : steps.length ? `展开（${steps.length}）` : '添加过程'}
+                  </button>
+                </div>
+
+                {showProcess ? (
+                  <div className="mt-4 space-y-3">
+                    <input
+                      ref={stepFileRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      multiple
+                      className="sr-only"
+                      onChange={(e) => {
+                        const target = stepImageTargetRef.current;
+                        if (target) addImagesToStep(target, e.target.files);
+                        stepImageTargetRef.current = null;
+                        e.target.value = '';
+                      }}
+                    />
+
+                    <div className="custom-scrollbar -mx-1 overflow-x-auto px-1 pb-2 pt-1">
+                      <ol className="flex w-max items-start gap-0">
+                        {steps.map((step, idx) => {
+                          const active = activeStepKey === step.key;
+                          return (
+                            <li key={step.key} className="flex items-start">
+                              <div className="flex w-[200px] shrink-0 flex-col items-center">
+                                {/* 节点区：固定高度，避免多图溢出盖住提示词 */}
+                                <div className="relative flex h-[100px] w-full items-center justify-center">
+                                  <button
+                                    type="button"
+                                    disabled={idx === 0}
+                                    onClick={() => moveStep(step.key, -1)}
+                                    className="absolute left-0 z-[2] flex h-6 w-6 items-center justify-center rounded-full text-[#e5e2e1]/45 hover:bg-white/5 hover:text-[#e5e2e1] disabled:opacity-20"
+                                    aria-label="左移"
+                                  >
+                                    <ChevronLeft className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveStepKey(step.key);
+                                      if (step.images.length === 0) {
+                                        stepImageTargetRef.current = step.key;
+                                        stepFileRef.current?.click();
+                                      }
+                                    }}
+                                    className={cn(
+                                      'relative flex h-[88px] w-[88px] items-center justify-center overflow-hidden rounded-full bg-[#1a1919] transition-[box-shadow,transform]',
+                                      active
+                                        ? 'shadow-[0_0_0_1.5px_rgba(255,184,102,0.55)]'
+                                        : 'hover:shadow-[0_0_0_1px_rgba(255,255,255,0.18)]',
+                                    )}
+                                    style={{ outline: '0.5px solid rgba(255,255,255,0.1)', outlineOffset: '-0.5px' }}
+                                    aria-label={`步骤 ${idx + 1}`}
+                                  >
+                                    <span className="absolute left-1/2 top-1 z-[2] -translate-x-1/2 rounded-full bg-[#2a2a2a] px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-[#ffb866]">
+                                      {idx + 1}
+                                    </span>
+                                    {step.images.length === 0 ? (
+                                      <span className="flex flex-col items-center gap-0.5 text-[#e5e2e1]/55">
+                                        <Plus className="h-5 w-5" />
+                                        <span className="text-[10px] font-medium">加图</span>
+                                      </span>
+                                    ) : step.images.length === 1 ? (
+                                      <img
+                                        src={step.images[0].preview}
+                                        alt=""
+                                        className="h-full w-full object-cover"
+                                      />
+                                    ) : (
+                                      <div className="flex items-center justify-center gap-0.5 px-2 pt-3">
+                                        {step.images.slice(0, 3).map((img) => (
+                                          <div
+                                            key={img.key}
+                                            className="h-9 w-9 overflow-hidden rounded-full bg-[#0e0e0e]"
+                                            style={{ outline: '1.5px solid #1a1919' }}
+                                          >
+                                            <img src={img.preview} alt="" className="h-full w-full object-cover" />
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={idx === steps.length - 1}
+                                    onClick={() => moveStep(step.key, 1)}
+                                    className="absolute right-0 z-[2] flex h-6 w-6 items-center justify-center rounded-full text-[#e5e2e1]/45 hover:bg-white/5 hover:text-[#e5e2e1] disabled:opacity-20"
+                                    aria-label="右移"
+                                  >
+                                    <ChevronRight className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeStep(step.key)}
+                                    className="absolute right-5 top-0 z-[3] flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-[#e5e2e1]/8 hover:text-[#e5e2e1]"
+                                    aria-label={`删除步骤 ${idx + 1}`}
+                                  >
+                                    <X className="h-3 w-3" strokeWidth={2} />
+                                  </button>
+                                </div>
+
+                                {/* 多图管理：独立行，与提示词分离 */}
+                                <div className="flex min-h-[36px] w-full flex-col items-center justify-center gap-1 px-1">
+                                  {active && step.images.length > 0 ? (
+                                    <div className="flex flex-wrap justify-center gap-1">
+                                      {step.images.map((img) => (
+                                        <button
+                                          key={img.key}
+                                          type="button"
+                                          onClick={() => removeStepImage(step.key, img.key)}
+                                          className="relative h-7 w-7 overflow-hidden rounded-full"
+                                          title="点击移除"
+                                        >
+                                          <img src={img.preview} alt="" className="h-full w-full object-cover" />
+                                          <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-[10px] text-transparent hover:bg-black/55 hover:text-[#e5e2e1]">
+                                            ×
+                                          </span>
+                                        </button>
+                                      ))}
+                                      {step.images.length < MAX_IMAGES_PER_STEP ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            stepImageTargetRef.current = step.key;
+                                            stepFileRef.current?.click();
+                                          }}
+                                          className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1a1919] text-[#e5e2e1]/7"
+                                          style={{ outline: '0.5px solid rgba(255,255,255,0.12)', outlineOffset: '-0.5px' }}
+                                        >
+                                          <Plus className="h-3 w-3" />
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
+                                  {active && drafts.length > 0 && step.images.length < MAX_IMAGES_PER_STEP ? (
+                                    <div className="flex flex-wrap justify-center gap-1">
+                                      {drafts.slice(0, 3).map((d, i) => (
+                                        <button
+                                          key={`node_cover_${step.key}_${d.key}`}
+                                          type="button"
+                                          onClick={() => {
+                                            addCoverImageToStep(step.key, d);
+                                            setActiveStepKey(step.key);
+                                          }}
+                                          className="rounded-full bg-[#1a1919] px-2 py-0.5 text-[10px] font-medium text-[#e5e2e1]/75"
+                                          style={{ outline: '0.5px solid rgba(255,255,255,0.1)', outlineOffset: '-0.5px' }}
+                                        >
+                                          成片{i + 1}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </div>
+
+                                {/* 提示词：随内容增高，不出现内部滚动条 */}
+                                <div className="mt-1 w-full px-0.5">
+                                  <label className="mb-1 block text-center text-[10px] font-medium tracking-wide text-[#e5e2e1]/45">
+                                    提示词
+                                  </label>
+                                  <textarea
+                                    value={step.note}
+                                    onFocus={() => setActiveStepKey(step.key)}
+                                    onChange={(e) => {
+                                      const note = e.target.value.slice(0, STEP_NOTE_MAX);
+                                      setSteps((prev) =>
+                                        prev.map((s) => (s.key === step.key ? { ...s, note } : s)),
+                                      );
+                                    }}
+                                    ref={(el) => {
+                                      if (!el) return;
+                                      el.style.height = 'auto';
+                                      el.style.height = `${el.scrollHeight}px`;
+                                    }}
+                                    placeholder="这一步的提示词…"
+                                    rows={3}
+                                    className="w-full resize-none overflow-hidden rounded-xl bg-[#1a1919] px-2.5 py-2 text-[11.5px] leading-relaxed text-[#e5e2e1] placeholder:text-[#e5e2e1]/4 outline-none"
+                                    style={{ outline: '0.5px solid rgba(255,255,255,0.08)', outlineOffset: '-0.5px' }}
+                                  />
+                                </div>
+                              </div>
+
+                              {idx < steps.length - 1 ? (
+                                <div className="mt-[44px] flex w-10 shrink-0 items-center px-0.5" aria-hidden>
+                                  <div className="h-px flex-1 bg-gradient-to-r from-white/25 to-[#ffb866]/35" />
+                                  <ChevronRight className="-ml-1 h-3.5 w-3.5 text-[#ffb866]/55" />
+                                </div>
+                              ) : null}
+                            </li>
+                          );
+                        })}
+
+                        {steps.length < MAX_STEPS ? (
+                          <li className="ml-2 flex w-[88px] shrink-0 flex-col items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={addEmptyStep}
+                              className="mt-1 flex h-[88px] w-[88px] flex-col items-center justify-center gap-1 rounded-full bg-[#1a1919]/80 text-[#e5e2e1]/55 transition-colors hover:text-[#e5e2e1]"
+                              style={{ outline: '0.5px dashed rgba(255,255,255,0.2)', outlineOffset: '-0.5px' }}
+                            >
+                              <Plus className="h-5 w-5" />
+                              <span className="text-[10px] font-medium">下一步</span>
+                            </button>
+                          </li>
+                        ) : null}
+                      </ol>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2.5 px-6 py-4 md:px-8">
+            <div className="flex flex-wrap items-center justify-end gap-2.5 px-6 py-4 md:px-8">
               <button
                 type="button"
                 onClick={onClose}
@@ -493,12 +902,22 @@ export function PublishWorkModal({ open, onClose, onSaved, editing = null }: Pro
               </button>
               <button
                 type="button"
-                disabled={!canSubmit || submitting}
-                onClick={() => void submit()}
+                disabled={!canSubmitDraft || submitting}
+                onClick={() => void submit(true)}
+                className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[#2a2a2a] px-5 text-[13.5px] font-medium text-[#e5e2e1] transition-[opacity,transform] hover:bg-[#333] disabled:opacity-45 active:scale-[0.98]"
+                style={{ outline: '0.5px solid rgba(255,255,255,0.12)', outlineOffset: '-0.5px' }}
+              >
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                保存草稿
+              </button>
+              <button
+                type="button"
+                disabled={!canSubmitPublish || submitting}
+                onClick={() => void submit(false)}
                 className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[#e5e2e1] px-5 text-[13.5px] font-medium text-[#141414] transition-[opacity,transform] hover:bg-white disabled:opacity-45 active:scale-[0.98]"
               >
                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
-                {editing ? '保存并发布' : '发布并投稿'}
+                {editing?.published === false ? '发布到画廊' : editing ? '保存并发布' : '发布并投稿'}
               </button>
             </div>
           </motion.div>

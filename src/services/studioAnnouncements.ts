@@ -89,6 +89,19 @@ export function registerStudioAnnouncementRoutes(
     }
   });
 
+  app.post("/api/announcements/read-all", requireAuth, (req, res) => {
+    try {
+      const userId = req.authUser!.id;
+      db.prepare(
+        `INSERT OR IGNORE INTO studio_announcement_reads (user_id, announcement_id)
+         SELECT ?, a.id FROM studio_announcements a`
+      ).run(userId);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "全部已读失败" });
+    }
+  });
+
   app.post("/api/announcements/:id/read", requireAuth, (req, res) => {
     try {
       const id = String(req.params.id || "").trim();

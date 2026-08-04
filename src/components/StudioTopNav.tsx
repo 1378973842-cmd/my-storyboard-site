@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { LayoutGroup, motion } from 'motion/react';
+import { motion } from 'motion/react';
 import {
   ArrowLeft,
   Home,
@@ -351,20 +351,7 @@ function NavBrand({
   );
 }
 
-const COVER_NAV_ORDER: CoverCenterNavId[] = ['home', 'workspace', 'personal', 'gallery'];
-
-function CoverCenterLink({
-  item,
-  pillLayoutId,
-  flowDir,
-  flowing,
-}: {
-  item: CoverCenterNavItem;
-  pillLayoutId: string;
-  /** 1=向右滑，-1=向左滑；仅切换瞬间播一次流光 */
-  flowDir: 1 | -1;
-  flowing: boolean;
-}) {
+function CoverCenterLink({ item }: { item: CoverCenterNavItem }) {
   const Icon = item.icon;
   return (
     <button
@@ -376,16 +363,9 @@ function CoverCenterLink({
         item.active ? 'cover-nav-text-link-active' : 'cover-nav-text-link-muted',
       )}
     >
-      {item.active ? (
-        <motion.span
-          layoutId={pillLayoutId}
-          className={cn('cover-nav-glass-pill', flowing && 'is-flowing')}
-          style={{ ['--cover-nav-flow' as string]: flowDir }}
-          transition={{ type: 'spring', stiffness: 380, damping: 34, mass: 0.85 }}
-          aria-hidden
-        />
-      ) : null}
-      <Icon className="cover-nav-text-link-icon relative z-[1]" strokeWidth={1.7} aria-hidden />
+      {/* 默认透明；悬停/聚焦时才显半透明玻璃胶囊 */}
+      <span className="cover-nav-glass-pill" aria-hidden />
+      <Icon className="cover-nav-text-link-icon relative z-[1]" strokeWidth={1.9} aria-hidden />
       <span className="cover-nav-text-link-label relative z-[1]">{item.label}</span>
     </button>
   );
@@ -458,10 +438,6 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
   const [coverNavGlass, setCoverNavGlass] = useState(false);
   /** 已打开具体画布板时隐藏四链，选画布闸门仍保留 */
   const [canvasBoardOpen, setCanvasBoardOpen] = useState(() => isInfiniteCanvasEditorOpen());
-  const [coverNavFlowDir, setCoverNavFlowDir] = useState<1 | -1>(1);
-  const [coverNavFlowing, setCoverNavFlowing] = useState(false);
-  const coverNavPrevIdRef = useRef<CoverCenterNavId | null>(null);
-  const coverNavFlowTimerRef = useRef<number | null>(null);
 
   const isOverlayNav = variant === 'overlay';
   useEffect(() => {
@@ -543,37 +519,6 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
     },
   ];
 
-  const coverNavActiveId =
-    coverCenterItems.find((item) => item.active)?.id ?? null;
-
-  useEffect(() => {
-    if (!coverNavActiveId) return;
-    const prev = coverNavPrevIdRef.current;
-    coverNavPrevIdRef.current = coverNavActiveId;
-    if (!prev || prev === coverNavActiveId) return;
-    const from = COVER_NAV_ORDER.indexOf(prev);
-    const to = COVER_NAV_ORDER.indexOf(coverNavActiveId);
-    if (from < 0 || to < 0 || from === to) return;
-    setCoverNavFlowDir(to > from ? 1 : -1);
-    // 先摘掉再挂上，保证每次切换都能重播一次流光
-    setCoverNavFlowing(false);
-    if (coverNavFlowTimerRef.current) window.clearTimeout(coverNavFlowTimerRef.current);
-    const startId = window.requestAnimationFrame(() => {
-      setCoverNavFlowing(true);
-      coverNavFlowTimerRef.current = window.setTimeout(() => {
-        setCoverNavFlowing(false);
-        coverNavFlowTimerRef.current = null;
-      }, 760);
-    });
-    return () => {
-      window.cancelAnimationFrame(startId);
-      if (coverNavFlowTimerRef.current) {
-        window.clearTimeout(coverNavFlowTimerRef.current);
-        coverNavFlowTimerRef.current = null;
-      }
-    };
-  }, [coverNavActiveId]);
-
   const handleHome = () => {
     if (onHome) {
       onHome();
@@ -593,6 +538,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
         'cover-hero-nav-bar',
         isOverlayNav &&
           'fixed inset-x-0 top-0 z-[70] pointer-events-none',
+        isOverlayNav && screen === 'personal' && 'cover-hero-nav-bar--personal',
         variant === 'embedded' &&
           'flex items-center shrink-0 z-50 px-4 py-3 md:px-6 md:py-4 bg-surface-container-lowest/55 backdrop-blur-[24px]',
         className,
@@ -645,39 +591,23 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
           )}
           aria-label={`${BRAND_NAME} navigation`}
         >
-          <LayoutGroup id="cover-center-nav-desktop">
-            <div
-              className={cn(
-                'pointer-events-auto absolute left-1/2 top-5 z-[3] hidden -translate-x-1/2 items-center gap-5 md:top-6 md:flex md:gap-6 lg:gap-7',
-                coverNavGlass && 'cover-glass-nav cover-hero-nav-pill !px-4 !py-2',
-              )}
-            >
-              {coverCenterItems.map((item) => (
-                <CoverCenterLink
-                  key={item.id}
-                  item={item}
-                  pillLayoutId="cover-nav-glass-pill-desktop"
-                  flowDir={coverNavFlowDir}
-                  flowing={coverNavFlowing}
-                />
-              ))}
-            </div>
-          </LayoutGroup>
+          <div
+            className={cn(
+              'pointer-events-auto absolute left-1/2 top-5 z-[3] hidden -translate-x-1/2 items-center gap-5 md:top-6 md:flex md:gap-6 lg:gap-7',
+              coverNavGlass && 'cover-glass-nav cover-hero-nav-pill !px-4 !py-2',
+            )}
+          >
+            {coverCenterItems.map((item) => (
+              <CoverCenterLink key={item.id} item={item} />
+            ))}
+          </div>
 
           <div className="pointer-events-auto ml-auto flex items-center gap-1.5">
-            <LayoutGroup id="cover-center-nav-mobile">
-              <div className="flex items-center gap-2.5 overflow-x-auto custom-scrollbar md:hidden">
-                {coverCenterItems.map((item) => (
-                  <CoverCenterLink
-                    key={item.id}
-                    item={item}
-                    pillLayoutId="cover-nav-glass-pill-mobile"
-                    flowDir={coverNavFlowDir}
-                    flowing={coverNavFlowing}
-                  />
-                ))}
-              </div>
-            </LayoutGroup>
+            <div className="flex items-center gap-2.5 overflow-x-auto custom-scrollbar md:hidden">
+              {coverCenterItems.map((item) => (
+                <CoverCenterLink key={item.id} item={item} />
+              ))}
+            </div>
             {user ? (
               <div className="hidden shrink-0 items-center gap-1.5 md:flex">
                 <StudioAnnouncementsBell isAdmin={isAdmin} heroTone />

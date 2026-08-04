@@ -4,6 +4,7 @@ import {
   Camera,
   Images,
   LogOut,
+  Megaphone,
   Plus,
   Settings,
   UserRound,
@@ -16,6 +17,7 @@ import type { AuthUser } from '../stores/authStore';
 import { useAuthStore } from '../stores/authStore';
 import { logoutSession } from '../lib/authSession';
 import { updateProfile, uploadAvatar } from '../lib/profileApi';
+import { StudioPublishAnnouncementModal } from './StudioPublishAnnouncementModal';
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
@@ -87,6 +89,7 @@ export const StudioUserMenu: React.FC<StudioUserMenuProps> = ({
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [profileError, setProfileError] = useState('');
   const [avatarVersion, setAvatarVersion] = useState(0);
+  const [publishAnnouncementOpen, setPublishAnnouncementOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, right: 16 });
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -378,6 +381,14 @@ export const StudioUserMenu: React.FC<StudioUserMenuProps> = ({
                     {isAdmin ? (
                       <>
                         <MenuRow
+                          icon={Megaphone}
+                          label="发布公告"
+                          onClick={() => {
+                            close();
+                            setPublishAnnouncementOpen(true);
+                          }}
+                        />
+                        <MenuRow
                           icon={Users}
                           label="用户管理"
                           onClick={() => {
@@ -425,6 +436,11 @@ export const StudioUserMenu: React.FC<StudioUserMenuProps> = ({
             document.body,
           )
         : null}
+
+      <StudioPublishAnnouncementModal
+        open={publishAnnouncementOpen}
+        onClose={() => setPublishAnnouncementOpen(false)}
+      />
     </div>
   );
 };

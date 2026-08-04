@@ -135,6 +135,12 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
     if (spaceTab === 'portfolio') void loadWorks();
   }, [shellActive, spaceTab, loadFavorites, loadWorks]);
 
+  useEffect(() => {
+    return () => {
+      delete document.documentElement.dataset.personalCoverHover;
+    };
+  }, []);
+
   const openPublish = (work?: GalleryWork | null) => {
     setEditing(work && !String(work.id).startsWith('legacy:') ? work : null);
     setPublishOpen(true);
@@ -194,8 +200,14 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
     >
       {/* 全宽可更换背景 */}
       <section
-        className="relative w-full overflow-hidden"
+        className="group/cover relative w-full overflow-hidden"
         style={{ height: 'clamp(200px, 28vw, 300px)' }}
+        onMouseEnter={() => {
+          document.documentElement.dataset.personalCoverHover = '1';
+        }}
+        onMouseLeave={() => {
+          delete document.documentElement.dataset.personalCoverHover;
+        }}
       >
         <div
           className="absolute inset-0"
@@ -212,12 +224,23 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
             draggable={false}
           />
         ) : null}
+        {/* 底部压暗：衔接下方内容，悬停不收 */}
         <div
-          className="pointer-events-none absolute inset-0"
+          className="pointer-events-none absolute inset-0 z-[1]"
           style={{
             background:
-              'linear-gradient(180deg, rgba(14,14,14,0.28) 0%, rgba(14,14,14,0.12) 45%, rgba(14,14,14,0.72) 100%)',
+              'linear-gradient(180deg, transparent 0%, transparent 42%, rgba(14,14,14,0.5) 78%, rgba(14,14,14,0.92) 100%)',
           }}
+          aria-hidden
+        />
+        {/* 顶部深阴影：悬停壁纸时丝滑收起（对齐参考图1→图2） */}
+        <div
+          className="personal-cover-top-scrim pointer-events-none absolute inset-x-0 top-0 z-[1] h-[78%] opacity-100 transition-opacity duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover/cover:opacity-0"
+          style={{
+            background:
+              'linear-gradient(180deg, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.52) 36%, rgba(0,0,0,0.18) 68%, transparent 100%)',
+          }}
+          aria-hidden
         />
 
         <input
@@ -228,12 +251,17 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
           onChange={(e) => void onPickCover(e.target.files?.[0])}
         />
 
-        <div className="relative z-[1] flex h-full items-center justify-center pt-14 md:pt-16">
+        <div className="relative z-[2] flex h-full items-center justify-center pt-14 md:pt-16">
           <button
             type="button"
             disabled={coverUploading}
             onClick={() => coverInputRef.current?.click()}
-            className="group flex flex-col items-center gap-2.5 rounded-2xl px-6 py-4 transition-opacity disabled:opacity-60"
+            className={cn(
+              'group flex flex-col items-center gap-2.5 rounded-2xl px-6 py-4 transition-opacity duration-200 disabled:pointer-events-none',
+              coverUploading || !coverSrc
+                ? 'opacity-100'
+                : 'opacity-0 group-hover/cover:opacity-100 focus-visible:opacity-100',
+            )}
             aria-label="更换背景图片"
           >
             <span
@@ -447,6 +475,11 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
                                     {galleryCategoryLabel(work.category)}
                                   </span>
                                 </span>
+                                {work.published === false ? (
+                                  <span className="absolute left-2.5 top-2.5 rounded-full bg-black/55 px-2 py-0.5 text-[10.5px] font-medium text-[#ffb866] backdrop-blur-md">
+                                    草稿
+                                  </span>
+                                ) : null}
                               </button>
                               <button
                                 type="button"
@@ -454,7 +487,7 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
                                 className="absolute bottom-3 right-3 z-[1] rounded-full bg-black/50 px-2.5 py-1 text-[11px] font-medium text-[#e5e2e1]/92 backdrop-blur-[16px] transition-colors hover:bg-black/65 hover:text-[#e5e2e1]"
                                 style={{ outline: '0.5px solid rgba(255,255,255,0.18)', outlineOffset: '-0.5px' }}
                               >
-                                编辑
+                                {work.published === false ? '编辑草稿' : '编辑'}
                               </button>
                             </article>
                           );
