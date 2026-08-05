@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { ArrowUp, Loader2, Plus } from 'lucide-react';
+import { ArrowRight, ArrowUp, Loader2, Plus } from 'lucide-react';
 import { useShellNavigation } from '../shell/ShellNavigation';
 import { useAuthStore } from '../stores/authStore';
 import { useStore } from '../store/useStore';
@@ -52,7 +52,7 @@ function formatHomeEditedLabel(ts?: number): string {
 }
 
 export function CoverHomeWorkspace() {
-  const { openInfiniteCanvas, warmInfiniteCanvas } = useShellNavigation();
+  const { openInfiniteCanvas, openCanvasWorkspace, warmInfiniteCanvas } = useShellNavigation();
   const user = useAuthStore((s) => s.user);
   const addNotice = useStore((s) => s.addNotice);
   const [prompt, setPrompt] = useState('');
@@ -153,76 +153,89 @@ export function CoverHomeWorkspace() {
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ ...spring, delay: 0.06 }}
-          className="cover-home-project-row mt-6 md:mt-7"
+          className="mt-6 md:mt-7"
         >
-          <button
-            type="button"
-            onClick={() => void handleCreate()}
-            disabled={creating}
-            className="cover-home-project-card cover-home-project-new"
-          >
-            <span className="cover-home-project-new-icon">
-              {creating ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="h-4 w-4" strokeWidth={2} />
-              )}
-            </span>
-            <span className="cover-home-project-title">{creating ? '创建中…' : '新建项目'}</span>
-            <span className="cover-home-project-meta">直接进入画布</span>
-          </button>
+          <div className="cover-home-project-row">
+            <button
+              type="button"
+              onClick={() => void handleCreate()}
+              disabled={creating}
+              className="cover-home-project-card cover-home-project-new"
+            >
+              <span className="cover-home-project-new-icon">
+                {creating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4" strokeWidth={2} />
+                )}
+              </span>
+              <span className="cover-home-project-title">{creating ? '创建中…' : '新建项目'}</span>
+              <span className="cover-home-project-meta">直接进入画布</span>
+            </button>
 
-          {loadingRecent
-            ? Array.from({ length: 3 }).map((_, i) => (
-                <div key={`sk-${i}`} className="cover-home-project-card cover-home-project-skeleton" />
-              ))
-            : recent.map((item) => {
-                const parenDate = formatHomeParenDate(item.created_at || item.updated_at);
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => void handleOpen(item.id)}
-                    disabled={openingId === item.id}
-                    className="cover-home-project-card"
-                  >
-                    <div
-                      className={cn(
-                        'cover-home-project-thumb',
-                        !item.preview_url && 'cover-home-project-thumb-empty',
-                      )}
+            {loadingRecent
+              ? Array.from({ length: 3 }).map((_, i) => (
+                  <div key={`sk-${i}`} className="cover-home-project-card cover-home-project-skeleton" />
+                ))
+              : recent.map((item) => {
+                  const parenDate = formatHomeParenDate(item.created_at || item.updated_at);
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => void handleOpen(item.id)}
+                      disabled={openingId === item.id}
+                      className="cover-home-project-card"
                     >
-                      {item.preview_url ? (
-                        <img src={item.preview_url} alt="" className="h-full w-full object-cover" />
-                      ) : (
-                        <span>{item.icon || '🧩'}</span>
-                      )}
-                    </div>
-                    <span className="cover-home-project-copy">
-                      <span className="cover-home-project-title truncate">
-                        {openingId === item.id
-                          ? '打开中…'
-                          : `${item.title || '未命名画布'}${parenDate ? ` ${parenDate}` : ''}`}
+                      <div
+                        className={cn(
+                          'cover-home-project-thumb',
+                          !item.preview_url && 'cover-home-project-thumb-empty',
+                        )}
+                      >
+                        {item.preview_url ? (
+                          <img src={item.preview_url} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          <span>{item.icon || '🧩'}</span>
+                        )}
+                      </div>
+                      <span className="cover-home-project-copy">
+                        <span className="cover-home-project-title truncate">
+                          {openingId === item.id
+                            ? '打开中…'
+                            : `${item.title || '未命名画布'}${parenDate ? ` ${parenDate}` : ''}`}
+                        </span>
+                        <span className="cover-home-project-meta">
+                          {formatHomeEditedLabel(item.updated_at || item.created_at)}
+                        </span>
                       </span>
-                      <span className="cover-home-project-meta">
-                        {formatHomeEditedLabel(item.updated_at || item.created_at)}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
+                    </button>
+                  );
+                })}
 
-          {!loadingRecent && user && recent.length === 0 ? (
-            <div className="cover-home-project-card cover-home-project-empty pointer-events-none">
-              <span className="cover-home-project-meta">还没有最近项目</span>
-            </div>
-          ) : null}
+            {!loadingRecent && user && recent.length === 0 ? (
+              <div className="cover-home-project-card cover-home-project-empty pointer-events-none">
+                <span className="cover-home-project-meta">还没有最近项目</span>
+              </div>
+            ) : null}
 
-          {!user ? (
-            <div className="cover-home-project-card cover-home-project-empty pointer-events-none">
-              <span className="cover-home-project-meta">登录后显示最近项目</span>
-            </div>
-          ) : null}
+            {!user ? (
+              <div className="cover-home-project-card cover-home-project-empty pointer-events-none">
+                <span className="cover-home-project-meta">登录后显示最近项目</span>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mt-3 flex justify-end md:mt-3.5">
+            <button
+              type="button"
+              onClick={openCanvasWorkspace}
+              className="inline-flex items-center gap-1 text-[13px] font-medium text-[#e5e2e1]/55 transition-colors hover:text-[#e5e2e1]"
+            >
+              所有项目
+              <ArrowRight className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+            </button>
+          </div>
         </motion.div>
       </div>
 

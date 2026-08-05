@@ -48,7 +48,8 @@
         { "desc": "前端：StudioUserMenu 头像下拉（徽章、admin 入口、退出）", "status": "done" },
         { "desc": "StudioTopNav 接入铃铛与头像，移除旧 admin/退出按钮", "status": "done" },
         { "desc": "自助改资料：PATCH /api/auth/profile + POST /api/auth/avatar + 头像菜单编辑 UI", "status": "done" },
-        { "id": "HOME12", "desc": "消息铃铛改为通知中心（左分类+右列表+一键已读）；发布公告迁至头像菜单", "status": "done", "priority": 139 }
+        { "id": "HOME12", "desc": "消息铃铛改为通知中心（左分类+右列表+一键已读）；发布公告迁至头像菜单", "status": "done", "priority": 139 },
+        { "id": "HOME13", "desc": "个人空间更换背景：上传前固定横幅比例裁切（拖动/缩放选区）", "status": "done", "priority": 140 }
       ]
     },
     {

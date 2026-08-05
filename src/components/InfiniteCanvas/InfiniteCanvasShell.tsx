@@ -2,7 +2,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type Ref } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { History, Keyboard } from 'lucide-react';
+import { History, Keyboard, Plus } from 'lucide-react';
 
 const dockSpring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 import {
@@ -566,13 +566,13 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                           </div>
                           <div id="gateToolbar" className="gate-toolbar">
                               <label className="gate-toolbar-search">
-                                  <i data-lucide="search" className="w-3.5 h-3.5"></i>
+                                  <i data-lucide="search" className="w-4 h-4"></i>
                                   <input id="gateSearchInput" type="search" placeholder="搜索" autoComplete="off" />
                               </label>
                               <div className="gate-toolbar-filter-wrap">
                                   <button id="gateFilterBtn" type="button" className="gate-toolbar-filter">
                                       <span id="gateFilterLabel">显示全部</span>
-                                      <i data-lucide="chevron-down" className="w-3.5 h-3.5"></i>
+                                      <i data-lucide="chevron-down" className="w-4 h-4"></i>
                                   </button>
                                   <div id="gateFilterMenu" className="gate-filter-menu" hidden role="menu">
                                       <div className="gate-filter-section">
@@ -618,17 +618,19 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                               </div>
                               <div className="gate-toolbar-view" role="group" aria-label="视图切换">
                                   <button id="gateViewGridBtn" type="button" className="gate-toolbar-view-btn is-active" aria-pressed="true" title="网格视图" aria-label="网格视图">
-                                      <i data-lucide="layout-grid" className="w-3.5 h-3.5"></i>
+                                      <i data-lucide="grip" className="w-4 h-4"></i>
                                   </button>
                                   <button id="gateViewListBtn" type="button" className="gate-toolbar-view-btn" aria-pressed="false" title="列表视图" aria-label="列表视图">
-                                      <i data-lucide="list" className="w-3.5 h-3.5"></i>
+                                      <i data-lucide="list" className="w-4 h-4"></i>
                                   </button>
                               </div>
+                              <span className="gate-toolbar-sep" aria-hidden="true" />
                               <button id="gateCreateCollectionBtn" className="gate-toolbar-icon-btn" type="button" title="新建合集" aria-label="新建合集">
                                   <i data-lucide="folder-plus" className="w-4 h-4"></i>
                               </button>
                               <button id="gateCreateBtn" className="gate-toolbar-create-btn" type="button">
-                                  <i data-lucide="plus" className="w-4 h-4"></i>
+                                  {/* 用 React 图标，避免 data-lucide createIcons 误替换成刷新符号 */}
+                                  <Plus className="w-4 h-4" strokeWidth={2.25} aria-hidden />
                                   <span>新建项目</span>
                               </button>
                               <button id="gateRefreshBtn" className="gate-toolbar-icon-btn gate-toolbar-ghost" type="button" title="刷新列表" aria-label="刷新列表" data-i18n-title="canvas.refresh" hidden>

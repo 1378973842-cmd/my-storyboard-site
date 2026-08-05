@@ -538,7 +538,6 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
         'cover-hero-nav-bar',
         isOverlayNav &&
           'fixed inset-x-0 top-0 z-[70] pointer-events-none',
-        isOverlayNav && screen === 'personal' && 'cover-hero-nav-bar--personal',
         variant === 'embedded' &&
           'flex items-center shrink-0 z-50 px-4 py-3 md:px-6 md:py-4 bg-surface-container-lowest/55 backdrop-blur-[24px]',
         className,

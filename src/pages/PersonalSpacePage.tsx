@@ -1,6 +1,6 @@
-import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronDown, Images, Lock, Loader2, Plus, RefreshCw } from 'lucide-react';
+import { ChevronDown, Images, Lock, Loader2, MapPin, MoreHorizontal, Plus, RefreshCw, StarOff } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store/useStore';
 import { useAuthStore } from '../stores/authStore';
@@ -12,10 +12,13 @@ import {
   fetchMyWorks,
   type GalleryWork,
 } from '../lib/galleryWorksApi';
+import { queueCanvasFavoriteNavigation } from '../lib/canvasFavoriteNavigation';
+import { useShellNavigation } from '../shell/ShellNavigation';
 import { CopyablePromptText } from '../components/CopyablePromptText';
 import { ReferenceImageLightbox } from '../components/ReferenceImageLightbox';
 import { PublishWorkModal } from '../components/PublishWorkModal';
 import { GalleryWorkDetailModal } from '../components/GalleryWorkDetailModal';
+import { PersonalCoverCropModal } from '../components/PersonalCoverCropModal';
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
@@ -29,6 +32,8 @@ type FavoriteItem = {
   preview_path?: string;
   prompt: string;
   model?: string;
+  canvas_id?: string;
+  node_id?: string;
 };
 
 function FeaturedEmptyIcon() {
@@ -79,8 +84,14 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
   const addNotice = useStore((s) => s.addNotice);
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
+  const { openInfiniteCanvas } = useShellNavigation();
   const coverInputRef = useRef<HTMLInputElement>(null);
   const pageScrollRef = useRef<HTMLDivElement>(null);
+  const favMenuRef = useRef<HTMLDivElement>(null);
+  const favListRef = useRef<HTMLDivElement>(null);
+  const favScrollLockRef = useRef<number | null>(null);
+  /** 收藏列表峰值高度：切换分类时不立刻变矮，避免整页滚动跳动 */
+  const favListPeakHeightRef = useRef(0);
   const [spaceTab, setSpaceTab] = useState<SpaceTab>('portfolio');
   const [workTab, setWorkTab] = useState<WorkSubTab>('works');
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
@@ -95,6 +106,9 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
   const [editing, setEditing] = useState<GalleryWork | null>(null);
   const [coverUploading, setCoverUploading] = useState(false);
   const [coverVersion, setCoverVersion] = useState(0);
+  const [coverCropFile, setCoverCropFile] = useState<File | null>(null);
+  const [favMenuId, setFavMenuId] = useState<string | null>(null);
+  const [favBusyId, setFavBusyId] = useState<string | null>(null);
 
   const loadFavorites = useCallback(async () => {
     setFavLoading(true);
@@ -136,28 +150,127 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
   }, [shellActive, spaceTab, loadFavorites, loadWorks]);
 
   useEffect(() => {
-    return () => {
-      delete document.documentElement.dataset.personalCoverHover;
+    if (!favMenuId) return;
+    const close = (event: MouseEvent) => {
+      if (favMenuRef.current?.contains(event.target as Node)) return;
+      setFavMenuId(null);
     };
-  }, []);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setFavMenuId(null);
+    };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [favMenuId]);
+
+  const locateFavoriteOnCanvas = useCallback(
+    (item: FavoriteItem) => {
+      const canvasId = String(item.canvas_id || '').trim();
+      if (!canvasId) {
+        addNotice('该收藏缺少画布定位信息，请在画布中重新点星收藏后再试', 'info');
+        setFavMenuId(null);
+        return;
+      }
+      queueCanvasFavoriteNavigation({
+        canvasId,
+        nodeId: String(item.node_id || '').trim(),
+        imageUrl: item.thumbnail_path || item.preview_path || '',
+      });
+      setFavMenuId(null);
+      openInfiniteCanvas();
+    },
+    [addNotice, openInfiniteCanvas],
+  );
+
+  const removeFavorite = useCallback(
+    async (item: FavoriteItem) => {
+      if (favBusyId) return;
+      setFavBusyId(item.id);
+      setFavMenuId(null);
+      try {
+        const res = await fetch(`/api/my-favorites/${encodeURIComponent(item.id)}`, {
+          method: 'DELETE',
+          credentials: 'same-origin',
+        });
+        const data = await readJsonResponse<{ ok?: boolean; error?: string }>(res);
+        if (!res.ok) throw new Error(data.error || '取消收藏失败');
+        setFavorites((prev) => prev.filter((row) => row.id !== item.id));
+        addNotice('已取消收藏', 'success');
+      } catch (e) {
+        addNotice(e instanceof Error ? e.message : '取消收藏失败', 'error');
+      } finally {
+        setFavBusyId(null);
+      }
+    },
+    [addNotice, favBusyId],
+  );
 
   const openPublish = (work?: GalleryWork | null) => {
     setEditing(work && !String(work.id).startsWith('legacy:') ? work : null);
     setPublishOpen(true);
   };
 
-  const switchFavFilter = useCallback((next: FavFilter) => {
-    const scroller = pageScrollRef.current;
-    const top = scroller?.scrollTop ?? 0;
-    setFavFilter(next);
-    // 列表高度变化时锁住滚动，避免整页突然往下跳
-    requestAnimationFrame(() => {
+  const switchFavFilter = useCallback(
+    (next: FavFilter) => {
+      if (next === favFilter) return;
+      const scroller = pageScrollRef.current;
+      const list = favListRef.current;
+      const top = scroller?.scrollTop ?? 0;
+      favScrollLockRef.current = top;
+      if (list) {
+        const h = Math.max(list.offsetHeight, list.scrollHeight, favListPeakHeightRef.current);
+        favListPeakHeightRef.current = h;
+        list.style.minHeight = `${h}px`;
+      }
+      // 同步钉住，避免 click 后焦点/回流抢先改 scrollTop
       if (scroller) scroller.scrollTop = top;
-    });
-  }, []);
+      setFavFilter(next);
+    },
+    [favFilter],
+  );
+
+  useLayoutEffect(() => {
+    if (spaceTab !== 'favorites') {
+      favListPeakHeightRef.current = 0;
+      favScrollLockRef.current = null;
+      if (favListRef.current) favListRef.current.style.minHeight = '';
+      return;
+    }
+    const list = favListRef.current;
+    const scroller = pageScrollRef.current;
+    if (list) {
+      favListPeakHeightRef.current = Math.max(
+        favListPeakHeightRef.current,
+        list.offsetHeight,
+        list.scrollHeight,
+      );
+      list.style.minHeight = `${Math.max(favListPeakHeightRef.current, 240)}px`;
+    }
+    const locked = favScrollLockRef.current;
+    if (locked == null || !scroller) return;
+    const pin = () => {
+      scroller.scrollTop = locked;
+    };
+    pin();
+    let frames = 0;
+    let raf = 0;
+    const tick = () => {
+      pin();
+      frames += 1;
+      if (frames < 12) raf = window.requestAnimationFrame(tick);
+      else favScrollLockRef.current = null;
+    };
+    raf = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(raf);
+  }, [favFilter, spaceTab, favorites.length, galleryFavorites.length]);
 
   const onPickCover = useCallback(
-    async (file: File | undefined) => {
+    (file: File | undefined) => {
       if (!file || coverUploading) return;
       if (!file.type.startsWith('image/')) {
         addNotice('请选择图片文件', 'error');
@@ -167,17 +280,26 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
         addNotice('背景图请小于 8MB', 'error');
         return;
       }
+      setCoverCropFile(file);
+      if (coverInputRef.current) coverInputRef.current.value = '';
+    },
+    [addNotice, coverUploading],
+  );
+
+  const onConfirmCoverCrop = useCallback(
+    async (cropped: File) => {
+      if (coverUploading) return;
       setCoverUploading(true);
       try {
-        const next = await uploadCover(file);
+        const next = await uploadCover(cropped);
         setUser(next);
         setCoverVersion((v) => v + 1);
+        setCoverCropFile(null);
         addNotice('背景已更新', 'success');
       } catch (e) {
         addNotice(e instanceof Error ? e.message : '上传背景失败', 'error');
       } finally {
         setCoverUploading(false);
-        if (coverInputRef.current) coverInputRef.current.value = '';
       }
     },
     [addNotice, coverUploading, setUser],
@@ -202,12 +324,6 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
       <section
         className="group/cover relative w-full overflow-hidden"
         style={{ height: 'clamp(200px, 28vw, 300px)' }}
-        onMouseEnter={() => {
-          document.documentElement.dataset.personalCoverHover = '1';
-        }}
-        onMouseLeave={() => {
-          delete document.documentElement.dataset.personalCoverHover;
-        }}
       >
         <div
           className="absolute inset-0"
@@ -248,7 +364,7 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
           type="file"
           accept="image/jpeg,image/png,image/webp,image/gif"
           className="sr-only"
-          onChange={(e) => void onPickCover(e.target.files?.[0])}
+          onChange={(e) => onPickCover(e.target.files?.[0])}
         />
 
         <div className="relative z-[2] flex h-full items-center justify-center pt-14 md:pt-16">
@@ -396,7 +512,7 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
                             onClick={() => setWorkTab(id)}
                             className={cn(
                               'relative rounded-full px-3.5 py-1.5 text-[13.5px] font-medium transition-colors',
-                              active ? 'text-[#e5e2e1]' : 'text-[#e5e2e1]/42 hover:text-[#e5e2e1]/7',
+                              active ? 'text-[#e5e2e1]' : 'text-[#e5e2e1]/42 hover:text-[#e5e2e1]/70',
                             )}
                           >
                             {active ? (
@@ -545,13 +661,17 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
                           type="button"
                           role="tab"
                           aria-selected={active}
+                          tabIndex={-1}
                           onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => switchFavFilter(id)}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            switchFavFilter(id);
+                          }}
                           className={cn(
                             'rounded-full px-3 py-1.5 text-[12.5px] font-medium transition-colors',
                             active
                               ? 'bg-[#2a2a2a] text-[#e5e2e1]'
-                              : 'text-[#e5e2e1]/42 hover:text-[#e5e2e1]/7',
+                              : 'text-[#e5e2e1]/42 hover:text-[#e5e2e1]/70',
                           )}
                           style={
                             active
@@ -582,7 +702,10 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
                     </p>
                   </div>
                 ) : (
-                  <div className="grid min-h-[240px] grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:gap-5 xl:grid-cols-4">
+                  <div
+                    ref={favListRef}
+                    className="grid min-h-[240px] grid-cols-1 gap-4 [overflow-anchor:none] sm:grid-cols-2 lg:grid-cols-3 lg:gap-5 xl:grid-cols-4"
+                  >
                     {(favFilter === 'all' || favFilter === 'gallery') &&
                       galleryFavorites.map((item) => {
                         const src = item.preview_path || item.thumbnail_path || item.image_path;
@@ -624,26 +747,104 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
                     {(favFilter === 'all' || favFilter === 'mine') &&
                       favorites.map((item) => {
                         const src = item.preview_path || item.thumbnail_path;
+                        const menuOpen = favMenuId === item.id;
+                        const canLocate = Boolean(String(item.canvas_id || '').trim());
                         return (
                           <article
                             key={`m_${item.id}`}
-                            className="overflow-hidden rounded-[18px] bg-[#1c1b1b] md:rounded-[20px]"
+                            className={cn(
+                              'rounded-[18px] bg-[#1c1b1b] md:rounded-[20px]',
+                              menuOpen ? 'relative z-[5] overflow-visible' : 'overflow-hidden',
+                            )}
                             style={{ outline: '0.5px solid rgba(255,255,255,0.06)', outlineOffset: '-0.5px' }}
                           >
-                            <button
-                              type="button"
-                              onClick={() => setPreviewUrl(src)}
-                              className="group relative block aspect-[4/3] w-full cursor-zoom-in bg-[#161616] text-left"
-                              aria-label="放大查看图片"
-                            >
-                              <img
-                                src={item.thumbnail_path || src}
-                                alt=""
-                                className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.02]"
-                                loading="lazy"
-                                draggable={false}
-                              />
-                            </button>
+                            <div className="group relative aspect-[4/3] w-full rounded-t-[18px] bg-[#161616] md:rounded-t-[20px]">
+                              <button
+                                type="button"
+                                onClick={() => setPreviewUrl(src)}
+                                className="absolute inset-0 block w-full cursor-zoom-in overflow-hidden rounded-t-[18px] text-left md:rounded-t-[20px]"
+                                aria-label="放大查看图片"
+                              >
+                                <img
+                                  src={item.thumbnail_path || src}
+                                  alt=""
+                                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.02]"
+                                  loading="lazy"
+                                  draggable={false}
+                                />
+                              </button>
+                              <div
+                                className="absolute right-2.5 top-2.5 z-[2]"
+                                ref={menuOpen ? favMenuRef : undefined}
+                              >
+                                <button
+                                  type="button"
+                                  aria-label="更多操作"
+                                  aria-haspopup="menu"
+                                  aria-expanded={menuOpen}
+                                  disabled={favBusyId === item.id}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setFavMenuId((id) => (id === item.id ? null : item.id));
+                                  }}
+                                  className={cn(
+                                    'flex h-8 w-8 items-center justify-center rounded-full bg-black/45 text-[#e5e2e1] backdrop-blur-[16px] transition-colors',
+                                    'outline outline-[0.5px] outline-white/15 outline-offset-[-0.5px]',
+                                    menuOpen ? 'bg-black/60' : 'hover:bg-black/55',
+                                  )}
+                                >
+                                  <MoreHorizontal className="h-4 w-4" strokeWidth={2} aria-hidden />
+                                </button>
+                                {menuOpen ? (
+                                  <div
+                                    role="menu"
+                                    className="absolute right-0 top-[calc(100%+6px)] z-[3] min-w-[168px] overflow-hidden rounded-xl bg-[#1a1919]/97 py-1 shadow-[0_18px_40px_-18px_rgba(0,0,0,0.75)] backdrop-blur-xl"
+                                    style={{
+                                      outline: '0.5px solid rgba(255,255,255,0.12)',
+                                      outlineOffset: '-0.5px',
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      role="menuitem"
+                                      disabled={!canLocate}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        locateFavoriteOnCanvas(item);
+                                      }}
+                                      className={cn(
+                                        'flex w-full items-center gap-2 px-3 py-2.5 text-left text-[13px] transition-colors',
+                                        canLocate
+                                          ? 'text-[#e5e2e1] hover:bg-white/[0.06]'
+                                          : 'cursor-not-allowed text-[#e5e2e1]/35',
+                                      )}
+                                    >
+                                      <MapPin className="h-3.5 w-3.5 shrink-0 text-[#ffb866]" />
+                                      定位到画布
+                                    </button>
+                                    <button
+                                      type="button"
+                                      role="menuitem"
+                                      disabled={favBusyId === item.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void removeFavorite(item);
+                                      }}
+                                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[13px] text-[#e5e2e1]/85 transition-colors hover:bg-white/[0.06] hover:text-[#ff8a8a]"
+                                    >
+                                      <StarOff className="h-3.5 w-3.5 shrink-0" />
+                                      取消收藏
+                                    </button>
+                                    {!canLocate ? (
+                                      <p className="px-3 pb-2 text-[11px] leading-relaxed text-[#e5e2e1]/4">
+                                        旧收藏无定位信息，请在画布中重新收藏
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
                             <div className="space-y-2.5 px-4 py-3.5">
                               <CopyablePromptText text={item.prompt || ''} />
                               <div className="flex items-center justify-between gap-2">
@@ -703,6 +904,16 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
             ? (work) => openPublish(work)
             : undefined
         }
+      />
+      <PersonalCoverCropModal
+        open={Boolean(coverCropFile)}
+        file={coverCropFile}
+        busy={coverUploading}
+        onClose={() => {
+          if (coverUploading) return;
+          setCoverCropFile(null);
+        }}
+        onConfirm={(cropped) => void onConfirmCoverCrop(cropped)}
       />
     </div>
   );

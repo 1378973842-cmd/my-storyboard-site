@@ -1642,7 +1642,8 @@ export function zoomCanvasViewport(factor){
 function zoomViewportAtClient(clientX, clientY, deltaY){
     if(!canvas || !board || isImageEditOpen()) return;
     const before = screenToWorld(clientX, clientY);
-    viewport.scale = Math.min(3, Math.max(0.08, viewport.scale * (deltaY > 0 ? .92 : 1.08)));
+    // 步进约 ±11%（原 ±8%），滚轮缩放稍灵敏一点
+    viewport.scale = Math.min(3, Math.max(0.08, viewport.scale * (deltaY > 0 ? .90 : 1.11)));
     const rect = board.getBoundingClientRect();
     viewport.x = clientX - rect.left - before.x * viewport.scale;
     viewport.y = clientY - rect.top - before.y * viewport.scale;
@@ -2389,10 +2390,13 @@ function normalizeApiNodeLayout(node){
 }
 const GENERATOR_BASE_W = 260;
 const GENERATOR_MIN_W = 96;
-/** RH 三栏默认宽；拉伸时按此为 1×，整块 UI 等比缩放 */
+/** RH 三栏内部排版宽；拉伸时按此为 1×，整块 UI 等比缩放 */
 const RH_BASE_W = 820;
+/** 默认视觉倍率：空台/新建 RH 为原来的 2.5× */
+const RH_DEFAULT_SCALE = 2.5;
+const RH_DEFAULT_W = Math.round(RH_BASE_W * RH_DEFAULT_SCALE);
 const RH_MIN_W = 520;
-const RH_MAX_W = 1640;
+const RH_MAX_W = Math.round(1640 * RH_DEFAULT_SCALE);
 /** 1× 布局下壳高上限：更高工作流走三栏内滚，底栏始终可见 */
 const RH_MAX_BASE_H = 720;
 /** 对齐上游参考图时的展示宽度上限，避免撑爆画布 */
@@ -2808,30 +2812,117 @@ function syncGeneratorNodeScale(node, el){
     el.style.setProperty('--generator-ui-scale', String(scale));
     return scale;
 }
-function rhUiScale(node){
-    const w = Math.max(RH_MIN_W, Math.min(RH_MAX_W, Number(node?.w || RH_BASE_W) || RH_BASE_W));
-    return w / RH_BASE_W;
+/** RH / 视频反推：共用 820 内排版 + 视觉 scale 壳 */
+function isRhStyleScaleNode(node){
+    return node?.type === 'rh' || node?.type === 'videoReverse';
 }
-/** 共用模版：清掉会裁切高工作流的旧固定高；宽≠基准则恢复为手改缩放 */
-function normalizeRhNodeLayout(node){
-    if(!node || node.type !== 'rh') return;
+/** Premium Agent：横向两栏壳；各类型自有 1× 排版宽，默认视觉 2.5×（与 RH 同机制） */
+const AGENT_PREMIUM_SCALE_TYPES = new Set([
+    'replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent',
+    'slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent',
+    'deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent',
+]);
+function isAgentPremiumScaleNode(node){
+    return AGENT_PREMIUM_SCALE_TYPES.has(node?.type);
+}
+function agentPremiumBaseW(node){
+    const map = {
+        replicaAgent:560,
+        imageRepairAgent:560,
+        batchPosterAgent:640,
+        nineGridAgent:640,
+        slotsLoopVideoAgent:600,
+        mxShellPromptAgent:600,
+        mxShellPolishAgent:600,
+        deepWhiteShotAgent:600,
+        screenwritingAgent:600,
+        pixarAdScriptAgent:640,
+    };
+    return map[node?.type] || 560;
+}
+function isScaleShellNode(node){
+    return isRhStyleScaleNode(node) || isAgentPremiumScaleNode(node);
+}
+function scaleShellBaseW(node){
+    if(isRhStyleScaleNode(node)) return RH_BASE_W;
+    return agentPremiumBaseW(node);
+}
+function scaleShellDefaultW(node){
+    return Math.round(scaleShellBaseW(node) * RH_DEFAULT_SCALE);
+}
+function scaleShellMinW(node){
+    return Math.max(200, Math.round(scaleShellBaseW(node) * (RH_MIN_W / RH_BASE_W)));
+}
+function scaleShellMaxW(node){
+    return Math.round(scaleShellBaseW(node) * (RH_MAX_W / RH_BASE_W));
+}
+function scaleShellUiScale(node){
+    const base = scaleShellBaseW(node);
+    const defW = scaleShellDefaultW(node);
+    const w = Math.max(scaleShellMinW(node), Math.min(scaleShellMaxW(node), Number(node?.w || defW) || defW));
+    return w / base;
+}
+function rhUiScale(node){
+    return scaleShellUiScale(node);
+}
+/** 旧竖向 / 窄壳 → 横向默认视觉 2.5×（不覆盖手改 _userSized） */
+function normalizeAgentNodeChrome(node){
+    if(!node?.type || !isAgentPremiumScaleNode(node)) return;
+    const defW = scaleShellDefaultW(node);
+    const base = agentPremiumBaseW(node);
     const w = Number(node.w || 0);
     const h = Number(node.h || 0);
-    // 旧窄 RH → 三栏默认宽
-    if(w > 0 && w < 780) node.w = RH_BASE_W;
-    // 历史模板固定高（含 560）在字段一多就会截断
-    if(h === 560) delete node.h;
+    const legacyW = {replicaAgent:320, imageRepairAgent:320, batchPosterAgent:340, nineGridAgent:360, slotsLoopVideoAgent:380, mxShellPromptAgent:400, mxShellPolishAgent:400, deepWhiteShotAgent:400, screenwritingAgent:400, pixarAdScriptAgent:420}[node.type] || base;
+    // AG95/AG96 竖向 1× base（迁移前）
+    const vertical1xW = {replicaAgent:380, imageRepairAgent:380, batchPosterAgent:400, nineGridAgent:420, slotsLoopVideoAgent:440, mxShellPromptAgent:440, mxShellPolishAgent:440, deepWhiteShotAgent:440, screenwritingAgent:440, pixarAdScriptAgent:460}[node.type] || 400;
+    const legacyH = {replicaAgent:480, imageRepairAgent:460, batchPosterAgent:520, nineGridAgent:560, slotsLoopVideoAgent:520, mxShellPromptAgent:400, mxShellPolishAgent:400, deepWhiteShotAgent:400, screenwritingAgent:420, pixarAdScriptAgent:580}[node.type] || 0;
+    const premium1xH = {replicaAgent:540, imageRepairAgent:520, batchPosterAgent:560, nineGridAgent:600, slotsLoopVideoAgent:560, mxShellPromptAgent:460, mxShellPolishAgent:460, deepWhiteShotAgent:460, screenwritingAgent:480, pixarAdScriptAgent:620}[node.type] || 0;
     if(node._userSized) return;
-    if(Math.abs((w || RH_BASE_W) - RH_BASE_W) > 1){
+    const near = (a, b) => Math.abs(a - b) <= 24;
+    // 旧竖向 1× / 2.5× 视觉宽、legacy 窄壳 → 横向默认视觉宽
+    if(w > 0 && (
+        w <= base + 24
+        || w <= legacyW + 24
+        || near(w, legacyW * RH_DEFAULT_SCALE)
+        || near(w, vertical1xW)
+        || near(w, vertical1xW * RH_DEFAULT_SCALE)
+    )) node.w = defW;
+    // 旧固定高（含 premium 1× / 竖向 2.5× 高）→ 交给 fit 按横向内容重算
+    if(h > 0 && (
+        h === legacyH
+        || h === premium1xH
+        || h <= Math.round(premium1xH * RH_DEFAULT_SCALE) + 8
+        || h > Math.round(base * 1.2)
+    )) delete node.h;
+}
+function normalizeAgentScaleLayout(node){
+    if(!isAgentPremiumScaleNode(node) || node._userSized) return;
+    const w = Number(node.w || 0);
+    if(!w || w < scaleShellMinW(node)) node.w = scaleShellDefaultW(node);
+    if(Number(node.h || 0) > 0 && Number(node.h) < scaleShellDefaultW(node) * 0.5) delete node.h;
+}
+function normalizeRhNodeLayout(node){
+    if(!isRhStyleScaleNode(node)) return;
+    const w = Number(node.w || 0);
+    const h = Number(node.h || 0);
+    // 旧窄壳 / 视频反推旧 380 → 默认视觉宽（2.5×）
+    if(w > 0 && w < 780) node.w = RH_DEFAULT_W;
+    // 历史 1× 默认宽（820）或未设宽 → 新默认视觉宽
+    if(!node._userSized && (!w || Math.abs(w - RH_BASE_W) <= 1)) node.w = RH_DEFAULT_W;
+    // 历史模板固定高（含 560 / 视频反推 460）在字段一多就会截断
+    if(h === 560 || (node.type === 'videoReverse' && h === 460 && !node._userSized)) delete node.h;
+    if(node._userSized) return;
+    if(Math.abs((w || RH_DEFAULT_W) - RH_DEFAULT_W) > 1 && Math.abs(w - RH_BASE_W) > 1){
         // 重载后 _userSized 丢失：用非默认宽恢复等比缩放
         node._userSized = true;
         return;
     }
-    if(h > 0) delete node.h;
+    if(h > 0 && !node._userSized) delete node.h;
 }
 function syncRhNodeScale(node, el){
-    if(!el || node?.type !== 'rh') return 1;
-    const scale = node._userSized ? rhUiScale(node) : 1;
+    if(!el || !isScaleShellNode(node)) return RH_DEFAULT_SCALE;
+    el.style.setProperty('--rh-base-w', `${scaleShellBaseW(node)}px`);
+    const scale = scaleShellUiScale(node);
     el.style.setProperty('--rh-ui-scale', String(scale));
     return scale;
 }
@@ -2841,7 +2932,8 @@ function measureRhBaseFrame(node, el){
     if(!wrap) return Number(node._rhBaseFrameH || 420);
     const root = el.closest?.('.infinite-canvas-root') || document.body;
     const probe = document.createElement('div');
-    probe.className = 'rh-node rh-measure rh-measure-probe';
+    // 视频反推共用 RH sized 壳规则，探针也挂 rh-node，测高才与实节点一致
+    probe.className = `${node.type}-node${isScaleShellNode(node) ? ' agent-scale-node' : ''}${node.type === 'videoReverse' ? ' rh-node' : node.type === 'rh' ? ' rh-node' : ''} rh-measure rh-measure-probe`;
     probe.setAttribute('aria-hidden', 'true');
     const clone = wrap.cloneNode(true);
     clone.style.transform = 'none';
@@ -2855,7 +2947,7 @@ function measureRhBaseFrame(node, el){
 let _rhFitRaf = 0;
 const _rhFitPending = new Set();
 function scheduleFitRhNodeFrame(node){
-    if(!node || node.type !== 'rh') return;
+    if(!isScaleShellNode(node)) return;
     _rhFitPending.add(node.id);
     if(_rhFitRaf) return;
     _rhFitRaf = requestAnimationFrame(() => {
@@ -2869,36 +2961,35 @@ function scheduleFitRhNodeFrame(node){
     });
 }
 /**
- * RH 共用壳 + 真·等比缩放：
+ * RH / 视频反推共用壳 + 真·等比缩放：
  * - 内部永远按 RH_BASE_W 排版
- * - 矮工作流：外壳随内容；高工作流：壳高封顶，三栏内滚，底栏常显
+ * - 默认视觉 RH_DEFAULT_SCALE（2.5×）；RH/视频反推超高封顶内滚；Premium Agent 全量展高无壳内滚动
  * - 手改宽：transform scale；外壳 = min(内容,上限) × scale
  */
 function fitRhNodeFrame(node, elHint=null){
-    if(!node || node.type !== 'rh') return;
+    if(!isScaleShellNode(node)) return;
     const el = elHint || nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
     if(!el) return;
+    el.style.setProperty('--rh-base-w', `${scaleShellBaseW(node)}px`);
     const contentH = measureRhBaseFrame(node, el);
-    const baseH = Math.min(RH_MAX_BASE_H, contentH);
-    const needsScroll = contentH > RH_MAX_BASE_H + 1;
+    const agentFullBleed = isAgentPremiumScaleNode(node);
+    const baseH = agentFullBleed ? contentH : Math.min(RH_MAX_BASE_H, contentH);
+    const needsScroll = !agentFullBleed && contentH > RH_MAX_BASE_H + 1;
     node._rhBaseFrameH = baseH;
+    const defW = scaleShellDefaultW(node);
     if(!node._userSized){
-        node.w = RH_BASE_W;
-        el.style.width = `${RH_BASE_W}px`;
-        el.style.setProperty('--rh-ui-scale', '1');
-        if(needsScroll){
-            node.h = baseH;
-            el.classList.add('sized', 'rh-content-scroll');
-            el.style.height = `${baseH}px`;
-        } else {
-            delete node.h;
-            el.classList.remove('sized', 'rh-content-scroll');
-            el.style.height = '';
-        }
+        node.w = defW;
+        const scale = defW / scaleShellBaseW(node);
+        el.style.width = `${defW}px`;
+        el.style.setProperty('--rh-ui-scale', String(scale));
+        node.h = Math.max(120, Math.round(baseH * scale));
+        el.classList.add('sized');
+        el.classList.toggle('rh-content-scroll', needsScroll);
+        el.style.height = `${node.h}px`;
         scheduleLinkGeometryRefresh(new Set([node.id]));
         return;
     }
-    node.w = Math.max(RH_MIN_W, Math.min(RH_MAX_W, Math.round(Number(node.w || RH_BASE_W) || RH_BASE_W)));
+    node.w = Math.max(scaleShellMinW(node), Math.min(scaleShellMaxW(node), Math.round(Number(node.w || defW) || defW)));
     const scale = syncRhNodeScale(node, el);
     node.h = Math.max(120, Math.round(baseH * scale));
     el.classList.add('sized');
@@ -3748,12 +3839,12 @@ function clearFavoriteImageHighlight(){
         favoriteImageHighlightTimer = null;
     }
     if(nodesEl){
-        nodesEl.querySelectorAll('.is-favorite-locate-flash').forEach(el => {
-            el.classList.remove('is-favorite-locate-flash');
+        nodesEl.querySelectorAll('.is-favorite-locate-flow, .is-favorite-locate-flash').forEach(el => {
+            el.classList.remove('is-favorite-locate-flow', 'is-favorite-locate-flash');
         });
     }
-    genHistoryPanelEl?.querySelectorAll?.('.is-favorite-locate-flash').forEach(el => {
-        el.classList.remove('is-favorite-locate-flash');
+    genHistoryPanelEl?.querySelectorAll?.('.is-favorite-locate-flow, .is-favorite-locate-flash').forEach(el => {
+        el.classList.remove('is-favorite-locate-flow', 'is-favorite-locate-flash');
     });
 }
 function nodeContainsFavoriteImage(node, targetUrl){
@@ -3788,11 +3879,12 @@ function resolveFavoriteTargetNode(nodeId, imageUrl){
 }
 function flashFavoriteLocateEl(el){
     if(!el) return false;
-    el.classList.add('is-favorite-locate-flash');
+    el.classList.add('is-favorite-locate-flow');
+    // 边缘流光约 3.5s，留给观察；不闪烁脉冲、不打开控制台
     favoriteImageHighlightTimer = setTimeout(() => {
-        el.classList.remove('is-favorite-locate-flash');
+        el.classList.remove('is-favorite-locate-flow');
         favoriteImageHighlightTimer = null;
-    }, 4200);
+    }, 3500);
     return true;
 }
 function flashFavoriteOutputImage(nodeId, imageUrl){
@@ -3806,23 +3898,19 @@ function flashFavoriteOutputImage(nodeId, imageUrl){
         const wrapUrl = normalizeFavoritePath(wrap.dataset.outputUrl || wrap.querySelector('img')?.dataset?.url || '');
         if(wrapUrl === targetUrl && flashFavoriteLocateEl(wrap)) return;
     }
-    // 节点结果库浮层（可能挂在 canvasRoot，不在 nodeEl 内）
-    const panelScope = genHistoryPanelNodeId === String(nodeId) ? genHistoryPanelEl : null;
-    for(const card of (panelScope?.querySelectorAll?.('.gen-history-card[data-history-url]') || [])){
-        if(normalizeFavoritePath(card.dataset.historyUrl || '') === targetUrl && flashFavoriteLocateEl(card)) return;
-    }
-    // Generator 图台 / 顶条缩略图
+    // Generator 图台 / 顶条缩略图（不打开结果库浮层）
     for(const el of nodeEl.querySelectorAll('.gen-stage-hero[data-preview-url], .gen-stage-thumb[data-preview-url], .gen-stage-tile[data-preview-url]')){
         if(normalizeFavoritePath(el.getAttribute('data-preview-url') || '') === targetUrl && flashFavoriteLocateEl(el)) return;
     }
-    // 拖入图：贴在 img 上闪
+    // 拖入图：贴圆角预览区，勿高亮方形节点壳
     if(nodeEl.classList.contains('image-node')){
         const img = nodeEl.querySelector('img');
-        if(img && normalizeFavoritePath(img.getAttribute('src') || '') === targetUrl && flashFavoriteLocateEl(img)) return;
-        if(img && flashFavoriteLocateEl(img)) return;
+        const hit = !targetUrl || (img && normalizeFavoritePath(img.getAttribute('src') || '') === targetUrl);
+        const wrap = nodeEl.querySelector('.image-preview-wrap');
+        if(hit && flashFavoriteLocateEl(wrap || nodeEl)) return;
     }
-    // 兜底：生成节点闪当前图台框
-    const stage = nodeEl.querySelector('.gen-stage-frame, .gen-stage-hero');
+    // 兜底：只高亮图台框，不选中节点
+    const stage = nodeEl.querySelector('.gen-stage-frame, .gen-stage-hero, .output-img-wrap');
     if(stage) flashFavoriteLocateEl(stage);
 }
 function focusCanvasFavoriteTarget({ nodeId = '', imageUrl = '' } = {}){
@@ -3833,13 +3921,13 @@ function focusCanvasFavoriteTarget({ nodeId = '', imageUrl = '' } = {}){
         setStatus(langIsEn() ? 'Target not found on this canvas' : '未在该画布上找到对应图片');
         return false;
     }
+    // 不选中、不强刷：避免弹出生成控制台 + 整板 force render 卡顿闪屏
     selected.clear();
-    selected.add(node.id);
     refreshSelectionVisuals();
-    safeRender({ force: true });
     requestAnimationFrame(() => {
         requestAnimationFrame(() => {
             const box = nodeBounds([node.id]);
+            viewport.scale = 0.4;
             centerViewportOnWorldPoint({ x: box.x + box.w / 2, y: box.y + box.h / 2 });
             flashFavoriteOutputImage(node.id, imageUrl);
             refreshGeometryAfterLayout();
@@ -4570,8 +4658,8 @@ function workflowTemplateBounds(template){
     list.forEach(n => {
         const x = Number(n.x || 0);
         const y = Number(n.y || 0);
-        const w = Number(n.w || (n.type === 'output' ? 460 : (n.type === 'replicaAgent' || n.type === 'imageRepairAgent') ? 320 : 260));
-        const h = Number(n.h || ((n.type === 'replicaAgent' || n.type === 'imageRepairAgent') ? 480 : 180));
+        const w = Number(n.w || (n.type === 'output' ? 460 : (n.type === 'replicaAgent' || n.type === 'imageRepairAgent') ? 380 : 260));
+        const h = Number(n.h || ((n.type === 'replicaAgent' || n.type === 'imageRepairAgent') ? 540 : 180));
         minX = Math.min(minX, x);
         minY = Math.min(minY, y);
         maxX = Math.max(maxX, x + w);
@@ -6479,8 +6567,8 @@ function addReplicaAgentNode(point){
         type:'replicaAgent',
         x:p.x,
         y:p.y,
-        w:320,
-        h:480,
+        w:scaleShellDefaultW({type:'replicaAgent'}),
+        h:0,
         style_prompt:'',
         ratio:'source',
         resolution:'2k',
@@ -6504,8 +6592,8 @@ function addImageRepairAgentNode(point){
         type:'imageRepairAgent',
         x:p.x,
         y:p.y,
-        w:320,
-        h:460,
+        w:scaleShellDefaultW({type:'imageRepairAgent'}),
+        h:0,
         textModel:defaultAgentChatModel(),
         imageModel:models.gpt || 'gpt-image-2',
         ratio:'source',
@@ -6529,8 +6617,8 @@ function addBatchPosterAgentNode(point){
         type:'batchPosterAgent',
         x:p.x,
         y:p.y,
-        w:340,
-        h:520,
+        w:scaleShellDefaultW({type:'batchPosterAgent'}),
+        h:0,
         batch_count:3,
         selectedPreset:'random',
         selectedThemeId:null,
@@ -6566,8 +6654,8 @@ function addVideoReverseNode(point){
         type:'videoReverse',
         x:p.x,
         y:p.y,
-        w:380,
-        h:460,
+        w:RH_DEFAULT_W,
+        h:0,
         model:defaultModel,
         system_prompt:'你是专业的视频分析助手。请根据用户提供的视频与提示词，输出清晰、结构化的分析结果。',
         outputText:'',
@@ -6582,8 +6670,8 @@ function addSlotsLoopVideoAgentNode(point){
         type:'slotsLoopVideoAgent',
         x:p.x,
         y:p.y,
-        w:380,
-        h:520,
+        w:scaleShellDefaultW({type:'slotsLoopVideoAgent'}),
+        h:0,
         model:defaultAgentChatModel(),
         duration:5,
         creative_idea:'',
@@ -6896,8 +6984,8 @@ function addMxShellPromptAgentNode(point){
         type:'mxShellPromptAgent',
         x:p.x,
         y:p.y,
-        w:400,
-        h:400,
+        w:scaleShellDefaultW({type:'mxShellPromptAgent'}),
+        h:0,
         model:defaultAgentChatModel(),
         mode:'multi_cam',
         cameraIntensity:'standard',
@@ -6920,8 +7008,8 @@ function addMxShellPolishAgentNode(point){
         type:'mxShellPolishAgent',
         x:p.x,
         y:p.y,
-        w:400,
-        h:400,
+        w:scaleShellDefaultW({type:'mxShellPolishAgent'}),
+        h:0,
         model:defaultAgentChatModel(),
         mode:'multi_cam',
         cameraIntensity:'standard',
@@ -6963,8 +7051,8 @@ function addDeepWhiteShotAgentNode(point){
         type:'deepWhiteShotAgent',
         x:p.x,
         y:p.y,
-        w:400,
-        h:400,
+        w:scaleShellDefaultW({type:'deepWhiteShotAgent'}),
+        h:0,
         model:defaultAgentChatModel(),
         scene:'',
         scene_name:'',
@@ -6990,8 +7078,8 @@ function addScreenwritingAgentNode(point){
         type:'screenwritingAgent',
         x:p.x,
         y:p.y,
-        w:400,
-        h:420,
+        w:scaleShellDefaultW({type:'screenwritingAgent'}),
+        h:0,
         model:defaultAgentChatModel(),
         mode:'from_scratch',
         brief:'',
@@ -7012,8 +7100,8 @@ function addPixarAdScriptAgentNode(point){
         type:'pixarAdScriptAgent',
         x:p.x,
         y:p.y,
-        w:420,
-        h:580,
+        w:scaleShellDefaultW({type:'pixarAdScriptAgent'}),
+        h:0,
         model:defaultAgentChatModel(),
         durationPreset:'30',
         durationSec:30,
@@ -7223,7 +7311,7 @@ function addRhNode(point){
         type:'rh',
         x:p.x,
         y:p.y,
-    w:820,
+        w:RH_DEFAULT_W,
         h:0,
         rhMode:'app',
         rhPayment:'free',
@@ -7821,7 +7909,7 @@ const GROUP_RESIZE_HANDLE_INSET = 32;
 const GROUP_DEFAULT_W = 380;
 const GROUP_DEFAULT_H_IMAGE_BATCH = 300;
 const GROUP_DEFAULT_H_PROMPT_GROUP = 380;
-const GROUP_PANEL_HEAD_IMAGE_BATCH = 72;
+const GROUP_PANEL_HEAD_IMAGE_BATCH = 64; // 顶栏约 56 + 缝；旧 144 是遗留 chrome 高度，会在标题下留空
 const GROUP_PANEL_HEAD_PROMPT_GROUP = 228;
 function groupPanelHeadInset(group){
     if(!group) return GROUP_DROP_HEAD_INSET;
@@ -7832,12 +7920,12 @@ function groupPanelHeadInset(group){
             : GROUP_DROP_HEAD_INSET;
     const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(group.id)}"]`);
     if(!el) return fallback;
-    const headH = el.querySelector('.node-head')?.offsetHeight || 42;
+    const headH = el.querySelector('.node-head')?.offsetHeight || (group.type === 'imageBatch' ? 56 : 42);
     const chrome = el.querySelector('.group-panel-chrome');
-    if(chrome){
-        const chromeH = chrome.offsetHeight || 0;
-        if(chromeH > 0) return Math.max(fallback, headH + chromeH + 8);
-    }
+    const chromeH = chrome?.offsetHeight || 0;
+    // 有实测 chrome 用实测；图片组无 chrome 时勿回退到虚高 fallback
+    if(chromeH > 0) return headH + chromeH + 8;
+    if(group.type === 'imageBatch') return headH + 8;
     return fallback;
 }
 function isImageBatchMember(group, child){
@@ -11818,11 +11906,14 @@ const NODE_TYPE_ICON = {
 function renderNode(node){
     normalizeApiNodeLayout(node);
     normalizeRhNodeLayout(node);
+    normalizeAgentNodeChrome(node);
+    normalizeAgentScaleLayout(node);
     const el = document.createElement('div');
     const size = defaultNodeSize(node.type);
     const hasFixedSize = Boolean(node.h || size.h);
     const inGroup = nodes.some(g => (g.type === 'group' || g.type === 'promptGroup' || g.type === 'imageBatch') && (g.items || []).includes(node.id));
-    el.className = `node ${node.type}-node ${node.type === 'frameStack' ? 'output-node ' : ''}${node.type === 'textOutput' && node.kind === 'mxShell' ? 'is-mxShell ' : ''}${node.type === 'textOutput' && node.kind === 'deepWhite' ? 'is-deepWhite ' : ''}${inGroup ? 'group-member ' : ''}${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''} ${isNodeDisabled(node) ? 'is-disabled' : ''}`;
+    // 视频反推挂 rh-node：复用 RH sized/scroll 壳，避免底栏被井区 min-height 裁掉
+    el.className = `node ${node.type}-node ${node.type === 'videoReverse' ? 'rh-node ' : ''}${node.type === 'frameStack' ? 'output-node ' : ''}${node.type === 'textOutput' && node.kind === 'mxShell' ? 'is-mxShell ' : ''}${node.type === 'textOutput' && node.kind === 'deepWhite' ? 'is-deepWhite ' : ''}${inGroup ? 'group-member ' : ''}${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''} ${isNodeDisabled(node) ? 'is-disabled' : ''}`;
     el.style.left = `${node.x}px`;
     el.style.top = `${node.y}px`;
     el.style.width = `${node.w || size.w}px`;
@@ -12093,6 +12184,8 @@ function renderNode(node){
         // 顶栏只留标题/删除；张数提示、上传/整理钮、整组禁用开关已去掉（右键仍可禁单张；拖入仍可上传）
         body.innerHTML = `<div class="image-batch-body"></div>`;
         bindImageBatchUpload(body, node);
+        // 顶栏 inset 已按实测收紧：重排子图，消掉标题下旧 144px 留空
+        scheduleImageBatchRelayout(node.id, 'auto');
     }
     if(node.type === 'generator' || node.type === 'msgen' || node.type === 'video'){
         const scaleWrap = document.createElement('div');
@@ -12100,8 +12193,8 @@ function renderNode(node){
         scaleWrap.appendChild(el.querySelector('.node-head'));
         scaleWrap.appendChild(body);
         el.appendChild(scaleWrap);
-    } else if(node.type === 'rh'){
-        // 裁切槽按视觉尺寸；内部永远 820 宽再 scale，外壳才能套住
+    } else if(isScaleShellNode(node)){
+        // 裁切槽按视觉尺寸；内部 1× 排版宽再 scale（RH / 视频反推 / Premium Agent）
         const slot = document.createElement('div');
         slot.className = 'rh-scale-slot';
         const scaleWrap = document.createElement('div');
@@ -12111,6 +12204,8 @@ function renderNode(node){
         scaleWrap.appendChild(body);
         slot.appendChild(scaleWrap);
         el.appendChild(slot);
+        if(isAgentPremiumScaleNode(node)) el.classList.add('agent-scale-node');
+        el.style.setProperty('--rh-base-w', `${scaleShellBaseW(node)}px`);
     } else {
         el.appendChild(body);
     }
@@ -12142,7 +12237,7 @@ function renderNode(node){
     el.ondragstart = e => { e.preventDefault(); e.stopPropagation(); };
     bindNodeLayoutObserver(el);
     if(isGenConsoleNode(node)) fitGeneratorNodeHeight(node, el);
-    if(node.type === 'rh'){
+    if(isScaleShellNode(node)){
         delete node._rhBaseFrameH;
         scheduleFitRhNodeFrame(node);
     }
@@ -12533,19 +12628,20 @@ function defaultNodeSize(type){
     if(type === 'loop') return {w:336, h:0};
     if(type === 'llm') return {w:420, h:590};
     if(type === 'generator') return {w:260, h:0};
-    if(type === 'replicaAgent') return {w:320, h:480};
-    if(type === 'imageRepairAgent') return {w:320, h:460};
-    if(type === 'batchPosterAgent') return {w:340, h:520};
-    if(type === 'nineGridAgent') return {w:360, h:560};
-    if(type === 'slotsLoopVideoAgent') return {w:380, h:520};
-    if(isMxShellFamilyAgent(type)) return {w:400, h:400};
+    if(type === 'replicaAgent') return {w:scaleShellDefaultW({type:'replicaAgent'}), h:0};
+    if(type === 'imageRepairAgent') return {w:scaleShellDefaultW({type:'imageRepairAgent'}), h:0};
+    if(type === 'batchPosterAgent') return {w:scaleShellDefaultW({type:'batchPosterAgent'}), h:0};
+    if(type === 'nineGridAgent') return {w:scaleShellDefaultW({type:'nineGridAgent'}), h:0};
+    if(type === 'slotsLoopVideoAgent') return {w:scaleShellDefaultW({type:'slotsLoopVideoAgent'}), h:0};
+    if(isMxShellFamilyAgent(type)) return {w:scaleShellDefaultW({type}), h:0};
     if(type === 'mxShellPromptView' || type === 'deepWhiteShotView' || type === 'textOutput') return {w:600, h:560};
-    if(type === 'deepWhiteShotAgent') return {w:400, h:400};
-    if(type === 'pixarAdScriptAgent') return {w:420, h:580};
-    if(type === 'videoReverse') return {w:380, h:460};
+    if(type === 'deepWhiteShotAgent') return {w:scaleShellDefaultW({type:'deepWhiteShotAgent'}), h:0};
+    if(type === 'screenwritingAgent') return {w:scaleShellDefaultW({type:'screenwritingAgent'}), h:0};
+    if(type === 'pixarAdScriptAgent') return {w:scaleShellDefaultW({type:'pixarAdScriptAgent'}), h:0};
+    if(type === 'videoReverse') return {w:RH_DEFAULT_W, h:0};
     if(type === 'msgen') return {w:260, h:0};
     if(type === 'video') return {w:260, h:0};
-    if(type === 'rh') return {w:820, h:0};
+    if(type === 'rh') return {w:RH_DEFAULT_W, h:0};
     if(type === 'comfy') return {w:420, h:460};
     if(type === 'ltxDirector') return {w:1000, h:800};
     if(type === 'output') return {w:460, h:0};
@@ -13413,6 +13509,86 @@ function videoReverseConnectedPromptNodes(node){
 function videoReverseInputVideos(node){
     return llmInputVideos(node);
 }
+/** 上传视频 → 左侧 Image(video) 节点并连到反推节点 */
+async function uploadVideosToVideoReverse(nodeId, files){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || node.type !== 'videoReverse') return;
+    const vids = [...files].filter(file => mediaKindForUpload(file) === 'video');
+    if(!vids.length){
+        softAlert(langIsEn() ? 'Please drop or pick a video file.' : '请拖入或选择视频文件。');
+        return;
+    }
+    const form = new FormData();
+    vids.forEach(file => form.append('files', file));
+    const res = await apiFetch('/api/ai/upload', {method:'POST', body:form});
+    if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Upload failed' : '上传失败'));
+    const data = await res.json();
+    const uploaded = (data.files || []).filter(file => file?.url);
+    if(!uploaded.length) throw new Error(langIsEn() ? 'Upload returned no video URL' : '上传未返回视频地址');
+    pushUndo();
+    const baseX = Number(node.x || 0) - 340;
+    const baseY = Number(node.y || 0);
+    uploaded.forEach((file, i) => {
+        const img = {
+            id:uid('img'),
+            type:'image',
+            x:baseX,
+            y:baseY + i * 48,
+            url:file.url,
+            name:file.name,
+            mediaKind:file.kind || 'video'
+        };
+        nodes.push(img);
+        if(canConnect(img.id, node.id) && !connections.some(c => c.from === img.id && c.to === node.id)){
+            connections.push({id:uid('c'), from:img.id, to:node.id});
+        }
+    });
+    render();
+    scheduleSave();
+}
+function bindVideoReverseUpload(wrap, node){
+    const well = wrap.querySelector('.video-reverse-media');
+    if(!well) return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'video/*,.mp4,.webm,.mov,.m4v,.avi,.mkv';
+    input.multiple = true;
+    input.style.display = 'none';
+    wrap.appendChild(input);
+    const pick = () => input.click();
+    const handleFiles = async fileList => {
+        if(!fileList?.length) return;
+        try {
+            await uploadVideosToVideoReverse(node.id, fileList);
+        } catch(err) {
+            softAlert(err?.message || (langIsEn() ? 'Upload failed' : '上传失败'));
+        } finally {
+            input.value = '';
+        }
+    };
+    input.onchange = () => handleFiles(input.files);
+    const triggers = wrap.querySelectorAll('.video-reverse-upload, .video-reverse-add-more');
+    triggers.forEach(el => {
+        el.onmousedown = e => e.stopPropagation();
+        el.onclick = e => { e.stopPropagation(); pick(); };
+    });
+    well.ondragover = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        well.classList.add('is-drag');
+    };
+    well.ondragleave = e => {
+        e.stopPropagation();
+        well.classList.remove('is-drag');
+    };
+    well.ondrop = async e => {
+        e.preventDefault();
+        e.stopPropagation();
+        well.classList.remove('is-drag');
+        if(isActiveOutputImageDrag(e.dataTransfer)) return;
+        if(e.dataTransfer?.files?.length) await handleFiles(e.dataTransfer.files);
+    };
+}
 const SLOTS_LOOP_VIDEO_DURATION_MIN = 3;
 const SLOTS_LOOP_VIDEO_DURATION_MAX = 15;
 const SLOTS_LOOP_VIDEO_DURATION_DEFAULT = 5;
@@ -13478,42 +13654,50 @@ function renderSlotsLoopVideoAgentBody(node){
         : '运行后将在此显示 Seedance 循环视频提示词…';
     const themeLabel = node.outputData?.theme_label ? String(node.outputData.theme_label) : '';
     const wrap = document.createElement('div');
-    wrap.className = 'generator-body slots-loop-video-body';
+    wrap.className = 'generator-body slots-loop-video-body agent-h-body';
     wrap.innerHTML = `
-        <div class="slots-loop-video-section">
-            <div class="slots-loop-video-section-title">${langIsEn() ? 'Image input' : '图片输入'}</div>
-            <div class="input-list slots-loop-input-list"></div>
+        <div class="agent-h-panes">
+            <div class="agent-h-col agent-h-col-scroll">
+                <div class="slots-loop-video-section">
+                    <div class="slots-loop-video-section-title">${langIsEn() ? 'Image input' : '图片输入'}</div>
+                    <div class="input-list slots-loop-input-list"></div>
+                </div>
+                <div class="slots-loop-video-badge-row">
+                    ${imageRef?.url
+                        ? `<div class="slots-loop-video-badge ok"><i data-lucide="image" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Slots image connected' : '已连接 Slots 静态图'}</span></div>`
+                        : `<div class="slots-loop-video-badge warn"><i data-lucide="image-off" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Connect an Image node' : '请连接 Image 图片节点'}</span></div>`}
+                    ${creative
+                        ? `<div class="slots-loop-video-badge ok"><i data-lucide="lightbulb" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Creative idea set' : '已设置创意想法'}</span></div>`
+                        : `<div class="slots-loop-video-badge warn"><i data-lucide="lightbulb" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Optional: add creative idea below or connect Prompt' : '可选：下方填写创意或连接提示词节点'}</span></div>`}
+                </div>
+                <label class="field">
+                    <div class="setting-title">${langIsEn() ? 'Creative idea (optional)' : '创意想法（可选）'}</div>
+                    <textarea class="slots-loop-creative-idea" placeholder="${langIsEn() ? 'e.g. buffalo stomps, fireball drops…' : '如：野牛跺脚、火球砸下…'}">${escapeHtml(node.creative_idea || '')}</textarea>
+                </label>
+                <div class="llm-pane-label">${langIsEn() ? 'Video prompts' : '视频提示词'}${themeLabel ? ` · ${escapeHtml(themeLabel)}` : ''}</div>
+                <div class="slots-loop-video-output ${outputText ? '' : 'is-empty'}">${escapeHtml(outputText || outputPlaceholder)}</div>
+                <div class="slots-loop-copy-row" style="display:${outputText ? 'flex' : 'none'}">
+                    <button type="button" class="gen-btn slots-loop-copy-btn"><i data-lucide="copy" class="w-4 h-4"></i><span>${langIsEn() ? 'Copy all' : '复制全部'}</span></button>
+                    <button type="button" class="gen-btn slots-loop-copy-full-btn"><i data-lucide="clipboard-copy" class="w-4 h-4"></i><span>${langIsEn() ? 'Copy merged' : '复制合并版'}</span></button>
+                </div>
+                ${node.runError ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
+            </div>
+            <div class="agent-h-col agent-h-col-right agent-h-col-scroll">
+                <label class="field">
+                    <div class="setting-title">${langIsEn() ? 'Duration (seconds)' : '视频时长（秒）'}</div>
+                    <input class="setting-input slots-loop-duration" type="number" min="${SLOTS_LOOP_VIDEO_DURATION_MIN}" max="${SLOTS_LOOP_VIDEO_DURATION_MAX}" step="1" value="${normalizeSlotsLoopVideoDuration(node.duration)}">
+                    <span class="batch-poster-field-hint">${langIsEn() ? `Custom ${SLOTS_LOOP_VIDEO_DURATION_MIN}–${SLOTS_LOOP_VIDEO_DURATION_MAX}s` : `可自定义 ${SLOTS_LOOP_VIDEO_DURATION_MIN}–${SLOTS_LOOP_VIDEO_DURATION_MAX} 秒`}</span>
+                </label>
+                <label class="field">
+                    <div class="setting-title">${langIsEn() ? 'Text model' : '文本模型'}</div>
+                    <select class="select-lite slots-loop-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
+                </label>
+            </div>
         </div>
-        <div class="slots-loop-video-badge-row">
-            ${imageRef?.url
-                ? `<div class="slots-loop-video-badge ok"><i data-lucide="image" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Slots image connected' : '已连接 Slots 静态图'}</span></div>`
-                : `<div class="slots-loop-video-badge warn"><i data-lucide="image-off" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Connect an Image node' : '请连接 Image 图片节点'}</span></div>`}
-            ${creative
-                ? `<div class="slots-loop-video-badge ok"><i data-lucide="lightbulb" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Creative idea set' : '已设置创意想法'}</span></div>`
-                : `<div class="slots-loop-video-badge warn"><i data-lucide="lightbulb" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Optional: add creative idea below or connect Prompt' : '可选：下方填写创意或连接提示词节点'}</span></div>`}
-        </div>
-        <label class="field">
-            <div class="setting-title">${langIsEn() ? 'Duration (seconds)' : '视频时长（秒）'}</div>
-            <input class="setting-input slots-loop-duration" type="number" min="${SLOTS_LOOP_VIDEO_DURATION_MIN}" max="${SLOTS_LOOP_VIDEO_DURATION_MAX}" step="1" value="${normalizeSlotsLoopVideoDuration(node.duration)}">
-            <span class="batch-poster-field-hint">${langIsEn() ? `Custom ${SLOTS_LOOP_VIDEO_DURATION_MIN}–${SLOTS_LOOP_VIDEO_DURATION_MAX}s` : `可自定义 ${SLOTS_LOOP_VIDEO_DURATION_MIN}–${SLOTS_LOOP_VIDEO_DURATION_MAX} 秒`}</span>
-        </label>
-        <label class="field">
-            <div class="setting-title">${langIsEn() ? 'Text model' : '文本模型'}</div>
-            <select class="select-lite slots-loop-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
-        </label>
-        <label class="field">
-            <div class="setting-title">${langIsEn() ? 'Creative idea (optional)' : '创意想法（可选）'}</div>
-            <textarea class="slots-loop-creative-idea" placeholder="${langIsEn() ? 'e.g. buffalo stomps, fireball drops…' : '如：野牛跺脚、火球砸下…'}">${escapeHtml(node.creative_idea || '')}</textarea>
-        </label>
-        <div class="llm-pane-label">${langIsEn() ? 'Video prompts' : '视频提示词'}${themeLabel ? ` · ${escapeHtml(themeLabel)}` : ''}</div>
-        <div class="slots-loop-video-output ${outputText ? '' : 'is-empty'}">${escapeHtml(outputText || outputPlaceholder)}</div>
-        <div class="slots-loop-copy-row" style="display:${outputText ? 'flex' : 'none'}">
-            <button type="button" class="gen-btn slots-loop-copy-btn"><i data-lucide="copy" class="w-4 h-4"></i><span>${langIsEn() ? 'Copy all' : '复制全部'}</span></button>
-            <button type="button" class="gen-btn slots-loop-copy-full-btn"><i data-lucide="clipboard-copy" class="w-4 h-4"></i><span>${langIsEn() ? 'Copy merged' : '复制合并版'}</span></button>
-        </div>
-        ${node.runError ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
-        <div class="gen-run-row">
-            <button class="gen-btn slots-loop-run-btn ${node.running ? 'running' : ''}"><i data-lucide="repeat-2" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Generating…' : '生成中…') : (langIsEn() ? 'Generate prompts' : '生成提示词')}</span></button>
+        <div class="agent-h-foot">
+            <div class="gen-run-row">
+                <button class="gen-btn slots-loop-run-btn ${node.running ? 'running' : ''}"><i data-lucide="repeat-2" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Generating…' : '生成中…') : (langIsEn() ? 'Generate prompts' : '生成提示词')}</span></button>
+            </div>
         </div>
     `;
     const durationInput = wrap.querySelector('.slots-loop-duration');
@@ -13802,7 +13986,7 @@ function renderMxShellPromptAgentBody(node){
     statusBits.push(modeLabel);
     statusBits.push(modelName);
     const wrap = document.createElement('div');
-    wrap.className = 'generator-body mx-shell-prompt-body agent-console-body';
+    wrap.className = 'generator-body mx-shell-prompt-body agent-console-body agent-h-body';
     const readyLabel = polish
         ? (langIsEn() ? 'Polished' : '已润色')
         : (langIsEn() ? 'Ready' : '已生成');
@@ -13817,53 +14001,61 @@ function renderMxShellPromptAgentBody(node){
         ? (polish ? (langIsEn() ? 'Polishing…' : '润色中…') : (langIsEn() ? 'Generating…' : '生成中…'))
         : (polish ? (langIsEn() ? 'Polish prompt' : '润色提示词') : (langIsEn() ? 'Generate' : '生成提示词'));
     wrap.innerHTML = `
-        <div class="agent-status-bar ${story.length >= 10 ? 'ok' : 'warn'}">${escapeHtml(statusBits.join(' · '))}</div>
-        ${outputText ? `
-        <div class="mx-shell-result-compact">
-            <div class="mx-shell-result-compact-title">${escapeHtml(readyLabel)} · ${escapeHtml(modeLabel)}</div>
-            <button type="button" class="gen-btn mx-shell-focus-view-btn"><i data-lucide="panel-right" class="w-4 h-4"></i><span>${langIsEn() ? 'Open text output' : '打开文本输出'}</span></button>
-        </div>` : node.runStatus === 'failed' && node.runError ? `
-        <div class="mx-shell-result-compact is-error-panel">
-            <div class="mx-shell-result-compact-hint">${escapeHtml(node.runError)}</div>
-        </div>` : ''}
-        <div class="agent-console-grid">
-            <label class="field">
-                <div class="setting-title">${langIsEn() ? 'Mode' : '模式'}</div>
-                <select class="select-lite mx-shell-mode">
-                    <option value="multi_cam" ${node.mode === 'multi_cam' ? 'selected' : ''}>${langIsEn() ? 'Multi-cam' : '多机位'}</option>
-                    <option value="one_shot" ${node.mode === 'one_shot' ? 'selected' : ''}>${langIsEn() ? 'One-shot' : '一镜到底'}</option>
-                </select>
-            </label>
-            <label class="field">
-                <div class="setting-title">${langIsEn() ? 'Camera intensity' : '运镜强度'}</div>
-                <select class="select-lite mx-shell-camera-intensity">
-                    <option value="restrained" ${node.cameraIntensity === 'restrained' ? 'selected' : ''}>${langIsEn() ? 'Restrained' : '克制'}</option>
-                    <option value="standard" ${node.cameraIntensity === 'standard' ? 'selected' : ''}>${langIsEn() ? 'Standard' : '标准'}</option>
-                    <option value="flashy" ${node.cameraIntensity === 'flashy' ? 'selected' : ''}>${langIsEn() ? 'Flashy' : '炫技'}</option>
-                </select>
-            </label>
-            <label class="field">
-                <div class="setting-title">${langIsEn() ? 'Model' : '模型'}</div>
-                <select class="select-lite mx-shell-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
-            </label>
+        <div class="agent-h-panes">
+            <div class="agent-h-col agent-h-col-scroll">
+                <div class="agent-status-bar ${story.length >= 10 ? 'ok' : 'warn'}">${escapeHtml(statusBits.join(' · '))}</div>
+                ${outputText ? `
+                <div class="mx-shell-result-compact">
+                    <div class="mx-shell-result-compact-title">${escapeHtml(readyLabel)} · ${escapeHtml(modeLabel)}</div>
+                    <button type="button" class="gen-btn mx-shell-focus-view-btn"><i data-lucide="panel-right" class="w-4 h-4"></i><span>${langIsEn() ? 'Open text output' : '打开文本输出'}</span></button>
+                </div>` : node.runStatus === 'failed' && node.runError ? `
+                <div class="mx-shell-result-compact is-error-panel">
+                    <div class="mx-shell-result-compact-hint">${escapeHtml(node.runError)}</div>
+                </div>` : ''}
+                <label class="field">
+                    <div class="setting-title">${escapeHtml(storyTitle)}</div>
+                    ${upstreamStory && !String(node.story || '').trim() ? `<div class="mx-shell-upstream-preview">${escapeHtml(upstreamStory.slice(0, 220))}${upstreamStory.length > 220 ? '…' : ''}</div>` : ''}
+                    <textarea class="mx-shell-story" placeholder="${escapeHtml(storyPh)}">${escapeHtml(node.story || '')}</textarea>
+                </label>
+                ${polish ? '' : `
+                <label class="field">
+                    <div class="setting-title">${langIsEn() ? 'Atmosphere (optional)' : '氛围（可选）'}</div>
+                    <textarea class="mx-shell-atmosphere" placeholder="${langIsEn() ? 'Look / grade…' : '画质 / 氛围…'}">${escapeHtml(node.atmosphere || '')}</textarea>
+                </label>
+                <details class="agent-refs-fold" ${imageUrls.length ? 'open' : ''}>
+                    <summary>${langIsEn() ? 'Reference images (optional)' : '参考图（可选）'}</summary>
+                    <div class="mx-shell-ref-list"></div>
+                </details>`}
+                ${node.runError && !(node.runStatus === 'failed' && !outputText) ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
+            </div>
+            <div class="agent-h-col agent-h-col-right agent-h-col-scroll">
+                <div class="agent-console-grid">
+                    <label class="field">
+                        <div class="setting-title">${langIsEn() ? 'Mode' : '模式'}</div>
+                        <select class="select-lite mx-shell-mode">
+                            <option value="multi_cam" ${node.mode === 'multi_cam' ? 'selected' : ''}>${langIsEn() ? 'Multi-cam' : '多机位'}</option>
+                            <option value="one_shot" ${node.mode === 'one_shot' ? 'selected' : ''}>${langIsEn() ? 'One-shot' : '一镜到底'}</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <div class="setting-title">${langIsEn() ? 'Camera intensity' : '运镜强度'}</div>
+                        <select class="select-lite mx-shell-camera-intensity">
+                            <option value="restrained" ${node.cameraIntensity === 'restrained' ? 'selected' : ''}>${langIsEn() ? 'Restrained' : '克制'}</option>
+                            <option value="standard" ${node.cameraIntensity === 'standard' ? 'selected' : ''}>${langIsEn() ? 'Standard' : '标准'}</option>
+                            <option value="flashy" ${node.cameraIntensity === 'flashy' ? 'selected' : ''}>${langIsEn() ? 'Flashy' : '炫技'}</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <div class="setting-title">${langIsEn() ? 'Model' : '模型'}</div>
+                        <select class="select-lite mx-shell-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
+                    </label>
+                </div>
+            </div>
         </div>
-        <label class="field">
-            <div class="setting-title">${escapeHtml(storyTitle)}</div>
-            ${upstreamStory && !String(node.story || '').trim() ? `<div class="mx-shell-upstream-preview">${escapeHtml(upstreamStory.slice(0, 220))}${upstreamStory.length > 220 ? '…' : ''}</div>` : ''}
-            <textarea class="mx-shell-story" placeholder="${escapeHtml(storyPh)}">${escapeHtml(node.story || '')}</textarea>
-        </label>
-        ${polish ? '' : `
-        <label class="field">
-            <div class="setting-title">${langIsEn() ? 'Atmosphere (optional)' : '氛围（可选）'}</div>
-            <textarea class="mx-shell-atmosphere" placeholder="${langIsEn() ? 'Look / grade…' : '画质 / 氛围…'}">${escapeHtml(node.atmosphere || '')}</textarea>
-        </label>
-        <details class="agent-refs-fold" ${imageUrls.length ? 'open' : ''}>
-            <summary>${langIsEn() ? 'Reference images (optional)' : '参考图（可选）'}</summary>
-            <div class="mx-shell-ref-list"></div>
-        </details>`}
-        ${node.runError && !(node.runStatus === 'failed' && !outputText) ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
-        <div class="gen-run-row">
-            <button class="gen-btn mx-shell-run-btn ${node.running ? 'running' : ''}"><i data-lucide="${runIcon}" class="w-4 h-4"></i><span>${escapeHtml(runLabel)}</span></button>
+        <div class="agent-h-foot">
+            <div class="gen-run-row">
+                <button class="gen-btn mx-shell-run-btn ${node.running ? 'running' : ''}"><i data-lucide="${runIcon}" class="w-4 h-4"></i><span>${escapeHtml(runLabel)}</span></button>
+            </div>
         </div>
     `;
     const modeSelect = wrap.querySelector('.mx-shell-mode');
@@ -14323,48 +14515,56 @@ function renderDeepWhiteShotAgentBody(node){
     dwBits.push(modelName);
     dwBits.push('DeepWhite v3');
     const wrap = document.createElement('div');
-    wrap.className = 'generator-body deepwhite-shot-body agent-console-body';
+    wrap.className = 'generator-body deepwhite-shot-body agent-console-body agent-h-body';
     wrap.innerHTML = `
-        <div class="agent-status-bar ${scene.length >= 20 ? 'ok' : 'warn'}">${escapeHtml(dwBits.join(' · '))}</div>
-        ${outputText ? `
-        <div class="mx-shell-result-compact">
-            <div class="mx-shell-result-compact-title">${langIsEn() ? 'Ready' : '已生成'}${node.outputData?.primary_director ? ' · ' + escapeHtml(node.outputData.primary_director) : ''}</div>
-            <button type="button" class="gen-btn deepwhite-focus-view-btn"><i data-lucide="panel-right" class="w-4 h-4"></i><span>${langIsEn() ? 'Open text output' : '打开文本输出'}</span></button>
-            <div class="gen-run-row deepwhite-export-row">
-                <button type="button" class="gen-btn deepwhite-to-ninegrid-btn"><i data-lucide="grid-3x3" class="w-4 h-4"></i><span>${langIsEn() ? 'Push to Nine Grid' : '推送到九宫格'}</span></button>
-                <button type="button" class="gen-btn deepwhite-seedance-btn"><i data-lucide="film" class="w-4 h-4"></i><span>${langIsEn() ? 'Export Seedance' : '导出 Seedance'}</span></button>
+        <div class="agent-h-panes">
+            <div class="agent-h-col agent-h-col-scroll">
+                <div class="agent-status-bar ${scene.length >= 20 ? 'ok' : 'warn'}">${escapeHtml(dwBits.join(' · '))}</div>
+                ${outputText ? `
+                <div class="mx-shell-result-compact">
+                    <div class="mx-shell-result-compact-title">${langIsEn() ? 'Ready' : '已生成'}${node.outputData?.primary_director ? ' · ' + escapeHtml(node.outputData.primary_director) : ''}</div>
+                    <button type="button" class="gen-btn deepwhite-focus-view-btn"><i data-lucide="panel-right" class="w-4 h-4"></i><span>${langIsEn() ? 'Open text output' : '打开文本输出'}</span></button>
+                    <div class="gen-run-row deepwhite-export-row">
+                        <button type="button" class="gen-btn deepwhite-to-ninegrid-btn"><i data-lucide="grid-3x3" class="w-4 h-4"></i><span>${langIsEn() ? 'Push to Nine Grid' : '推送到九宫格'}</span></button>
+                        <button type="button" class="gen-btn deepwhite-seedance-btn"><i data-lucide="film" class="w-4 h-4"></i><span>${langIsEn() ? 'Export Seedance' : '导出 Seedance'}</span></button>
+                    </div>
+                </div>` : node.runStatus === 'failed' && node.runError ? `
+                <div class="mx-shell-result-compact is-error-panel">
+                    <div class="mx-shell-result-compact-hint">${escapeHtml(node.runError)}</div>
+                </div>` : ''}
+                <label class="field">
+                    <div class="setting-title">${langIsEn() ? 'Scene / screenplay' : '场景 / 剧本'}</div>
+                    ${upstreamScene && !String(node.scene || '').trim() ? `<div class="mx-shell-upstream-preview">${escapeHtml(upstreamScene.slice(0, 220))}${upstreamScene.length > 220 ? '…' : ''}</div>` : ''}
+                    <textarea class="deepwhite-scene" placeholder="${langIsEn() ? 'Paste scene…' : '粘贴场景 / 剧本…'}">${escapeHtml(node.scene || '')}</textarea>
+                </label>
+                <details class="agent-refs-fold" ${imageUrls.length ? 'open' : ''}>
+                    <summary>${langIsEn() ? 'Reference images (optional)' : '参考图（可选）'}</summary>
+                    <div class="mx-shell-ref-list"></div>
+                </details>
+                ${node.runError && !(node.runStatus === 'failed' && !outputText) ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
             </div>
-        </div>` : node.runStatus === 'failed' && node.runError ? `
-        <div class="mx-shell-result-compact is-error-panel">
-            <div class="mx-shell-result-compact-hint">${escapeHtml(node.runError)}</div>
-        </div>` : ''}
-        <div class="agent-console-grid">
-            <label class="field">
-                <div class="setting-title">${langIsEn() ? 'Model' : '模型'}</div>
-                <select class="select-lite deepwhite-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
-            </label>
-            <label class="field">
-                <div class="setting-title">${langIsEn() ? 'Scene name' : '场景名'}</div>
-                <input class="setting-input deepwhite-scene-name" type="text" maxlength="40" value="${escapeHtml(node.scene_name || '')}" placeholder="${escapeAttr(langIsEn() ? 'Optional' : '可选')}">
-            </label>
+            <div class="agent-h-col agent-h-col-right agent-h-col-scroll">
+                <div class="agent-console-grid">
+                    <label class="field">
+                        <div class="setting-title">${langIsEn() ? 'Model' : '模型'}</div>
+                        <select class="select-lite deepwhite-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
+                    </label>
+                    <label class="field">
+                        <div class="setting-title">${langIsEn() ? 'Scene name' : '场景名'}</div>
+                        <input class="setting-input deepwhite-scene-name" type="text" maxlength="40" value="${escapeHtml(node.scene_name || '')}" placeholder="${escapeAttr(langIsEn() ? 'Optional' : '可选')}">
+                    </label>
+                </div>
+                <label class="field">
+                    <div class="setting-title">${langIsEn() ? 'Director hint (optional)' : '导演倾向（可选）'}</div>
+                    <input class="setting-input deepwhite-director-hint" type="text" maxlength="120" value="${escapeHtml(node.director_hint || '')}" placeholder="${escapeAttr(langIsEn() ? 'e.g. Hitchcock' : '如：希区柯克')}">
+                    <span class="batch-poster-field-hint">${langIsEn() ? 'Blank = auto-pick by dramatic function (not random).' : '留空则按戏剧功能自动选主规则（非随机）。'}</span>
+                </label>
+            </div>
         </div>
-        <label class="field">
-            <div class="setting-title">${langIsEn() ? 'Scene / screenplay' : '场景 / 剧本'}</div>
-            ${upstreamScene && !String(node.scene || '').trim() ? `<div class="mx-shell-upstream-preview">${escapeHtml(upstreamScene.slice(0, 220))}${upstreamScene.length > 220 ? '…' : ''}</div>` : ''}
-            <textarea class="deepwhite-scene" placeholder="${langIsEn() ? 'Paste scene…' : '粘贴场景 / 剧本…'}">${escapeHtml(node.scene || '')}</textarea>
-        </label>
-        <label class="field">
-            <div class="setting-title">${langIsEn() ? 'Director hint (optional)' : '导演倾向（可选）'}</div>
-            <input class="setting-input deepwhite-director-hint" type="text" maxlength="120" value="${escapeHtml(node.director_hint || '')}" placeholder="${escapeAttr(langIsEn() ? 'e.g. Hitchcock' : '如：希区柯克')}">
-            <span class="batch-poster-field-hint">${langIsEn() ? 'Blank = auto-pick by dramatic function (not random).' : '留空则按戏剧功能自动选主规则（非随机）。'}</span>
-        </label>
-        <details class="agent-refs-fold" ${imageUrls.length ? 'open' : ''}>
-            <summary>${langIsEn() ? 'Reference images (optional)' : '参考图（可选）'}</summary>
-            <div class="mx-shell-ref-list"></div>
-        </details>
-        ${node.runError && !(node.runStatus === 'failed' && !outputText) ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
-        <div class="gen-run-row">
-            <button class="gen-btn deepwhite-run-btn ${node.running ? 'running' : ''}"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Designing…' : '设计中…') : (langIsEn() ? 'Generate' : '生成分镜')}</span></button>
+        <div class="agent-h-foot">
+            <div class="gen-run-row">
+                <button class="gen-btn deepwhite-run-btn ${node.running ? 'running' : ''}"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Designing…' : '设计中…') : (langIsEn() ? 'Generate' : '生成分镜')}</span></button>
+            </div>
         </div>
     `;
     const modelSelect = wrap.querySelector('.deepwhite-text-model');
@@ -14637,51 +14837,59 @@ function renderScreenwritingAgentBody(node){
         node.runError = langIsEn() ? 'Marked done but no script. Please regenerate.' : '显示完成但没有剧本，请重新生成。';
     }
     const wrap = document.createElement('div');
-    wrap.className = 'generator-body screenwriting-agent-body agent-console-body';
+    wrap.className = 'generator-body screenwriting-agent-body agent-console-body agent-h-body';
     wrap.innerHTML = `
-        <div class="agent-status-bar ${String(node.brief || '').trim().length >= 8 || String(node.material || '').trim().length >= 8 ? 'ok' : 'warn'}">${escapeHtml([
-            screenwritingModeLabel(node.mode),
-            clampAgentTextModel(node.model),
-            outputText ? (langIsEn() ? 'Ready' : '已生成') : (langIsEn() ? 'Need brief/material' : '需 brief/素材'),
-        ].join(' · '))}</div>
-        ${outputText ? `
-        <div class="mx-shell-result-compact">
-            <div class="mx-shell-result-compact-title">${langIsEn() ? 'Ready' : '已生成'}${node.outputData?.title ? ' · ' + escapeHtml(node.outputData.title) : ''}</div>
-            <button type="button" class="gen-btn screenwriting-focus-view-btn"><i data-lucide="panel-right" class="w-4 h-4"></i><span>${langIsEn() ? 'Open text output' : '打开文本输出'}</span></button>
-        </div>` : node.runStatus === 'failed' && node.runError ? `
-        <div class="mx-shell-result-compact is-error-panel">
-            <div class="mx-shell-result-compact-hint">${escapeHtml(node.runError)}</div>
-        </div>` : ''}
-        <div class="agent-console-grid">
-            <label class="field">
-                <div class="setting-title">${langIsEn() ? 'Mode' : '模式'}</div>
-                <select class="select-lite screenwriting-mode">
-                    <option value="from_scratch" ${node.mode === 'from_scratch' ? 'selected' : ''}>${langIsEn() ? 'From scratch' : '从零创作'}</option>
-                    <option value="diagnose" ${node.mode === 'diagnose' ? 'selected' : ''}>${langIsEn() ? 'Diagnose' : '诊断'}</option>
-                    <option value="rewrite" ${node.mode === 'rewrite' ? 'selected' : ''}>${langIsEn() ? 'Rewrite' : '改写'}</option>
-                    <option value="scene" ${node.mode === 'scene' ? 'selected' : ''}>${langIsEn() ? 'Scene' : '分场'}</option>
-                </select>
-            </label>
-            <label class="field">
-                <div class="setting-title">${langIsEn() ? 'Model' : '模型'}</div>
-                <select class="select-lite screenwriting-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
-            </label>
+        <div class="agent-h-panes">
+            <div class="agent-h-col agent-h-col-scroll">
+                <div class="agent-status-bar ${String(node.brief || '').trim().length >= 8 || String(node.material || '').trim().length >= 8 ? 'ok' : 'warn'}">${escapeHtml([
+                    screenwritingModeLabel(node.mode),
+                    clampAgentTextModel(node.model),
+                    outputText ? (langIsEn() ? 'Ready' : '已生成') : (langIsEn() ? 'Need brief/material' : '需 brief/素材'),
+                ].join(' · '))}</div>
+                ${outputText ? `
+                <div class="mx-shell-result-compact">
+                    <div class="mx-shell-result-compact-title">${langIsEn() ? 'Ready' : '已生成'}${node.outputData?.title ? ' · ' + escapeHtml(node.outputData.title) : ''}</div>
+                    <button type="button" class="gen-btn screenwriting-focus-view-btn"><i data-lucide="panel-right" class="w-4 h-4"></i><span>${langIsEn() ? 'Open text output' : '打开文本输出'}</span></button>
+                </div>` : node.runStatus === 'failed' && node.runError ? `
+                <div class="mx-shell-result-compact is-error-panel">
+                    <div class="mx-shell-result-compact-hint">${escapeHtml(node.runError)}</div>
+                </div>` : ''}
+                <label class="field">
+                    <div class="setting-title">${langIsEn() ? 'Brief' : 'Brief / 创意'}</div>
+                    <textarea class="screenwriting-brief" placeholder="${langIsEn() ? 'Logline / brief…' : '一句话创意 / brief…'}">${escapeHtml(node.brief || '')}</textarea>
+                </label>
+                <label class="field">
+                    <div class="setting-title">${langIsEn() ? 'Material' : '素材 / 原文'}</div>
+                    <textarea class="screenwriting-material" placeholder="${langIsEn() ? 'Paste draft / material…' : '粘贴草稿 / 素材…'}">${escapeHtml(node.material || '')}</textarea>
+                </label>
+                ${node.runError && !(node.runStatus === 'failed' && !outputText) ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
+            </div>
+            <div class="agent-h-col agent-h-col-right agent-h-col-scroll">
+                <div class="agent-console-grid">
+                    <label class="field">
+                        <div class="setting-title">${langIsEn() ? 'Mode' : '模式'}</div>
+                        <select class="select-lite screenwriting-mode">
+                            <option value="from_scratch" ${node.mode === 'from_scratch' ? 'selected' : ''}>${langIsEn() ? 'From scratch' : '从零创作'}</option>
+                            <option value="diagnose" ${node.mode === 'diagnose' ? 'selected' : ''}>${langIsEn() ? 'Diagnose' : '诊断'}</option>
+                            <option value="rewrite" ${node.mode === 'rewrite' ? 'selected' : ''}>${langIsEn() ? 'Rewrite' : '改写'}</option>
+                            <option value="scene" ${node.mode === 'scene' ? 'selected' : ''}>${langIsEn() ? 'Scene' : '分场'}</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <div class="setting-title">${langIsEn() ? 'Model' : '模型'}</div>
+                        <select class="select-lite screenwriting-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
+                    </label>
+                </div>
+                <label class="field">
+                    <div class="setting-title">${langIsEn() ? 'Duration hint' : '时长提示'}</div>
+                    <input class="setting-input screenwriting-duration" type="text" maxlength="80" value="${escapeHtml(node.durationHint || '')}" placeholder="${escapeAttr(langIsEn() ? 'e.g. 90s / 3min' : '如：90秒 / 3分钟')}">
+                </label>
+            </div>
         </div>
-        <label class="field">
-            <div class="setting-title">${langIsEn() ? 'Duration hint' : '时长提示'}</div>
-            <input class="setting-input screenwriting-duration" type="text" maxlength="80" value="${escapeHtml(node.durationHint || '')}" placeholder="${escapeAttr(langIsEn() ? 'e.g. 90s / 3min' : '如：90秒 / 3分钟')}">
-        </label>
-        <label class="field">
-            <div class="setting-title">${langIsEn() ? 'Brief' : 'Brief / 创意'}</div>
-            <textarea class="screenwriting-brief" placeholder="${langIsEn() ? 'Logline / brief…' : '一句话创意 / brief…'}">${escapeHtml(node.brief || '')}</textarea>
-        </label>
-        <label class="field">
-            <div class="setting-title">${langIsEn() ? 'Material' : '素材 / 原文'}</div>
-            <textarea class="screenwriting-material" placeholder="${langIsEn() ? 'Paste draft / material…' : '粘贴草稿 / 素材…'}">${escapeHtml(node.material || '')}</textarea>
-        </label>
-        ${node.runError && !(node.runStatus === 'failed' && !outputText) ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
-        <div class="gen-run-row">
-            <button class="gen-btn screenwriting-run-btn ${node.running ? 'running' : ''}"><i data-lucide="pen-line" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Writing…' : '创作中…') : (langIsEn() ? 'Generate' : '生成剧本')}</span></button>
+        <div class="agent-h-foot">
+            <div class="gen-run-row">
+                <button class="gen-btn screenwriting-run-btn ${node.running ? 'running' : ''}"><i data-lucide="pen-line" class="w-4 h-4"></i><span>${node.running ? (langIsEn() ? 'Writing…' : '创作中…') : (langIsEn() ? 'Generate' : '生成剧本')}</span></button>
+            </div>
         </div>
     `;
     const modeSelect = wrap.querySelector('.screenwriting-mode');
@@ -14837,58 +15045,66 @@ function renderPixarAdScriptAgentBody(node){
     const missing = storyAnimMissingKinds(node);
     const ready = script.length >= 20;
     const wrap = document.createElement('div');
-    wrap.className = 'generator-body pixar-ad-script-body agent-console-body';
+    wrap.className = 'generator-body pixar-ad-script-body agent-console-body agent-h-body';
     const priorAssets = collectStoryAnimPriorAssetPrompts(node);
     const flowHint = langIsEn()
         ? `Flow: ① asset prompts → gen images (done) ② story script (locks to ${priorAssets.length ? priorAssets.length + ' asset prompts' : 'story keywords if no assets yet'}) ③ sketch + assets → image gen`
         : `推荐：①资产提示词→手连生图（结束）②分镜脚本${priorAssets.length ? `（已锁定 ${priorAssets.length} 条资产造型）` : '（尚未生成资产提示词时可先写造型）'}③线稿+资产图一起接生图`;
     wrap.innerHTML = `
-        <div class="agent-status-bar ${ready ? 'ok' : 'warn'}">${escapeHtml([
-            `${node.durationSec}s`,
-            clampAgentTextModel(node.model),
-            outputText ? (langIsEn() ? 'outputs ready' : '已有输出') : (ready ? (langIsEn() ? 'Ready' : '可生成') : (langIsEn() ? 'Need story (≥20 chars)' : '需故事创意（≥20字）')),
-        ].join(' · '))}</div>
-        <div class="mx-shell-result-compact-hint pixar-flow-hint">${escapeHtml(flowHint)}</div>
-        ${outputText ? `
-        <div class="mx-shell-result-compact">
-            <div class="mx-shell-result-compact-title">${langIsEn() ? 'Outputs ready' : '输出已生成'}</div>
-            <button type="button" class="gen-btn pixar-focus-assets-btn"><i data-lucide="panel-right" class="w-4 h-4"></i><span>${langIsEn() ? 'Open outputs' : '打开输出节点'}</span></button>
-        </div>` : node.runStatus === 'failed' && node.runError ? `
-        <div class="mx-shell-result-compact is-error-panel"><div class="mx-shell-result-compact-hint">${escapeHtml(node.runError)}</div></div>` : ''}
-        <div class="agent-console-grid">
-            <label class="field">
-                <div class="setting-title">${langIsEn() ? 'Duration' : '时长'}</div>
-                <select class="select-lite pixar-duration-preset">
-                    ${['15','20','25','30'].map(v => `<option value="${v}" ${node.durationPreset === v ? 'selected' : ''}>${v}s</option>`).join('')}
-                    <option value="custom" ${node.durationPreset === 'custom' ? 'selected' : ''}>${langIsEn() ? 'Custom (>30s)' : '自定义 (>30s)'}</option>
-                </select>
-            </label>
-            <label class="field pixar-custom-duration-field" style="${node.durationPreset === 'custom' ? '' : 'display:none'}">
-                <div class="setting-title">${langIsEn() ? 'Seconds' : '秒数'}</div>
-                <input class="setting-input pixar-duration-sec" type="number" min="31" max="180" value="${escapeAttr(String(node.durationSec || 45))}">
-            </label>
+        <div class="agent-h-panes">
+            <div class="agent-h-col agent-h-col-scroll">
+                <div class="agent-status-bar ${ready ? 'ok' : 'warn'}">${escapeHtml([
+                    `${node.durationSec}s`,
+                    clampAgentTextModel(node.model),
+                    outputText ? (langIsEn() ? 'outputs ready' : '已有输出') : (ready ? (langIsEn() ? 'Ready' : '可生成') : (langIsEn() ? 'Need story (≥20 chars)' : '需故事创意（≥20字）')),
+                ].join(' · '))}</div>
+                <div class="mx-shell-result-compact-hint pixar-flow-hint">${escapeHtml(flowHint)}</div>
+                ${outputText ? `
+                <div class="mx-shell-result-compact">
+                    <div class="mx-shell-result-compact-title">${langIsEn() ? 'Outputs ready' : '输出已生成'}</div>
+                    <button type="button" class="gen-btn pixar-focus-assets-btn"><i data-lucide="panel-right" class="w-4 h-4"></i><span>${langIsEn() ? 'Open outputs' : '打开输出节点'}</span></button>
+                </div>` : node.runStatus === 'failed' && node.runError ? `
+                <div class="mx-shell-result-compact is-error-panel"><div class="mx-shell-result-compact-hint">${escapeHtml(node.runError)}</div></div>` : ''}
+                <label class="field">
+                    <div class="setting-title">${langIsEn() ? 'Story / idea' : '故事创意 / 剧本'}</div>
+                    ${script && !String(node.story || node.raw_script || '').trim() ? `<div class="mx-shell-upstream-preview">${escapeHtml(script.slice(0, 220))}${script.length > 220 ? '…' : ''}</div>` : ''}
+                    <textarea class="pixar-raw-script" placeholder="${langIsEn() ? 'Paste the story idea or connect an upstream text node…' : '粘贴故事创意，或连接上游文本节点…'}">${escapeHtml(node.story || node.raw_script || '')}</textarea>
+                </label>
+                <details class="agent-refs-fold" ${imageUrls.length ? 'open' : ''}>
+                    <summary>${langIsEn() ? 'Refs on Agent (optional, not required)' : '连到 Agent 的参考图（可选，不必为出脚本而回连）'}</summary>
+                    <div class="mx-shell-ref-list"></div>
+                </details>
+                ${node.runError && !(node.runStatus === 'failed' && !outputText) ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
+            </div>
+            <div class="agent-h-col agent-h-col-right agent-h-col-scroll">
+                <div class="agent-console-grid">
+                    <label class="field">
+                        <div class="setting-title">${langIsEn() ? 'Duration' : '时长'}</div>
+                        <select class="select-lite pixar-duration-preset">
+                            ${['15','20','25','30'].map(v => `<option value="${v}" ${node.durationPreset === v ? 'selected' : ''}>${v}s</option>`).join('')}
+                            <option value="custom" ${node.durationPreset === 'custom' ? 'selected' : ''}>${langIsEn() ? 'Custom (>30s)' : '自定义 (>30s)'}</option>
+                        </select>
+                    </label>
+                    <label class="field pixar-custom-duration-field" style="${node.durationPreset === 'custom' ? '' : 'display:none'}">
+                        <div class="setting-title">${langIsEn() ? 'Seconds' : '秒数'}</div>
+                        <input class="setting-input pixar-duration-sec" type="number" min="31" max="180" value="${escapeAttr(String(node.durationSec || 45))}">
+                    </label>
+                </div>
+                <label class="field">
+                    <div class="setting-title">${langIsEn() ? 'Visual style' : '画面风格基调'}</div>
+                    <input class="setting-input pixar-style-description" type="text" maxlength="500" value="${escapeHtml(node.style_description || '')}">
+                </label>
+                <label class="field">
+                    <div class="setting-title">${langIsEn() ? 'Model' : '模型'}</div>
+                    <select class="select-lite pixar-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
+                </label>
+            </div>
         </div>
-        <label class="field">
-            <div class="setting-title">${langIsEn() ? 'Visual style' : '画面风格基调'}</div>
-            <input class="setting-input pixar-style-description" type="text" maxlength="500" value="${escapeHtml(node.style_description || '')}">
-        </label>
-        <label class="field">
-            <div class="setting-title">${langIsEn() ? 'Story / idea' : '故事创意 / 剧本'}</div>
-            ${script && !String(node.story || node.raw_script || '').trim() ? `<div class="mx-shell-upstream-preview">${escapeHtml(script.slice(0, 220))}${script.length > 220 ? '…' : ''}</div>` : ''}
-            <textarea class="pixar-raw-script" placeholder="${langIsEn() ? 'Paste the story idea or connect an upstream text node…' : '粘贴故事创意，或连接上游文本节点…'}">${escapeHtml(node.story || node.raw_script || '')}</textarea>
-        </label>
-        <details class="agent-refs-fold" ${imageUrls.length ? 'open' : ''}>
-            <summary>${langIsEn() ? 'Refs on Agent (optional, not required)' : '连到 Agent 的参考图（可选，不必为出脚本而回连）'}</summary>
-            <div class="mx-shell-ref-list"></div>
-        </details>
-        <label class="field">
-            <div class="setting-title">${langIsEn() ? 'Model' : '模型'}</div>
-            <select class="select-lite pixar-text-model">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
-        </label>
-        ${node.runError && !(node.runStatus === 'failed' && !outputText) ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
-        <div class="gen-run-row pixar-run-actions">
-            <button type="button" class="pixar-action-btn is-secondary pixar-asset-prompt-btn ${node.running ? 'running' : ''}" ${!ready || node.running ? 'disabled' : ''} title="${escapeAttr(missing.length ? (langIsEn() ? 'When assets missing' : '缺彩图资产时用') : (langIsEn() ? 'Regenerate asset prompts' : '可重生成资产提示词'))}"><i data-lucide="image-plus" class="w-3.5 h-3.5"></i><span>${node.running ? (langIsEn() ? 'Working…' : '生成中…') : (langIsEn() ? 'Asset prompts' : '资产提示词')}</span></button>
-            <button type="button" class="pixar-action-btn is-primary pixar-run-btn ${node.running ? 'running' : ''}" ${!ready || node.running ? 'disabled' : ''} title="${escapeAttr(langIsEn() ? 'No need to rewire asset images here' : '不必先把资产图连回本节点')}"><i data-lucide="sparkles" class="w-3.5 h-3.5"></i><span>${node.running ? (langIsEn() ? 'Directing…' : '导演生成中…') : (langIsEn() ? 'Story script' : '分镜脚本')}</span></button>
+        <div class="agent-h-foot">
+            <div class="gen-run-row pixar-run-actions">
+                <button type="button" class="pixar-action-btn is-secondary pixar-asset-prompt-btn ${node.running ? 'running' : ''}" ${!ready || node.running ? 'disabled' : ''} title="${escapeAttr(missing.length ? (langIsEn() ? 'When assets missing' : '缺彩图资产时用') : (langIsEn() ? 'Regenerate asset prompts' : '可重生成资产提示词'))}"><i data-lucide="image-plus" class="w-3.5 h-3.5"></i><span>${node.running ? (langIsEn() ? 'Working…' : '生成中…') : (langIsEn() ? 'Asset prompts' : '资产提示词')}</span></button>
+                <button type="button" class="pixar-action-btn is-primary pixar-run-btn ${node.running ? 'running' : ''}" ${!ready || node.running ? 'disabled' : ''} title="${escapeAttr(langIsEn() ? 'No need to rewire asset images here' : '不必先把资产图连回本节点')}"><i data-lucide="sparkles" class="w-3.5 h-3.5"></i><span>${node.running ? (langIsEn() ? 'Directing…' : '导演生成中…') : (langIsEn() ? 'Story script' : '分镜脚本')}</span></button>
+            </div>
         </div>
     `;
     const bindText = (selector, key, max) => {
@@ -16178,8 +16394,8 @@ function addNineGridAgentNode(point){
         type:'nineGridAgent',
         x:p.x,
         y:p.y,
-        w:360,
-        h:560,
+        w:scaleShellDefaultW({type:'nineGridAgent'}),
+        h:0,
         story:'',
         shots:[],
         refLooks:[],
@@ -16583,69 +16799,71 @@ function renderNineGridAgentBody(node){
     const refs = nineGridAgentRefs(node);
     const story = nineGridAgentStory(node);
     const wrap = document.createElement('div');
-    wrap.className = 'generator-body nine-grid-agent-body';
-    const scroll = document.createElement('div');
-    scroll.className = 'nine-grid-scroll';
-    scroll.innerHTML = `
-        <div class="nine-grid-section">
-            <div class="nine-grid-section-title">${langIsEn() ? 'Story' : '剧本'}</div>
-            <textarea class="nine-grid-story-input" placeholder="${escapeAttr(langIsEn() ? 'Story or connect Prompt upstream…' : '粘贴剧本，或上游连接 Prompt…')}">${escapeHtml(node.story || '')}</textarea>
-            ${story && story !== String(node.story || '').trim() ? `<div class="nine-grid-hint">${escapeHtml(langIsEn() ? 'Using upstream Prompt' : '当前使用上游 Prompt')}</div>` : ''}
+    wrap.className = 'generator-body nine-grid-agent-body agent-h-body';
+    wrap.innerHTML = `
+        <div class="agent-h-panes">
+            <div class="agent-h-col agent-h-col-scroll">
+                <div class="nine-grid-section">
+                    <div class="nine-grid-section-title">${langIsEn() ? 'Story' : '剧本'}</div>
+                    <textarea class="nine-grid-story-input" placeholder="${escapeAttr(langIsEn() ? 'Story or connect Prompt upstream…' : '粘贴剧本，或上游连接 Prompt…')}">${escapeHtml(node.story || '')}</textarea>
+                    ${story && story !== String(node.story || '').trim() ? `<div class="nine-grid-hint">${escapeHtml(langIsEn() ? 'Using upstream Prompt' : '当前使用上游 Prompt')}</div>` : ''}
+                </div>
+                <div class="nine-grid-section">
+                    <div class="nine-grid-section-title">${langIsEn() ? 'References' : '参考图'} · ${refs.length}</div>
+                    <div class="input-list nine-grid-input-list"></div>
+                </div>
+                <div class="nine-grid-section nine-grid-shots-section">${renderNineGridShotCells(node)}</div>
+                ${node.runError ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
+            </div>
+            <div class="agent-h-col agent-h-col-right agent-h-col-scroll">
+                <div class="nine-grid-section nine-grid-crop-row">
+                    <label class="nine-grid-autocrop-label">
+                        <input type="checkbox" class="nine-grid-autocrop" ${node.autoCrop ? 'checked' : ''}>
+                        <span>${langIsEn() ? 'Auto-crop 9 after board' : '生成大图后自动切 9 张'}</span>
+                    </label>
+                    <label><span>Padding</span><input type="number" class="nine-grid-padding setting-input" min="0" max="200" value="${Number(node.cropPadding || 0)}"></label>
+                    <label><span>Gap</span><input type="number" class="nine-grid-gap setting-input" min="0" max="200" value="${Number(node.cropGap || 0)}"></label>
+                    <button type="button" class="nine-grid-estimate-gap-btn">${langIsEn() ? 'Estimate seam' : '估算 seam'}</button>
+                </div>
+                ${node.promptSource === 'deepWhite' ? `<div class="nine-grid-hint">${langIsEn() ? 'Prompts from DeepWhite · auto-crop off by default' : '分镜来自 DeepWhite · 默认不自动切格'}</div>` : ''}
+                <div class="nine-grid-section">
+                    <label class="nine-grid-model-field">
+                        <span>${langIsEn() ? 'Text model' : '文本模型'}</span>
+                        <select class="nine-grid-text-model setting-input">${agentTextModelOptions(resolveNineGridAgentTextModel(node))}</select>
+                    </label>
+                    <label class="nine-grid-model-field">
+                        <span>${langIsEn() ? 'Image model' : '生图模型'}</span>
+                        <select class="nine-grid-model setting-input">${nineGridImageModelOptions(node)}</select>
+                    </label>
+                    ${isGptImage2Model(node.model) ? `
+                    <label class="nine-grid-model-field">
+                        <span>${langIsEn() ? 'Quality' : '质量'}</span>
+                        <select class="nine-grid-quality setting-input">
+                            <option value="low" ${node.quality === 'low' ? 'selected' : ''}>low</option>
+                            <option value="medium" ${node.quality === 'medium' ? 'selected' : ''}>medium</option>
+                            <option value="high" ${node.quality === 'high' ? 'selected' : ''}>high</option>
+                        </select>
+                    </label>` : ''}
+                    <label class="nine-grid-model-field">
+                        <span>${langIsEn() ? 'Resolution' : '分辨率'}</span>
+                        <select class="nine-grid-resolution setting-input">
+                            <option value="1k" ${node.resolution === '1k' ? 'selected' : ''}>1K</option>
+                            <option value="2k" ${node.resolution === '2k' ? 'selected' : ''}>2K</option>
+                            <option value="4k" ${node.resolution === '4k' ? 'selected' : ''}>4K</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
         </div>
-        <div class="nine-grid-section">
-            <div class="nine-grid-section-title">${langIsEn() ? 'References' : '参考图'} · ${refs.length}</div>
-            <div class="input-list nine-grid-input-list"></div>
+        <div class="agent-h-foot">
+            <div class="gen-run-row nine-grid-run-row">
+                <button type="button" class="gen-btn nine-grid-phase-a-btn ${node.running ? 'running' : ''}"><span>${langIsEn() ? 'Phase A: Prompts' : '① 生成分镜'}</span></button>
+                <button type="button" class="gen-btn nine-grid-phase-b-btn ${node.running ? 'running' : ''}"><span>${node.autoCrop ? (langIsEn() ? 'Phase B: Grid + crop' : '② 生成大图并切格') : (langIsEn() ? 'Phase B: Board only' : '② 只生成大图')}</span></button>
+                <button type="button" class="gen-btn nine-grid-full-btn ${node.running ? 'running' : ''}"><span>${langIsEn() ? 'Run all' : '一键全流程'}</span></button>
+                <button type="button" class="gen-btn nine-grid-crop-btn ${node.running ? 'running' : ''}" ${!node.gridUrl || isNodeDisabled(node) ? 'disabled' : ''}><span>${langIsEn() ? 'Crop 9' : '切 9 张'}</span></button>
+            </div>
         </div>
-        <div class="nine-grid-section nine-grid-crop-row">
-            <label class="nine-grid-autocrop-label">
-                <input type="checkbox" class="nine-grid-autocrop" ${node.autoCrop ? 'checked' : ''}>
-                <span>${langIsEn() ? 'Auto-crop 9 after board' : '生成大图后自动切 9 张'}</span>
-            </label>
-            <label><span>Padding</span><input type="number" class="nine-grid-padding setting-input" min="0" max="200" value="${Number(node.cropPadding || 0)}"></label>
-            <label><span>Gap</span><input type="number" class="nine-grid-gap setting-input" min="0" max="200" value="${Number(node.cropGap || 0)}"></label>
-            <button type="button" class="nine-grid-estimate-gap-btn">${langIsEn() ? 'Estimate seam' : '估算 seam'}</button>
-        </div>
-        ${node.promptSource === 'deepWhite' ? `<div class="nine-grid-hint">${langIsEn() ? 'Prompts from DeepWhite · auto-crop off by default' : '分镜来自 DeepWhite · 默认不自动切格'}</div>` : ''}
-        <div class="nine-grid-section">
-            <label class="nine-grid-model-field">
-                <span>${langIsEn() ? 'Text model' : '文本模型'}</span>
-                <select class="nine-grid-text-model setting-input">${agentTextModelOptions(resolveNineGridAgentTextModel(node))}</select>
-            </label>
-            <label class="nine-grid-model-field">
-                <span>${langIsEn() ? 'Image model' : '生图模型'}</span>
-                <select class="nine-grid-model setting-input">${nineGridImageModelOptions(node)}</select>
-            </label>
-            ${isGptImage2Model(node.model) ? `
-            <label class="nine-grid-model-field">
-                <span>${langIsEn() ? 'Quality' : '质量'}</span>
-                <select class="nine-grid-quality setting-input">
-                    <option value="low" ${node.quality === 'low' ? 'selected' : ''}>low</option>
-                    <option value="medium" ${node.quality === 'medium' ? 'selected' : ''}>medium</option>
-                    <option value="high" ${node.quality === 'high' ? 'selected' : ''}>high</option>
-                </select>
-            </label>` : ''}
-            <label class="nine-grid-model-field">
-                <span>${langIsEn() ? 'Resolution' : '分辨率'}</span>
-                <select class="nine-grid-resolution setting-input">
-                    <option value="1k" ${node.resolution === '1k' ? 'selected' : ''}>1K</option>
-                    <option value="2k" ${node.resolution === '2k' ? 'selected' : ''}>2K</option>
-                    <option value="4k" ${node.resolution === '4k' ? 'selected' : ''}>4K</option>
-                </select>
-            </label>
-        </div>
-        <div class="nine-grid-section nine-grid-shots-section">${renderNineGridShotCells(node)}</div>
-        ${node.runError ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
     `;
-    const runRow = document.createElement('div');
-    runRow.className = 'gen-run-row nine-grid-run-row';
-    runRow.innerHTML = `
-        <button type="button" class="gen-btn nine-grid-phase-a-btn ${node.running ? 'running' : ''}"><span>${langIsEn() ? 'Phase A: Prompts' : '① 生成分镜'}</span></button>
-        <button type="button" class="gen-btn nine-grid-phase-b-btn ${node.running ? 'running' : ''}"><span>${node.autoCrop ? (langIsEn() ? 'Phase B: Grid + crop' : '② 生成大图并切格') : (langIsEn() ? 'Phase B: Board only' : '② 只生成大图')}</span></button>
-        <button type="button" class="gen-btn nine-grid-full-btn ${node.running ? 'running' : ''}"><span>${langIsEn() ? 'Run all' : '一键全流程'}</span></button>
-        <button type="button" class="gen-btn nine-grid-crop-btn ${node.running ? 'running' : ''}" ${!node.gridUrl || isNodeDisabled(node) ? 'disabled' : ''}><span>${langIsEn() ? 'Crop 9' : '切 9 张'}</span></button>
-    `;
-    wrap.appendChild(scroll);
-    wrap.appendChild(runRow);
     bindNineGridAgentControls(wrap, node);
     const sources = orderedSources(node, generatorSources(node));
     const imageInputs = sources
@@ -16920,46 +17138,50 @@ function renderBatchPosterAgentBody(node){
     node.custom_theme = normalizeBatchPosterCustomTheme(node.custom_theme);
     node.theme_source = normalizeBatchPosterThemeSource(node.theme_source, node);
     const wrap = document.createElement('div');
-    wrap.className = 'generator-body batch-poster-agent-body';
-    const scroll = document.createElement('div');
-    scroll.className = 'batch-poster-scroll';
-    scroll.innerHTML = `
-        <div class="batch-poster-section">
-            <div class="batch-poster-section-title">${langIsEn() ? 'Image input' : '图片输入'}</div>
-            <div class="input-list batch-poster-input-list"></div>
-        </div>
-        <div class="batch-poster-section">
-            <label class="batch-poster-field">
-                <span class="batch-poster-field-label">Batch Count</span>
-                <input class="batch-poster-count setting-input" type="number" min="1" max="10" step="1" value="${Math.max(1, Math.min(10, Number(node.batch_count || 3)))}">
-            </label>
-            ${batchPosterThemeSectionHtml(node)}
-            ${batchPosterPipelineSelectHtml(node)}
-            ${batchPosterPlanBCopySectionHtml(node)}
-            <label class="batch-poster-field">
-                <span class="batch-poster-field-label">${langIsEn() ? 'Text model' : '文本模型'}</span>
-                <select class="batch-poster-text-model setting-input">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
-            </label>
-            <label class="batch-poster-field batch-poster-image-model-field">
-                <span class="batch-poster-field-label">${langIsEn() ? 'Image model' : '生图模型'}</span>
-                <select class="batch-poster-image-model setting-input">${batchPosterImageModelOptions(node)}</select>
-            </label>
-        </div>
-        ${replicaAgentSizeSettingsHtml(node)}
-        <div class="batch-poster-section">
-            <label class="batch-poster-field">
-                <span class="batch-poster-field-label">Base Prompt</span>
-                <textarea class="batch-poster-base-prompt replica-style-input" rows="5" readonly tabindex="-1">${escapeHtml(node.base_prompt || BATCH_POSTER_BASE_PROMPT)}</textarea>
-            </label>
-        </div>
-        ${node.runError ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
-    `;
-    const runRow = document.createElement('div');
-    runRow.className = 'gen-run-row batch-poster-run-row';
+    wrap.className = 'generator-body batch-poster-agent-body agent-h-body';
     const batchPosterBtn = agentPendingRunState(node.id, langIsEn() ? 'Run Batch' : '一键批量生成', langIsEn() ? 'Generating' : '生成中');
-    runRow.innerHTML = agentGenRunActionsHtml(node.id, `<button type="button" class="gen-btn batch-poster-run-btn ${batchPosterBtn.runningCls}"><i data-lucide="layers" class="w-4 h-4"></i><span>${escapeHtml(batchPosterBtn.label)}</span></button>`);
-    wrap.appendChild(scroll);
-    wrap.appendChild(runRow);
+    wrap.innerHTML = `
+        <div class="agent-h-panes">
+            <div class="agent-h-col agent-h-col-scroll">
+                <div class="batch-poster-section">
+                    <div class="batch-poster-section-title">${langIsEn() ? 'Image input' : '图片输入'}</div>
+                    <div class="input-list batch-poster-input-list"></div>
+                </div>
+                <div class="batch-poster-section">
+                    <label class="batch-poster-field">
+                        <span class="batch-poster-field-label">Base Prompt</span>
+                        <textarea class="batch-poster-base-prompt replica-style-input" rows="5" readonly tabindex="-1">${escapeHtml(node.base_prompt || BATCH_POSTER_BASE_PROMPT)}</textarea>
+                    </label>
+                </div>
+                ${node.runError ? `<div class="replica-run-error">${escapeHtml(node.runError)}</div>` : ''}
+            </div>
+            <div class="agent-h-col agent-h-col-right agent-h-col-scroll">
+                <div class="batch-poster-section">
+                    <label class="batch-poster-field">
+                        <span class="batch-poster-field-label">Batch Count</span>
+                        <input class="batch-poster-count setting-input" type="number" min="1" max="10" step="1" value="${Math.max(1, Math.min(10, Number(node.batch_count || 3)))}">
+                    </label>
+                    ${batchPosterThemeSectionHtml(node)}
+                    ${batchPosterPipelineSelectHtml(node)}
+                    ${batchPosterPlanBCopySectionHtml(node)}
+                    <label class="batch-poster-field">
+                        <span class="batch-poster-field-label">${langIsEn() ? 'Text model' : '文本模型'}</span>
+                        <select class="batch-poster-text-model setting-input">${agentTextModelOptions(resolveBatchPosterChatModel(node))}</select>
+                    </label>
+                    <label class="batch-poster-field batch-poster-image-model-field">
+                        <span class="batch-poster-field-label">${langIsEn() ? 'Image model' : '生图模型'}</span>
+                        <select class="batch-poster-image-model setting-input">${batchPosterImageModelOptions(node)}</select>
+                    </label>
+                </div>
+                ${replicaAgentSizeSettingsHtml(node)}
+            </div>
+        </div>
+        <div class="agent-h-foot">
+            <div class="gen-run-row batch-poster-run-row">
+                ${agentGenRunActionsHtml(node.id, `<button type="button" class="gen-btn batch-poster-run-btn ${batchPosterBtn.runningCls}"><i data-lucide="layers" class="w-4 h-4"></i><span>${escapeHtml(batchPosterBtn.label)}</span></button>`)}
+            </div>
+        </div>
+    `;
     bindBatchPosterAgentControls(wrap, node);
     bindCascadeButtons(wrap, node.id);
     const sources = orderedSources(node, generatorSources(node));
@@ -17011,43 +17233,47 @@ function renderImageRepairAgentBody(node){
     const source = imageRepairAgentSourceImage(node);
     const srcOk = Boolean(source?.url);
     const runError = String(node.runError || '').trim();
-    const wrap = document.createElement('div');
-    wrap.className = 'generator-body image-repair-agent-body';
-    const scroll = document.createElement('div');
-    scroll.className = 'replica-agent-scroll';
-    scroll.innerHTML = `
-        <div class="replica-status-row">
-            <div class="replica-status-badge ${srcOk ? 'ok' : 'warn'}"><i data-lucide="image" class="w-3.5 h-3.5"></i><span>${srcOk ? (langIsEn() ? 'Source image ready' : '已连接待修复图片') : (langIsEn() ? 'Connect source image' : '请连接待修复图片')}</span></div>
-        </div>
-        ${runError ? `<div class="replica-run-error">${escapeHtml(runError)}</div>` : ''}
-        <label class="replica-field">
-            <span class="replica-field-label">${langIsEn() ? 'Text model (reverse prompt)' : '文本模型（反推提示词）'}</span>
-            <select class="image-repair-text-model setting-input">${agentTextModelOptions(resolveImageRepairAgentTextModel(node))}</select>
-        </label>
-        <label class="replica-field">
-            <span class="replica-field-label">${langIsEn() ? 'Image model (lineart & composite)' : '生图模型（线稿与合成）'}</span>
-            <select class="image-repair-image-model setting-input">${imageRepairAgentImageModelOptions(node)}</select>
-        </label>
-        ${replicaAgentSizeSettingsHtml(node)}
-        <div class="replica-section">
-            <div class="replica-section-title">${langIsEn() ? 'Batch count' : '批量数量'}</div>
-            <div class="replica-marker-hint">${langIsEn() ? 'Each click runs this many repairs; you can click again while tasks are running.' : '每次点击按此数量启动修复；运行中可继续点击追加任务。'}</div>
-            ${agentCountStepperHtml(node, 'image-repair-count-input setting-input', 'data-repair-step')}
-        </div>
-        <div class="replica-section">
-            <div class="replica-section-title">${langIsEn() ? 'Pipeline' : '修复流程'}</div>
-            <div class="replica-marker-hint">${langIsEn() ? '1) Reverse generation logic → 2) Line art → 3) Blur color ref (gpt-image-2) → 4) Composite restore' : '1）反推生成逻辑 → 2）提取线稿 → 3）模糊固有色参考（gpt-image-2）→ 4）线稿+模糊合成修复'}</div>
-        </div>
-    `;
     const pendingN = agentPendingCount(node.id);
-    const runRow = document.createElement('div');
-    runRow.className = 'gen-run-row replica-run-row';
     const btnLabel = pendingN > 0
         ? (langIsEn() ? `Repairing (${pendingN})…` : `修复中 (${pendingN})…`)
         : (langIsEn() ? 'Run repair' : '开始修复');
-    runRow.innerHTML = `${agentGenRunActionsHtml(node.id, `<button type="button" class="gen-btn image-repair-run-btn ${pendingN > 0 ? 'running' : ''}" onclick="runImageRepairAgentFromButton('${node.id}', event)"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span>${btnLabel}</span></button>`)}${cascadeBtnHtml(node)}`;
-    wrap.appendChild(scroll);
-    wrap.appendChild(runRow);
+    const wrap = document.createElement('div');
+    wrap.className = 'generator-body image-repair-agent-body agent-h-body';
+    wrap.innerHTML = `
+        <div class="agent-h-panes">
+            <div class="agent-h-col agent-h-col-scroll">
+                <div class="replica-status-row">
+                    <div class="replica-status-badge ${srcOk ? 'ok' : 'warn'}"><i data-lucide="image" class="w-3.5 h-3.5"></i><span>${srcOk ? (langIsEn() ? 'Source image ready' : '已连接待修复图片') : (langIsEn() ? 'Connect source image' : '请连接待修复图片')}</span></div>
+                </div>
+                ${runError ? `<div class="replica-run-error">${escapeHtml(runError)}</div>` : ''}
+                <div class="replica-section">
+                    <div class="replica-section-title">${langIsEn() ? 'Pipeline' : '修复流程'}</div>
+                    <div class="replica-marker-hint">${langIsEn() ? '1) Reverse generation logic → 2) Line art → 3) Blur color ref (gpt-image-2) → 4) Composite restore' : '1）反推生成逻辑 → 2）提取线稿 → 3）模糊固有色参考（gpt-image-2）→ 4）线稿+模糊合成修复'}</div>
+                </div>
+            </div>
+            <div class="agent-h-col agent-h-col-right agent-h-col-scroll">
+                <label class="replica-field">
+                    <span class="replica-field-label">${langIsEn() ? 'Text model (reverse prompt)' : '文本模型（反推提示词）'}</span>
+                    <select class="image-repair-text-model setting-input">${agentTextModelOptions(resolveImageRepairAgentTextModel(node))}</select>
+                </label>
+                <label class="replica-field">
+                    <span class="replica-field-label">${langIsEn() ? 'Image model (lineart & composite)' : '生图模型（线稿与合成）'}</span>
+                    <select class="image-repair-image-model setting-input">${imageRepairAgentImageModelOptions(node)}</select>
+                </label>
+                ${replicaAgentSizeSettingsHtml(node)}
+                <div class="replica-section">
+                    <div class="replica-section-title">${langIsEn() ? 'Batch count' : '批量数量'}</div>
+                    <div class="replica-marker-hint">${langIsEn() ? 'Each click runs this many repairs; you can click again while tasks are running.' : '每次点击按此数量启动修复；运行中可继续点击追加任务。'}</div>
+                    ${agentCountStepperHtml(node, 'image-repair-count-input setting-input', 'data-repair-step')}
+                </div>
+            </div>
+        </div>
+        <div class="agent-h-foot">
+            <div class="gen-run-row replica-run-row">
+                ${agentGenRunActionsHtml(node.id, `<button type="button" class="gen-btn image-repair-run-btn ${pendingN > 0 ? 'running' : ''}" onclick="runImageRepairAgentFromButton('${node.id}', event)"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span>${btnLabel}</span></button>`)}${cascadeBtnHtml(node)}
+            </div>
+        </div>
+    `;
     bindImageRepairAgentControls(wrap, node);
     bindCascadeButtons(wrap, node.id);
     return wrap;
@@ -17068,48 +17294,52 @@ function renderReplicaAgentBody(node){
     const targetMarkers = normalizeReplicaTargetMarkers(node);
     const runError = String(node.runError || '').trim();
     const wrap = document.createElement('div');
-    wrap.className = 'generator-body replica-agent-body';
-    const scroll = document.createElement('div');
-    scroll.className = 'replica-agent-scroll';
-    scroll.innerHTML = `
-        <div class="replica-status-row">
-            <div class="replica-status-badge ${bgOk ? 'ok' : 'warn'}"><i data-lucide="image" class="w-3.5 h-3.5"></i><span>${bgOk ? (langIsEn() ? 'Background ready (图1)' : '已连接背景/构图参考（图1）') : (langIsEn() ? 'Connect background (图1)' : '请连接背景/构图参考（图1）')}</span></div>
-            <div class="replica-status-badge ${charOk ? 'ok' : 'neutral'}"><i data-lucide="user" class="w-3.5 h-3.5"></i><span>${charOk ? (langIsEn() ? `${charCount} character ref(s) ready` : `已连接 ${charCount} 张角色参考`) : (langIsEn() ? 'Character ref optional' : '角色参考可选')}</span></div>
-        </div>
-        ${runError ? `<div class="replica-run-error">${escapeHtml(runError)}</div>` : ''}
-        <label class="replica-field">
-            <span class="replica-field-label">${langIsEn() ? 'Text model (vision)' : '文本模型（画面分析）'}</span>
-            <select class="replica-text-model setting-input">${agentTextModelOptions(resolveReplicaAgentTextModel(node))}</select>
-        </label>
-        ${replicaAgentSizeSettingsHtml(node)}
-        <div class="replica-section">
-            <div class="replica-section-title">${langIsEn() ? 'Style constraints' : '风格限定'}</div>
-            <textarea class="replica-style-input" placeholder="${langIsEn() ? 'Describe style constraints…' : '输入风格限定词…'}">${escapeHtml(node.style_prompt || '')}</textarea>
-        </div>
-        <div class="replica-section">
-            <div class="replica-section-title">${langIsEn() ? 'Swap targets (multi-select)' : '换人目标（可多选）'}</div>
-            <div class="replica-marker-chips">
-                ${[1,2,3,4,5].map(n => `<button type="button" class="replica-marker-chip ${targetMarkers.includes(n) ? 'active' : ''}" data-marker="${n}">${circledNumber(n)}</button>`).join('')}
-            </div>
-            <div class="replica-marker-hint">${langIsEn() ? 'Use brush → Place label → ①②③ on each character in BOTH keyframe and ref sheet (not emoji). Numbers must match: ① on pig in frame = ① on pig in ref. Select all target numbers below. Do not use tiny stickers the model cannot read.' : '请用「编辑图片 → 画笔 → 放置编号 → ①②③」分别标在关键帧与角色对照表的每个角色上（不要用 emoji）。编号必须一一对应：关键帧猪=①，对照表猪也=①。下方换人目标请全选要换的编号。编号请足够大，避免过小贴纸模型无法识别。'}</div>
-        </div>
-        <div class="replica-section replica-section-roles">
-            <div class="replica-section-title">${langIsEn() ? 'Role mapping' : '角色映射'}${images.length ? ` · ${images.length}` : ''}</div>
-            <div class="replica-role-list"></div>
-        </div>
-    `;
-    const runRow = document.createElement('div');
-    runRow.className = 'gen-run-row replica-run-row';
+    wrap.className = 'generator-body replica-agent-body agent-h-body';
     const upstreamLoop = resolveCascadeLoop(node.id);
     const batchLabel = upstreamLoop && upstreamLoop.count > 1
         ? (langIsEn() ? `Run all ${upstreamLoop.count} rounds` : `批量复刻 ${upstreamLoop.count} 轮`)
         : (langIsEn() ? 'Run replica' : '开始复刻');
     const replicaBtn = agentPendingRunState(node.id, batchLabel, langIsEn() ? 'Running' : '运行中');
-    runRow.innerHTML = `${agentGenRunActionsHtml(node.id, `<button type="button" class="gen-btn replica-run-btn ${replicaBtn.runningCls}" onclick="runReplicaAgentFromButton('${node.id}', event)"><i data-lucide="zap" class="w-4 h-4"></i><span>${escapeHtml(replicaBtn.label)}</span></button>`)}${cascadeBtnHtml(node)}`;
-    wrap.appendChild(scroll);
-    wrap.appendChild(runRow);
+    wrap.innerHTML = `
+        <div class="agent-h-panes">
+            <div class="agent-h-col agent-h-col-scroll">
+                <div class="replica-status-row">
+                    <div class="replica-status-badge ${bgOk ? 'ok' : 'warn'}"><i data-lucide="image" class="w-3.5 h-3.5"></i><span>${bgOk ? (langIsEn() ? 'Background ready (图1)' : '已连接背景/构图参考（图1）') : (langIsEn() ? 'Connect background (图1)' : '请连接背景/构图参考（图1）')}</span></div>
+                    <div class="replica-status-badge ${charOk ? 'ok' : 'neutral'}"><i data-lucide="user" class="w-3.5 h-3.5"></i><span>${charOk ? (langIsEn() ? `${charCount} character ref(s) ready` : `已连接 ${charCount} 张角色参考`) : (langIsEn() ? 'Character ref optional' : '角色参考可选')}</span></div>
+                </div>
+                ${runError ? `<div class="replica-run-error">${escapeHtml(runError)}</div>` : ''}
+                <div class="replica-section">
+                    <div class="replica-section-title">${langIsEn() ? 'Style constraints' : '风格限定'}</div>
+                    <textarea class="replica-style-input" placeholder="${langIsEn() ? 'Describe style constraints…' : '输入风格限定词…'}">${escapeHtml(node.style_prompt || '')}</textarea>
+                </div>
+                <div class="replica-section">
+                    <div class="replica-section-title">${langIsEn() ? 'Swap targets (multi-select)' : '换人目标（可多选）'}</div>
+                    <div class="replica-marker-chips">
+                        ${[1,2,3,4,5].map(n => `<button type="button" class="replica-marker-chip ${targetMarkers.includes(n) ? 'active' : ''}" data-marker="${n}">${circledNumber(n)}</button>`).join('')}
+                    </div>
+                    <div class="replica-marker-hint">${langIsEn() ? 'Use brush → Place label → ①②③ on each character in BOTH keyframe and ref sheet (not emoji). Numbers must match: ① on pig in frame = ① on pig in ref. Select all target numbers below. Do not use tiny stickers the model cannot read.' : '请用「编辑图片 → 画笔 → 放置编号 → ①②③」分别标在关键帧与角色对照表的每个角色上（不要用 emoji）。编号必须一一对应：关键帧猪=①，对照表猪也=①。下方换人目标请全选要换的编号。编号请足够大，避免过小贴纸模型无法识别。'}</div>
+                </div>
+                <div class="replica-section replica-section-roles">
+                    <div class="replica-section-title">${langIsEn() ? 'Role mapping' : '角色映射'}${images.length ? ` · ${images.length}` : ''}</div>
+                    <div class="replica-role-list"></div>
+                </div>
+            </div>
+            <div class="agent-h-col agent-h-col-right agent-h-col-scroll">
+                <label class="replica-field">
+                    <span class="replica-field-label">${langIsEn() ? 'Text model (vision)' : '文本模型（画面分析）'}</span>
+                    <select class="replica-text-model setting-input">${agentTextModelOptions(resolveReplicaAgentTextModel(node))}</select>
+                </label>
+                ${replicaAgentSizeSettingsHtml(node)}
+            </div>
+        </div>
+        <div class="agent-h-foot">
+            <div class="gen-run-row replica-run-row">
+                ${agentGenRunActionsHtml(node.id, `<button type="button" class="gen-btn replica-run-btn ${replicaBtn.runningCls}" onclick="runReplicaAgentFromButton('${node.id}', event)"><i data-lucide="zap" class="w-4 h-4"></i><span>${escapeHtml(replicaBtn.label)}</span></button>`)}${cascadeBtnHtml(node)}
+            </div>
+        </div>
+    `;
     bindCascadeButtons(wrap, node.id);
-    const textModelSelect = scroll.querySelector('.replica-text-model');
+    const textModelSelect = wrap.querySelector('.replica-text-model');
     if(textModelSelect){
         textModelSelect.onmousedown = e => e.stopPropagation();
         textModelSelect.onchange = e => {
@@ -17118,13 +17348,13 @@ function renderReplicaAgentBody(node){
             scheduleSave();
         };
     }
-    const textarea = scroll.querySelector('.replica-style-input');
+    const textarea = wrap.querySelector('.replica-style-input');
     bindScrollableText(textarea);
     textarea.oninput = e => {
         node.style_prompt = e.target.value;
         scheduleSave();
     };
-    const markerChips = scroll.querySelectorAll('.replica-marker-chip');
+    const markerChips = wrap.querySelectorAll('.replica-marker-chip');
     markerChips.forEach(chip => {
         chip.onmousedown = e => e.stopPropagation();
         chip.onclick = e => {
@@ -17145,8 +17375,8 @@ function renderReplicaAgentBody(node){
             });
         };
     });
-    renderReplicaAgentRoleMapper(scroll.querySelector('.replica-role-list'), node);
-    bindReplicaAgentSizeControls(scroll, node, background?.url || '');
+    renderReplicaAgentRoleMapper(wrap.querySelector('.replica-role-list'), node);
+    bindReplicaAgentSizeControls(wrap, node, background?.url || '');
     return wrap;
 }
 function runReplicaAgentFromButton(nodeId, event){
@@ -17394,34 +17624,81 @@ function renderVideoReverseBody(node){
     node.model = clampAgentTextModel(node.model);
     let promptBadge;
     if(!promptNodes.length){
-        promptBadge = `<div class="video-reverse-badge warn"><i data-lucide="text-cursor-input" class="w-3.5 h-3.5"></i><span>请连接提示词节点（提示词右侧端口 → 本节点左侧端口）</span></div>`;
+        promptBadge = `<div class="video-reverse-badge warn"><i data-lucide="text-cursor-input" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Connect a Prompt node (OUT → this IN)' : '请连接提示词节点（右侧端口 → 本节点左侧）'}</span></div>`;
     } else if(!promptText.trim()){
-        promptBadge = `<div class="video-reverse-badge warn"><i data-lucide="text-cursor-input" class="w-3.5 h-3.5"></i><span>已连接提示词，请在提示词节点里填写反推要求</span></div>`;
+        promptBadge = `<div class="video-reverse-badge warn"><i data-lucide="text-cursor-input" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Prompt connected — write reverse instructions' : '已连接提示词，请填写反推要求'}</span></div>`;
     } else {
-        promptBadge = `<div class="video-reverse-badge ok"><i data-lucide="text-cursor-input" class="w-3.5 h-3.5"></i><span>已连接反推提示词</span></div>`;
+        promptBadge = `<div class="video-reverse-badge ok"><i data-lucide="text-cursor-input" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Reverse prompt ready' : '已连接反推提示词'}</span></div>`;
     }
+    const primary = videos[0] || '';
+    const extraThumbs = videos.slice(1, 4).map(url => (
+        isMissingAssetUrl(url)
+            ? `<div class="video-reverse-thumb is-missing">${missingAssetHtml(url, true)}</div>`
+            : `<div class="video-reverse-thumb"><video src="${escapeAttr(url)}" muted playsinline preload="metadata"></video></div>`
+    )).join('');
+    const mediaInner = videos.length
+        ? `<div class="video-reverse-preview">
+                ${isMissingAssetUrl(primary)
+                    ? `<div class="video-reverse-preview-missing">${missingAssetHtml(primary, true)}</div>`
+                    : `<video class="video-reverse-preview-video" src="${escapeAttr(primary)}" controls muted playsinline preload="metadata"></video>`}
+                <button type="button" class="video-reverse-add-more" title="${escapeAttr(langIsEn() ? 'Upload more videos' : '继续上传视频')}"><i data-lucide="plus" class="w-3.5 h-3.5"></i><span>${videos.length > 1 ? `${videos.length}` : (langIsEn() ? 'Add' : '上传')}</span></button>
+            </div>
+            ${extraThumbs ? `<div class="video-reverse-thumbs">${extraThumbs}</div>` : ''}`
+        : `<div class="video-reverse-upload" role="button" tabindex="0">
+                <i data-lucide="upload" class="video-reverse-upload-icon"></i>
+                <span class="video-reverse-upload-title">${langIsEn() ? 'Drop or click to upload video' : '拖入或点击上传视频'}</span>
+                <span class="video-reverse-upload-hint">${langIsEn() ? 'Or wire a video Image node to the left port' : '也可将画布上的视频节点连到左侧端口'}</span>
+            </div>`;
     const outputText = String(node.outputText || '').trim();
-    const outputPlaceholder = '运行后将在此显示视频反推内容…';
+    const outputPlaceholder = langIsEn() ? 'Reverse result will appear here…' : '运行后将在此显示视频反推内容…';
+    const running = Boolean(node.running);
+    const runLabel = running
+        ? (langIsEn() ? 'Analyzing…' : '分析中…')
+        : (langIsEn() ? 'Run Reverse' : '运行反推');
     const wrap = document.createElement('div');
-    wrap.className = 'generator-body video-reverse-body';
+    // 对齐 RH 三栏壳：上传井 / 参数 / 输出井 + 底栏
+    wrap.className = 'rh-body rh-body-tri video-reverse-body';
     wrap.innerHTML = `
-        <div class="video-reverse-badge-row">
-            ${videos.length ? `<div class="video-reverse-badge ok"><i data-lucide="video" class="w-3.5 h-3.5"></i><span>已连接 ${videos.length} 个视频</span></div>` : `<div class="video-reverse-badge warn"><i data-lucide="video-off" class="w-3.5 h-3.5"></i><span>请连接视频节点</span></div>`}
-            ${promptBadge}
+        <div class="rh-tri">
+            <section class="rh-pane rh-pane-in">
+                <div class="rh-pane-head">
+                    <span class="rh-pane-title"><i data-lucide="video" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Input' : '输入'}</span></span>
+                </div>
+                <div class="rh-well video-reverse-media">
+                    ${mediaInner}
+                    <div class="video-reverse-badge-row">${promptBadge}</div>
+                </div>
+            </section>
+            <section class="rh-pane rh-pane-params">
+                <div class="rh-side-scroll">
+                    <label class="field rh-side-field">
+                        <div class="setting-title">${langIsEn() ? 'Text model' : '文本模型'}</div>
+                        <select class="select-lite video-reverse-model">${models.map(m => `<option value="${escapeHtml(m)}" ${m === node.model ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('')}</select>
+                    </label>
+                    <label class="field rh-side-field">
+                        <div class="setting-title">System</div>
+                        <textarea class="video-reverse-system rh-prompt-tile-input" placeholder="${escapeAttr(langIsEn() ? 'Optional system prompt' : '系统指令，可留空使用默认')}">${escapeHtml(node.system_prompt || '')}</textarea>
+                    </label>
+                </div>
+            </section>
+            <section class="rh-pane rh-pane-out">
+                <div class="rh-pane-head">
+                    <span class="rh-pane-title">
+                        <i data-lucide="${running ? 'loader-circle' : 'file-text'}" class="w-3.5 h-3.5 ${running ? 'spin-icon' : ''}"></i>
+                        <span>${langIsEn() ? 'Output' : '反推结果'}</span>
+                    </span>
+                </div>
+                <div class="rh-well video-reverse-output ${outputText ? '' : 'is-empty'}">${escapeHtml(outputText || outputPlaceholder)}</div>
+            </section>
         </div>
-        <label class="field">
-            <div class="setting-title">${langIsEn() ? 'Text model (video analysis)' : '文本模型（视频分析）'}</div>
-            <select class="select-lite video-reverse-model">${models.map(m => `<option value="${escapeHtml(m)}" ${m === node.model ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('')}</select>
-        </label>
-        <label class="field">
-            <div class="setting-title">System（可选）</div>
-            <textarea class="video-reverse-system" placeholder="系统指令，可留空使用默认">${escapeHtml(node.system_prompt || '')}</textarea>
-        </label>
-        <div class="llm-pane-label">反推结果</div>
-        <div class="video-reverse-output ${outputText ? '' : 'is-empty'}">${escapeHtml(outputText || outputPlaceholder)}</div>
-        <div class="gen-run-row">
-            <button class="gen-btn video-reverse-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="scan-search" class="w-4 h-4"></i><span>${node.running ? '分析中…' : '运行反推'}</span></button>
+        <div class="rh-foot">
+            <div class="gen-run-row rh-run-row">
+                ${agentGenRunActionsHtml(node.id, `<button class="gen-btn rh-run video-reverse-run ${running ? 'running' : ''}" ${running || isNodeDisabled(node) ? 'disabled' : ''}><span>${escapeHtml(runLabel)}</span></button>`)}
+                ${cascadeBtnHtml(node)}
+            </div>
+            <div class="rh-progress ${running ? 'is-on' : ''}" aria-hidden="true"><div class="rh-progress-bar"></div></div>
         </div>
+        ${retryBarHtml(node)}
     `;
     const modelSelect = wrap.querySelector('.video-reverse-model');
     modelSelect.onmousedown = e => e.stopPropagation();
@@ -17436,12 +17713,21 @@ function renderVideoReverseBody(node){
     systemEl.oninput = e => {
         node.system_prompt = e.target.value;
         scheduleSave();
+        delete node._rhBaseFrameH;
+        scheduleFitRhNodeFrame(node);
     };
     bindScrollableText(wrap.querySelector('.video-reverse-output'));
     wrap.querySelector('.video-reverse-run').onclick = e => {
         e.stopPropagation();
         runVideoReverseNode(node.id);
     };
+    bindCascadeButtons(wrap, node.id);
+    bindVideoReverseUpload(wrap, node);
+    const previewVideo = wrap.querySelector('.video-reverse-preview-video');
+    if(previewVideo){
+        previewVideo.onmousedown = e => e.stopPropagation();
+        previewVideo.onclick = e => e.stopPropagation();
+    }
     return wrap;
 }
 async function runVideoReverseNode(nodeId, opts={}){
@@ -17459,7 +17745,7 @@ async function runVideoReverseNode(nodeId, opts={}){
         return;
     }
     if(!videos.length){
-        softAlert(langIsEn() ? 'Connect a video Image node.' : '请连接包含视频的「图片」节点（mediaKind 为 video）。');
+        softAlert(langIsEn() ? 'Upload a video on the left, or connect a video Image node.' : '请在左侧上传视频，或连接包含视频的节点。');
         return;
     }
     if(!opts.cascade){ node.running = true; node.runStatus = 'running'; refreshNodes([node.id]); }
@@ -17698,10 +17984,19 @@ function reserveGeneratorPendingSlots(gen, pendingIds){
     const prevPending = Array.isArray(gen._stageSlots)
         ? gen._stageSlots.filter(s => s?.kind === 'pending' && s.id && !idList.includes(String(s.id)))
         : [];
+    const pendingById = new Map(generatorPendingList(gen).map(p => [String(p.id), p]));
+    const consoleAspect = genStageAspectLabelFromNode(gen);
     gen._stageSlots = [
-        ...ready.map(url => ({ kind: 'url', url })),
+        ...ready.map(url => {
+            const aspect = genStageAspectLabelForUrl(gen, url);
+            return aspect ? { kind: 'url', url, aspect } : { kind: 'url', url };
+        }),
         ...prevPending,
-        ...idList.map(id => ({ kind: 'pending', id })),
+        ...idList.map(id => ({
+            kind: 'pending',
+            id,
+            aspect: pendingById.get(String(id))?.aspect || consoleAspect,
+        })),
     ];
 }
 function syncPreviewRoundUrlsFromStageSlots(gen){
@@ -17717,7 +18012,7 @@ function syncPreviewRoundUrlsFromStageSlots(gen){
         .filter(s => s?.kind === 'url' && s.url)
         .map(s => s.url);
 }
-function fillGeneratorPendingSlot(gen, pendingId, urls){
+function fillGeneratorPendingSlot(gen, pendingId, urls, aspect=''){
     if(!isGenConsoleNode(gen) || !pendingId) return false;
     const list = (urls || []).map(outputUrlValue).filter(Boolean);
     if(!list.length) return false;
@@ -17725,12 +18020,14 @@ function fillGeneratorPendingSlot(gen, pendingId, urls){
         reserveGeneratorPendingSlots(gen, [pendingId]);
     }
     let idx = gen._stageSlots.findIndex(s => s?.kind === 'pending' && String(s.id) === String(pendingId));
+    const stamp = String(aspect || gen._stageSlots[idx]?.aspect || '').trim();
+    const asUrlSlot = (url) => (stamp ? { kind: 'url', url, aspect: stamp } : { kind: 'url', url });
     if(idx < 0){
-        list.forEach(url => gen._stageSlots.push({ kind: 'url', url }));
+        list.forEach(url => gen._stageSlots.push(asUrlSlot(url)));
     } else {
-        gen._stageSlots[idx] = { kind: 'url', url: list[0] };
+        gen._stageSlots[idx] = asUrlSlot(list[0]);
         for(let i = 1; i < list.length; i += 1){
-            gen._stageSlots.splice(idx + i, 0, { kind: 'url', url: list[i] });
+            gen._stageSlots.splice(idx + i, 0, asUrlSlot(list[i]));
         }
     }
     syncPreviewRoundUrlsFromStageSlots(gen);
@@ -17805,6 +18102,8 @@ function appendGeneratorHistory(gen, outputs, meta={}){
     const startedAt = Number(meta.startedAt) || nowMs();
     const slotIndex = Number(meta.slotIndex);
     const pendingId = meta.pendingId ? String(meta.pendingId) : '';
+    const aspect = String(meta.aspect || meta.aspectRatio || '').trim()
+        || genStageAspectLabelFromNode(gen);
     const existing = generatorHistoryItems(gen);
     const seen = new Set(existing.map(item => item.url));
     const next = [...existing];
@@ -17824,6 +18123,7 @@ function appendGeneratorHistory(gen, outputs, meta={}){
             startedAt,
             slotIndex: Number.isFinite(slotIndex) ? slotIndex + ui : undefined,
             pendingId: pendingId || undefined,
+            aspect: aspect || undefined,
         });
     });
     gen.history = next.length > MAX_GEN_HISTORY ? next.slice(-MAX_GEN_HISTORY) : next;
@@ -17841,7 +18141,7 @@ function appendGeneratorHistory(gen, outputs, meta={}){
             }
             primaryUrl = prevOrder[pIdx] || null;
         }
-        const filledSlot = pendingId ? fillGeneratorPendingSlot(gen, pendingId, added) : false;
+        const filledSlot = pendingId ? fillGeneratorPendingSlot(gen, pendingId, added, aspect) : false;
         if(!filledSlot){
             syncGeneratorPreviewFromHistory(gen);
             let order = (gen.previewRoundUrls || []).map(outputUrlValue).filter(Boolean);
@@ -18019,13 +18319,14 @@ function fitImageNodeToNaturalAspect(node, el, img){
         if(batch) scheduleImageBatchRelayout(batch.id, 'auto');
     }
 }
-function applyNaturalAspectFromImg(img, frameEl, node){
+function applyNaturalAspectFromImg(img, frameEl, node, url=''){
     if(!img || !frameEl) return;
     const apply = () => {
         const nw = img.naturalWidth || img.videoWidth || 0;
         const nh = img.naturalHeight || img.videoHeight || 0;
         if(!nw || !nh) return;
         frameEl.style.aspectRatio = `${nw} / ${nh}`;
+        if(url) stampHistoryNaturalAspect(node, url, nw, nh);
         if(isGenConsoleNode(node) && !node._userSized){
             node._stageAspect = {nw, nh};
             delete node._baseFrameH;
@@ -18040,6 +18341,25 @@ function applyNaturalAspectFromImg(img, frameEl, node){
     }
     if(img.complete && img.naturalWidth > 0) apply();
     else img.addEventListener('load', apply, {once:true});
+}
+/** grid 格：无 stamp 时用 natural 设 --gen-tile-ar，并回填 history */
+function applyNaturalAspectToGenTile(media, mediaEl, node, url){
+    if(!media || !mediaEl) return;
+    if(mediaEl.style.getPropertyValue('--gen-tile-ar')) return;
+    const apply = () => {
+        const nw = media.naturalWidth || media.videoWidth || 0;
+        const nh = media.naturalHeight || media.videoHeight || 0;
+        if(!nw || !nh) return;
+        mediaEl.style.setProperty('--gen-tile-ar', `${nw} / ${nh}`);
+        stampHistoryNaturalAspect(node, url, nw, nh);
+    };
+    if(media.tagName === 'VIDEO'){
+        if(media.readyState >= 1 && media.videoWidth > 0) apply();
+        else media.addEventListener('loadedmetadata', apply, {once:true});
+        return;
+    }
+    if(media.complete && media.naturalWidth > 0) apply();
+    else media.addEventListener('load', apply, {once:true});
 }
 function generatorPendingList(node){
     if(!isGenConsoleNode(node)) return [];
@@ -18384,7 +18704,16 @@ function bindGenStageInteractions(root, node){
         const frame = hero.classList.contains('gen-stage-stack-hero')
             ? hero
             : (hero.closest('.gen-stage-frame') || hero);
-        applyNaturalAspectFromImg(media, frame, node);
+        const heroUrl = hero.getAttribute('data-preview-url') || '';
+        const stamped = genStageAspectCssForUrl(node, heroUrl);
+        if(stamped){
+            frame.style.aspectRatio = stamped;
+            if(isGenConsoleNode(node) && !node._userSized && !node._stageAspect){
+                // 有 stamp 时仍可按 stamp 估高；natural 到达后再精调
+                fitGeneratorNodeHeight(node);
+            }
+        }
+        applyNaturalAspectFromImg(media, frame, node, heroUrl);
         if(media) media.draggable = false;
     }
     const badge = root?.querySelector?.('.gen-stage-badge');
@@ -18463,6 +18792,8 @@ function bindGenStageInteractions(root, node){
         const url = tile.getAttribute('data-preview-url') || media?.getAttribute('src') || '';
         const item = generatorHistoryItems(node).find(x => x.url === url) || {url};
         bindCanvasImageDragCopy(media, url, String(item.prompt || ''));
+        const mediaEl = tile.querySelector('.gen-stage-tile-media');
+        applyNaturalAspectToGenTile(media, mediaEl, node, url);
     });
     root?.querySelectorAll?.('.gen-stage-cover-fav[data-action="fav"], .gen-stage-tile [data-action="fav"]').forEach(btn => {
         btn.onmousedown = e => e.stopPropagation();
@@ -18522,13 +18853,94 @@ function genStageThumbHtml(url){
     return `<img src="${escapeAttr(url)}" alt="" loading="lazy" decoding="async">`;
 }
 function genStageTileAspectCss(node){
-    const r = String(node?.ratio || node?.msRatio || '').trim();
-    const aspect = /^\d+:\d+$/.test(r) ? r : (LEGACY_RATIO_TO_ASPECT[r] || '');
-    if(aspect){
-        const [a, b] = aspect.split(':');
+    return aspectLabelToCss(genStageAspectLabelFromNode(node)) || '2 / 3';
+}
+/** '1:1' / '2 / 3' / legacy square → CSS aspect-ratio 值 */
+function aspectLabelToCss(label){
+    const t = String(label || '').trim();
+    if(!t) return '';
+    if(/^\d+\s*\/\s*\d+$/.test(t)){
+        const [a, b] = t.split('/').map(s => s.trim());
         return `${a} / ${b}`;
     }
-    return '2 / 3';
+    if(/^\d+:\d+$/.test(t)){
+        const [a, b] = t.split(':');
+        return `${a} / ${b}`;
+    }
+    const legacy = LEGACY_RATIO_TO_ASPECT[t];
+    if(legacy){
+        const [a, b] = legacy.split(':');
+        return `${a} / ${b}`;
+    }
+    return '';
+}
+/** 当前控制台选中的比例标签（钉在 pending / history 上） */
+function genStageAspectLabelFromNode(node){
+    if(node?.type === 'video'){
+        const ar = String(node.aspectRatio || '').trim();
+        if(/^\d+:\d+$/.test(ar)) return ar;
+        return '16:9';
+    }
+    const raw = String(node?.type === 'msgen' ? (node.msRatio || '') : (node?.ratio || '')).trim();
+    if(/^\d+:\d+$/.test(raw)) return raw;
+    if(LEGACY_RATIO_TO_ASPECT[raw]) return LEGACY_RATIO_TO_ASPECT[raw];
+    if(raw === 'custom'){
+        const custom = String(node?.type === 'msgen' ? (node.msCustomRatio || '') : (node?.customRatio || '')).trim();
+        if(/^\d+:\d+$/.test(custom)) return custom;
+    }
+    if(raw === 'source'){
+        const custom = String(node?.customRatio || '').trim();
+        if(/^\d+:\d+$/.test(custom)) return custom;
+    }
+    return '2:3';
+}
+function genStageAspectCssFromItem(item){
+    if(!item || typeof item !== 'object') return '';
+    const fromLabel = aspectLabelToCss(item.aspect || item.aspectRatio || '');
+    if(fromLabel) return fromLabel;
+    const nw = Number(item.nw || item.naturalWidth || 0);
+    const nh = Number(item.nh || item.naturalHeight || 0);
+    if(nw > 0 && nh > 0) return `${nw} / ${nh}`;
+    return '';
+}
+function genStageAspectLabelForUrl(node, url){
+    const want = outputUrlValue(url);
+    if(!want || !isGenConsoleNode(node)) return '';
+    const hit = generatorHistoryItems(node).find(i => outputUrlValue(i.url) === want);
+    const label = String(hit?.aspect || hit?.aspectRatio || '').trim();
+    if(label) return label;
+    if(Array.isArray(node._stageSlots)){
+        const slot = node._stageSlots.find(s => s?.kind === 'url' && outputUrlValue(s.url) === want);
+        return String(slot?.aspect || '').trim();
+    }
+    return '';
+}
+function genStageAspectCssForUrl(node, url){
+    const want = outputUrlValue(url);
+    if(!want) return '';
+    const hit = generatorHistoryItems(node).find(i => outputUrlValue(i.url) === want);
+    const fromHist = genStageAspectCssFromItem(hit);
+    if(fromHist) return fromHist;
+    if(Array.isArray(node?._stageSlots)){
+        const slot = node._stageSlots.find(s => s?.kind === 'url' && outputUrlValue(s.url) === want);
+        const fromSlot = aspectLabelToCss(slot?.aspect || '');
+        if(fromSlot) return fromSlot;
+    }
+    return '';
+}
+/** 旧结果无 stamp：用 natural 回填 history，避免之后被控制台比例带跑 */
+function stampHistoryNaturalAspect(node, url, nw, nh){
+    if(!isGenConsoleNode(node) || !url || !(nw > 0) || !(nh > 0)) return;
+    if(!Array.isArray(node.history)) return;
+    const want = outputUrlValue(url);
+    const item = node.history.find(x => {
+        if(!x || typeof x !== 'object') return outputUrlValue(x) === want;
+        return outputUrlValue(x.url) === want || outputUrlValue(x) === want;
+    });
+    if(!item || typeof item !== 'object') return;
+    if(item.aspect || item.aspectRatio || (item.nw && item.nh)) return;
+    item.nw = nw;
+    item.nh = nh;
 }
 function genStageCoverFavHtml(url){
     if(!url || isMissingAssetUrl(url)) return '';
@@ -18542,9 +18954,11 @@ function renderGenStageTileHtml(node, url, previewIndex, primaryUrl){
     const isPrimary = url === primaryUrl;
     const picking = isGenBatchPicking(node);
     const picked = picking && isGenBatchUrlPicked(url);
+    const tileAr = genStageAspectCssForUrl(node, url);
+    const mediaStyle = tileAr ? ` style="--gen-tile-ar:${tileAr}"` : '';
     if(picking){
         return `<div class="gen-stage-tile ${isPrimary ? 'is-primary' : ''} ${picked ? 'is-batch-picked' : ''} is-batch-pick-mode" data-preview-url="${escapeAttr(url)}" data-preview-index="${previewIndex}" role="checkbox" aria-checked="${picked ? 'true' : 'false'}" tabindex="0">
-            <div class="gen-stage-tile-media">${genStageMediaHtml(url)}</div>
+            <div class="gen-stage-tile-media"${mediaStyle}>${genStageMediaHtml(url)}</div>
             <span class="gen-stage-tile-check" aria-hidden="true">${picked ? '✓' : ''}</span>
         </div>`;
     }
@@ -18555,7 +18969,7 @@ function renderGenStageTileHtml(node, url, previewIndex, primaryUrl){
         ? (langIsEn() ? 'Remove from favorites' : '取消收藏')
         : (langIsEn() ? 'Add to favorites' : '收藏');
     return `<div class="gen-stage-tile ${isPrimary ? 'is-primary' : ''}" data-preview-url="${escapeAttr(url)}" data-preview-index="${previewIndex}" role="button" tabindex="0">
-        <div class="gen-stage-tile-media">${genStageMediaHtml(url)}</div>
+        <div class="gen-stage-tile-media"${mediaStyle}>${genStageMediaHtml(url)}</div>
         <div class="gen-stage-tile-actions gen-stage-tile-actions-left">
             <button type="button" class="gen-stage-tile-btn gen-stage-tile-btn-icon${favActive ? ' is-active' : ''}" data-action="fav" data-url="${escapeAttr(url)}" title="${escapeAttr(favTitle)}" aria-pressed="${favActive ? 'true' : 'false'}"><i data-lucide="star" class="w-5 h-5"></i></button>
             <button type="button" class="gen-stage-tile-btn gen-stage-tile-btn-icon" data-action="download" data-url="${escapeAttr(url)}" title="${escapeAttr(downloadLabel)}"><i data-lucide="download" class="w-5 h-5"></i></button>
@@ -18565,11 +18979,13 @@ function renderGenStageTileHtml(node, url, previewIndex, primaryUrl){
         </div>
     </div>`;
 }
-function renderGenStagePendingTileHtml(pending, index){
+function renderGenStagePendingTileHtml(pending, index, node=null){
     const label = pending?.stageLabel
         || (langIsEn() ? `Generating ${index + 1}` : `生成中 ${index + 1}`);
+    const tileAr = aspectLabelToCss(pending?.aspect)
+        || (node ? genStageTileAspectCss(node) : '2 / 3');
     return `<div class="gen-stage-tile is-pending" data-pending-id="${escapeAttr(pending?.id || '')}" aria-busy="true" role="status">
-        <div class="gen-stage-tile-media">
+        <div class="gen-stage-tile-media" style="--gen-tile-ar:${tileAr}">
             <div class="gen-stage-pending-fill">
                 <div class="output-pending-waves" aria-hidden="true"><span></span><span></span><span></span></div>
                 <span class="gen-stage-pending-label">${escapeHtml(label)}</span>
@@ -18596,7 +19012,7 @@ function renderGenStageStackHtml(node, urls, primary, busyOverlay, pendingCount 
         const depth = peeks.length - i;
         return `<div class="gen-stage-stack-peek" style="--peek:${depth}" aria-hidden="true">${genStageThumbHtml(url)}</div>`;
     }).join('');
-    const ar = genStageTileAspectCss(node);
+    const ar = genStageAspectCssForUrl(node, primary) || genStageTileAspectCss(node);
     const expandTitle = waiting
         ? (langIsEn()
             ? `Expand · ${count} ready, ${waiting} generating`
@@ -18682,8 +19098,9 @@ function renderGenStageHtml(node){
         let pendingIdx = 0;
         const tiles = slots.map((slot) => {
             if(slot?.kind === 'pending'){
-                const p = pendingById.get(String(slot.id)) || { id: slot.id };
-                const html = renderGenStagePendingTileHtml(p, pendingIdx);
+                const p = pendingById.get(String(slot.id)) || { id: slot.id, aspect: slot.aspect };
+                if(!p.aspect && slot.aspect) p.aspect = slot.aspect;
+                const html = renderGenStagePendingTileHtml(p, pendingIdx, node);
                 pendingIdx += 1;
                 return html;
             }
@@ -18699,14 +19116,13 @@ function renderGenStageHtml(node){
         );
         const orphanPending = pendings
             .filter(p => !slottedPending.has(String(p.id)))
-            .map((p, i) => renderGenStagePendingTileHtml(p, pendingIdx + i))
+            .map((p, i) => renderGenStagePendingTileHtml(p, pendingIdx + i, node))
             .join('');
         const total = Math.max(1, slots.length + (orphanPending ? pendings.filter(p => !slottedPending.has(String(p.id))).length : 0));
         const cols = genStageGridCols(total);
-        const ar = genStageTileAspectCss(node);
         const collapseTitle = langIsEn() ? 'Collapse' : '收起';
         return `<div class="gen-stage has-images history-open is-grid ${isBusy ? 'is-busy' : ''}${isGenBatchPicking(node) ? ' is-batch-picking' : ''}${refPickClass}">
-            <div class="gen-stage-frame is-grid" style="--gen-tile-ar:${ar}; --gen-grid-cols:${cols}">
+            <div class="gen-stage-frame is-grid" style="--gen-grid-cols:${cols}">
                 <button type="button" class="gen-stage-grid-collapse" data-action="collapse-grid" title="${escapeAttr(collapseTitle)}">
                     <i data-lucide="minimize-2" class="w-6 h-6"></i>
                     <span>${escapeHtml(collapseTitle)}</span>
@@ -19119,6 +19535,7 @@ function openGenStageResultMenu(nodeId, clientX, clientY, opts={}){
     imageNodeMenu.classList.remove('output-node-menu');
     imageNodeMenu.innerHTML = `
         <button class="menu-btn" type="button" data-gen-preview="1"><i data-lucide="maximize-2" class="w-4 h-4"></i><span>${en ? 'Open preview' : '进入预览'}</span></button>
+        ${multi ? `<button class="menu-btn" type="button" data-gen-set-primary="1"><i data-lucide="pin" class="w-4 h-4"></i><span>${en ? 'Set as primary' : '设为主图'}</span></button>` : ''}
         <button class="menu-btn" type="button" data-gen-favorite="1"><i data-lucide="star" class="w-4 h-4"></i><span>${favorited ? (en ? 'Remove favorite' : '取消收藏') : (en ? 'Save to favorites' : '保存到我的收藏')}</span></button>
         <button class="menu-btn" type="button" data-gen-copy-image="1"><i data-lucide="copy" class="w-4 h-4"></i><span>${en ? 'Copy image' : '复制图片'}</span></button>
         <button class="menu-btn" type="button" data-gen-download-one="1"><i data-lucide="download" class="w-4 h-4"></i><span>${en ? 'Download' : '下载'}</span></button>
@@ -19149,6 +19566,17 @@ function openGenStageResultMenu(nodeId, clientX, clientY, opts={}){
         e.stopPropagation();
         closeImageNodeMenu();
         openGeneratorHistoryLightbox(node, url);
+    });
+    imageNodeMenu.querySelector('[data-gen-set-primary]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        closeImageNodeMenu();
+        try { pushUndo(); } catch(_){ /* ignore */ }
+        setGeneratorPrimaryByDisplaySwap(node, previewIndex, url);
+        refreshDownstreamGenConsumers(node.id);
+        setGenStageHistoryOpen(node, false);
+        refreshAfter();
+        syncImageGenDock();
+        setStatus(en ? 'Set as primary' : '已设为主图');
     });
     imageNodeMenu.querySelector('[data-gen-favorite]')?.addEventListener('click', e => {
         e.stopPropagation();
@@ -19881,10 +20309,8 @@ function remountImageGenDock(node){
         shell.appendChild(buildMsGenDockContent(node));
         host.appendChild(shell);
     } else if(node.type === 'video'){
-        const shell = document.createElement('div');
-        shell.className = 'gen-dock is-floating video-dock';
-        shell.appendChild(buildVideoDockContent(node));
-        host.appendChild(shell);
+        host.innerHTML = videoDockShellHtml(node);
+        bindVideoDockControls(host, node);
     } else {
         host.innerHTML = genDockShellHtml(node, {
             floating:true,
@@ -20425,10 +20851,105 @@ function renderVideoBody(node){
     refreshIcons(wrap);
     return wrap;
 }
-/** 视频生成控制台（浮动 dock，不进节点壳） */
-function buildVideoDockContent(node){
-    const wrap = document.createElement('div');
-    wrap.className = 'video-dock-body';
+/** 视频控制台：比例 / 分辨率 / 时长（对齐图片 dock 芯片条） */
+function videoDockSizePanelHtml(node){
+    const duration = Math.max(1, Math.min(60, Number(node.duration || 5)));
+    const aspect = node.aspectRatio || '16:9';
+    const resolution = node.resolution || '';
+    const aspectOpts = ['16:9','9:16','1:1','4:3','3:4','21:9','9:21','keep_ratio','adaptive']
+        .map(v => `<option value="${v}" ${v === aspect ? 'selected' : ''}>${v === 'keep_ratio' ? 'keep' : v === 'adaptive' ? 'adapt' : v}</option>`)
+        .join('');
+    const resOpts = [
+        ['', 'Auto'],
+        ['480p', '480p'],
+        ['720p', '720p'],
+        ['1080p', '1080p'],
+        ['780P', '780P'],
+    ].map(([v, label]) => `<option value="${escapeAttr(v)}" ${v === resolution ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
+    return `
+        <div class="gen-dock-size">
+            <label class="gen-dock-chip gen-dock-chip-ratio" title="${escapeAttr(tr('canvas.videoAspect'))}">
+                <i data-lucide="rectangle-horizontal" class="w-3.5 h-3.5 gen-dock-chip-icon"></i>
+                <select class="select-lite video-aspect compact-select gen-dock-select">${aspectOpts}</select>
+            </label>
+            <label class="gen-dock-chip gen-dock-chip-resolution" title="${escapeAttr(tr('canvas.videoResolution'))}">
+                <select class="select-lite video-resolution compact-select gen-dock-select">${resOpts}</select>
+            </label>
+            <label class="gen-dock-chip gen-dock-chip-duration" title="${escapeAttr(tr('canvas.videoDuration'))}">
+                <input class="gen-dock-duration-input video-duration" type="number" min="1" max="60" step="1" value="${duration}" size="2" inputmode="numeric" aria-label="${escapeAttr(tr('canvas.videoDuration'))}">
+                <span class="gen-dock-count-suffix">s</span>
+            </label>
+        </div>
+    `;
+}
+function videoDockAdvancedHtml(node){
+    const toggles = [
+        ['enhancePrompt', tr('canvas.videoEnhancePrompt')],
+        ['enableUpsample', tr('canvas.videoUpsample')],
+        ['watermark', tr('canvas.videoWatermark')],
+        ['cameraFixed', tr('canvas.videoCameraFixed')],
+        ['generateAudio', tr('canvas.videoGenerateAudio')],
+        ['useFrameRoles', tr('canvas.videoFirstLastFrames')],
+    ];
+    return `
+        <div class="gen-settings gen-dock-advanced" hidden>
+            <div class="gen-dock-advanced-title">${langIsEn() ? 'More settings' : '更多设置'}</div>
+            <div class="gen-settings-row gen-dock-video-toggles" style="flex-wrap:wrap">
+                ${toggles.map(([field, label]) => (
+                    `<button type="button" class="setting-check ${node[field] ? 'active' : ''}" data-video-toggle="${field}"><span class="check-dot"></span>${escapeHtml(label)}</button>`
+                )).join('')}
+            </div>
+        </div>
+    `;
+}
+/** 视频生成控制台壳：与图片 Gen Console 同构（提示词 + 参考 + 底栏芯片） */
+function videoDockShellHtml(node){
+    node.apiProvider = resolveVideoProviderId(node.apiProvider || 'comfly');
+    node.model = node.model || 'veo3-fast';
+    if(node.prompt == null) node.prompt = '';
+    const runLabel = agentPendingRunState(node.id, tr('canvas.videoGenerate'), tr('canvas.generating'));
+    const iconName = runLabel.runningCls ? 'loader-circle' : 'arrow-up';
+    const runBtn = hasUpstreamLoop(node.id)
+        ? ''
+        : `<button class="gen-btn gen-dock-send ${runLabel.runningCls}" type="button" title="${escapeAttr(runLabel.label)}" aria-label="${escapeAttr(runLabel.label)}" ${isNodeDisabled(node) ? 'disabled' : ''}><i data-lucide="${iconName}" class="w-4 h-4${runLabel.runningCls ? ' gen-dock-send-spin' : ''}"></i></button>`;
+    const stopHtml = hasUpstreamLoop(node.id) ? '' : agentGenRunActionsHtml(node.id, runBtn);
+    return `
+        <div class="gen-dock is-floating video-dock">
+            <textarea class="gen-dock-prompt" placeholder="${escapeAttr(langIsEn() ? 'Describe the video you want…' : '描述你想生成的视频…')}" rows="3">${escapeHtml(node.prompt || '')}</textarea>
+            <div class="prompt-list gen-dock-upstream"></div>
+            <div class="gen-dock-refs"></div>
+            <div class="gen-dock-bar">
+                <div class="gen-dock-group gen-dock-group-source">
+                    <label class="gen-dock-chip gen-dock-chip-provider">
+                        <select class="select-lite video-provider gen-dock-select" title="Provider">${videoProviderOptions(node.apiProvider)}</select>
+                    </label>
+                    <label class="gen-dock-chip gen-dock-chip-model">
+                        <select class="select-lite video-model gen-dock-select" title="Model">${videoModelOptions(node.model, node.apiProvider)}</select>
+                    </label>
+                </div>
+                <span class="gen-dock-sep" aria-hidden="true"></span>
+                <div class="gen-dock-group gen-dock-group-size">
+                    ${videoDockSizePanelHtml(node)}
+                </div>
+                <span class="gen-dock-sep" aria-hidden="true"></span>
+                <div class="gen-dock-group gen-dock-group-tools">
+                    <button type="button" class="gen-dock-gear" title="${escapeAttr(langIsEn() ? 'More settings' : '更多设置')}" aria-label="settings"><i data-lucide="sliders-horizontal" class="w-4 h-4"></i></button>
+                </div>
+                <span class="gen-dock-sep" aria-hidden="true"></span>
+                <div class="gen-dock-group gen-dock-group-run">
+                    <div class="gen-run-row gen-dock-run">
+                        ${stopHtml || runBtn}
+                        ${cascadeBtnHtml(node)}
+                    </div>
+                </div>
+            </div>
+            ${videoDockAdvancedHtml(node)}
+            ${retryBarHtml(node)}
+        </div>
+    `;
+}
+function bindVideoDockControls(wrap, node){
+    if(!wrap || !node || node.type !== 'video') return;
     const inputSources = generatorSources(node);
     const ordered = orderedSources(node, inputSources);
     const imageInputs = ordered.filter(src => src.refs?.length);
@@ -20436,65 +20957,8 @@ function buildVideoDockContent(node){
     node.apiProvider = resolveVideoProviderId(node.apiProvider || 'comfly');
     node.model = node.model || 'veo3-fast';
     if(node.prompt == null) node.prompt = '';
-    wrap.innerHTML = `
-        <textarea class="gen-dock-prompt video-local-prompt" placeholder="${escapeAttr(langIsEn() ? 'Describe the video you want…' : '描述你想生成的视频…')}" rows="3">${escapeHtml(node.prompt || '')}</textarea>
-        <div class="prompt-list mb-2"></div>
-        <div class="generator-section-label">${tr('canvas.images') || 'Images'}</div>
-        <div class="input-list video-img-list"></div>
-        <div class="gen-settings">
-            <div class="gen-settings-row">
-                <select class="select-lite video-provider" style="flex:1">${videoProviderOptions(node.apiProvider)}</select>
-                <select class="select-lite video-model" style="flex:2">${videoModelOptions(node.model, node.apiProvider)}</select>
-            </div>
-            <div class="gen-settings-row">
-                <label class="field" style="flex:1">
-                    <div class="setting-title">${tr('canvas.videoDuration')}</div>
-                    <input class="setting-input video-duration" type="number" min="1" max="60" step="1" value="${Number(node.duration || 5)}">
-                </label>
-                <label class="field" style="flex:1">
-                    <div class="setting-title">${tr('canvas.videoAspect')}</div>
-                    <select class="select-lite video-aspect compact-select">
-                        <option value="16:9">16:9</option>
-                        <option value="9:16">9:16</option>
-                        <option value="1:1">1:1</option>
-                        <option value="4:3">4:3</option>
-                        <option value="3:4">3:4</option>
-                        <option value="21:9">21:9</option>
-                        <option value="9:21">9:21</option>
-                        <option value="keep_ratio">keep</option>
-                        <option value="adaptive">adapt</option>
-                    </select>
-                </label>
-                <label class="field" style="flex:1">
-                    <div class="setting-title">${tr('canvas.videoResolution')}</div>
-                    <select class="select-lite video-resolution compact-select">
-                        <option value="">Auto</option>
-                        <option value="480p">480p</option>
-                        <option value="720p">720p</option>
-                        <option value="1080p">1080p</option>
-                        <option value="780P">780P</option>
-                    </select>
-                </label>
-            </div>
-            <div class="gen-settings-row" style="flex-wrap:wrap">
-                <button type="button" class="setting-check ${node.enhancePrompt ? 'active' : ''}" data-video-toggle="enhancePrompt"><span class="check-dot"></span>${tr('canvas.videoEnhancePrompt')}</button>
-                <button type="button" class="setting-check ${node.enableUpsample ? 'active' : ''}" data-video-toggle="enableUpsample"><span class="check-dot"></span>${tr('canvas.videoUpsample')}</button>
-                <button type="button" class="setting-check ${node.watermark ? 'active' : ''}" data-video-toggle="watermark"><span class="check-dot"></span>${tr('canvas.videoWatermark')}</button>
-                <button type="button" class="setting-check ${node.cameraFixed ? 'active' : ''}" data-video-toggle="cameraFixed"><span class="check-dot"></span>${tr('canvas.videoCameraFixed')}</button>
-                <button type="button" class="setting-check ${node.generateAudio ? 'active' : ''}" data-video-toggle="generateAudio"><span class="check-dot"></span>${tr('canvas.videoGenerateAudio')}</button>
-                <button type="button" class="setting-check ${node.useFrameRoles ? 'active' : ''}" data-video-toggle="useFrameRoles"><span class="check-dot"></span>${tr('canvas.videoFirstLastFrames')}</button>
-            </div>
-        </div>
-        <div class="gen-run-row">
-            ${hasUpstreamLoop(node.id) ? '' : (() => {
-                const videoBtn = agentPendingRunState(node.id, tr('canvas.videoGenerate'), tr('canvas.generating'));
-                return agentGenRunActionsHtml(node.id, `<button class="gen-btn gen-dock-send ${videoBtn.runningCls}" type="button" title="${escapeAttr(videoBtn.label)}" ${isNodeDisabled(node) ? 'disabled' : ''}><i data-lucide="arrow-up" class="w-4 h-4"></i></button>`);
-            })()}
-            ${cascadeBtnHtml(node)}
-        </div>
-        ${retryBarHtml(node)}
-    `;
-    const localPrompt = wrap.querySelector('.video-local-prompt');
+
+    const localPrompt = wrap.querySelector('.gen-dock-prompt');
     if(localPrompt){
         bindScrollableText(localPrompt);
         localPrompt.oninput = e => {
@@ -20504,32 +20968,73 @@ function buildVideoDockContent(node){
         };
         localPrompt.onfocus = () => touchBoardInteraction();
     }
+
+    const gearBtn = wrap.querySelector('.gen-dock-gear');
+    const advancedEl = wrap.querySelector('.gen-dock-advanced');
+    if(gearBtn && advancedEl){
+        gearBtn.onclick = e => {
+            e.stopPropagation();
+            advancedEl.hidden = !advancedEl.hidden;
+            gearBtn.classList.toggle('is-open', !advancedEl.hidden);
+        };
+    }
+
     const providerSelect = wrap.querySelector('.video-provider');
     const modelSelect = wrap.querySelector('.video-model');
-    const durationSelect = wrap.querySelector('.video-duration');
+    const durationInput = wrap.querySelector('.video-duration');
     const aspectSelect = wrap.querySelector('.video-aspect');
     const resolutionSelect = wrap.querySelector('.video-resolution');
-    providerSelect.value = node.apiProvider;
-    durationSelect.value = String(node.duration || 5);
-    aspectSelect.value = node.aspectRatio || '16:9';
-    resolutionSelect.value = node.resolution || '';
-    [providerSelect, modelSelect, durationSelect, aspectSelect, resolutionSelect].forEach(input => {
+    if(providerSelect) providerSelect.value = node.apiProvider;
+    if(durationInput) durationInput.value = String(Math.max(1, Math.min(60, Number(node.duration || 5))));
+    if(aspectSelect) aspectSelect.value = node.aspectRatio || '16:9';
+    if(resolutionSelect) resolutionSelect.value = node.resolution || '';
+    [providerSelect, modelSelect, durationInput, aspectSelect, resolutionSelect].forEach(input => {
+        if(!input) return;
         input.onmousedown = e => e.stopPropagation();
         input.onclick = e => e.stopPropagation();
     });
-    providerSelect.onchange = e => {
-        e.stopPropagation();
-        node.apiProvider = e.target.value;
-        const models = providerVideoModels(node.apiProvider);
-        if(!models.includes(node.model)) node.model = models[0] || node.model;
-        modelSelect.innerHTML = videoModelOptions(node.model, node.apiProvider);
-        scheduleSave();
-    };
-    modelSelect.onchange = e => { e.stopPropagation(); node.model = e.target.value; scheduleSave(); };
-    durationSelect.oninput = e => { e.stopPropagation(); node.duration = Math.max(1, Math.min(60, Number(e.target.value || 5))); scheduleSave(); };
-    durationSelect.onblur = e => { e.target.value = String(Math.max(1, Math.min(60, Number(node.duration || 5)))); };
-    aspectSelect.onchange = e => { e.stopPropagation(); node.aspectRatio = e.target.value; scheduleSave(); };
-    resolutionSelect.onchange = e => { e.stopPropagation(); node.resolution = e.target.value; scheduleSave(); };
+    if(providerSelect){
+        providerSelect.onchange = e => {
+            e.stopPropagation();
+            node.apiProvider = e.target.value;
+            const models = providerVideoModels(node.apiProvider);
+            if(!models.includes(node.model)) node.model = models[0] || node.model;
+            if(modelSelect) modelSelect.innerHTML = videoModelOptions(node.model, node.apiProvider);
+            mountCanvasCustomSelects(wrap);
+            scheduleSave();
+        };
+    }
+    if(modelSelect){
+        modelSelect.onchange = e => { e.stopPropagation(); node.model = e.target.value; scheduleSave(); };
+    }
+    if(durationInput){
+        durationInput.oninput = e => {
+            e.stopPropagation();
+            node.duration = Math.max(1, Math.min(60, Number(e.target.value || 5)));
+            scheduleSave();
+        };
+        durationInput.onblur = e => {
+            e.target.value = String(Math.max(1, Math.min(60, Number(node.duration || 5))));
+        };
+    }
+    if(aspectSelect){
+        aspectSelect.onchange = e => {
+            e.stopPropagation();
+            node.aspectRatio = e.target.value;
+            delete node._baseFrameH;
+            delete node._stageAspect;
+            fitGeneratorNodeHeight(node);
+            refreshGenStage(
+                nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`),
+                node
+            );
+            scheduleSave();
+            if(imageGenDockNodeId === node.id) positionImageGenDock(node);
+        };
+    }
+    if(resolutionSelect){
+        resolutionSelect.onchange = e => { e.stopPropagation(); node.resolution = e.target.value; scheduleSave(); };
+    }
     wrap.querySelectorAll('[data-video-toggle]').forEach(btn => {
         btn.onmousedown = e => e.stopPropagation();
         btn.onclick = e => {
@@ -20541,14 +21046,34 @@ function buildVideoDockContent(node){
             else refreshNodes([node.id]);
         };
     });
-    renderVideoImageInputs(wrap.querySelector('.video-img-list'), node, imageInputs);
+
+    renderGenDockImageInputs(wrap.querySelector('.gen-dock-refs'), node, imageInputs);
+    annotateVideoDockFrameRoles(wrap.querySelector('.gen-dock-refs'), node);
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
     const videoGenBtn = wrap.querySelector('.gen-btn');
     if(videoGenBtn) videoGenBtn.onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
     bindCascadeButtons(wrap, node.id);
     wrap.onmousedown = e => e.stopPropagation();
     wrap.onclick = e => e.stopPropagation();
-    return wrap;
+}
+/** @deprecated 兼容旧调用：改为壳 + bind */
+function buildVideoDockContent(node){
+    const wrap = document.createElement('div');
+    wrap.innerHTML = videoDockShellHtml(node);
+    const shell = wrap.firstElementChild || wrap;
+    bindVideoDockControls(shell, node);
+    return shell;
+}
+/** 首尾帧模式下给前两张参考加角标 */
+function annotateVideoDockFrameRoles(container, node){
+    if(!container || !node?.useFrameRoles) return;
+    const items = container.querySelectorAll('.input-item');
+    items.forEach((item, i) => {
+        if(i > 1) return;
+        if(item.querySelector('.video-frame-label')) return;
+        const label = i === 0 ? tr('canvas.videoRoleFirstFrame') : tr('canvas.videoRoleLastFrame');
+        item.insertAdjacentHTML('beforeend', `<div class="video-frame-label">${escapeHtml(label)}</div>`);
+    });
 }
 function renderPromptPreview(container, promptInputs){
     if(!container) return;
@@ -22505,6 +23030,13 @@ function pendingHostForNode(node){
 function pushNodePending(node, pendings){
     const host = pendingHostForNode(node);
     if(!host || !pendings?.length) return host;
+    // 生图台：把「当次控制台比例」钉在 pending 上，完成后写进 history，不随后改比例
+    if(isGenConsoleNode(node)){
+        const aspect = genStageAspectLabelFromNode(node);
+        pendings.forEach(p => {
+            if(p && !p.aspect) p.aspect = aspect;
+        });
+    }
     host._pending = [...(host._pending || []), ...pendings];
     // 同步登记 ledger：即使后续 _pending 被清空，完成回调仍能落板
     pendings.forEach(p => {
@@ -22518,6 +23050,7 @@ function pushNodePending(node, pendings){
             appendGenerated: Boolean(p.appendGenerated),
             startedAt: Number(p.startedAt || nowMs()),
             canvasTaskType: String(p.canvasTaskType || 'online-image'),
+            aspect: p.aspect || '',
         });
     });
     return host;
@@ -22744,15 +23277,17 @@ function softRefreshGeneratorInputLists(gen){
         else renderImageInputList(list, gen, imageInputs);
     };
     if(imageGenDockNodeId === gen.id && imageGenDockEl){
-        if(gen.type === 'video') fill(imageGenDockEl.querySelector('.video-img-list'), 'video');
-        else if(gen.type === 'msgen') fill(imageGenDockEl.querySelector('.ms-img-list') || imageGenDockEl.querySelector('.input-list'));
+        if(gen.type === 'video'){
+            fill(imageGenDockEl.querySelector('.gen-dock-refs'), 'dock');
+            annotateVideoDockFrameRoles(imageGenDockEl.querySelector('.gen-dock-refs'), gen);
+        } else if(gen.type === 'msgen') fill(imageGenDockEl.querySelector('.ms-img-list') || imageGenDockEl.querySelector('.input-list'));
         else fill(imageGenDockEl.querySelector('.gen-dock-refs'), 'dock');
         const promptList = imageGenDockEl.querySelector('.prompt-list, .gen-dock-upstream');
         if(promptList) renderPromptPreview(promptList, sources.filter(src => src.prompt && !src.refs?.length));
     }
     const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(gen.id)}"]`);
     if(!el) return;
-    if(gen.type === 'video') fill(el.querySelector('.video-img-list'), 'video');
+    if(gen.type === 'video') fill(el.querySelector('.gen-dock-refs'), 'dock');
     else if(gen.type === 'comfy' || gen.type === 'ltxDirector') fill(el.querySelector('.input-list'), 'comfy');
     else if(gen.type === 'batchPosterAgent') fill(el.querySelector('.batch-poster-input-list'));
     else if(gen.type === 'slotsLoopVideoAgent') fill(el.querySelector('.slots-loop-input-list'));
@@ -22956,9 +23491,12 @@ function refreshGeneratorInputViews(){
             if(imageGenDockNodeId === gen.id){
                 const dock = imageGenDockEl;
                 const editingDock = dock?.contains?.(document.activeElement);
-                const imgList = dock?.querySelector?.('.video-img-list');
-                if(imgList) renderVideoImageInputs(imgList, gen, imageInputs);
-                const promptList = dock?.querySelector?.('.prompt-list');
+                const refs = dock?.querySelector?.('.gen-dock-refs');
+                if(refs){
+                    renderGenDockImageInputs(refs, gen, imageInputs);
+                    annotateVideoDockFrameRoles(refs, gen);
+                }
+                const promptList = dock?.querySelector?.('.prompt-list, .gen-dock-upstream');
                 if(promptList) renderPromptPreview(promptList, sources.filter(src => src.prompt && !src.refs?.length));
                 else if(!editingDock && !isCanvasTextEditing()) remountImageGenDock(gen);
             }
@@ -25442,6 +25980,10 @@ function collectRunMetas(out, ids){
     return (ids || []).map(id => pendingById(out, id)).filter(Boolean).map(p => ({
         runMs: nowMs() - Number(p.startedAt || nowMs()),
         run: p.run || {},
+        aspect: p.aspect || '',
+        pendingId: p.id || '',
+        startedAt: Number(p.startedAt || nowMs()),
+        slotIndex: Number(p.slotIndex),
     }));
 }
 function collectRunMeta(out, id){
@@ -25582,6 +26124,7 @@ function resolveCanvasTaskContext(taskId){
         canvasTaskId: String(taskId),
         canvasTaskType: String(rec.canvasTaskType || 'online-image'),
         appendGenerated: Boolean(rec.appendGenerated),
+        aspect: rec.aspect || '',
         _recovered: true,
     };
     return { out: out || gen, pending, recovered: true, gen };
@@ -25912,6 +26455,7 @@ function completeCanvasImageTask(taskId, result){
         pendingId: pending.id || '',
         startedAt: Number(pending.startedAt || nowMs()),
         slotIndex: Number(pending.slotIndex),
+        aspect: pending.aspect || raw?.aspect || '',
     };
     meta.run.request = requestMetaFromResult(result);
     applyCompletedCanvasImages(ctx, images, meta, taskId);
@@ -27549,9 +28093,12 @@ function startNodeResize(e, node){
     e.stopPropagation();
     const el = nodesEl.querySelector(`.node[data-id="${node.id}"]`);
     const rect = el?.getBoundingClientRect();
-    if(node.type === 'rh' && el){
+    if(isScaleShellNode(node) && el){
         el.style.setProperty('--rh-ui-scale', '1');
-        node._rhBaseFrameH = Math.min(RH_MAX_BASE_H, measureRhBaseFrame(node, el));
+        el.style.setProperty('--rh-base-w', `${scaleShellBaseW(node)}px`);
+        node._rhBaseFrameH = isAgentPremiumScaleNode(node)
+            ? measureRhBaseFrame(node, el)
+            : Math.min(RH_MAX_BASE_H, measureRhBaseFrame(node, el));
     }
     resizeNode = {
         node,
@@ -27572,13 +28119,13 @@ function onNodeResize(e){
         withCanvasRootClass(list => list.add('canvas-node-resize'));
     }
     const min = defaultNodeSize(resizeNode.node.type);
-    const minW = resizeNode.node.type === 'rh'
-        ? RH_MIN_W
+    const minW = isScaleShellNode(resizeNode.node)
+        ? scaleShellMinW(resizeNode.node)
         : Math.max(Math.min(min.w, 220), 96);
     const nextW = Math.max(minW, resizeNode.sw + (e.clientX - resizeNode.sx) / viewport.scale);
     const nextH = Math.max(96, resizeNode.sh + (e.clientY - resizeNode.sy) / viewport.scale);
-    const nextWRounded = resizeNode.node.type === 'rh'
-        ? Math.max(RH_MIN_W, Math.min(RH_MAX_W, Math.round(nextW)))
+    const nextWRounded = isScaleShellNode(resizeNode.node)
+        ? Math.max(scaleShellMinW(resizeNode.node), Math.min(scaleShellMaxW(resizeNode.node), Math.round(nextW)))
         : Math.round(nextW);
     resizeNode.node.w = nextWRounded;
     const autoFitGroupHeight = resizeNode.node.type === 'imageBatch' || resizeNode.node.type === 'promptGroup' || resizeNode.node.type === 'group';
@@ -27588,10 +28135,12 @@ function onNodeResize(e){
         const baseH = Number(resizeNode.node._baseFrameH || 320);
         resizeNode.node.h = Math.max(96, Math.round(baseH * (nextWRounded / GENERATOR_BASE_W)));
         resizeNode.node._userSized = true;
-    } else if(resizeNode.node.type === 'rh'){
-        // 视觉等比：外壳 = min(内容,上限) × scale；内部布局仍是 820
-        const scale = nextWRounded / RH_BASE_W;
-        const baseH = Math.min(RH_MAX_BASE_H, Number(resizeNode.node._rhBaseFrameH || 420));
+    } else if(isScaleShellNode(resizeNode.node)){
+        const baseW = scaleShellBaseW(resizeNode.node);
+        const scale = nextWRounded / baseW;
+        const baseH = isAgentPremiumScaleNode(resizeNode.node)
+            ? Number(resizeNode.node._rhBaseFrameH || measureRhBaseFrame(resizeNode.node, el) || 420)
+            : Math.min(RH_MAX_BASE_H, Number(resizeNode.node._rhBaseFrameH || 420));
         resizeNode.node._rhBaseFrameH = baseH;
         resizeNode.node.h = Math.max(120, Math.round(baseH * scale));
         resizeNode.node._userSized = true;
@@ -27606,7 +28155,7 @@ function onNodeResize(e){
             syncOutputNodeThumbVars(el, resizeNode.node);
         }
         if(resizeNode.node.type === 'generator') syncGeneratorNodeScale(resizeNode.node, el);
-        if(resizeNode.node.type === 'rh') syncRhNodeScale(resizeNode.node, el);
+        if(isScaleShellNode(resizeNode.node)) syncRhNodeScale(resizeNode.node, el);
         if(resizeNode.node.type === 'imageBatch' || resizeNode.node.type === 'promptGroup' || resizeNode.node.type === 'group'){
             layoutGroupChildren(resizeNode.node, { resizeGroup: false, layoutAllItems: true, updateDom: true });
         }
@@ -28302,7 +28851,8 @@ function isNodeLinkFlowing(node){
 function linkClassForConnection(fromNode, toNode){
     if(isNodeDisabled(fromNode) || isNodeDisabled(toNode)) return 'link link-inactive';
     let cls = 'link';
-    if(isNodeLinkFlowing(fromNode) || isNodeLinkFlowing(toNode)) cls += ' link-flowing';
+    // 只亮「流入正在生成的节点」的线：from 在跑不该点亮下游出口（否则会误亮右边已完成结果）
+    if(isNodeLinkFlowing(toNode)) cls += ' link-flowing';
     // 选中端点节点：两侧连线加亮（图3）
     if((fromNode && selected.has(fromNode.id)) || (toNode && selected.has(toNode.id))) cls += ' link-lit';
     return cls;

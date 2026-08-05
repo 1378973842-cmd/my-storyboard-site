@@ -746,32 +746,7 @@ html[data-theme="light"] body {
     isolation: isolate;
   }
 
-  /* 顶栏黑色渐变：抬白字对比度（对齐参考图1） */
-  .cover-hero-nav-bar.fixed::before {
-    content: "";
-    position: absolute;
-    inset: 0 0 auto 0;
-    height: min(148px, 22vh);
-    z-index: 0;
-    pointer-events: none;
-    background: linear-gradient(
-      180deg,
-      rgba(0, 0, 0, 0.72) 0%,
-      rgba(0, 0, 0, 0.38) 42%,
-      transparent 100%
-    );
-    opacity: 1;
-    transition: opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  /* 个人空间：壁纸自带顶部阴影；悬停壁纸时与壁纸阴影一并收起 */
-  .cover-hero-nav-bar.fixed.cover-hero-nav-bar--personal::before {
-    opacity: 0;
-  }
-
-  html[data-personal-cover-hover='1'] .cover-hero-nav-bar.fixed::before {
-    opacity: 0;
-  }
+  /* 顶部深阴影仅挂在个人空间壁纸上（PersonalSpacePage），其它分支不加顶栏渐变 */
 
   .cover-hero-nav-bar nav {
     position: relative;

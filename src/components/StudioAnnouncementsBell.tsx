@@ -5,7 +5,6 @@ import {
   CheckCheck,
   ChevronDown,
   Heart,
-  Image as ImageIcon,
   Megaphone,
   MessageCircle,
   UserPlus,
@@ -23,7 +22,7 @@ import {
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
-type TabId = 'official' | 'replies' | 'model' | 'likes' | 'follows';
+type TabId = 'official' | 'replies' | 'likes' | 'follows';
 type ListFilter = 'all' | 'unread';
 
 const TABS: Array<{
@@ -34,7 +33,6 @@ const TABS: Array<{
 }> = [
   { id: 'official', label: '官方通知', icon: Megaphone, ready: true },
   { id: 'replies', label: '回复我的', icon: MessageCircle, ready: false },
-  { id: 'model', label: '模型返图', icon: ImageIcon, ready: false },
   { id: 'likes', label: '收到的赞', icon: Heart, ready: false },
   { id: 'follows', label: '关注我的', icon: UserPlus, ready: false },
 ];

@@ -348,10 +348,10 @@ export function canAccessUploadPath(
     const work = db
       .prepare(
         `SELECT id FROM gallery_works
-         WHERE published = 1 AND (image_path = ? OR images_json LIKE ?)
+         WHERE published = 1 AND (image_path = ? OR images_json LIKE ? OR process_steps_json LIKE ?)
          LIMIT 1`
       )
-      .get(p, `%${p}%`);
+      .get(p, `%${p}%`, `%${p}%`);
     if (work) return true;
   } catch {
     /* schema 尚未初始化时忽略 */
