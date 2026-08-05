@@ -1284,34 +1284,45 @@
   stroke-dasharray:14 90;
   opacity:.9;
 }
-/* 生成中：实线底座 + 能量包络流动（不拆成虚线） */
+/* 生成中：对齐拉线多层能量，琥珀色；dashoffset 由 JS rAF 驱动（禁 CSS animation，防 mousemove 冻帧） */
 .link.link-flowing {
-  stroke:rgba(255,184,102,.88);
-  stroke-width:2.6;
+  stroke:rgba(255,184,102,.4);
+  stroke-width:1.6;
   stroke-dasharray:none;
   opacity:1;
-  /* 禁止 filter 动画/常驻滤镜：SVG + filter 在 Chrome 主线程跑，mousemove 一忙就冻住 */
   filter:none;
-  animation:linkFlowGlow 1.4s ease-in-out infinite;
+  animation:none;
 }
-.link-flow-energy {
+.link-flow-bloom,
+.link-flow-energy,
+.link-flow-core {
   fill:none;
-  stroke:#ffe0a8;
-  stroke-width:3.2;
   stroke-linecap:round;
-  stroke-dasharray:18 92;
-  opacity:.95;
+  stroke-linejoin:round;
   pointer-events:none;
   filter:none;
-  animation:linkEnergyFlow 1.05s linear infinite;
+  animation:none;
 }
-@keyframes linkEnergyFlow { to { stroke-dashoffset:-110; } }
-@keyframes linkFlowGlow {
-  0%, 100% { opacity:.82; stroke:rgba(255,184,102,.72); }
-  50% { opacity:1; stroke:rgba(255,200,120,.95); }
+.link-flow-bloom {
+  stroke:rgba(255,184,102,.45);
+  stroke-width:9;
+  stroke-dasharray:26 78;
+  opacity:.72;
+}
+.link-flow-energy {
+  stroke:#ffb866;
+  stroke-width:3.4;
+  stroke-dasharray:22 82;
+  opacity:.95;
+}
+.link-flow-core {
+  stroke:#ffe8c8;
+  stroke-width:1.35;
+  stroke-dasharray:14 90;
+  opacity:.9;
 }
 @media (prefers-reduced-motion: reduce) {
-  .link.link-flowing, .link-flow-energy { animation:none; }
+  .link-flow-bloom, .link-flow-energy, .link-flow-core { opacity:.35; }
   .link-temp-bloom, .link-temp-energy, .link-temp-core { opacity:.35; }
   .output-img-wrap.loading-wrap,.output-img-wrap.loading-wrap::before,.output-pending-waves span { animation:none; }
   .output-img-wrap.loading-wrap::before { opacity:.45; }
@@ -1323,14 +1334,15 @@
 .infinite-canvas-root.theme-dark .link-temp-bloom { stroke:rgba(110,190,255,.48); }
 .infinite-canvas-root.theme-dark .link-temp-energy { stroke:#9ad4ff; }
 .infinite-canvas-root.theme-dark .link-temp-core { stroke:#f2fbff; }
-.infinite-canvas-root.theme-dark .link.link-flowing {
-  stroke:rgba(255,184,102,.92);
-  filter:none;
+.infinite-canvas-root.theme-dark .link.link-flowing,
+.infinite-canvas-root.theme-dark .link.link-flowing.link-lit {
+  stroke:rgba(255,184,102,.42);
+  /* 盖过 .link / .link-lit 的 drop-shadow：SVG filter 一开，能量段跟着主线程卡 */
+  filter:none !important;
 }
-.infinite-canvas-root.theme-dark .link-flow-energy {
-  stroke:#ffe8c0;
-  filter:none;
-}
+.infinite-canvas-root.theme-dark .link-flow-bloom { stroke:rgba(255,184,102,.5); }
+.infinite-canvas-root.theme-dark .link-flow-energy { stroke:#ffc278; }
+.infinite-canvas-root.theme-dark .link-flow-core { stroke:#fff0d6; }
 .link.knife-trail { stroke:#ef4444; stroke-width:2.4; stroke-dasharray:7 6; opacity:.88; filter:drop-shadow(0 0 6px rgba(239,68,68,.35)); }
 .link-hit { stroke:transparent; stroke-width:22; fill:none; pointer-events:none; }
 .link-controls { position:absolute; inset:0; width:6000px; height:4000px; pointer-events:none; z-index:34; }

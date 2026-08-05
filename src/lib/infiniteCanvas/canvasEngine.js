@@ -138,15 +138,17 @@ function markLinkOriginPort(originId, originKind){
     resetPortMagnet(port);
     port.classList.add('is-link-origin');
 }
-/** 拉线能量段：rAF 推 dashoffset，避免每帧改 path d 打断 CSS 动画 */
+/** 拉线能量段：rAF 推 dashoffset；周期必须=dasharray 周期(26+78=104)，否则每圈跳一下 */
 let tempLinkEnergyRAF = 0;
-const TEMP_LINK_ENERGY_PERIOD = 110;
+const LINK_ENERGY_DASH_PERIOD = 104;
 const TEMP_LINK_LAYERS = [
     { key:'base', cls:'link temp' },
     { key:'bloom', cls:'link-temp-bloom' },
     { key:'energy', cls:'link-temp-energy' },
     { key:'core', cls:'link-temp-core' },
 ];
+let tempLinkEnergyPaths = [];
+let tempLinkLastDashOffset = '';
 function clearTempLinkDom(){
     if(!linksEl) return;
     linksEl.querySelectorAll('path[data-temp-link]').forEach(el => el.remove());
@@ -154,6 +156,8 @@ function clearTempLinkDom(){
     linksEl.querySelectorAll('path.link.temp').forEach(el => {
         if(!el.dataset.tempLink) el.remove();
     });
+    tempLinkEnergyPaths = [];
+    tempLinkLastDashOffset = '';
 }
 function stopTempLinkEnergyLoop(){
     if(!tempLinkEnergyRAF) return;
@@ -164,15 +168,20 @@ function startTempLinkEnergyLoop(){
     if(tempLinkEnergyRAF) return;
     const prefersReduce = typeof matchMedia === 'function'
         && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    tempLinkEnergyPaths = linksEl
+        ? Array.from(linksEl.querySelectorAll('path[data-temp-link="bloom"], path[data-temp-link="energy"], path[data-temp-link="core"]'))
+        : [];
     const tick = () => {
         tempLinkEnergyRAF = 0;
         if(!tempLink || !linksEl) return;
+        const paths = tempLinkEnergyPaths;
+        if(!paths.length) return;
         if(!prefersReduce){
-            const flow = -((performance.now() * 0.12) % TEMP_LINK_ENERGY_PERIOD);
-            const off = `${flow.toFixed(1)}`;
-            linksEl.querySelectorAll('path[data-temp-link="bloom"], path[data-temp-link="energy"], path[data-temp-link="core"]').forEach(p => {
-                p.style.strokeDashoffset = off;
-            });
+            const off = (-((performance.now() * 0.12) % LINK_ENERGY_DASH_PERIOD)).toFixed(1);
+            if(off !== tempLinkLastDashOffset){
+                tempLinkLastDashOffset = off;
+                for(let i = 0; i < paths.length; i++) paths[i].style.strokeDashoffset = off;
+            }
         }
         tempLinkEnergyRAF = requestAnimationFrame(tick);
     };
@@ -1423,7 +1432,6 @@ let connHoverPendingEvent = null;
 let connHoverLastAt = 0;
 // 悬停检测节流：mousemove 太密会和主线程 SVG 能量动画抢时间
 const CONN_HOVER_MIN_MS = 48;
-const CONN_HOVER_FLOWING_MIN_MS = 120;
 /** 掠过连线不立刻出 X；停稳后再显示 */
 const CONN_HOVER_SHOW_DELAY_MS = 500;
 const CONN_HOVER_HIDE_DELAY_MS = 160;
@@ -3766,7 +3774,8 @@ function resetPortMagnet(port){
     if(nodeEl && id && !selected.has(id) && !nodeEl.matches(':hover') && !nodeEl.querySelector('.port.is-magnetic')){
         if(nodeEl.classList.contains('ports-open')){
             nodeEl.classList.remove('ports-open');
-            scheduleLinkGeometryRefresh(new Set([id]));
+            // 生成能量流动中勿刷连线几何，否则反复写 path d 会卡顿
+            if(!hasFlowingLinkEnergy()) scheduleLinkGeometryRefresh(new Set([id]));
         }
     }
 }
@@ -3821,7 +3830,8 @@ function runPortMagnetUpdate(){
                 port.classList.add('is-magnetic');
                 el.classList.add('ports-open');
                 beginPortMagnetSnap(port);
-                scheduleLinkGeometryRefresh(new Set([n.id]));
+                // 生成中锁线几何：磁吸只动圆点，不重算连线 path
+                if(!hasFlowingLinkEnergy()) scheduleLinkGeometryRefresh(new Set([n.id]));
             } else {
                 port.classList.add('is-magnetic');
             }
@@ -29058,15 +29068,70 @@ function portPoint(id, kind){
     const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
     return portPointFromLayout(n, kind, el);
 }
-function linkPathD(x1, y1, x2, y2){
-    // 坐标量化：避免浮点抖动反复写 d，重置 stroke-dashoffset 动画
-    const q = v => Math.round(Number(v) * 10) / 10;
+function linkPathD(x1, y1, x2, y2, opts={}){
+    // 坐标量化：避免浮点抖动反复写 d；生成中用整像素，进一步压微抖
+    const q = opts.coarse
+        ? (v => Math.round(Number(v)))
+        : (v => Math.round(Number(v) * 10) / 10);
     const ax = q(x1), ay = q(y1), bx = q(x2), by = q(y2);
     const dx = Math.max(80, Math.abs(bx - ax) * .45);
     return `M ${ax} ${ay} C ${ax + dx} ${ay}, ${bx - dx} ${by}, ${bx} ${by}`;
 }
+/** 生成中能量段：与拉线同构（bloom/energy/core），琥珀色；rAF 推 dashoffset */
+let flowLinkEnergyRAF = 0;
+let flowLinkEnergyPaths = [];
+let flowLinkEnergyCount = 0;
+let flowLinkLastDashOffset = '';
+const FLOW_LINK_LAYERS = [
+    { key:'bloom', cls:'link-flow-bloom' },
+    { key:'energy', cls:'link-flow-energy' },
+    { key:'core', cls:'link-flow-core' },
+];
 function hasFlowingLinkEnergy(){
-    return Boolean(linksEl?.querySelector?.('path.link-flow-energy'));
+    return flowLinkEnergyCount > 0;
+}
+function rebuildFlowLinkEnergyCache(){
+    flowLinkEnergyPaths = linksEl ? Array.from(linksEl.querySelectorAll('path[data-flow-link]')) : [];
+    flowLinkEnergyCount = flowLinkEnergyPaths.length;
+    if(!flowLinkEnergyCount) flowLinkLastDashOffset = '';
+}
+function stopFlowLinkEnergyLoop(){
+    if(!flowLinkEnergyRAF) return;
+    cancelAnimationFrame(flowLinkEnergyRAF);
+    flowLinkEnergyRAF = 0;
+}
+function startFlowLinkEnergyLoop(){
+    if(flowLinkEnergyRAF) return;
+    const prefersReduce = typeof matchMedia === 'function'
+        && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    rebuildFlowLinkEnergyCache();
+    const tick = () => {
+        flowLinkEnergyRAF = 0;
+        if(!linksEl) return;
+        const paths = flowLinkEnergyPaths;
+        if(!paths.length){
+            flowLinkEnergyCount = 0;
+            return;
+        }
+        if(!prefersReduce){
+            // 周期=104，与 stroke-dasharray 对齐，避免每圈跳变卡顿
+            const off = (-((performance.now() * 0.12) % LINK_ENERGY_DASH_PERIOD)).toFixed(1);
+            if(off !== flowLinkLastDashOffset){
+                flowLinkLastDashOffset = off;
+                for(let i = 0; i < paths.length; i++) paths[i].style.strokeDashoffset = off;
+            }
+        }
+        flowLinkEnergyRAF = requestAnimationFrame(tick);
+    };
+    flowLinkEnergyRAF = requestAnimationFrame(tick);
+}
+/** 连线端点：生成中锁贴边，忽略 ports-open/磁吸 outset，防止 path d 被鼠标改掉 */
+function portPointForConnection(id, kind, flowing){
+    ensureLiveCanvasDom();
+    const n = nodes.find(x => x.id === id);
+    if(!n) return {x:0, y:0};
+    const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+    return portPointFromLayout(n, kind, el, flowing ? { expanded:false } : {});
 }
 function linksGeometryStale(){
     if(!linksEl) return true;
@@ -29104,24 +29169,43 @@ function linkClassForConnection(fromNode, toNode){
 }
 function syncLinkEnergyOverlay(connectionId, d, flowing){
     if(!linksEl || !connectionId) return;
-    let energy = linksEl.querySelector(`path.link-flow-energy[data-connection-id="${CSS.escape(connectionId)}"]`);
+    const layerSel = `path[data-flow-link][data-connection-id="${CSS.escape(connectionId)}"]`;
     if(!flowing){
-        energy?.remove();
+        const had = linksEl.querySelector(layerSel);
+        linksEl.querySelectorAll(layerSel).forEach(el => el.remove());
+        // 兼容旧单层
+        linksEl.querySelector(`path.link-flow-energy[data-connection-id="${CSS.escape(connectionId)}"]:not([data-flow-link])`)?.remove();
+        rebuildFlowLinkEnergyCache();
+        if(!hasFlowingLinkEnergy()){
+            stopFlowLinkEnergyLoop();
+            // 流动刚结束：补一次几何，接回 ports-open 锚点
+            if(had) scheduleLinkGeometryRefresh();
+        }
         return;
     }
-    if(!energy){
-        energy = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        energy.setAttribute('class', 'link-flow-energy');
-        energy.dataset.connectionId = connectionId;
-        const base = linksEl.querySelector(`path.link[data-connection-id="${CSS.escape(connectionId)}"]:not(.link-hit)`);
-        if(base?.nextSibling) linksEl.insertBefore(energy, base.nextSibling);
-        else if(base) base.after(energy);
-        else linksEl.appendChild(energy);
-        energy.setAttribute('d', d);
-        return;
+    const base = linksEl.querySelector(`path.link[data-connection-id="${CSS.escape(connectionId)}"]:not(.link-hit)`);
+    let insertAfter = base;
+    let created = false;
+    for(const layer of FLOW_LINK_LAYERS){
+        let p = linksEl.querySelector(`path[data-flow-link="${layer.key}"][data-connection-id="${CSS.escape(connectionId)}"]`);
+        if(!p){
+            p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            p.setAttribute('class', layer.cls);
+            p.dataset.flowLink = layer.key;
+            p.dataset.connectionId = connectionId;
+            if(insertAfter?.nextSibling) linksEl.insertBefore(p, insertAfter.nextSibling);
+            else if(insertAfter) insertAfter.after(p);
+            else linksEl.appendChild(p);
+            p.setAttribute('d', d);
+            created = true;
+        } else if(p.getAttribute('d') !== d){
+            // 路径未变时勿写 d，避免无谓重绘打断观感
+            p.setAttribute('d', d);
+        }
+        insertAfter = p;
     }
-    // 路径未变时勿写 d，否则会重置 stroke-dashoffset 动画
-    if(energy.getAttribute('d') !== d) energy.setAttribute('d', d);
+    if(created) rebuildFlowLinkEnergyCache();
+    startFlowLinkEnergyLoop();
 }
 function syncLinkFlowForNodes(nodeIds){
     if(!linksEl || !nodeIds?.length) return;
@@ -29139,11 +29223,12 @@ function syncLinkFlowForNodes(nodeIds){
 }
 function ensureConnectionLinkDom(c){
     if(!linksEl || !linkControlsEl || !c) return;
-    const a = portPoint(c.from, 'out');
-    const b = portPoint(c.to, 'in');
-    const d = linkPathD(a.x, a.y, b.x, b.y);
     const fromNode = nodes.find(n => n.id === c.from);
     const toNode = nodes.find(n => n.id === c.to);
+    const flowing = isNodeLinkFlowing(toNode);
+    const a = portPointForConnection(c.from, 'out', flowing);
+    const b = portPointForConnection(c.to, 'in', flowing);
+    const d = linkPathD(a.x, a.y, b.x, b.y, flowing ? { coarse:true } : {});
     const cls = linkClassForConnection(fromNode, toNode);
     let visible = linksEl.querySelector(`path.link[data-connection-id="${CSS.escape(c.id)}"]:not(.link-hit)`);
     let hit = linksEl.querySelector(`path.link-hit[data-connection-id="${CSS.escape(c.id)}"]`);
@@ -29236,16 +29321,24 @@ function scheduleLinkGeometryRefresh(onlyNodeIds=null){
 function renderLinks(){
     ensureLiveCanvasDom();
     if(!linksEl || !linkControlsEl) return;
+    stopFlowLinkEnergyLoop();
+    flowLinkEnergyPaths = [];
+    flowLinkEnergyCount = 0;
+    flowLinkLastDashOffset = '';
     linksEl.innerHTML = '';
     linkControlsEl.innerHTML = '';
     connections.forEach(c => {
-        const a = portPoint(c.from, 'out'), b = portPoint(c.to, 'in');
         const fromNode = nodes.find(n => n.id === c.from);
         const toNode = nodes.find(n => n.id === c.to);
+        const flowing = isNodeLinkFlowing(toNode);
+        const a = portPointForConnection(c.from, 'out', flowing);
+        const b = portPointForConnection(c.to, 'in', flowing);
         const cls = linkClassForConnection(fromNode, toNode);
+        const d = linkPathD(a.x, a.y, b.x, b.y, flowing ? { coarse:true } : {});
         const line = pathEl(a.x, a.y, b.x, b.y, cls, c.id);
+        if(line.getAttribute('d') !== d) line.setAttribute('d', d);
         linksEl.appendChild(line);
-        syncLinkEnergyOverlay(c.id, line.getAttribute('d') || '', cls.includes('link-flowing'));
+        syncLinkEnergyOverlay(c.id, d, cls.includes('link-flowing'));
         const btn = linkDeleteButton(c, a, b);
         linkControlsEl.appendChild(btn);
         linksEl.appendChild(linkHitEl(a.x, a.y, b.x, b.y, c.id));
@@ -29428,12 +29521,46 @@ function isPointerOverLinkUiChrome(el){
         '.image-gen-dock-host, .image-action-bar-host, .gen-dock, .gen-history-panel, .node, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #selectionMenu, .minimap, .bottombar, .toolbar, .canvas-custom-select-panel'
     ));
 }
+/** 图片/成片等实心媒体：线从底下穿过时，指针或剪刀落点在其上则不响应删线 */
+const LINK_HOVER_MEDIA_OCCLUDER_TYPES = new Set([
+    'image', 'output', 'generator', 'video', 'msgen', 'frameStack',
+]);
+function isWorldPointOccludedByMediaNode(point, pad = 2){
+    if(!point || !nodes?.length) return false;
+    for(let i = 0; i < nodes.length; i++){
+        const n = nodes[i];
+        if(!n || !LINK_HOVER_MEDIA_OCCLUDER_TYPES.has(n.type)) continue;
+        const r = nodeRect(n);
+        if(point.x >= r.x - pad && point.x <= r.x + r.w + pad
+            && point.y >= r.y - pad && point.y <= r.y + r.h + pad){
+            return true;
+        }
+    }
+    return false;
+}
+/** 指针在节点/控制台上，或几何落点钻进媒体节点矩形 → 视为被挡住 */
+function isLinkHoverOccluded(clientX, clientY, worldPoint, hitPoint = null){
+    if(worldPoint && isWorldPointOccludedByMediaNode(worldPoint)) return true;
+    if(hitPoint && isWorldPointOccludedByMediaNode(hitPoint)) return true;
+    const topEl = pointerElIgnoringLinkDelete(clientX, clientY);
+    return isPointerOverLinkUiChrome(topEl);
+}
 /** 命中测试时跳过连线 X 自身，避免「X 挡指针 → 下一帧又判定离开」来回闪 */
 function pointerElIgnoringLinkDelete(clientX, clientY){
     const stack = document.elementsFromPoint(clientX, clientY) || [];
-    return stack.find(el => !el.closest?.('.link-delete, .link-controls, .links, .link-hit, .link-flow-energy')) || null;
+    return stack.find(el => !el.closest?.('.link-delete, .link-controls, .links, .link-hit, .link-flow-energy, .link-flow-bloom, .link-flow-core, [data-flow-link]')) || null;
+}
+function clearConnectionHoverState(){
+    clearConnHoverArm();
+    cancelConnHoverHide();
+    setHoveredConnection('');
 }
 function scheduleConnectionHoverUpdate(e){
+    // 生成能量流动中：完全跳过删线悬停，避免 mousemove 与能量 rAF 抢主线程
+    if(hasFlowingLinkEnergy()){
+        if(hoveredConnectionId || connHoverArmedId) clearConnectionHoverState();
+        return;
+    }
     connHoverPendingEvent = e;
     if(connHoverRAF) return;
     connHoverRAF = requestAnimationFrame(() => {
@@ -29441,14 +29568,17 @@ function scheduleConnectionHoverUpdate(e){
         const event = connHoverPendingEvent;
         connHoverPendingEvent = null;
         if(!event) return;
+        if(hasFlowingLinkEnergy()){
+            if(hoveredConnectionId || connHoverArmedId) clearConnectionHoverState();
+            return;
+        }
         // 已悬停：每帧跟手，不节流；全量扫描仍节流
         if(hoveredConnectionId){
             updateConnectionHoverFromMouse(event);
             return;
         }
         const now = Date.now();
-        const minMs = hasFlowingLinkEnergy() ? CONN_HOVER_FLOWING_MIN_MS : CONN_HOVER_MIN_MS;
-        if(minMs > 0 && now - connHoverLastAt < minMs){
+        if(CONN_HOVER_MIN_MS > 0 && now - connHoverLastAt < CONN_HOVER_MIN_MS){
             scheduleConnectionHoverUpdate(event);
             return;
         }
@@ -29458,46 +29588,45 @@ function scheduleConnectionHoverUpdate(e){
 }
 function updateConnectionHoverFromMouse(e){
     if(!canvas || tempLink || dragNode || dragBoard || resizeNode || knifeActive){
-        clearConnHoverArm();
-        cancelConnHoverHide();
-        setHoveredConnection('');
+        clearConnectionHoverState();
+        return;
+    }
+    if(hasFlowingLinkEnergy()){
+        clearConnectionHoverState();
         return;
     }
     if(!connections.length){
-        clearConnHoverArm();
-        cancelConnHoverHide();
-        setHoveredConnection('');
+        clearConnectionHoverState();
         return;
     }
     const point = screenToWorld(e.clientX, e.clientY);
     const enter = Math.max(18, 22 / Math.max(0.08, viewport.scale || 1));
     const leave = enter * 1.8;
-    const flowing = hasFlowingLinkEnergy();
     // 指针在 X / 热区上：锁住位置，绝不吸回中点
-    if(!flowing){
-        const overDelete = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.link-delete');
-        const nearId = overDelete?.dataset?.connectionId
-            || (hoveredConnectionId && isPointerNearLinkDeleteBtn(hoveredConnectionId, e.clientX, e.clientY) ? hoveredConnectionId : '');
-        if(nearId){
-            cancelConnHoverHide();
-            clearConnHoverArm();
-            if(hoveredConnectionId !== nearId){
-                // 点到的是选中常显中点钮：以当前按钮位置进入 hover，勿先 teleport
-                const btn = linkControlsEl?.querySelector(`.link-delete[data-connection-id="${CSS.escape(nearId)}"]`);
-                const hit = btn ? { x:parseFloat(btn.style.left) || 0, y:parseFloat(btn.style.top) || 0 } : null;
-                setHoveredConnection(nearId, hit);
-            }
-            return;
+    const overDelete = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.link-delete');
+    const nearId = overDelete?.dataset?.connectionId
+        || (hoveredConnectionId && isPointerNearLinkDeleteBtn(hoveredConnectionId, e.clientX, e.clientY) ? hoveredConnectionId : '');
+    if(nearId){
+        cancelConnHoverHide();
+        clearConnHoverArm();
+        if(hoveredConnectionId !== nearId){
+            // 点到的是选中常显中点钮：以当前按钮位置进入 hover，勿先 teleport
+            const btn = linkControlsEl?.querySelector(`.link-delete[data-connection-id="${CSS.escape(nearId)}"]`);
+            const hit = btn ? { x:parseFloat(btn.style.left) || 0, y:parseFloat(btn.style.top) || 0 } : null;
+            setHoveredConnection(nearId, hit);
         }
+        return;
     }
-    // 已悬停：沿曲线跟手
+    // 已悬停：沿曲线跟手；移到图片等媒体上则收起（线常画在节点之上，几何命中会穿透）
     if(hoveredConnectionId){
         const cur = connections.find(c => c.id === hoveredConnectionId);
         if(cur){
             const from = portPoint(cur.from, 'out');
             const to = portPoint(cur.to, 'in');
-            const hit = nearestCubicPointOnLink(from, to, point, flowing ? 12 : 20);
-            if(!isLinkDeleteBlockedNearPort(from, to, hit) && hit.dist <= leave){
+            const hit = nearestCubicPointOnLink(from, to, point, 20);
+            if(!isLinkDeleteBlockedNearPort(from, to, hit)
+                && hit.dist <= leave
+                && !isLinkHoverOccluded(e.clientX, e.clientY, point, hit)){
                 cancelConnHoverHide();
                 positionLinkDeleteAt(hoveredConnectionId, hit.x, hit.y);
                 return;
@@ -29507,14 +29636,11 @@ function updateConnectionHoverFromMouse(e){
         scheduleConnHoverHide();
         return;
     }
-    // 能量流动时：跳过昂贵的 elementsFromPoint，只靠几何命中
-    if(!flowing){
-        const topEl = pointerElIgnoringLinkDelete(e.clientX, e.clientY);
-        if(isPointerOverLinkUiChrome(topEl)){
-            clearConnHoverArm();
-            scheduleConnHoverHide();
-            return;
-        }
+    // 节点/控制台/媒体矩形遮挡：避免图上误出剪刀
+    if(isLinkHoverOccluded(e.clientX, e.clientY, point)){
+        clearConnHoverArm();
+        scheduleConnHoverHide();
+        return;
     }
     let bestId = '';
     let bestHit = null;
@@ -29524,8 +29650,10 @@ function updateConnectionHoverFromMouse(e){
         const pad = enter;
         if(point.x < Math.min(from.x, to.x) - pad || point.x > Math.max(from.x, to.x) + pad ||
             point.y < Math.min(from.y, to.y) - pad || point.y > Math.max(from.y, to.y) + pad) return;
-        const hit = nearestCubicPointOnLink(from, to, point, flowing ? 12 : 20);
+        const hit = nearestCubicPointOnLink(from, to, point, 20);
         if(isLinkDeleteBlockedNearPort(from, to, hit)) return;
+        // 剪刀落点钻进图片矩形也不挂（线 z-index 高于节点时尤其明显）
+        if(isWorldPointOccludedByMediaNode(hit)) return;
         if(hit.dist < (bestHit?.dist ?? Infinity)){
             bestHit = hit;
             bestId = c.id;
@@ -29805,13 +29933,13 @@ function setNodePortsOpen(el, open){
     if(open){
         if(el.classList.contains('ports-open')) return;
         el.classList.add('ports-open');
-        scheduleLinkGeometryRefresh(new Set([id]));
+        if(!hasFlowingLinkEnergy()) scheduleLinkGeometryRefresh(new Set([id]));
         return;
     }
     if(selected.has(id) || el.querySelector('.port.is-magnetic')) return;
     if(!el.classList.contains('ports-open')) return;
     el.classList.remove('ports-open');
-    scheduleLinkGeometryRefresh(new Set([id]));
+    if(!hasFlowingLinkEnergy()) scheduleLinkGeometryRefresh(new Set([id]));
 }
 function wireBoardEvents() {
 if(!board || boardEventsWired) return;
