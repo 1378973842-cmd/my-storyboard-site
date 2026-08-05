@@ -279,7 +279,7 @@ function toRecord(doc: CanvasDocument): CanvasRecord {
   const preview_url = extractPreviewUrl(doc);
   return {
     id: doc.id,
-    title: doc.title || "未命名画布",
+    title: doc.title || "Untitled",
     icon: doc.icon || "🧩",
     kind: normalizeKind(doc.kind),
     created_at: doc.created_at || 0,
@@ -345,7 +345,7 @@ export function createCanvas(
   const ts = nowMs();
   const doc: CanvasDocument = {
     id: uuidv4().replace(/-/g, ""),
-    title: (payload.title || (kind === "smart" ? "智能画布" : "未命名画布")).slice(0, 80),
+    title: (payload.title || (kind === "smart" ? "智能画布" : "Untitled")).slice(0, 80),
     icon: (payload.icon || (kind === "smart" ? "sparkles" : "🧩")).slice(0, 32),
     kind,
     owner_id: ctx.userId,
@@ -418,7 +418,7 @@ export function saveCanvas(
     err.updated_at = current;
     throw err;
   }
-  doc.title = (payload.title || doc.title || "未命名画布").slice(0, 80);
+  doc.title = (payload.title || doc.title || "Untitled").slice(0, 80);
   doc.icon = (payload.icon || doc.icon || "🧩").slice(0, 32);
   const existingNodeCount = Array.isArray(doc.nodes) ? doc.nodes.length : 0;
   const existingUrlCount = countNodesWithUrl(doc.nodes);

@@ -81,6 +81,7 @@ export type RunningHubG2AspectRatio = (typeof RUNNINGHUB_G2_RATIOS)[number];
 
 export function getStoryboardImageEnv(): StoryboardImageEnv | null {
   let apiKey = (process.env.STORYBOARD_IMAGE_API_KEY ?? "").trim();
+  if (!apiKey) apiKey = (process.env.RUNNINGHUB_API_KEY ?? "").trim();
   if (/^bearer\s+/i.test(apiKey)) apiKey = apiKey.replace(/^bearer\s+/i, "").trim();
   if (!apiKey) return null;
 
@@ -392,6 +393,7 @@ export async function submitAndPollRunningHub(
   console.log(`[${logTag}] taskId=${taskId}, polling…`);
 
   let lastPayload: unknown = null;
+  let lastStatus = "";
   while (Date.now() < deadline) {
     await sleep(pollMs);
     const qRes = await fetch(rhUrl(env, env.queryPath), {
@@ -409,12 +411,21 @@ export async function submitAndPollRunningHub(
       throw new Error(`RunningHub 查询失败 (${qRes.status})：${msg}`);
     }
     const status = queryStatus(qRaw);
+    if (status && status !== lastStatus) {
+      lastStatus = status;
+      console.log(`[${logTag}] taskId=${taskId} status=${status}`);
+    }
     if (isTerminalSuccess(status)) {
       const url = extractResultUrl(qRaw);
       if (!url) throw new Error(`RunningHub 任务成功但未解析到 results[0].url：${JSON.stringify(qRaw).slice(0, 500)}`);
+      console.log(`[${logTag}] taskId=${taskId} success`);
       return url;
     }
     if (isTerminalFailed(status)) {
+      const qObj = (qRaw && typeof qRaw === "object" ? qRaw : {}) as Record<string, unknown>;
+      const msg = String(qObj.errorMessage || qObj.error_message || qObj.message || "").trim();
+      const code = String(qObj.errorCode || qObj.error_code || qObj.code || "").trim();
+      if (msg) throw new Error(code ? `RunningHub 任务失败 [${code}]：${msg}` : `RunningHub 任务失败：${msg}`);
       throw new Error(`RunningHub 任务失败：${JSON.stringify(qRaw).slice(0, 800)}`);
     }
   }

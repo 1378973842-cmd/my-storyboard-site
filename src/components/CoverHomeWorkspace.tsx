@@ -203,7 +203,7 @@ export function CoverHomeWorkspace() {
                         <span className="cover-home-project-title truncate">
                           {openingId === item.id
                             ? '打开中…'
-                            : `${item.title || '未命名画布'}${parenDate ? ` ${parenDate}` : ''}`}
+                            : `${item.title || 'Untitled'}${parenDate ? ` ${parenDate}` : ''}`}
                         </span>
                         <span className="cover-home-project-meta">
                           {formatHomeEditedLabel(item.updated_at || item.created_at)}

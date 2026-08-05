@@ -1,16 +1,16 @@
 # 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  1. **HOME14 本地完成**：管理员「公告管理」页（列表 / 发布 / 编辑 / 删除）；头像菜单「发布公告」改为「公告管理」。
-  2. 后端：`GET/PUT/DELETE /api/admin/announcements`（及原有 POST）。
-  3. 本会话另有未提交：通知详情弹层、列表 Logo 卡片、拉端口收控制台、画廊毛玻璃等（与 HOME14 一并或分 commit 由导演定）。
-- **验证状态**：`tsc --noEmit` 通过。请管理员手测：头像 → 公告管理 → 发布/编辑/删除，铃铛侧同步变化。
-- **明日焦点**：导演验收公告管理 → commit / 部署。
-- **Blockers**：无。
+  1. **AG111 本地完成**：视频节点 `hailuo-h3`（RunningHub 海螺 H3）。
+  2. **空图台比例丝滑**：底边中心锚点+冻结控制台保间距；收尾保留 height，避免末帧卡顿。
+  3. 另有未提交：新建画布默认名 `Untitled`。
+- **验证状态**：`node init.mjs` 见本会话；请导演手测：新建图片生成节点 → 切 1:1 / 16:9 / 9:16，空框应丝滑变形。
+- **明日焦点**：手测比例变形 + hailuo-h3 → commit / 部署。
+- **Blockers**：无。视频假「生成中」：`_pending` 曾落盘且 video 未进 resetTransient；已修。成功片已捞回 `/uploads/canvas/video_recover_81895169.mp4`。
 
 ## 新对话开场白（复制给 Agent）
 
 ```
 继续 gemini-deploy。先读 docs/HANDOFF.md。
-本地 HOME14（公告管理）已完成未 commit。按导演下一条反馈继续。
+本地有：hailuo-h3、空图台比例丝滑、Untitled 默认名。未 commit。按导演下一条反馈继续。
 ```

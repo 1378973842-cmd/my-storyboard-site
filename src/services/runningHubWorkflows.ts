@@ -398,19 +398,25 @@ function failReason(raw: unknown): string {
   const candidates: unknown[] = [];
   if (data && typeof data === "object") {
     const d = data as Record<string, unknown>;
-    candidates.push(d.failedReason, d.failReason, d.message, d.error);
+    // 优先可读文案；空对象 failedReason:{} 交给 formatRhApiError 跳过
+    candidates.push(
+      d.errorMessage,
+      d.error_message,
+      d.failedReason,
+      d.failReason,
+      d.message,
+      d.error,
+      d.errorCode != null || d.error_code != null
+        ? { errorCode: d.errorCode ?? d.error_code, errorMessage: d.errorMessage ?? d.error_message }
+        : null,
+    );
   }
-  candidates.push(obj.msg, obj.message, obj.error);
+  candidates.push(obj.errorMessage, obj.error_message, obj.msg, obj.message, obj.error);
   for (const value of candidates) {
-    if (value != null && typeof value === "object") {
-      try {
-        return JSON.stringify(value);
-      } catch {
-        /* fallthrough */
-      }
-    }
+    if (value == null) continue;
+    if (typeof value === "object" && !Array.isArray(value) && !Object.keys(value as object).length) continue;
     const text = formatRhApiError(value, "");
-    if (text) return text;
+    if (text && text !== "{}" && text !== "[]") return text;
   }
   return formatRhApiError(raw, "");
 }

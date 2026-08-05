@@ -1131,8 +1131,7 @@ function renderCanvasListInto(list){
 async function createCanvas(){
     const customTitle = gateTitleInput?.value.trim();
     const isSmart = createCanvasKind === 'smart';
-    const titleBase = isSmart ? tr('canvas.newSmartCanvas') : tr('canvas.newCanvas');
-    const title = customTitle || `${titleBase} ${new Date().toLocaleTimeString(window.StudioI18n?.lang() === 'en' ? 'en-US' : 'zh-CN', {hour:'2-digit', minute:'2-digit'})}`;
+    const title = customTitle || (isSmart ? (tr('canvas.newSmartCanvas') || 'Untitled') : 'Untitled');
     trashMode = false;
     refreshGateViewControls();
     setStatus('Creating...');

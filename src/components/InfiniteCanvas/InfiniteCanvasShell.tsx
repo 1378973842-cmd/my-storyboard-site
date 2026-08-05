@@ -476,7 +476,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                       <div className="canvas-topbar-nav">
                           <button id="backToManagerBtn" className="tool-btn tool-btn-back" type="button" title="返回画布管理" aria-label="返回画布管理" data-i18n-title="canvas.backToManager"><i data-lucide="arrow-left" className="w-4 h-4"></i></button>
                           <div className="canvas-nav-meta">
-                              <div id="currentCanvasTitle" className="current-canvas-title">未命名画布</div>
+                              <div id="currentCanvasTitle" className="current-canvas-title">Untitled</div>
                               <div id="saveState" className="current-canvas-save">--</div>
                               <div id="currentCanvasTime" className="current-canvas-time" hidden aria-hidden="true">--</div>
                           </div>

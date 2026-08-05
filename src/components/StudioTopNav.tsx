@@ -123,7 +123,7 @@ function CanvasHeaderCluster({
     }
     setMeta(prev => {
       const next = {
-        title: titleEl.textContent?.trim() || '未命名画布',
+        title: titleEl.textContent?.trim() || 'Untitled',
         date: timeEl?.dataset?.shortDate?.trim() || '',
         status: saveEl.textContent?.trim() || '已保存到云端',
         statusKind: saveEl.dataset.kind || '',

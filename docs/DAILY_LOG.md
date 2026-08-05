@@ -304,3 +304,5 @@
 ### 记录 / 说明
 - HOME13: 个人空间背景上传前裁切
 - HOME14: 管理员公告管理（列表/编辑/删除）
+- 生产 deploy:safe 上线 b5e4e58；备份 studio-20260805-144924.tar.gz；PM2 online HTTP 200
+- AG111：视频节点接入 RunningHub hailuo-h3（multimodal-to-video）

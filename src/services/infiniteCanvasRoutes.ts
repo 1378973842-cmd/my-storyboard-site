@@ -27,6 +27,8 @@ import { registerCanvasScreenwritingRoutes } from "./canvasScreenwritingBridge.j
 import { registerCanvasPixarAdScriptRoutes } from "./canvasPixarAdScriptBridge.js";
 import { registerCanvasReplicaAgentRoutes } from "./canvasReplicaAgentBridge.js";
 import { registerCanvasImageRepairAgentRoutes } from "./canvasImageRepairAgentBridge.js";
+import { registerCanvasVideoRoutes } from "./canvasVideoBridge.js";
+import { HAILUO_H3_MODEL_ID } from "./runningHubHailuoVideo.js";
 import {
   deleteUserWorkflowTemplate,
   getWorkflowTemplate,
@@ -421,6 +423,14 @@ export function registerInfiniteCanvasRoutes(
   }
 
   registerCanvasLlmRoutes(app, projectRoot, gate);
+  registerCanvasVideoRoutes(app, {
+    projectRoot,
+    requireGate: gate,
+    onPersisted: (localUrl, req) => {
+      const userId = req.authUser?.id;
+      if (userId && deps?.db) recordFileOwnership(deps.db, localUrl, userId);
+    },
+  });
   registerCanvasBatchPosterRoutes(app, projectRoot, gate);
   registerCanvasSlotsLoopVideoRoutes(app, projectRoot, gate);
   registerCanvasMxShellPromptRoutes(app, projectRoot, gate);
@@ -479,13 +489,14 @@ export function registerInfiniteCanvasRoutes(
         ].filter(Boolean)
       )
     );
+    const videoModels = [HAILUO_H3_MODEL_ID];
     res.json({
       base_url: process.env.THIRD_PARTY_API_BASE || "",
       chat_model: chatModels[0],
       image_model: imageModels[0],
       chat_models: chatModels,
       image_models: imageModels,
-      video_models: [],
+      video_models: videoModels,
       comfy_instances: [],
       api_providers: [
         {
@@ -493,6 +504,7 @@ export function registerInfiniteCanvasRoutes(
           name: "RunningHub",
           label: "RunningHub",
           image_models: imageModels,
+          video_models: videoModels,
           has_key: Boolean((process.env.RUNNINGHUB_API_KEY || process.env.STORYBOARD_IMAGE_API_KEY || "").trim()),
           has_wallet_key: Boolean((process.env.RUNNINGHUB_WALLET_API_KEY || "").trim()),
           // 仅 id + 显示名；密钥正文不下发前端
@@ -561,13 +573,12 @@ export function registerInfiniteCanvasRoutes(
     res.json({ files: uploaded });
   });
 
-  /** 视频 / Comfy / LLM 等：尚未接入本站 */
+  /** Comfy 等：尚未接入本站（视频已走 registerCanvasVideoRoutes） */
   const aiStub = (_req: Request, res: Response) => {
     res.status(501).json({
       error: "该节点 API 尚未接入本站后端，可在 .env 配置 CANVAS_API_ORIGIN 转发到原 Python 服务。",
     });
   };
-  app.post("/api/canvas-video", gate, aiStub);
   app.post("/api/generate", gate, aiStub);
   app.post("/api/upload", gate, aiStub);
 }

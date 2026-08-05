@@ -2411,6 +2411,11 @@
   overflow:hidden;
   box-shadow:none;
 }
+/* 空台改比例：由 JS rAF 插值宽高；此期关掉 aspect-ratio，避免与 dock 脱节 */
+.gen-stage.is-empty .gen-stage-frame.is-aspect-morph {
+  aspect-ratio:auto;
+  width:100%;
+}
 .gen-stage.has-images .gen-stage-frame {
   /* 有图仍保灰底：透明 PNG 不露画布点阵 */
   background:#2a2928;

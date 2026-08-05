@@ -86,11 +86,19 @@ export function formatRhApiError(value: unknown, fallback = '操作失败'): str
   if (value instanceof Error) return value.message.trim() || fallback;
   if (typeof value === 'object') {
     const obj = value as Record<string, unknown>;
-    for (const key of ['message', 'msg', 'error', 'failReason', 'failedReason', 'detail', 'reason']) {
+    for (const key of ['errorMessage', 'error_message', 'message', 'msg', 'error', 'failReason', 'failedReason', 'detail', 'reason']) {
       if (obj[key] != null) {
+        // 空对象 {} 不当成有效错误文案
+        if (typeof obj[key] === 'object' && !Array.isArray(obj[key]) && !Object.keys(obj[key] as object).length) {
+          continue;
+        }
         const nested = formatRhApiError(obj[key], '');
-        if (nested) return nested;
+        if (nested && nested !== '{}' && nested !== '[]') return nested;
       }
+    }
+    const code = obj.errorCode ?? obj.error_code ?? obj.code;
+    if (code != null && String(code).trim()) {
+      return `错误码 ${String(code).trim()}`;
     }
     try {
       const json = JSON.stringify(value);

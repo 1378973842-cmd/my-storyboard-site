@@ -1519,24 +1519,23 @@ const MANAGED_CHAT_MODELS_KEY = 'canvas_chat_models_ordered';
 const CANVAS_THEME_KEY = 'canvas_theme';
 const QUICK_TOOLBAR_COLLAPSED_KEY = 'canvas_quick_toolbar_collapsed';
 const DEFAULT_VIDEO_MODELS = [
-    // Veo
-    'veo2', 'veo2-fast', 'veo2-pro',
-    'veo3', 'veo3-fast', 'veo3-pro',
-    'veo3.1', 'veo3.1-fast', 'veo3.1-quality', 'veo3.1-lite',
-    // Sora
-    'sora-2', 'sora-2-pro',
-    // 通义万相
-    'wan2.6-t2v', 'wan2.6-i2v',
-    'wan2.5-t2v-preview', 'wan2.5-i2v-preview',
-    'wan2.2-t2v-plus', 'wan2.2-i2v-plus', 'wan2.2-i2v-flash',
-    // Seedance
-    'doubao-seedance-2-0-260128',
-    'doubao-seedance-2-0-fast-260128',
-    'doubao-seedance-1-5-pro-251215',
-    'doubao-seedance-1-0-pro-250528',
-    'doubao-seedance-1-0-lite-t2v-250428',
-    'doubao-seedance-1-0-lite-i2v-250428'
+    // RunningHub 标准模型（本站已接入）
+    'hailuo-h3',
 ];
+function isHailuoH3VideoModel(model){
+    const m = String(model || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+    return m === 'hailuo-h3' || m === 'minimax-hailuo-h3' || m.includes('hailuo-h3');
+}
+function applyHailuoVideoDefaults(node){
+    if(!node || !isHailuoH3VideoModel(node.model)) return;
+    const dur = Math.round(Number(node.duration || 5));
+    node.duration = Number.isFinite(dur) ? Math.max(5, Math.min(15, dur)) : 5;
+    const res = String(node.resolution || '').trim().toUpperCase();
+    if(res !== '2K' && res !== '768P') node.resolution = '768P';
+    const ratio = String(node.aspectRatio || '').trim();
+    const allowed = new Set(['adaptive','21:9','16:9','4:3','1:1','3:4','9:16']);
+    if(!allowed.has(ratio)) node.aspectRatio = 'adaptive';
+}
 
 function uid(prefix='n'){ return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`; }
 function applyTheme(_theme){
@@ -1759,9 +1758,11 @@ function normalizeLoadedProviders(list){
     const mapped = (list?.length ? list : defaultApiProviders()).map(p => {
         const rawId = String(p?.id || '').trim().toLowerCase();
         if(rawId === 'comfly' || rawId === 'runninghub'){
+            const mergedVideo = uniqueModels([...(p.video_models || []), ...videoModels]);
             return siteImageProviderEntry({
                 ...p,
                 image_models: uniqueModels([...(p.image_models || []), ...imageModels]),
+                video_models: mergedVideo.length ? mergedVideo : (videoModels.length ? videoModels : DEFAULT_VIDEO_MODELS),
             });
         }
         return {
@@ -1872,12 +1873,17 @@ function providerImageModels(providerId){
 }
 function videoApiProviders(){
     const providers = (apiProviders.length ? apiProviders : defaultApiProviders())
-        .filter(p => p.id !== 'modelscope' && !isRunningHubProvider(p) && p.enabled !== false);
-    return providers.length ? providers : defaultApiProviders();
+        .filter(p => p.id !== 'modelscope' && p.enabled !== false && (p.video_models || []).length);
+    if(providers.length) return providers;
+    return defaultApiProviders().map(p => ({
+        ...p,
+        video_models: uniqueModels(p.video_models?.length ? p.video_models : DEFAULT_VIDEO_MODELS),
+    }));
 }
 function resolveVideoProviderId(id){
     const providers = videoApiProviders();
-    return providers.find(p => p.id === id)?.id || providers[0]?.id || 'comfly';
+    const normalized = legacyImageProviderId(id);
+    return providers.find(p => p.id === normalized)?.id || providers[0]?.id || 'runninghub';
 }
 function videoProviderOptions(selectedId){
     const selected = resolveVideoProviderId(selectedId);
@@ -1885,8 +1891,13 @@ function videoProviderOptions(selectedId){
 }
 function providerVideoModels(providerId){
     // 不走 providerById（会 fallback 到第一个 provider，造成串台），直接查精确匹配
-    const provider = apiProviders.find(p => p.id === providerId);
-    return uniqueModels(provider?.video_models || []);
+    const normalized = legacyImageProviderId(providerId);
+    let provider = apiProviders.find(p => p.id === normalized);
+    if(!provider && normalized === 'runninghub'){
+        provider = apiProviders.find(p => String(p.id || '').toLowerCase() === 'comfly');
+    }
+    const models = uniqueModels(provider?.video_models || []);
+    return models.length ? models : DEFAULT_VIDEO_MODELS;
 }
 function videoModelOptions(selectedModel, providerId){
     const models = providerVideoModels(providerId);
@@ -3196,6 +3207,136 @@ function fitGeneratorNodeHeight(node, elHint=null){
         scheduleImageGenDockFollow(node);
     });
 }
+/** 空图台：rAF 插值宽高；底边中心锚点 + 冻结控制台，间距不变；收尾不清 height，避免跳变卡顿 */
+function morphEmptyGenStageToConsoleRatio(node){
+    if(!node || !isGenConsoleNode(node)) return;
+    if(generatorPreviewUrls(node).length) return;
+    if(typeof generatorPendingList === 'function' && generatorPendingList(node).length) return;
+    delete node._stageAspect;
+    delete node._baseFrameH;
+    const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
+    if(!el) return;
+    const frame = el.querySelector('.gen-stage.is-empty .gen-stage-frame');
+    const ar = genStageTileAspectCss(node) || '1 / 1';
+    const arParts = String(ar).split('/').map(Number);
+    const arNum = (arParts[0] > 0 && arParts[1] > 0) ? (arParts[0] / arParts[1]) : 1;
+    const targetW = genStageDisplayWidth(node, []);
+    const targetH = Math.max(96, Math.round(targetW / Math.max(0.05, arNum)));
+    const fromW = Number.parseFloat(el.style.width) || el.offsetWidth || targetW;
+    const fromH = Math.max(
+        1,
+        frame?.offsetHeight || el.offsetHeight || fromW
+    );
+    const reduce = typeof prefersGenStageReducedMotion === 'function'
+        ? prefersGenStageReducedMotion()
+        : false;
+
+    if(el.__aspectMorphRaf){
+        cancelAnimationFrame(el.__aspectMorphRaf);
+        el.__aspectMorphRaf = 0;
+    }
+    clearTimeout(el.__aspectMorphTimer);
+
+    // 冻结控制台屏幕位置（board 内 absolute），图台底边锚住 → 间距恒定
+    const dockFrozen = Boolean(imageGenDockEl && imageGenDockNodeId === node.id);
+    const frozenDockLeft = dockFrozen ? imageGenDockEl.style.left : '';
+    const frozenDockTop = dockFrozen ? imageGenDockEl.style.top : '';
+    const pinDock = () => {
+        if(!dockFrozen || !imageGenDockEl) return;
+        if(frozenDockLeft) imageGenDockEl.style.left = frozenDockLeft;
+        if(frozenDockTop) imageGenDockEl.style.top = frozenDockTop;
+    };
+
+    const anchorCenterX = Number(node.x || 0) + fromW / 2;
+    const anchorBottom = Number(node.y || 0) + fromH;
+
+    const applyFrameSize = (w, h) => {
+        const rw = Math.round(w);
+        const rh = Math.round(h);
+        node._displayW = rw;
+        node._displayH = rh;
+        if(!node._userSized){
+            node.w = GENERATOR_BASE_W;
+            delete node.h;
+        }
+        node.x = anchorCenterX - rw / 2;
+        node.y = anchorBottom - rh;
+        el.style.left = `${node.x}px`;
+        el.style.top = `${node.y}px`;
+        el.style.width = `${rw}px`;
+        el.style.height = '';
+        el.classList.remove('sized');
+        if(frame){
+            frame.style.aspectRatio = 'auto';
+            frame.style.height = `${rh}px`;
+        }
+        pinDock();
+    };
+
+    const finish = () => {
+        // 已在目标尺寸：只落稳样式，禁止再改几何（清 height / 重算会导致末帧卡顿与间距跳动）
+        el.classList.remove('is-aspect-morph');
+        if(frame){
+            frame.classList.remove('is-aspect-morph');
+            frame.style.aspectRatio = ar;
+            frame.style.height = `${targetH}px`;
+        }
+        if(!node._userSized){
+            el.style.setProperty('--generator-ui-scale', '1');
+            node.w = GENERATOR_BASE_W;
+            delete node.h;
+        }
+        node._displayW = targetW;
+        node._displayH = targetH;
+        node.x = anchorCenterX - targetW / 2;
+        node.y = anchorBottom - targetH;
+        el.style.left = `${node.x}px`;
+        el.style.top = `${node.y}px`;
+        el.style.width = `${targetW}px`;
+        el.style.height = '';
+        pinDock();
+        // 连线几何延后一帧，避免与末帧布局抢同一 paint
+        requestAnimationFrame(() => {
+            pinDock();
+            scheduleLinkGeometryRefresh(new Set([node.id]));
+        });
+    };
+
+    if(reduce || (Math.abs(fromW - targetW) < 1 && Math.abs(fromH - targetH) < 1)){
+        if(frame){
+            frame.style.aspectRatio = ar;
+            frame.style.height = `${targetH}px`;
+        }
+        applyFrameSize(targetW, targetH);
+        finish();
+        return;
+    }
+
+    el.classList.add('is-aspect-morph');
+    if(frame) frame.classList.add('is-aspect-morph');
+    applyFrameSize(fromW, fromH);
+
+    const t0 = performance.now();
+    const dur = 420;
+    // smootherstep：末段更柔，减轻收尾顿挫感
+    const ease = (t) => t * t * t * (t * (t * 6 - 15) + 10);
+
+    const tick = (now) => {
+        const p = Math.min(1, (now - t0) / dur);
+        const e = ease(p);
+        applyFrameSize(
+            fromW + (targetW - fromW) * e,
+            fromH + (targetH - fromH) * e
+        );
+        if(p < 1){
+            el.__aspectMorphRaf = requestAnimationFrame(tick);
+            return;
+        }
+        el.__aspectMorphRaf = 0;
+        finish();
+    };
+    el.__aspectMorphRaf = requestAnimationFrame(tick);
+}
 /** 图台尺寸变化后，把浮动控制台重新贴到节点下方 */
 function scheduleImageGenDockFollow(node){
     if(!node) return;
@@ -4345,6 +4486,7 @@ function serializableCanvasNode(node){
     // 运行时字段禁止落盘，否则重开会出现假「运行中」/编辑态残留
     delete copy._ltxEditor;
     delete copy.running;
+    delete copy._pending;
     delete copy._batchPosterRuns;
     delete copy._batchPosterTitlePrefetchBusy;
     delete copy._batchProgress;
@@ -5592,8 +5734,8 @@ async function createCanvas(options = {}){
     if(!skipNamePrompt && !creatingCanvas) setCreateMode(true, createCanvasKind);
     const customTitle = creatingCanvas ? (getGateCreateTitleInput()?.value?.trim?.() || '') : '';
     const isSmart = createCanvasKind === 'smart';
-    const titleBase = isSmart ? tr('canvas.newSmartCanvas') : tr('canvas.newCanvas');
-    const title = customTitle || `${titleBase} ${new Date().toLocaleTimeString(window.StudioI18n?.lang() === 'en' ? 'en-US' : 'zh-CN', {hour:'2-digit', minute:'2-digit'})}`;
+    // 新建默认名与顶栏一致：统一 Untitled（有自定义标题时仍用自定义）
+    const title = customTitle || (isSmart ? (tr('canvas.newSmartCanvas') || 'Untitled') : 'Untitled');
     if(creatingCanvas) setCreateMode(false);
     trashMode = false;
     refreshGateViewControls();
@@ -7302,17 +7444,17 @@ function addMsGenNode(point){
 }
 function addVideoNode(point){
     const p = point || defaultPoint(160, 0);
-    const providerId = videoApiProviders()[0]?.id || 'comfly';
-    return addNode({
+    const providerId = videoApiProviders()[0]?.id || 'runninghub';
+    const node = {
         id:uid('vid'),
         type:'video',
         x:p.x,
         y:p.y,
         apiProvider:providerId,
-        model:videoModels[0] || DEFAULT_VIDEO_MODELS[0],
+        model:videoModels[0] || DEFAULT_VIDEO_MODELS[0] || 'hailuo-h3',
         duration:5,
-        aspectRatio:'16:9',
-        resolution:'',
+        aspectRatio:'adaptive',
+        resolution:'768P',
         enhancePrompt:false,
         enableUpsample:false,
         watermark:false,
@@ -7325,7 +7467,9 @@ function addVideoNode(point){
         previewLayout:'time',
         inputs:[],
         running:false
-    });
+    };
+    applyHailuoVideoDefaults(node);
+    return addNode(node);
 }
 function addRhNode(point){
     const p = point || defaultPoint(180, 0);
@@ -7630,6 +7774,7 @@ function buildMsGenDockContent(node){
                 node.msCustomRatioHeight = '';
             }
             syncMsCustomSizeControls();
+            morphEmptyGenStageToConsoleRatio(node);
             scheduleSave();
         };
         msResolutionSelect.onmousedown = e => e.stopPropagation();
@@ -20176,8 +20321,8 @@ function bindImageGenDockControls(wrap, node){
             e.stopPropagation();
             node.model = e.target.value;
             syncSizeControlsLite();
+            morphEmptyGenStageToConsoleRatio(node);
             scheduleSave();
-            positionImageGenDock(node);
         };
     }
     if(ratioSelect){
@@ -20187,8 +20332,8 @@ function bindImageGenDockControls(wrap, node){
             e.stopPropagation();
             node.ratio = e.target.value || resolveRatioForCaps('', generatorModelCaps(node.model));
             syncSizeControlsLite();
+            morphEmptyGenStageToConsoleRatio(node);
             scheduleSave();
-            positionImageGenDock(node);
         };
     }
     if(resolutionSelect){
@@ -20914,19 +21059,23 @@ function renderVideoBody(node){
 }
 /** 视频控制台：比例 / 分辨率 / 时长（对齐图片 dock 芯片条） */
 function videoDockSizePanelHtml(node){
-    const duration = Math.max(1, Math.min(60, Number(node.duration || 5)));
-    const aspect = node.aspectRatio || '16:9';
-    const resolution = node.resolution || '';
-    const aspectOpts = ['16:9','9:16','1:1','4:3','3:4','21:9','9:21','keep_ratio','adaptive']
+    const hailuo = isHailuoH3VideoModel(node.model);
+    if(hailuo) applyHailuoVideoDefaults(node);
+    const durationMin = hailuo ? 5 : 1;
+    const durationMax = hailuo ? 15 : 60;
+    const duration = Math.max(durationMin, Math.min(durationMax, Number(node.duration || 5)));
+    const aspect = node.aspectRatio || (hailuo ? 'adaptive' : '16:9');
+    const resolution = node.resolution || (hailuo ? '768P' : '');
+    const aspectList = hailuo
+        ? ['adaptive','21:9','16:9','4:3','1:1','3:4','9:16']
+        : ['16:9','9:16','1:1','4:3','3:4','21:9','9:21','keep_ratio','adaptive'];
+    const aspectOpts = aspectList
         .map(v => `<option value="${v}" ${v === aspect ? 'selected' : ''}>${v === 'keep_ratio' ? 'keep' : v === 'adaptive' ? 'adapt' : v}</option>`)
         .join('');
-    const resOpts = [
-        ['', 'Auto'],
-        ['480p', '480p'],
-        ['720p', '720p'],
-        ['1080p', '1080p'],
-        ['780P', '780P'],
-    ].map(([v, label]) => `<option value="${escapeAttr(v)}" ${v === resolution ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
+    const resOpts = (hailuo
+        ? [['768P', '768P'], ['2K', '2K']]
+        : [['', 'Auto'], ['480p', '480p'], ['720p', '720p'], ['1080p', '1080p'], ['780P', '780P']]
+    ).map(([v, label]) => `<option value="${escapeAttr(v)}" ${v === resolution ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
     return `
         <div class="gen-dock-size">
             <label class="gen-dock-chip gen-dock-chip-ratio" title="${escapeAttr(tr('canvas.videoAspect'))}">
@@ -20937,7 +21086,7 @@ function videoDockSizePanelHtml(node){
                 <select class="select-lite video-resolution compact-select gen-dock-select">${resOpts}</select>
             </label>
             <label class="gen-dock-chip gen-dock-chip-duration" title="${escapeAttr(tr('canvas.videoDuration'))}">
-                <input class="gen-dock-duration-input video-duration" type="number" min="1" max="60" step="1" value="${duration}" size="2" inputmode="numeric" aria-label="${escapeAttr(tr('canvas.videoDuration'))}">
+                <input class="gen-dock-duration-input video-duration" type="number" min="${durationMin}" max="${durationMax}" step="1" value="${duration}" size="2" inputmode="numeric" aria-label="${escapeAttr(tr('canvas.videoDuration'))}">
                 <span class="gen-dock-count-suffix">s</span>
             </label>
         </div>
@@ -20965,8 +21114,9 @@ function videoDockAdvancedHtml(node){
 }
 /** 视频生成控制台壳：与图片 Gen Console 同构（提示词 + 参考 + 底栏芯片） */
 function videoDockShellHtml(node){
-    node.apiProvider = resolveVideoProviderId(node.apiProvider || 'comfly');
-    node.model = node.model || 'veo3-fast';
+    node.apiProvider = resolveVideoProviderId(node.apiProvider || 'runninghub');
+    node.model = node.model || providerVideoModels(node.apiProvider)[0] || 'hailuo-h3';
+    applyHailuoVideoDefaults(node);
     if(node.prompt == null) node.prompt = '';
     const runLabel = agentPendingRunState(node.id, tr('canvas.videoGenerate'), tr('canvas.generating'));
     const iconName = runLabel.runningCls ? 'loader-circle' : 'arrow-up';
@@ -21015,9 +21165,12 @@ function bindVideoDockControls(wrap, node){
     const ordered = orderedSources(node, inputSources);
     const imageInputs = ordered.filter(src => src.refs?.length);
     const promptInputs = ordered.filter(src => src.prompt && !src.refs?.length);
-    node.apiProvider = resolveVideoProviderId(node.apiProvider || 'comfly');
-    node.model = node.model || 'veo3-fast';
+    node.apiProvider = resolveVideoProviderId(node.apiProvider || 'runninghub');
+    node.model = node.model || providerVideoModels(node.apiProvider)[0] || 'hailuo-h3';
+    applyHailuoVideoDefaults(node);
     if(node.prompt == null) node.prompt = '';
+    const hailuo = () => isHailuoH3VideoModel(node.model);
+    const durationBounds = () => hailuo() ? {min:5, max:15} : {min:1, max:60};
 
     const localPrompt = wrap.querySelector('.gen-dock-prompt');
     if(localPrompt){
@@ -21046,9 +21199,12 @@ function bindVideoDockControls(wrap, node){
     const aspectSelect = wrap.querySelector('.video-aspect');
     const resolutionSelect = wrap.querySelector('.video-resolution');
     if(providerSelect) providerSelect.value = node.apiProvider;
-    if(durationInput) durationInput.value = String(Math.max(1, Math.min(60, Number(node.duration || 5))));
-    if(aspectSelect) aspectSelect.value = node.aspectRatio || '16:9';
-    if(resolutionSelect) resolutionSelect.value = node.resolution || '';
+    {
+        const b = durationBounds();
+        if(durationInput) durationInput.value = String(Math.max(b.min, Math.min(b.max, Number(node.duration || 5))));
+    }
+    if(aspectSelect) aspectSelect.value = node.aspectRatio || (hailuo() ? 'adaptive' : '16:9');
+    if(resolutionSelect) resolutionSelect.value = node.resolution || (hailuo() ? '768P' : '');
     [providerSelect, modelSelect, durationInput, aspectSelect, resolutionSelect].forEach(input => {
         if(!input) return;
         input.onmousedown = e => e.stopPropagation();
@@ -21060,37 +21216,40 @@ function bindVideoDockControls(wrap, node){
             node.apiProvider = e.target.value;
             const models = providerVideoModels(node.apiProvider);
             if(!models.includes(node.model)) node.model = models[0] || node.model;
+            applyHailuoVideoDefaults(node);
             if(modelSelect) modelSelect.innerHTML = videoModelOptions(node.model, node.apiProvider);
             mountCanvasCustomSelects(wrap);
             scheduleSave();
+            if(imageGenDockNodeId === node.id) syncImageGenDock();
         };
     }
     if(modelSelect){
-        modelSelect.onchange = e => { e.stopPropagation(); node.model = e.target.value; scheduleSave(); };
+        modelSelect.onchange = e => {
+            e.stopPropagation();
+            node.model = e.target.value;
+            applyHailuoVideoDefaults(node);
+            scheduleSave();
+            if(imageGenDockNodeId === node.id) syncImageGenDock();
+        };
     }
     if(durationInput){
         durationInput.oninput = e => {
             e.stopPropagation();
-            node.duration = Math.max(1, Math.min(60, Number(e.target.value || 5)));
+            const b = durationBounds();
+            node.duration = Math.max(b.min, Math.min(b.max, Number(e.target.value || 5)));
             scheduleSave();
         };
         durationInput.onblur = e => {
-            e.target.value = String(Math.max(1, Math.min(60, Number(node.duration || 5))));
+            const b = durationBounds();
+            e.target.value = String(Math.max(b.min, Math.min(b.max, Number(node.duration || 5))));
         };
     }
     if(aspectSelect){
         aspectSelect.onchange = e => {
             e.stopPropagation();
             node.aspectRatio = e.target.value;
-            delete node._baseFrameH;
-            delete node._stageAspect;
-            fitGeneratorNodeHeight(node);
-            refreshGenStage(
-                nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`),
-                node
-            );
+            morphEmptyGenStageToConsoleRatio(node);
             scheduleSave();
-            if(imageGenDockNodeId === node.id) positionImageGenDock(node);
         };
     }
     if(resolutionSelect){
@@ -22669,11 +22828,26 @@ async function rhUploadValueIfNeeded(value, node=null){
     return data.data?.fileName || text;
 }
 function rhSummarizeTaskFail(raw){
-    const text = String(raw || '').trim();
-    if(!text) return tr('canvas.rhFailed');
+    if(raw == null || raw === '') return tr('canvas.rhFailed');
+    if(typeof raw === 'object'){
+        const obj = raw;
+        const msg = String(obj.errorMessage || obj.error_message || obj.message || obj.msg || '').trim();
+        const code = String(obj.errorCode || obj.error_code || obj.code || '').trim();
+        if(msg) return code ? `[${code}] ${msg}` : msg;
+        try {
+            const json = JSON.stringify(obj);
+            if(json && json !== '{}' && json !== '[]') return json.length > 320 ? `${json.slice(0, 320)}…` : json;
+        } catch(_) {}
+        return tr('canvas.rhFailed');
+    }
+    const text = String(raw).trim();
+    if(!text || text === '[object Object]') return tr('canvas.rhFailed');
     if(text.startsWith('{') || text.startsWith('[')){
         try {
             const obj = JSON.parse(text);
+            const msg = String(obj.errorMessage || obj.error_message || obj.message || obj.msg || '').trim();
+            const code = String(obj.errorCode || obj.error_code || obj.code || '').trim();
+            if(msg) return code ? `[${code}] ${msg}` : msg;
             const node = String(obj.node_name || obj.nodeName || '').trim();
             const trace = Array.isArray(obj.traceback) ? obj.traceback.join('\n') : String(obj.traceback || '');
             const extra = String(obj.exception_message || obj.exception_type || '').trim();
@@ -22768,7 +22942,7 @@ async function runRhNode(nodeId, opts={}){
                 result = data;
                 break;
             }
-            if(data.status === 'FAILED') throw new Error(rhSummarizeTaskFail(data.failReason || data.raw));
+            if(data.status === 'FAILED') throw new Error(rhSummarizeTaskFail(data.failReason || data.errorMessage || data.raw));
         }
         if(!result) throw new Error(tr('canvas.rhTimeout'));
         if(!isPendingActive(host, pendingId)) return;
@@ -24002,10 +24176,10 @@ async function runVideoNode(nodeId, opts={}){
             body:JSON.stringify({
                 prompt,
                 provider_id:resolveVideoProviderId(node.apiProvider || 'comfly'),
-                model:node.model || 'veo3-fast',
+                model:node.model || 'hailuo-h3',
                 duration:Number(node.duration || 5),
-                aspect_ratio:node.aspectRatio || '16:9',
-                resolution:node.resolution || '',
+                aspect_ratio:node.aspectRatio || (isHailuoH3VideoModel(node.model) ? 'adaptive' : '16:9'),
+                resolution:node.resolution || (isHailuoH3VideoModel(node.model) ? '768P' : ''),
                 images:refs,
                 videos:videoRefs.map(ref => ref.url),
                 enhance_prompt:Boolean(node.enhancePrompt),
@@ -25950,10 +26124,12 @@ function syncAgentRunStatusAfterTask(gen, {completed=false, failed=false, error=
 function resetTransientNodeRunState(){
     const resumable = new Set(['online-image', 'replica-agent', 'image-repair-agent']);
     nodes.forEach(host => {
-        if(host.type !== 'output' && host.type !== 'generator') return;
-        host._pending = (host._pending || []).filter(p =>
-            Boolean(p?.canvasTaskId) && resumable.has(String(p.canvasTaskType || ''))
-        );
+        // 视频 / msgen / generator 等同构节点都会挂 _pending；只清 output+generator 会留下假「生成中」
+        if(host.type === 'output' || isGenConsoleNode(host)){
+            host._pending = (host._pending || []).filter(p =>
+                Boolean(p?.canvasTaskId) && resumable.has(String(p.canvasTaskType || ''))
+            );
+        }
     });
     nodes.forEach(n => {
         // Batch Poster 内存 run 表在重开后不可恢复，必须清掉以免假 running

@@ -213,6 +213,7 @@
         { "id": "AG108", "desc": "修：视频时长 chip 数字与 s 紧挨（duration input 专用宽度，对齐 count-lite）", "status": "done", "priority": 129 },
         { "id": "AG109", "desc": "修：Premium Agent 旧竖向 CSS（定高/overflow!important）不再作用于 agent-scale-node，恢复横向壳滚动与底栏", "status": "done", "priority": 130 },
         { "id": "AG110", "desc": "UX：Premium Agent 壳高跟内容全量展开——取消 720 封顶与栏内滚动/textarea max-height", "status": "done", "priority": 131 },
+        { "id": "AG111", "desc": "视频节点接入 RunningHub 海螺 H3（hailuo-h3 multimodal-to-video：768P/2K、5–15s、ratio）", "status": "done", "priority": 142 },
         { "id": "HOME1", "desc": "主页 TapNow 布局：顶栏 主页/工作空间/个人空间/公共画廊 + 保留背景品牌", "status": "done", "priority": 106 },
         { "id": "HOME2", "desc": "主页：中央输入框（未接模型）+ 新建项目直接进画布 + 最近 3 项目", "status": "done", "priority": 107 },
         { "id": "HOME3", "desc": "个人空间占位页 + 管理员主页轮播 API/管理页 + 底部自动滑动条", "status": "done", "priority": 108 },

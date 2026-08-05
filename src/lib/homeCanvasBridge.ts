@@ -23,8 +23,7 @@ declare global {
 }
 
 function defaultCanvasTitle(): string {
-  const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-  return `新建画布 ${time}`;
+  return 'Untitled';
 }
 
 export async function fetchRecentCanvases(limit = 3): Promise<CanvasListItem[]> {
