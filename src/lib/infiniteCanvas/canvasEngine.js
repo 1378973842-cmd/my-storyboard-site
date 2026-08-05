@@ -3577,7 +3577,7 @@ const PORT_DOT_OUTSET = 34.5;
 /** 端口圆点磁吸：靠近后圆点吸到十字光标中心，明确「可拉线」 */
 const PORT_MAGNET_ENTER = 55; // 屏幕像素，进入外侧半圆
 const PORT_MAGNET_LEAVE = 62; // 略大，避免在半圆边缘抖回箭头
-const PORT_MAGNET_SNAP_MS = 320; // 首次吸附弹簧时长（与 CSS 对齐）
+const PORT_MAGNET_SNAP_MS = 180; // 首次吸附标记时长（不再给 translate 加 CSS 过渡）
 let portMagnetMouse = null;
 let portMagnetRAF = 0;
 const portMagnetActivePorts = new Set();
@@ -3646,11 +3646,7 @@ function runPortMagnetUpdate(){
         clearAllPortMagnet();
         return;
     }
-    // 能量流动时跳过磁吸：频繁布局读取会冻住主线程上的 SVG dash 动画
-    if(hasFlowingLinkEnergy()){
-        if(portMagnetActivePorts.size) clearAllPortMagnet();
-        return;
-    }
+    // 勿在能量线流动时整板禁用磁吸——生成节点右侧端口会表现为「不跟鼠标」
     const scale = Math.max(0.08, viewport.scale || 1);
     const boardRect = board.getBoundingClientRect();
     const world = screenToWorld(mouse.x, mouse.y);
@@ -3681,16 +3677,14 @@ function runPortMagnetUpdate(){
             const ox = kind === 'out' ? Math.max(0, dx / scale) : Math.min(0, dx / scale);
             const oy = dy / scale;
             if(!wasActive){
-                // 首次吸附：弹簧飞向光标，结束后再零延迟跟随
                 port.classList.add('is-magnetic');
                 el.classList.add('ports-open');
                 beginPortMagnetSnap(port);
-                // 强制从原点起算，避免同帧无过渡硬切
-                void dot.offsetWidth;
                 scheduleLinkGeometryRefresh(new Set([n.id]));
             } else {
                 port.classList.add('is-magnetic');
             }
+            // 每帧直写位移（CSS 不得给 translate 加 transition）
             dot.style.setProperty('--dot-x', `${ox.toFixed(2)}px`);
             dot.style.setProperty('--dot-y', `${oy.toFixed(2)}px`);
             stillActive.add(port);
@@ -5749,8 +5743,11 @@ function startTitleEdit(id, titleEl){
 }
 async function setCanvasTitle(id, title){
     const item = canvases.find(c => c.id === id);
+    const prevListTitle = item?.title;
+    const prevOpenTitle = canvas?.id === id ? canvas.title : null;
     if(item) item.title = title;
     if(canvas?.id === id) canvas.title = title;
+    if(currentCanvasTitle && canvas?.id === id) currentCanvasTitle.textContent = title;
     renderCanvasList();
     try {
         let target = canvas?.id === id ? canvas : null;
@@ -5758,21 +5755,47 @@ async function setCanvasTitle(id, title){
             const data = await apiFetch(`/api/canvases/${id}`).then(r => r.json());
             target = data.canvas;
         }
+        if(!target) throw new Error('重命名失败');
         target.title = title;
+        // 当前打开板优先用 lastCanvasUpdatedAt，避免刚保存后 canvas.updated_at 未跟上导致冲突
+        const baseAt = canvas?.id === id
+            ? Number(lastCanvasUpdatedAt || target.updated_at || 0)
+            : Number(target.updated_at || 0);
         const res = await apiFetch(`/api/canvases/${id}`, {
             method:'PUT',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
                 title:target.title,
                 icon:target.icon,
-                base_updated_at:Number(target.updated_at || lastCanvasUpdatedAt || 0)
+                base_updated_at:baseAt
             })
         });
         if(!res.ok) throw new Error('重命名失败');
-        if(currentCanvasTitle && canvas?.id === id) currentCanvasTitle.textContent = title;
+        const data = await res.json().catch(() => ({}));
+        const saved = data?.canvas;
+        const nextAt = Number(saved?.updated_at || 0);
+        const nextTitle = String(saved?.title || title);
+        if(item){
+            item.title = nextTitle;
+            if(nextAt) item.updated_at = nextAt;
+        }
+        if(canvas?.id === id){
+            canvas.title = nextTitle;
+            if(nextAt){
+                canvas.updated_at = nextAt;
+                lastCanvasUpdatedAt = nextAt;
+            }
+            if(currentCanvasTitle) currentCanvasTitle.textContent = nextTitle;
+        }
         await loadCanvasList(false);
     } catch(e){
-        setStatus('重命名失败');
+        if(item && prevListTitle != null) item.title = prevListTitle;
+        if(canvas?.id === id && prevOpenTitle != null){
+            canvas.title = prevOpenTitle;
+            if(currentCanvasTitle) currentCanvasTitle.textContent = prevOpenTitle;
+        }
+        renderCanvasList();
+        setStatus(langIsEn() ? 'Rename failed' : '重命名失败');
         console.error(e);
     }
 }
@@ -29693,14 +29716,17 @@ on(board, 'pointerdown', onBoardPointerDown);
 const trackBoardPointer = e => {
     if(!canvas || !board) return;
     lastMouseBoard = screenToWorld(e.clientX, e.clientY);
+    // 捕获阶段也刷磁吸：节点内部 stopPropagation 时右侧端口仍能跟手
+    if(!tempLink && !dragNode && !dragBoard && !resizeNode){
+        schedulePortMagnetUpdate(e.clientX, e.clientY);
+    }
 };
-// 捕获阶段：节点/浮层 stopPropagation 时仍刷新粘贴落点
+// 捕获阶段：节点/浮层 stopPropagation 时仍刷新粘贴落点 / 端口磁吸
 on(board, 'pointermove', trackBoardPointer, {capture: true});
 on(board, 'mousemove', e => {
     trackBoardPointer(e);
     if(genRefPick) updateGenRefPickHover(e.clientX, e.clientY);
     scheduleConnectionHoverUpdate(e);
-    schedulePortMagnetUpdate(e.clientX, e.clientY);
     if(canvas && knifeActive && !isEditableTarget(e.target) && !dragNode && !dragBoard && !resizeNode && !tempLink){
         continueKnifeDrag(e);
     } else if(!e.shiftKey) {

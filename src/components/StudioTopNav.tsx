@@ -104,6 +104,7 @@ function CanvasHeaderCluster({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const renameBusyRef = useRef(false);
 
   const syncMeta = useCallback(() => {
     if (!isInfiniteCanvasEditorOpen()) {
@@ -209,14 +210,20 @@ function CanvasHeaderCluster({
   }, [meta?.title]);
 
   const commitRename = useCallback(async () => {
+    if (renameBusyRef.current) return;
     const trimmed = draft.trim();
     if (!trimmed || trimmed === meta?.title) {
       cancelRename();
       return;
     }
+    renameBusyRef.current = true;
     setEditing(false);
-    await updateCurrentCanvasTitle(trimmed);
-    syncMeta();
+    try {
+      await updateCurrentCanvasTitle(trimmed);
+      syncMeta();
+    } finally {
+      renameBusyRef.current = false;
+    }
   }, [cancelRename, draft, meta?.title, syncMeta]);
 
   const runAction = useCallback(async (id: (typeof CANVAS_BRAND_MENU)[number]['id']) => {

@@ -2034,8 +2034,20 @@
 .infinite-canvas-root.canvas-node-drag .generator-node > .port,
 .infinite-canvas-root.canvas-node-drag .msgen-node > .port,
 .infinite-canvas-root.canvas-node-drag .video-node > .port { cursor:crosshair !important; }
-.image-preview-wrap { position:relative; flex:1; min-height:0; display:flex; align-items:center; justify-content:center; border-radius:18px; overflow:hidden; }
-.image-node img { display:block; width:100%; height:auto; max-height:none; object-fit:contain; border-radius:18px; background:transparent; box-shadow:0 28px 64px -28px rgba(0,0,0,.55); }
+/* 透明图层落在灰底圆角板上（对齐参考：灰底托图，不露画布点阵） */
+.image-preview-wrap {
+  position:relative;
+  flex:1;
+  min-height:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:18px;
+  overflow:hidden;
+  background:#2a2928;
+  box-shadow:0 28px 64px -28px rgba(0,0,0,.55);
+}
+.image-node img { display:block; width:100%; height:auto; max-height:none; object-fit:contain; border-radius:18px; background:transparent; box-shadow:none; }
 .image-node video { display:block; width:100%; max-height:260px; object-fit:contain; border-radius:16px; background:#0f172a; }
 .node.sized.image-node img { flex:0 0 auto; width:100%; height:auto; max-height:100%; object-fit:contain; }
 .node.sized.image-node video { flex:1; min-height:0; height:100%; max-height:none; }
@@ -2400,10 +2412,15 @@
   box-shadow:none;
 }
 .gen-stage.has-images .gen-stage-frame {
-  background:transparent;
+  /* 有图仍保灰底：透明 PNG 不露画布点阵 */
+  background:#2a2928;
   box-shadow:none;
   height:auto;
   overflow:visible;
+}
+.gen-stage.has-images .gen-stage-hero {
+  background:#2a2928;
+  border-radius:18px;
 }
 .gen-stage.has-images .gen-stage-hero img,
 .gen-stage.has-images .gen-stage-hero video {
@@ -6143,9 +6160,9 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
   pointer-events:none !important;
   transition:opacity .12s ease;
 }
-/* 跟随阶段：零延迟贴十字；首次吸附用 is-magnetic-snap 弹簧 */
+/* 跟随阶段：transform 必须零延迟，否则每帧改 --dot-x/y 会被长 transition 拖成「不跟手」 */
 .port.is-magnetic .port-dot {
-  transition:none;
+  transition:border-color .2s ease, opacity .18s ease;
   --port-slide:0px;
   --dot-scale:1.08;
   opacity:1;
@@ -6153,8 +6170,9 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
   background:transparent;
   box-shadow:none;
 }
+/* 保留 snap 类作时序标记；禁止再给 translate 加过渡 */
 .port.is-magnetic-snap .port-dot {
-  transition:transform .32s cubic-bezier(.22,1.25,.36,1), border-color .2s ease, opacity .22s ease;
+  transition:border-color .2s ease, opacity .18s ease;
 }
 .infinite-canvas-root.theme-dark .port-dot {
   border:var(--port-stroke) solid rgba(170,170,170,.78);

@@ -263,7 +263,7 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
                     initial={{ opacity: 0, y: 14 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={spring}
-                    className="group relative isolate overflow-hidden rounded-[18px] bg-[#161616] md:rounded-[20px]"
+                    className="group relative overflow-hidden rounded-[18px] bg-[#161616] md:rounded-[20px]"
                   >
                     <button
                       type="button"
@@ -271,29 +271,37 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
                       onClick={() => setDetail(item)}
                       aria-label={`查看 ${item.title}`}
                     >
-                      <span className="absolute inset-0 overflow-hidden">
-                        <img
-                          src={src}
-                          alt=""
-                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-                          loading="lazy"
-                          draggable={false}
-                        />
-                      </span>
-                      {/* 底部毛玻璃：圆角贴齐卡片底边，略向下延伸 1px 消掉发丝缝 */}
-                      <span
-                        className="pointer-events-none absolute inset-x-0 -bottom-px z-[1] rounded-b-[18px] bg-black/50 px-3.5 pb-[calc(0.875rem+1px)] pt-3 backdrop-blur-[28px] md:rounded-b-[20px]"
-                        style={{ WebkitBackdropFilter: 'blur(28px)' }}
-                        aria-hidden
-                      >
-                        <span className="block truncate text-[11.5px] text-white/70">
-                          {ownerHandle(item.owner_name)}
-                        </span>
-                        <span className="mt-0.5 block truncate pr-14 text-[14px] font-semibold tracking-[-0.01em] text-[#f2efee]">
-                          {item.title || '未命名作品'}
-                        </span>
-                      </span>
+                      <img
+                        src={src}
+                        alt=""
+                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                        loading="lazy"
+                        draggable={false}
+                      />
                     </button>
+                    {/*
+                      毛玻璃挂在卡片层（勿塞进带 overflow 的 button）：
+                      backdrop-filter + 双重裁切会在右/底露出发丝缝。
+                      左右底各外扩 1px，由卡片 overflow 裁齐圆角。
+                    */}
+                    <div
+                      className="pointer-events-none absolute z-[1] bg-black/50 px-3.5 pt-3 backdrop-blur-[28px]"
+                      style={{
+                        left: -1,
+                        right: -1,
+                        bottom: -1,
+                        paddingBottom: 'calc(0.875rem + 1px)',
+                        WebkitBackdropFilter: 'blur(28px)',
+                      }}
+                      aria-hidden
+                    >
+                      <span className="block truncate text-[11.5px] text-white/70">
+                        {ownerHandle(item.owner_name)}
+                      </span>
+                      <span className="mt-0.5 block truncate pr-14 text-[14px] font-semibold tracking-[-0.01em] text-[#f2efee]">
+                        {item.title || '未命名作品'}
+                      </span>
+                    </div>
                     <button
                       type="button"
                       onClick={(e) => void onToggleFavorite(item, e)}
