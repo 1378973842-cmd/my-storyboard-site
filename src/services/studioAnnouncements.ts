@@ -61,6 +61,33 @@ export function registerStudioAnnouncementRoutes(
     }
   });
 
+  const selectAnnouncementById = db.prepare(
+    `SELECT a.id, a.title, a.body, a.author_id, a.created_at,
+            u.display_name AS author_name, 0 AS read
+     FROM studio_announcements a
+     JOIN users u ON u.id = a.author_id
+     WHERE a.id = ?`
+  );
+
+  app.get("/api/admin/announcements", requireAdmin, (_req, res) => {
+    try {
+      const rows = db
+        .prepare(
+          `SELECT a.id, a.title, a.body, a.author_id, a.created_at,
+                  u.display_name AS author_name,
+                  (SELECT COUNT(*) FROM studio_announcement_reads r WHERE r.announcement_id = a.id) AS read_count
+           FROM studio_announcements a
+           JOIN users u ON u.id = a.author_id
+           ORDER BY a.created_at DESC
+           LIMIT 200`
+        )
+        .all() as Array<AnnouncementRow & { read_count: number }>;
+      res.json({ announcements: rows });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "加载公告失败" });
+    }
+  });
+
   app.post("/api/admin/announcements", requireAdmin, (req, res) => {
     try {
       const title = String(req.body?.title ?? "").trim();
@@ -74,18 +101,46 @@ export function registerStudioAnnouncementRoutes(
       db.prepare(
         `INSERT INTO studio_announcements (id, title, body, author_id) VALUES (?, ?, ?, ?)`
       ).run(id, title, body, req.authUser!.id);
-      const row = db
-        .prepare(
-          `SELECT a.id, a.title, a.body, a.author_id, a.created_at,
-                  u.display_name AS author_name, 0 AS read
-           FROM studio_announcements a
-           JOIN users u ON u.id = a.author_id
-           WHERE a.id = ?`
-        )
-        .get(id) as AnnouncementRow;
+      const row = selectAnnouncementById.get(id) as AnnouncementRow;
       res.json({ ok: true, announcement: row });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : "发布公告失败" });
+    }
+  });
+
+  app.put("/api/admin/announcements/:id", requireAdmin, (req, res) => {
+    try {
+      const id = String(req.params.id || "").trim();
+      if (!id) return res.status(400).json({ error: "无效公告" });
+      const exists = db.prepare("SELECT id FROM studio_announcements WHERE id = ?").get(id);
+      if (!exists) return res.status(404).json({ error: "公告不存在" });
+
+      const title = String(req.body?.title ?? "").trim();
+      const body = String(req.body?.body ?? "").trim();
+      if (!title) return res.status(400).json({ error: "标题不能为空" });
+      if (!body) return res.status(400).json({ error: "正文不能为空" });
+      if (title.length > 120) return res.status(400).json({ error: "标题过长（最多 120 字）" });
+      if (body.length > 4000) return res.status(400).json({ error: "正文过长（最多 4000 字）" });
+
+      db.prepare(`UPDATE studio_announcements SET title = ?, body = ? WHERE id = ?`).run(title, body, id);
+      const row = selectAnnouncementById.get(id) as AnnouncementRow;
+      res.json({ ok: true, announcement: row });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "更新公告失败" });
+    }
+  });
+
+  app.delete("/api/admin/announcements/:id", requireAdmin, (req, res) => {
+    try {
+      const id = String(req.params.id || "").trim();
+      if (!id) return res.status(400).json({ error: "无效公告" });
+      const exists = db.prepare("SELECT id FROM studio_announcements WHERE id = ?").get(id);
+      if (!exists) return res.status(404).json({ error: "公告不存在" });
+      db.prepare(`DELETE FROM studio_announcement_reads WHERE announcement_id = ?`).run(id);
+      db.prepare(`DELETE FROM studio_announcements WHERE id = ?`).run(id);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "删除公告失败" });
     }
   });
 

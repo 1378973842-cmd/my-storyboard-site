@@ -12,8 +12,11 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '../lib/utils';
+import { BRAND_LOGO_SRC, BRAND_NAME } from './StudioBrand';
 import {
   fetchAnnouncements,
+  formatAnnouncementDate,
+  formatAnnouncementRelativeTime,
   formatAnnouncementTime,
   markAllAnnouncementsRead,
   markAnnouncementRead,
@@ -52,7 +55,7 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<StudioAnnouncement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   const load = useCallback(async () => {
@@ -81,13 +84,15 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
   }, [open, load]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open && !detail) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key !== 'Escape') return;
+      if (detail) setDetail(null);
+      else setOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open]);
+  }, [open, detail]);
 
   const visibleItems = useMemo(() => {
     if (tab !== 'official') return [] as StudioAnnouncement[];
@@ -95,8 +100,10 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
     return items;
   }, [items, listFilter, tab]);
 
+  const closeDetail = useCallback(() => setDetail(null), []);
+
   const onOpenItem = useCallback(async (item: StudioAnnouncement) => {
-    setExpandedId((id) => (id === item.id ? null : item.id));
+    setDetail(item);
     if (item.read) return;
     try {
       await markAnnouncementRead(item.id);
@@ -104,6 +111,7 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
         prev.map((row) => (row.id === item.id ? { ...row, read: true } : row)),
       );
       setUnreadCount((n) => Math.max(0, n - 1));
+      setDetail((cur) => (cur?.id === item.id ? { ...cur, read: true } : cur));
     } catch {
       /* ignore */
     }
@@ -137,6 +145,7 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
           e.stopPropagation();
           setOpen((v) => !v);
           setFilterOpen(false);
+          setDetail(null);
         }}
       >
         <Bell className="h-4 w-4" strokeWidth={1.7} aria-hidden />
@@ -157,7 +166,10 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     className="absolute inset-0 bg-black/45 backdrop-blur-[2px]"
-                    onClick={() => setOpen(false)}
+                    onClick={() => {
+                      setDetail(null);
+                      setOpen(false);
+                    }}
                   />
                   <motion.div
                     role="dialog"
@@ -297,47 +309,124 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
                           </p>
                         ) : (
                           <ul className="space-y-2.5">
-                            {visibleItems.map((item) => {
-                              const expanded = expandedId === item.id;
-                              return (
-                                <li key={item.id}>
-                                  <button
-                                    type="button"
-                                    onClick={() => void onOpenItem(item)}
-                                    className="relative w-full rounded-2xl bg-[#1a1919] px-4 py-3.5 text-left transition-colors hover:bg-[#1f1e1e]"
-                                    style={{ outline: '0.5px solid rgba(255,255,255,0.06)', outlineOffset: '-0.5px' }}
-                                  >
-                                    {!item.read ? (
-                                      <span className="absolute right-3.5 top-3.5 h-2 w-2 rounded-full bg-[#ff5a6a]" />
-                                    ) : null}
+                            {visibleItems.map((item) => (
+                              <li key={item.id}>
+                                <button
+                                  type="button"
+                                  onClick={() => void onOpenItem(item)}
+                                  className="relative flex w-full items-start gap-3 rounded-2xl bg-[#1a1919] px-3.5 py-3.5 text-left transition-colors hover:bg-[#1f1e1e] md:gap-3.5 md:px-4"
+                                  style={{ outline: '0.5px solid rgba(255,255,255,0.06)', outlineOffset: '-0.5px' }}
+                                >
+                                  {!item.read ? (
+                                    <span className="absolute right-3.5 top-3.5 h-2 w-2 rounded-full bg-[#ff5a6a]" />
+                                  ) : null}
+                                  <img
+                                    src={BRAND_LOGO_SRC}
+                                    alt=""
+                                    width={44}
+                                    height={44}
+                                    className="mt-0.5 h-11 w-11 shrink-0 rounded-[12px] object-cover"
+                                    draggable={false}
+                                    aria-hidden
+                                  />
+                                  <span className="min-w-0 flex-1 pr-4">
                                     <span
                                       className={cn(
-                                        'block pr-5 text-[14px] font-semibold leading-snug',
+                                        'block truncate text-[14px] font-semibold leading-snug',
                                         item.read ? 'text-[#e5e2e1]/55' : 'text-[#e5e2e1]',
                                       )}
                                     >
-                                      {item.title}
+                                      {item.title || BRAND_NAME}
                                     </span>
-                                    <span className="mt-1.5 block text-[12px] text-[#e5e2e1]/4">
-                                      {formatAnnouncementTime(item.created_at)}
+                                    {/* 勿加 block：会盖掉 line-clamp 的 -webkit-box，导致全文溢出 */}
+                                    <span className="mt-1.5 line-clamp-2 overflow-hidden break-words text-[12.5px] leading-relaxed text-[#e5e2e1]/45">
+                                      {item.body.replace(/\s+/g, ' ').trim()}
                                     </span>
-                                    {expanded ? (
-                                      <span className="mt-3 block whitespace-pre-wrap break-words text-[13px] leading-relaxed text-[#e5e2e1]/72">
-                                        {item.body}
-                                      </span>
-                                    ) : (
-                                      <span className="mt-2 block line-clamp-2 text-[12.5px] leading-relaxed text-[#e5e2e1]/45">
-                                        {item.body}
-                                      </span>
-                                    )}
-                                  </button>
-                                </li>
-                              );
-                            })}
+                                    <span className="mt-2.5 block text-[12px] text-[#e5e2e1]/38">
+                                      {formatAnnouncementDate(item.created_at)}
+                                    </span>
+                                  </span>
+                                </button>
+                              </li>
+                            ))}
                           </ul>
                         )}
                       </div>
                     </section>
+                  </motion.div>
+                </div>
+              ) : null}
+            </AnimatePresence>,
+            document.body,
+          )
+        : null}
+
+      {typeof document !== 'undefined'
+        ? createPortal(
+            <AnimatePresence>
+              {detail ? (
+                <div className="fixed inset-0 z-[230] flex items-center justify-center p-3 sm:p-6">
+                  <motion.button
+                    type="button"
+                    aria-label="关闭详情"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
+                    onClick={closeDetail}
+                  />
+                  <motion.div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="announcement-detail-title"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 12 }}
+                    transition={spring}
+                    className="relative z-10 flex max-h-[min(820px,88dvh)] w-full max-w-[560px] flex-col overflow-hidden rounded-[22px] bg-[#1a1919] shadow-[0_40px_90px_-36px_rgba(0,0,0,0.8)]"
+                    style={{ outline: '0.5px solid rgba(255,255,255,0.1)', outlineOffset: '-0.5px' }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <header className="flex shrink-0 items-center justify-between gap-3 px-5 pb-3 pt-4 md:px-6 md:pt-5">
+                      <h2 className="text-[16px] font-semibold tracking-[-0.02em] text-[#e5e2e1]">
+                        系统消息
+                      </h2>
+                      <button
+                        type="button"
+                        onClick={closeDetail}
+                        className="flex h-9 w-9 items-center justify-center rounded-full text-[#e5e2e1]/55 transition-colors hover:bg-white/5 hover:text-[#e5e2e1]"
+                        aria-label="关闭"
+                      >
+                        <X className="h-4 w-4" strokeWidth={1.75} />
+                      </button>
+                    </header>
+
+                    <div className="shell-slim-scrollbar min-h-0 flex-1 overflow-y-auto px-5 pb-2 md:px-6">
+                      <h3
+                        id="announcement-detail-title"
+                        className="text-[20px] font-semibold leading-snug tracking-[-0.02em] text-[#e5e2e1] md:text-[22px]"
+                      >
+                        {detail.title}
+                      </h3>
+                      <p className="mt-2 text-[12.5px] text-[#e5e2e1]/42">
+                        {formatAnnouncementRelativeTime(detail.created_at)}
+                        <span className="mx-1.5 text-[#e5e2e1]/22">·</span>
+                        <span className="text-[#e5e2e1]/35">{formatAnnouncementTime(detail.created_at)}</span>
+                      </p>
+                      <div className="mt-5 whitespace-pre-wrap break-words text-[14px] leading-[1.7] text-[#e5e2e1]/78">
+                        {detail.body}
+                      </div>
+                    </div>
+
+                    <footer className="flex shrink-0 justify-end px-5 pb-4 pt-3 md:px-6 md:pb-5">
+                      <button
+                        type="button"
+                        onClick={closeDetail}
+                        className="h-10 rounded-full bg-[#e5e2e1] px-6 text-[13.5px] font-medium text-[#141414] transition-colors hover:bg-white"
+                      >
+                        我知道了
+                      </button>
+                    </footer>
                   </motion.div>
                 </div>
               ) : null}

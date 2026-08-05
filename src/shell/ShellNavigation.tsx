@@ -22,7 +22,8 @@ export type ShellScreen =
   | 'gallery'
   | 'admin-users'
   | 'admin-rh-workflows'
-  | 'admin-home-carousel';
+  | 'admin-home-carousel'
+  | 'admin-announcements';
 
 type SubScreen =
   | 'my-favorites'
@@ -30,7 +31,8 @@ type SubScreen =
   | 'gallery'
   | 'admin-users'
   | 'admin-rh-workflows'
-  | 'admin-home-carousel';
+  | 'admin-home-carousel'
+  | 'admin-announcements';
 
 const SUB_SCREENS = new Set<ShellScreen>([
   'my-favorites',
@@ -39,6 +41,7 @@ const SUB_SCREENS = new Set<ShellScreen>([
   'admin-users',
   'admin-rh-workflows',
   'admin-home-carousel',
+  'admin-announcements',
 ]);
 
 function isSubScreen(screen: ShellScreen): screen is SubScreen {
@@ -67,6 +70,7 @@ const VALID_SCREENS = new Set<ShellScreen>([
   'admin-users',
   'admin-rh-workflows',
   'admin-home-carousel',
+  'admin-announcements',
 ]);
 
 function readSnap(): Snap | null {
@@ -127,6 +131,7 @@ type ShellNavigationValue = {
   openAdminUsers: () => void;
   openAdminRhWorkflows: () => void;
   openAdminHomeCarousel: () => void;
+  openAdminAnnouncements: () => void;
   goBack: () => void;
   warmInfiniteCanvas: () => void;
 };
@@ -244,6 +249,7 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
   const openAdminUsers = useCallback(() => openSubPage('admin-users'), [openSubPage]);
   const openAdminRhWorkflows = useCallback(() => openSubPage('admin-rh-workflows'), [openSubPage]);
   const openAdminHomeCarousel = useCallback(() => openSubPage('admin-home-carousel'), [openSubPage]);
+  const openAdminAnnouncements = useCallback(() => openSubPage('admin-announcements'), [openSubPage]);
   const goBack = useCallback(() => {
     setScreen(returnToRef.current);
   }, []);
@@ -273,6 +279,7 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
       openAdminUsers,
       openAdminRhWorkflows,
       openAdminHomeCarousel,
+      openAdminAnnouncements,
       goBack,
       warmInfiniteCanvas,
     }),
@@ -297,6 +304,7 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
       openAdminUsers,
       openAdminRhWorkflows,
       openAdminHomeCarousel,
+      openAdminAnnouncements,
       goBack,
       warmInfiniteCanvas,
     ],

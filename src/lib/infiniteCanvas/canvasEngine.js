@@ -8584,8 +8584,11 @@ function closeLinkCreateMenu(){
     nodeInputMenu.innerHTML = '';
     nodeOutputMenu.innerHTML = '';
     linkCreateState = null;
-    // 关掉选节点菜单时清掉悬空预览线
-    if(tempLink?.pendingMenu) cancelTempLink();
+    // 关掉选节点菜单时清掉悬空预览线，并恢复生图控制台
+    if(tempLink?.pendingMenu){
+        cancelTempLink();
+        restoreImageGenDockAfterLink();
+    }
 }
 function openImageNodeMenu(nodeId, clientX, clientY){
     ensureImageNodeMenuOutsideDismiss();
@@ -19976,6 +19979,20 @@ function collapseImageGenDockForDrag(){
     imageGenDockEl.setAttribute('aria-hidden', 'true');
     imageGenDockEl.style.pointerEvents = 'none';
 }
+/** 拉端口连线时收起生图控制台，避免挡线/挡落点 */
+function collapseImageGenDockForLink(){
+    if(!imageGenDockEl || imageGenDockEl.hidden) return;
+    imageGenDockEl.hidden = true;
+    imageGenDockEl.setAttribute('aria-hidden', 'true');
+    imageGenDockEl.style.pointerEvents = 'none';
+}
+function restoreImageGenDockAfterLink(){
+    if(tempLink) return;
+    requestAnimationFrame(() => {
+        if(tempLink) return;
+        syncImageGenDock();
+    });
+}
 function removeImageGenDock(){
     if(imageGenDockEl?.__sizeOutsideClose){
         document.removeEventListener('pointerdown', imageGenDockEl.__sizeOutsideClose, true);
@@ -20299,7 +20316,10 @@ function bindImageGenDockControls(wrap, node){
     wrap.onclick = e => e.stopPropagation();
 }
 function remountImageGenDock(node){
+    // 仅同节点 remount 时保留光标/选区；切到别的生成节点绝不能把旧提示词写进新节点
+    const prevDockId = imageGenDockNodeId;
     const keepPrompt = (() => {
+        if(!node?.id || prevDockId !== node.id) return null;
         if(!imageGenDockEl?.contains?.(document.activeElement)) return null;
         const ta = imageGenDockEl.querySelector?.('.gen-dock-prompt');
         if(!ta || document.activeElement !== ta) return null;
@@ -20374,6 +20394,12 @@ function syncImageGenDock(){
         removeImageActionBar();
         return;
     }
+    // 拉端口连线中：保持收起，勿 remount 把控制台又拉出来
+    if(tempLink){
+        collapseImageGenDockForLink();
+        syncImageActionBar();
+        return;
+    }
     // 拖动中保持收起，避免中途 remount/定位把控制台又拉出来
     if(dragNode?.chromeActive && dragTouchesImageGenDock()){
         collapseImageGenDockForDrag();
@@ -20385,8 +20411,12 @@ function syncImageGenDock(){
     const isGen = only && isGenConsoleNode(only);
     const disabled = Boolean(only && isNodeDisabled(only));
     if(!isGen){
-        // 打字中勿因短暂选中抖动拆掉控制台
-        if(isCanvasTextEditing() && imageGenDockEl?.contains?.(document.activeElement)) return;
+        // 打字中勿因「点空白」短暂选中抖动拆掉控制台；点到其它节点时 selected 已变，照常收起
+        if(
+            isCanvasTextEditing()
+            && imageGenDockEl?.contains?.(document.activeElement)
+            && selected.size === 0
+        ) return;
         removeImageGenDock();
     } else if(disabled){
         // 禁用：与节点变灰同帧收起；隐藏而非销毁，恢复时可瞬间展开
@@ -20401,9 +20431,17 @@ function syncImageGenDock(){
         const orphanCount = canvasRoot
             ? canvasRoot.querySelectorAll('.image-gen-dock-host').length
             : (board?.querySelectorAll('.image-gen-dock-host').length || 0);
-        // 仅「输入框打字」时避免 remount 冲掉光标；点 xx/按钮也算 contains(active)，不能挡参考图刷新
+        // 仅「当前节点控制台里打字」时避免 remount 冲掉光标；换节点必须放行
         const active = document.activeElement;
         const textEditingHere = Boolean(imageGenDockEl?.contains?.(active) && isEditableTarget(active));
+        const switchingAwayWhileTyping = Boolean(
+            textEditingHere
+            && imageGenDockNodeId
+            && imageGenDockNodeId !== only.id
+        );
+        if(switchingAwayWhileTyping){
+            try { active.blur?.(); } catch(_){ /* ignore */ }
+        }
         if(imageGenDockNodeId === only.id && imageGenDockEl?.isConnected){
             const wasHidden = Boolean(imageGenDockEl.hidden);
             imageGenDockEl.hidden = false;
@@ -20418,7 +20456,7 @@ function syncImageGenDock(){
                 softRefreshGeneratorInputLists(only);
                 positionImageGenDock(only);
             }
-        } else if(!textEditingHere){
+        } else if(!textEditingHere || switchingAwayWhileTyping){
             remountImageGenDock(only);
         }
     }
@@ -28266,6 +28304,9 @@ function startLink(e, originId, originKind){
     // 拉线中隐藏起点圆点，避免和预览线叠在一起
     markLinkOriginPort(originId, originKind);
     clearAllPortMagnet();
+    // 控制台显示时拉端口：先收起，松手/取消后再展开
+    collapseImageGenDockForLink();
+    try { document.activeElement?.blur?.(); } catch(_){ /* ignore */ }
     refreshTempLinkDom();
     const pointerId = e.pointerId ?? null;
     let finished = false;
@@ -28284,8 +28325,13 @@ function startLink(e, originId, originKind){
         if(e2.type === 'pointerup' && e2.button !== 0) return;
         finished = true;
         finishTempLink(e2);
+        // pendingMenu（松手开创建菜单）时仍在拉线态，等菜单关闭再展开
+        if(!tempLink?.pendingMenu) restoreImageGenDockAfterLink();
     };
-    const onCancel = () => cancelTempLink();
+    const onCancel = () => {
+        cancelTempLink();
+        restoreImageGenDockAfterLink();
+    };
     document.addEventListener('pointermove', onMove, true);
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('pointerup', onFinish, true);
@@ -29950,7 +29996,11 @@ on(window, 'keydown', e => {
     }
     if(e.key === 'Escape' && outputLightbox?.classList.contains('open')) { closeOutputLightbox(); return; }
     if(e.key === 'Escape' && document.getElementById('textOutputReader')?.classList.contains('open')) { closeTextOutputReader(); return; }
-    if(e.key === 'Escape' && tempLink){ cancelTempLink(); return; }
+    if(e.key === 'Escape' && tempLink){
+        cancelTempLink();
+        restoreImageGenDockAfterLink();
+        return;
+    }
     if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') { e.preventDefault(); groupSelectedImages(); }
     // Ctrl/Cmd+B：禁用/恢复选中节点。与 Ctrl+G 一致——焦点在 gen-dock 提示词框时也要生效
     // （旧逻辑遇到 TEXTAREA 直接 return，Gen Console 下几乎永远失效）

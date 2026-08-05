@@ -45,6 +45,7 @@ import { MyFavoritesPage } from './pages/MyFavoritesPage';
 import { PersonalSpacePage } from './pages/PersonalSpacePage';
 import { GalleryPage } from './pages/GalleryPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
+import { AdminAnnouncementsPage } from './pages/AdminAnnouncementsPage';
 import { AdminRunningHubWorkflowsPage } from './pages/AdminRunningHubWorkflowsPage';
 import { AdminHomeCarouselPage } from './pages/AdminHomeCarouselPage';
 import { ZoomableLightboxImage } from './components/ZoomableLightboxImage';
@@ -292,6 +293,7 @@ export default function App() {
   const showAdminUsersPage = screen === 'admin-users';
   const showAdminRhWorkflowsPage = screen === 'admin-rh-workflows';
   const showAdminHomeCarouselPage = screen === 'admin-home-carousel';
+  const showAdminAnnouncementsPage = screen === 'admin-announcements';
   /** 主页/工作空间/个人/画廊共用四链顶栏（进到具体画布板后由 TopNav 再藏） */
   const showFourTabNav =
     showCoverPage ||
@@ -306,7 +308,9 @@ export default function App() {
         ? 'admin-rh-workflows'
         : showAdminHomeCarouselPage
           ? 'admin-home-carousel'
-          : undefined;
+          : showAdminAnnouncementsPage
+            ? 'admin-announcements'
+            : undefined;
 
   /** 回到首页时确保画布层不挡滚轮（z-index + body 标记） */
   useEffect(() => {
@@ -673,6 +677,7 @@ export default function App() {
       <AdminUsersPage shellActive={showAdminUsersPage} />
       <AdminRunningHubWorkflowsPage shellActive={showAdminRhWorkflowsPage} />
       <AdminHomeCarouselPage shellActive={showAdminHomeCarouselPage} />
+      <AdminAnnouncementsPage shellActive={showAdminAnnouncementsPage} />
       {/* Keep editor mounted after first open (cover / main studio), so draft persists */}
       {(showImageEditorPage || imageEditorKeepAlive) && (
         <StudioHeroShell active={showImageEditorPage && !showCoverPage}>
