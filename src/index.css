@@ -824,6 +824,7 @@ html[data-theme="light"] body {
   }
 
   .studio-canvas-header-cluster {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -831,70 +832,362 @@ html[data-theme="light"] body {
     min-width: 0;
   }
 
-  .studio-canvas-header-row {
-    display: flex;
+  .studio-canvas-header-pill {
+    display: inline-flex;
     align-items: center;
-    gap: 12px;
     min-width: 0;
+    max-width: min(520px, calc(100vw - 1.5rem));
+    min-height: 44px;
+    padding: 4px 6px 4px 4px;
+    border-radius: 999px;
+    background: rgba(28, 27, 27, 0.88);
+    outline: 0.5px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 18px 48px -24px rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
   }
 
-  .studio-canvas-header-logo {
+  .studio-canvas-pill-seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    min-height: 36px;
+    padding: 0 10px;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: #e5e2e1;
+    cursor: pointer;
+    transition: background 0.16s ease;
+  }
+
+  .studio-canvas-pill-seg:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .studio-canvas-pill-logo {
+    padding-left: 4px;
+    padding-right: 8px;
     flex-shrink: 0;
-    border-radius: 12px;
-    transition: transform 0.18s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+
+  .studio-canvas-pill-title-wrap {
+    min-width: 0;
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+  }
+
+  .studio-canvas-pill-title-wrap.is-editing {
+    padding: 0 10px;
+    min-width: 120px;
+  }
+
+  .studio-canvas-pill-title {
+    max-width: min(280px, 42vw);
+  }
+
+  .studio-canvas-pill-title-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: Inter, -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    line-height: 1.2;
+    color: #e5e2e1;
+  }
+
+  .studio-canvas-pill-chevron {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: rgba(229, 226, 225, 0.45);
+    transition: transform 0.18s ease, color 0.16s ease;
+  }
+
+  .studio-canvas-pill-chevron.is-open {
+    transform: rotate(180deg);
+    color: rgba(255, 184, 102, 0.9);
+  }
+
+  .studio-canvas-pill-sep {
+    width: 1px;
+    height: 18px;
+    flex-shrink: 0;
+    margin: 0 2px;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .studio-canvas-pill-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex-shrink: 0;
+    border-radius: 999px;
+    color: rgba(229, 226, 225, 0.55);
+  }
+
+  .studio-canvas-pill-status.is-saving {
+    color: rgba(255, 184, 102, 0.95);
+  }
+
+  .studio-canvas-pill-status.is-error {
+    color: #fca5a5;
+  }
+
+  .studio-canvas-pill-status-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .studio-canvas-pill-status-icon.is-spin {
+    animation: studio-canvas-status-spin 0.85s linear infinite;
+  }
+
+  @keyframes studio-canvas-status-spin {
+    to { transform: rotate(360deg); }
   }
 
   /* 叠层顶栏品牌：主页/工作空间/个人/画廊共用工作空间尺寸 */
-  .cover-hero-nav-bar .studio-top-brand-hit .studio-brand-mark-logo,
-  .cover-hero-nav-bar .studio-canvas-header-logo .studio-brand-mark-logo {
+  .cover-hero-nav-bar .studio-top-brand-hit .studio-brand-mark-logo {
     width: 40px;
     height: 40px;
     border-radius: 12px;
   }
 
-  .cover-hero-nav-bar .studio-top-brand-hit .cover-nav-brand,
-  .cover-hero-nav-bar .studio-canvas-header-logo .cover-nav-brand {
+  .cover-hero-nav-bar .studio-canvas-header-pill .studio-brand-mark-logo {
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+  }
+
+  .cover-hero-nav-bar .studio-top-brand-hit .cover-nav-brand {
     font-size: 1rem;
   }
 
-  .studio-canvas-header-logo:hover {
-    transform: translateY(-1px);
-  }
-
-  .studio-canvas-header-logo:hover .studio-brand-mark-logo {
+  .studio-canvas-pill-logo:hover .studio-brand-mark-logo {
     box-shadow:
       0 0 0 0.5px rgba(255, 184, 102, 0.35),
-      0 0 18px rgba(255, 184, 102, 0.22),
-      0 10px 24px -12px rgba(0, 0, 0, 0.7);
-    filter: brightness(1.08);
+      0 0 14px rgba(255, 184, 102, 0.18);
+    filter: brightness(1.06);
   }
 
-  .studio-canvas-header-logo[aria-expanded="true"] .studio-brand-mark-logo {
+  .studio-canvas-pill-logo[aria-expanded="true"] .studio-brand-mark-logo {
     box-shadow:
       0 0 0 0.5px rgba(255, 184, 102, 0.42),
-      0 0 20px rgba(255, 184, 102, 0.28),
-      0 10px 24px -12px rgba(0, 0, 0, 0.7);
+      0 0 16px rgba(255, 184, 102, 0.22);
   }
 
-  .studio-canvas-header-logo:hover .studio-brand-mark-logo {
-    transform: scale(1.06);
+  .studio-brand-menu.studio-canvas-header-dropdown,
+  .studio-canvas-switcher {
+    position: absolute;
+    top: calc(100% + 10px);
+    left: 0;
+    z-index: 90;
   }
 
-  .studio-canvas-header-logo:active .studio-brand-mark-logo {
-    transform: scale(0.98);
-  }
-
-  .studio-brand-menu.studio-brand-menu-below {
-    position: static;
-    top: auto;
-    left: auto;
-    margin-top: 8px;
+  .studio-brand-menu.studio-canvas-header-dropdown {
     min-width: 176px;
-    z-index: 80;
   }
 
-  .studio-canvas-meta {
-    flex-shrink: 1;
+  .studio-canvas-switcher {
+    width: min(320px, calc(100vw - 1.5rem));
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    border-radius: 18px;
+    background: rgba(22, 22, 22, 0.96);
+    outline: 0.5px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 22px 56px -22px rgba(0, 0, 0, 0.78);
+    /* 降模糊减轻打开时合成卡顿；底色已够实 */
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    transform-origin: 16px top;
+    will-change: transform, opacity;
+  }
+
+  .studio-canvas-switcher-list {
+    max-height: min(320px, 46vh);
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-right: 2px;
+    content-visibility: auto;
+    contain: content;
+  }
+
+  .studio-canvas-switcher-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .studio-canvas-switcher-search-icon {
+    position: absolute;
+    left: 12px;
+    width: 15px;
+    height: 15px;
+    color: rgba(229, 226, 225, 0.42);
+    pointer-events: none;
+  }
+
+  .studio-canvas-switcher-search-input {
+    width: 100%;
+    height: 38px;
+    padding: 0 12px 0 36px;
+    border: none;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #e5e2e1;
+    font-size: 13px;
+    font-weight: 500;
+    outline: none;
+  }
+
+  .studio-canvas-switcher-search-input::placeholder {
+    color: rgba(229, 226, 225, 0.38);
+  }
+
+  .studio-canvas-switcher-search-input:focus {
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 0 0 0.5px rgba(255, 184, 102, 0.35);
+  }
+
+  .studio-canvas-switcher-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 48px;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 12px;
+    background: transparent;
+    color: #e5e2e1;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.16s ease;
+  }
+
+  .studio-canvas-switcher-item:hover,
+  .studio-canvas-switcher-item.is-active {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .studio-canvas-switcher-item:disabled {
+    opacity: 0.55;
+    cursor: wait;
+  }
+
+  .studio-canvas-switcher-thumb {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border-radius: 10px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.06);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(229, 226, 225, 0.5);
+  }
+
+  .studio-canvas-switcher-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    content-visibility: auto;
+  }
+
+  .studio-canvas-switcher-thumb.is-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .studio-canvas-switcher-name {
+    min-width: 0;
+    flex: 1 1 auto;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+
+  .studio-canvas-switcher-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .studio-canvas-switcher-date {
+    flex-shrink: 0;
+    color: rgba(229, 226, 225, 0.38);
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .studio-canvas-switcher-check {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    color: rgba(229, 226, 225, 0.82);
+  }
+
+  .studio-canvas-switcher-check-spacer {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+  }
+
+  .studio-canvas-switcher-empty {
+    padding: 22px 10px;
+    text-align: center;
+    color: rgba(229, 226, 225, 0.42);
+    font-size: 12px;
+  }
+
+  .studio-canvas-switcher-foot {
+    margin-top: 8px;
+    padding-top: 8px;
+    box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
+  }
+
+  .studio-canvas-switcher-new {
+    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 12px;
+    background: transparent;
+    color: #e5e2e1;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.16s ease;
+  }
+
+  .studio-canvas-switcher-new:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .studio-canvas-switcher-new:disabled {
+    opacity: 0.55;
+    cursor: wait;
   }
 
   .studio-canvas-meta-input {
@@ -904,9 +1197,9 @@ html[data-theme="light"] body {
     padding: 0;
     border: none;
     background: transparent;
-    color: #e5e2e1;
+    color: #ffb866;
     font-family: Inter, -apple-system, "PingFang SC", "Segoe UI", sans-serif;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 600;
     letter-spacing: -0.015em;
     line-height: 1.25;
@@ -937,85 +1230,6 @@ html[data-theme="light"] body {
 
   .studio-brand-menu-item:hover {
     background: rgba(255, 255, 255, 0.06);
-  }
-
-  .studio-canvas-meta {
-    min-width: 0;
-    max-width: min(340px, 48vw);
-    padding: 0;
-    border-radius: 0;
-    background: transparent;
-    outline: none;
-    box-shadow: none;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-
-  .studio-canvas-meta.is-editing {
-    outline: none;
-    box-shadow: none;
-  }
-
-  .studio-canvas-meta.is-editing .studio-canvas-meta-input {
-    color: #ffb866;
-  }
-
-  /* 上：左名称 / 右日期；下：保存状态 */
-  .studio-canvas-meta-topline {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    min-width: 0;
-  }
-
-  .studio-canvas-meta-title {
-    min-width: 0;
-    flex: 1 1 auto;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: #e5e2e1;
-    font-family: Inter, -apple-system, "PingFang SC", "Segoe UI", sans-serif;
-    font-size: 16px;
-    font-weight: 600;
-    letter-spacing: -0.015em;
-    line-height: 1.25;
-  }
-
-  .studio-canvas-meta-date {
-    flex: 0 0 auto;
-    color: rgba(229, 226, 225, 0.42);
-    font-family: Inter, -apple-system, "PingFang SC", "Segoe UI", sans-serif;
-    font-size: 12px;
-    font-weight: 500;
-    letter-spacing: 0.01em;
-    white-space: nowrap;
-  }
-
-  .studio-canvas-meta-time,
-  .studio-canvas-meta-status {
-    margin-top: 2px;
-    color: rgba(229, 226, 225, 0.4);
-    font-family: Inter, -apple-system, "PingFang SC", "Segoe UI", sans-serif;
-    font-size: 12px;
-    font-weight: 500;
-    letter-spacing: 0.01em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .studio-canvas-meta-status.is-saving {
-    color: rgba(255, 184, 102, 0.92);
-  }
-
-  .studio-canvas-meta-status.is-saved {
-    color: rgba(229, 226, 225, 0.4);
-  }
-
-  .studio-canvas-meta-status.is-error {
-    color: #fca5a5;
   }
 
   .cover-nav-text-link {

@@ -696,30 +696,88 @@
 .shortcuts-modal-close:hover { background:rgba(255,255,255,.12); color:#fff6ea; }
 .canvas-node-search-modal {
   position:fixed; inset:0; z-index:140; display:flex; align-items:flex-start; justify-content:center;
-  padding:12vh 16px 24px; background:rgba(8,7,6,.45); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+  padding:10vh 16px 24px; background:rgba(8,7,6,.42); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
 }
 .canvas-node-search-panel {
-  width:min(480px, calc(100vw - 32px)); border-radius:20px; overflow:hidden;
-  background:linear-gradient(180deg, rgba(48,48,52,.96), rgba(38,38,42,.96)); outline:0.5px solid rgba(255,255,255,.1);
-  box-shadow:0 32px 80px -28px rgba(0,0,0,.7), 0 1px 0 rgba(255,255,255,.05) inset;
+  width:min(560px, calc(100vw - 28px)); border-radius:18px; overflow:hidden;
+  background:linear-gradient(180deg, rgba(44,44,48,.97), rgba(32,32,36,.98));
+  outline:0.5px solid rgba(255,255,255,.1);
+  box-shadow:0 36px 90px -30px rgba(0,0,0,.72), 0 1px 0 rgba(255,255,255,.05) inset;
+}
+.canvas-node-search-field {
+  display:flex; align-items:center; gap:10px; margin:12px 12px 4px; padding:10px 12px;
+  border-radius:12px; background:rgba(255,255,255,.05);
+  outline:0.5px solid rgba(255,255,255,.06);
+}
+.canvas-node-search-field > i,
+.canvas-node-search-field > svg {
+  width:16px; height:16px; flex:0 0 auto; color:rgba(229,226,225,.45);
 }
 .canvas-node-search-input {
-  width:100%; border:none; outline:none; background:transparent; color:#e5e2e1;
-  font-size:15px; font-weight:600; padding:16px 18px 12px; letter-spacing:-.01em;
+  flex:1; min-width:0; border:none; outline:none; background:transparent; color:#e5e2e1;
+  font-size:14px; font-weight:600; padding:0; letter-spacing:-.01em;
 }
-.canvas-node-search-input::placeholder { color:rgba(229,226,225,.4); font-weight:500; }
-.canvas-node-search-list { max-height:min(360px, 48vh); overflow:auto; padding:4px 8px 10px; }
+.canvas-node-search-input::placeholder { color:rgba(229,226,225,.38); font-weight:500; }
+.canvas-node-search-cats {
+  display:flex; align-items:stretch; gap:2px; padding:8px 10px 6px;
+  overflow-x:auto; scrollbar-width:none; -ms-overflow-style:none;
+}
+.canvas-node-search-cats::-webkit-scrollbar { display:none; }
+.canvas-node-search-cat {
+  flex:1 0 auto; min-width:52px; display:inline-flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:5px; padding:8px 6px; border:0; border-radius:12px; background:transparent;
+  color:rgba(229,226,225,.48); cursor:pointer;
+  font-family:Manrope,sans-serif; font-size:10px; font-weight:650; letter-spacing:.02em;
+  transition:background .18s ease, color .18s ease;
+}
+.canvas-node-search-cat i,
+.canvas-node-search-cat svg { width:16px; height:16px; }
+.canvas-node-search-cat:hover { color:rgba(229,226,225,.82); background:rgba(255,255,255,.05); }
+.canvas-node-search-cat.is-active {
+  color:#e5e2e1; background:rgba(255,255,255,.12);
+}
+.canvas-node-search-list { max-height:min(560px, 62vh); overflow:auto; padding:4px 8px 8px; }
 .canvas-node-search-item {
-  width:100%; display:flex; align-items:center; justify-content:space-between; gap:12px;
+  width:100%; display:flex; align-items:center; gap:12px;
   text-align:left; border:none; background:transparent; color:#e5e2e1; cursor:pointer;
-  border-radius:12px; padding:10px 12px; font-size:13px; font-weight:600;
+  border-radius:12px; padding:10px 12px; margin:0;
+  transition:background .16s ease;
 }
 .canvas-node-search-item:hover, .canvas-node-search-item.is-active { background:rgba(255,255,255,.08); }
-.canvas-node-search-type { color:rgba(229,226,225,.42); font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
-.canvas-node-search-empty { padding:18px 12px; text-align:center; color:rgba(229,226,225,.45); font-size:12px; }
+.canvas-node-search-thumb {
+  width:48px; height:48px; flex:0 0 auto; border-radius:11px; overflow:hidden;
+  background:rgba(255,255,255,.06); display:inline-flex; align-items:center; justify-content:center;
+}
+.canvas-node-search-thumb img {
+  width:100%; height:100%; object-fit:cover; display:block;
+}
+.canvas-node-search-thumb.is-icon {
+  color:rgba(229,226,225,.62);
+}
+.canvas-node-search-thumb.is-icon i,
+.canvas-node-search-thumb.is-icon svg { width:18px; height:18px; }
+.canvas-node-search-meta {
+  min-width:0; flex:1; display:flex; flex-direction:column; gap:3px;
+}
+.canvas-node-search-title {
+  font-size:14px; font-weight:650; line-height:1.3;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.canvas-node-search-sub {
+  font-size:12px; font-weight:500; color:rgba(229,226,225,.42);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.canvas-node-search-empty { padding:22px 12px; text-align:center; color:rgba(229,226,225,.45); font-size:12px; }
 .canvas-node-search-hint {
-  padding:8px 16px 14px; color:rgba(229,226,225,.38); font-size:11px; font-family:Manrope,sans-serif;
+  padding:6px 16px 12px; color:rgba(229,226,225,.34); font-size:11px; font-family:Manrope,sans-serif;
   letter-spacing:.04em;
+}
+.canvas-side-dock .dock-icon-anim--search {
+  display:inline-flex; transform-origin:60% 40%;
+}
+.canvas-side-dock .tool-btn:hover .dock-icon-anim--search,
+.canvas-side-dock .tool-btn.is-active .dock-icon-anim--search {
+  transform:scale(1.06);
 }
 .canvas-gen-browser-modal {
   position:fixed; inset:0; z-index:140; display:flex; align-items:flex-start; justify-content:center;
@@ -6217,8 +6275,10 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 /* --fav-locate-r = 图片本身圆角；外扩伪元素半径 = r + inset，否则角会发方 */
 .output-img-wrap.is-favorite-locate-flow,
 .gen-stage-hero.is-favorite-locate-flow,
+.gen-stage-stack-hero.is-favorite-locate-flow,
 .gen-stage-thumb.is-favorite-locate-flow,
 .gen-stage-frame.is-favorite-locate-flow,
+.text-stage-frame.is-favorite-locate-flow,
 .gen-history-card.is-favorite-locate-flow,
 .image-preview-wrap.is-favorite-locate-flow,
 .image-node.is-favorite-locate-flow {
@@ -6230,13 +6290,16 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 }
 .output-img-wrap.is-favorite-locate-flow { --fav-locate-r: 16px; }
 .gen-stage-thumb.is-favorite-locate-flow { --fav-locate-r: 10px; }
-.gen-stage-frame.is-favorite-locate-flow { --fav-locate-r: 12px; }
+.gen-stage-frame.is-favorite-locate-flow,
+.text-stage-frame.is-favorite-locate-flow { --fav-locate-r: 12px; }
 .gen-history-card.is-favorite-locate-flow { --fav-locate-r: 14px; }
 /* 锐利边缘流光（image-node 默认藏掉 ::before，此处强制打开） */
 .output-img-wrap.is-favorite-locate-flow::before,
 .gen-stage-hero.is-favorite-locate-flow::before,
+.gen-stage-stack-hero.is-favorite-locate-flow::before,
 .gen-stage-thumb.is-favorite-locate-flow::before,
 .gen-stage-frame.is-favorite-locate-flow::before,
+.text-stage-frame.is-favorite-locate-flow::before,
 .gen-history-card.is-favorite-locate-flow::before,
 .image-preview-wrap.is-favorite-locate-flow::before,
 .image-node.is-favorite-locate-flow::before {
@@ -6274,8 +6337,10 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 /* 外沿光晕：同角旋转，模糊后形成跟着走的柔光带 */
 .output-img-wrap.is-favorite-locate-flow::after,
 .gen-stage-hero.is-favorite-locate-flow::after,
+.gen-stage-stack-hero.is-favorite-locate-flow::after,
 .gen-stage-thumb.is-favorite-locate-flow::after,
 .gen-stage-frame.is-favorite-locate-flow::after,
+.text-stage-frame.is-favorite-locate-flow::after,
 .gen-history-card.is-favorite-locate-flow::after,
 .image-preview-wrap.is-favorite-locate-flow::after,
 .image-node.is-favorite-locate-flow::after {

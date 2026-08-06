@@ -28,6 +28,7 @@ import { registerCanvasPixarAdScriptRoutes } from "./canvasPixarAdScriptBridge.j
 import { registerCanvasReplicaAgentRoutes } from "./canvasReplicaAgentBridge.js";
 import { registerCanvasImageRepairAgentRoutes } from "./canvasImageRepairAgentBridge.js";
 import { registerCanvasVideoRoutes } from "./canvasVideoBridge.js";
+import { decodeUploadFilename } from "../lib/decodeUploadFilename.js";
 import { HAILUO_H3_MODEL_ID } from "./runningHubHailuoVideo.js";
 import {
   deleteUserWorkflowTemplate,
@@ -351,7 +352,7 @@ export function registerInfiniteCanvasRoutes(
           {
             category_id: categoryId,
             buffer: file.buffer,
-            filename: file.originalname,
+            filename: decodeUploadFilename(file.originalname),
             mime: file.mimetype,
           },
           canvasAccessCtx(req)
@@ -550,7 +551,8 @@ export function registerInfiniteCanvasRoutes(
       if (!file?.buffer?.length) continue;
       const mime = (file.mimetype || "").toLowerCase();
       let kind = "image";
-      let ext = path.extname(file.originalname || "").toLowerCase();
+      const displayName = decodeUploadFilename(file.originalname) || "";
+      let ext = path.extname(displayName || file.originalname || "").toLowerCase();
       if (mime.startsWith("video/") || [".mp4", ".webm", ".mov", ".m4v"].includes(ext)) {
         kind = "video";
         if (!ext) ext = ".mp4";
@@ -567,7 +569,7 @@ export function registerInfiniteCanvasRoutes(
       if (userId && deps?.db) recordFileOwnership(deps.db, url, userId);
       uploaded.push({
         url,
-        name: file.originalname || filename,
+        name: displayName || filename,
         kind,
       });
     }

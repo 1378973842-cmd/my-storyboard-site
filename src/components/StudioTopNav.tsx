@@ -1,11 +1,18 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
+  AlertCircle,
   ArrowLeft,
+  Check,
+  ChevronDown,
   Home,
+  Image as ImageIcon,
   Images,
   Layers2,
+  Loader2,
   Pencil,
+  Plus,
+  Search,
   UserRound,
   Workflow,
   type LucideIcon,
@@ -15,6 +22,7 @@ import { useAuthStore } from '../stores/authStore';
 import { StudioAnnouncementsBell } from './StudioAnnouncementsBell';
 import { StudioUserMenu } from './StudioUserMenu';
 import {
+  getCurrentCanvasId,
   isInfiniteCanvasEditorOpen,
   returnToCanvasManager,
   updateCurrentCanvasTitle,
@@ -22,6 +30,75 @@ import {
 import { StudioBackgroundRevealControl } from './StudioBackgroundRevealControl';
 import { StudioBrandMark, BRAND_NAME } from './StudioBrand';
 import { cn } from '../lib/utils';
+
+type CanvasListItem = {
+  id: string;
+  title: string;
+  kind?: string;
+  preview_url?: string;
+  created_at?: number;
+  updated_at?: number;
+};
+
+function formatCanvasParenDate(value?: number) {
+  if (!value) return '';
+  const time = value < 10000000000 ? value * 1000 : value;
+  const date = new Date(time);
+  if (Number.isNaN(date.getTime())) return '';
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `(${m}${d})`;
+}
+
+/** 顶栏切换列表缓存：打开时先出缓存，后台静默刷新 */
+let canvasSwitcherCache: CanvasListItem[] = [];
+let canvasSwitcherCacheAt = 0;
+let canvasSwitcherInflight: Promise<CanvasListItem[]> | null = null;
+const CANVAS_SWITCHER_TTL_MS = 20_000;
+
+function normalizeCanvasList(rows: unknown[]): CanvasListItem[] {
+  return rows
+    .filter((raw): raw is CanvasListItem => {
+      const item = raw as CanvasListItem;
+      return Boolean(item?.id) && item.kind !== 'smart';
+    })
+    .map(item => ({
+      id: String(item.id),
+      title: String(item.title || 'Untitled'),
+      kind: item.kind,
+      preview_url: item.preview_url ? String(item.preview_url) : undefined,
+      created_at: Number(item.created_at || 0) || undefined,
+      updated_at: Number(item.updated_at || 0) || undefined,
+    }));
+}
+
+async function fetchCanvasSwitcherList(force = false): Promise<CanvasListItem[]> {
+  const now = Date.now();
+  if (
+    !force
+    && canvasSwitcherCache.length
+    && now - canvasSwitcherCacheAt < CANVAS_SWITCHER_TTL_MS
+  ) {
+    return canvasSwitcherCache;
+  }
+  if (canvasSwitcherInflight) return canvasSwitcherInflight;
+  canvasSwitcherInflight = (async () => {
+    const res = await fetch('/api/canvases', { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('load failed');
+    const data = await res.json();
+    const rows = Array.isArray(data?.canvases) ? data.canvases : [];
+    canvasSwitcherCache = normalizeCanvasList(rows);
+    canvasSwitcherCacheAt = Date.now();
+    return canvasSwitcherCache;
+  })().finally(() => {
+    canvasSwitcherInflight = null;
+  });
+  return canvasSwitcherInflight;
+}
+
+function invalidateCanvasSwitcherCache() {
+  canvasSwitcherCacheAt = 0;
+}
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
@@ -94,28 +171,35 @@ function CanvasHeaderCluster({
   className?: string;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [meta, setMeta] = useState<{
     title: string;
-    date: string;
+    canvasId: string;
     status: string;
     statusKind: string;
   } | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [canvasList, setCanvasList] = useState<CanvasListItem[]>(() => canvasSwitcherCache);
+  const [listLoading, setListLoading] = useState(false);
+  const [listQuery, setListQuery] = useState('');
+  const [switchBusy, setSwitchBusy] = useState(false);
+  const clusterRef = useRef<HTMLDivElement | null>(null);
   const btnRef = useRef<HTMLButtonElement | null>(null);
+  const titleBtnRef = useRef<HTMLButtonElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const renameBusyRef = useRef(false);
 
   const syncMeta = useCallback(() => {
     if (!isInfiniteCanvasEditorOpen()) {
       setMeta(null);
       setEditing(false);
+      setSwitcherOpen(false);
       return;
     }
     const titleEl = document.getElementById('currentCanvasTitle');
-    const timeEl = document.getElementById('currentCanvasTime');
     const saveEl = document.getElementById('saveState');
     if (!titleEl || !saveEl) {
       setMeta(null);
@@ -124,13 +208,13 @@ function CanvasHeaderCluster({
     setMeta(prev => {
       const next = {
         title: titleEl.textContent?.trim() || 'Untitled',
-        date: timeEl?.dataset?.shortDate?.trim() || '',
+        canvasId: getCurrentCanvasId(),
         status: saveEl.textContent?.trim() || '已保存到云端',
         statusKind: saveEl.dataset.kind || '',
       };
       if (
         prev?.title === next.title
-        && prev?.date === next.date
+        && prev?.canvasId === next.canvasId
         && prev?.status === next.status
         && prev?.statusKind === next.statusKind
       ) return prev;
@@ -151,18 +235,8 @@ function CanvasHeaderCluster({
       attributeFilter: ['data-infinite-canvas-editor', 'data-canvas-open'],
     });
     const titleEl = document.getElementById('currentCanvasTitle');
-    const timeEl = document.getElementById('currentCanvasTime');
     const saveEl = document.getElementById('saveState');
     if (titleEl) obs.observe(titleEl, { childList: true, characterData: true, subtree: true });
-    if (timeEl) {
-      obs.observe(timeEl, {
-        childList: true,
-        characterData: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['data-short-date'],
-      });
-    }
     // 镜像隐藏顶栏 #saveState：保存中 / 已保存到云端 写在这里，可见顶栏必须跟着变
     if (saveEl) {
       obs.observe(saveEl, {
@@ -180,16 +254,45 @@ function CanvasHeaderCluster({
     };
   }, [syncMeta]);
 
+  const loadCanvasList = useCallback(async (opts?: { force?: boolean; silent?: boolean }) => {
+    const force = Boolean(opts?.force);
+    const hasCache = canvasSwitcherCache.length > 0;
+    if (hasCache) setCanvasList(canvasSwitcherCache);
+    // 有缓存时不闪「加载中」，后台刷新即可
+    if (!opts?.silent && !hasCache) setListLoading(true);
+    try {
+      const rows = await fetchCanvasSwitcherList(force);
+      setCanvasList(rows);
+    } catch {
+      if (!hasCache) setCanvasList([]);
+    } finally {
+      setListLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!switcherOpen) return;
+    // 有模块缓存则静默刷新，避免「加载中」闪一下
+    void loadCanvasList({ silent: canvasSwitcherCache.length > 0 });
+  }, [switcherOpen, loadCanvasList]);
+
+  const prefetchCanvasList = useCallback(() => {
+    if (canvasSwitcherInflight) return;
+    if (canvasSwitcherCache.length && Date.now() - canvasSwitcherCacheAt < CANVAS_SWITCHER_TTL_MS) return;
+    void fetchCanvasSwitcherList(false).then(rows => setCanvasList(rows)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!menuOpen && !switcherOpen) return;
     const onDoc = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (menuRef.current?.contains(target) || btnRef.current?.contains(target)) return;
+      if (clusterRef.current?.contains(target)) return;
       setMenuOpen(false);
+      setSwitcherOpen(false);
     };
     document.addEventListener('click', onDoc);
     return () => document.removeEventListener('click', onDoc);
-  }, [menuOpen]);
+  }, [menuOpen, switcherOpen]);
 
   useEffect(() => {
     if (!editing) return;
@@ -197,14 +300,17 @@ function CanvasHeaderCluster({
     inputRef.current?.select();
   }, [editing]);
 
-  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  const closeMenus = useCallback(() => {
+    setMenuOpen(false);
+    setSwitcherOpen(false);
+  }, []);
 
   const startRename = useCallback(() => {
-    closeMenu();
+    closeMenus();
     if (!meta) return;
     setDraft(meta.title);
     setEditing(true);
-  }, [closeMenu, meta]);
+  }, [closeMenus, meta]);
 
   const cancelRename = useCallback(() => {
     setEditing(false);
@@ -222,6 +328,7 @@ function CanvasHeaderCluster({
     setEditing(false);
     try {
       await updateCurrentCanvasTitle(trimmed);
+      invalidateCanvasSwitcherCache();
       syncMeta();
     } finally {
       renameBusyRef.current = false;
@@ -233,7 +340,7 @@ function CanvasHeaderCluster({
       startRename();
       return;
     }
-    closeMenu();
+    closeMenus();
     if (id === 'home') {
       onHome();
       return;
@@ -241,34 +348,90 @@ function CanvasHeaderCluster({
     if (id === 'gate') {
       await returnToCanvasManager();
     }
-  }, [closeMenu, onHome, startRename]);
+  }, [closeMenus, onHome, startRename]);
+
+  const openCanvasById = useCallback(async (id: string) => {
+    if (!id || id === meta?.canvasId || switchBusy) {
+      setSwitcherOpen(false);
+      return;
+    }
+    setSwitchBusy(true);
+    try {
+      const openFn = (window as unknown as { openCanvas?: (canvasId: string) => Promise<void> }).openCanvas;
+      if (typeof openFn === 'function') await openFn(id);
+      setSwitcherOpen(false);
+      syncMeta();
+    } finally {
+      setSwitchBusy(false);
+    }
+  }, [meta?.canvasId, switchBusy, syncMeta]);
+
+  const createNewCanvas = useCallback(async () => {
+    if (switchBusy) return;
+    setSwitchBusy(true);
+    try {
+      const createFn = (window as unknown as {
+        createCanvas?: (opts?: { skipNamePrompt?: boolean }) => Promise<void>;
+      }).createCanvas;
+      if (typeof createFn === 'function') await createFn({ skipNamePrompt: true });
+      invalidateCanvasSwitcherCache();
+      setSwitcherOpen(false);
+      syncMeta();
+    } finally {
+      setSwitchBusy(false);
+    }
+  }, [switchBusy, syncMeta]);
+
+  const onTitleClick = useCallback((e: React.MouseEvent) => {
+    if (editing || switchBusy) return;
+    // detail>1 是双击的后续 click，避免先关面板再重命名
+    if (e.detail > 1) return;
+    setMenuOpen(false);
+    setSwitcherOpen(prev => !prev);
+  }, [editing, switchBusy]);
+
+  const onTitleDoubleClick = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    startRename();
+  }, [startRename]);
 
   const items = CANVAS_BRAND_MENU.filter(item => item.id === 'home' || editorOpen);
+  const q = listQuery.trim().toLowerCase();
+  const filteredList = q
+    ? canvasList.filter(item => item.title.toLowerCase().includes(q))
+    : canvasList;
+  const statusKind = meta?.statusKind || '';
+  const statusTitle = meta?.status || '';
 
   return (
-    <div className={cn('studio-canvas-header-cluster', className)}>
-      <div className="studio-canvas-header-row">
+    <div ref={clusterRef} className={cn('studio-canvas-header-cluster', className)}>
+      <div className={cn('studio-canvas-header-pill', meta && 'has-meta')}>
         <button
           ref={btnRef}
           type="button"
           onClick={e => {
             e.stopPropagation();
+            setSwitcherOpen(false);
             setMenuOpen(prev => !prev);
           }}
-          className="studio-canvas-header-logo group flex shrink-0 min-w-0 cursor-pointer"
+          className="studio-canvas-pill-seg studio-canvas-pill-logo"
           aria-label={`${BRAND_NAME} 导航`}
           aria-expanded={menuOpen}
           aria-haspopup="menu"
         >
           <StudioBrandMark heroTone={heroTone} menuOpen={menuOpen} showName={false} />
+          <ChevronDown
+            className={cn('studio-canvas-pill-chevron', menuOpen && 'is-open')}
+            strokeWidth={2}
+            aria-hidden
+          />
         </button>
 
         {meta ? (
-          <div
-            className={cn('studio-canvas-meta', editing && 'is-editing')}
-            aria-label={`当前画布：${meta.title}`}
-          >
-            <div className="studio-canvas-meta-topline">
+          <>
+            <span className="studio-canvas-pill-sep" aria-hidden />
+            <div className={cn('studio-canvas-pill-title-wrap', editing && 'is-editing')}>
               {editing ? (
                 <input
                   ref={inputRef}
@@ -276,6 +439,7 @@ function CanvasHeaderCluster({
                   maxLength={80}
                   value={draft}
                   className="studio-canvas-meta-input"
+                  aria-label="重命名画布"
                   onChange={e => setDraft(e.target.value)}
                   onBlur={() => void commitRename()}
                   onKeyDown={e => {
@@ -293,35 +457,55 @@ function CanvasHeaderCluster({
                   onClick={e => e.stopPropagation()}
                 />
               ) : (
-                <div
-                  className="studio-canvas-meta-title"
-                  title="双击重命名"
-                  onDoubleClick={e => {
+                <button
+                  ref={titleBtnRef}
+                  type="button"
+                  className="studio-canvas-pill-seg studio-canvas-pill-title"
+                  aria-label={`当前画布：${meta.title}，打开画布列表`}
+                  aria-expanded={switcherOpen}
+                  aria-haspopup="listbox"
+                  title="单击切换画布 · 双击重命名"
+                  onPointerEnter={prefetchCanvasList}
+                  onClick={e => {
                     e.stopPropagation();
-                    startRename();
+                    onTitleClick(e);
                   }}
+                  onDoubleClick={onTitleDoubleClick}
                 >
-                  {meta.title}
-                </div>
+                  <span className="studio-canvas-pill-title-text">{meta.title}</span>
+                  <ChevronDown
+                    className={cn('studio-canvas-pill-chevron', switcherOpen && 'is-open')}
+                    strokeWidth={2}
+                    aria-hidden
+                  />
+                </button>
               )}
-              {meta.date ? <div className="studio-canvas-meta-date">{meta.date}</div> : null}
             </div>
+            <span className="studio-canvas-pill-sep" aria-hidden />
             <div
               className={cn(
-                'studio-canvas-meta-status',
-                meta.statusKind === 'saving' && 'is-saving',
-                meta.statusKind === 'saved' && 'is-saved',
-                meta.statusKind === 'error' && 'is-error',
+                'studio-canvas-pill-status',
+                statusKind === 'saving' && 'is-saving',
+                statusKind === 'saved' && 'is-saved',
+                statusKind === 'error' && 'is-error',
               )}
+              title={statusTitle}
+              aria-label={statusTitle}
             >
-              {meta.status}
+              {statusKind === 'saving' ? (
+                <Loader2 className="studio-canvas-pill-status-icon is-spin" strokeWidth={2.25} aria-hidden />
+              ) : statusKind === 'error' ? (
+                <AlertCircle className="studio-canvas-pill-status-icon" strokeWidth={2.25} aria-hidden />
+              ) : (
+                <Check className="studio-canvas-pill-status-icon" strokeWidth={2.5} aria-hidden />
+              )}
             </div>
-          </div>
+          </>
         ) : null}
       </div>
 
       {menuOpen && (
-        <div ref={menuRef} className="studio-brand-menu studio-brand-menu-below" role="menu">
+        <div className="studio-brand-menu studio-canvas-header-dropdown" role="menu">
           {items.map(item => (
             <button
               key={item.id}
@@ -339,6 +523,93 @@ function CanvasHeaderCluster({
           ))}
         </div>
       )}
+
+      <AnimatePresence>
+        {switcherOpen && meta ? (
+          <motion.div
+            key="canvas-switcher"
+            className="studio-canvas-switcher"
+            role="listbox"
+            aria-label="画布列表"
+            initial={{ opacity: 0, y: 10, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 6, scale: 0.98 }}
+            transition={spring}
+          >
+            <div className="studio-canvas-switcher-search">
+              <Search className="studio-canvas-switcher-search-icon" strokeWidth={1.75} aria-hidden />
+              <input
+                ref={searchRef}
+                type="search"
+                value={listQuery}
+                onChange={e => setListQuery(e.target.value)}
+                placeholder="搜索画布"
+                className="studio-canvas-switcher-search-input"
+                onClick={e => e.stopPropagation()}
+                onKeyDown={e => e.stopPropagation()}
+              />
+            </div>
+            <div className="studio-canvas-switcher-list">
+              {listLoading && filteredList.length === 0 ? (
+                <div className="studio-canvas-switcher-empty">加载中…</div>
+              ) : filteredList.length === 0 ? (
+                <div className="studio-canvas-switcher-empty">没有匹配的画布</div>
+              ) : (
+                filteredList.map(item => {
+                  const active = item.id === meta.canvasId;
+                  const paren = formatCanvasParenDate(item.created_at || item.updated_at);
+                  const preview = String(item.preview_url || '').trim();
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="option"
+                      aria-selected={active}
+                      className={cn('studio-canvas-switcher-item', active && 'is-active')}
+                      disabled={switchBusy}
+                      onClick={e => {
+                        e.stopPropagation();
+                        void openCanvasById(item.id);
+                      }}
+                    >
+                      <span className={cn('studio-canvas-switcher-thumb', !preview && 'is-icon')}>
+                        {preview ? (
+                          <img src={preview} alt="" loading="lazy" decoding="async" draggable={false} />
+                        ) : (
+                          <ImageIcon strokeWidth={1.6} aria-hidden />
+                        )}
+                      </span>
+                      <span className="studio-canvas-switcher-name">
+                        <span className="studio-canvas-switcher-title">{item.title}</span>
+                        {paren ? <span className="studio-canvas-switcher-date">{paren}</span> : null}
+                      </span>
+                      {active ? (
+                        <Check className="studio-canvas-switcher-check" strokeWidth={2.5} aria-hidden />
+                      ) : (
+                        <span className="studio-canvas-switcher-check-spacer" aria-hidden />
+                      )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            <div className="studio-canvas-switcher-foot">
+              <button
+                type="button"
+                className="studio-canvas-switcher-new"
+                disabled={switchBusy}
+                onClick={e => {
+                  e.stopPropagation();
+                  void createNewCanvas();
+                }}
+              >
+                <Plus className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden />
+                <span>新建画布</span>
+              </button>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }

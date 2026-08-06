@@ -2,7 +2,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type Ref } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { History, Keyboard, Plus } from 'lucide-react';
+import { History, Keyboard, Plus, Search } from 'lucide-react';
 
 const dockSpring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 import {
@@ -526,6 +526,20 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                       <span data-i18n="canvas.materialLibrary">素材库</span>
                   </button>
                   <span className="canvas-side-dock-sep" aria-hidden="true" />
+                  <button
+                    id="canvasNodeSearchBtn"
+                    type="button"
+                    className="tool-btn tool-btn-ghost tool-btn-icon-only"
+                    title="搜索节点"
+                    aria-label="搜索节点"
+                    aria-pressed="false"
+                    onClick={() => canvasWin["openCanvasNodeSearch"]?.()}
+                  >
+                      <span className="dock-icon-anim dock-icon-anim--search" aria-hidden="true">
+                        <Search className="w-4 h-4" aria-hidden />
+                      </span>
+                      <span>搜索</span>
+                  </button>
                   <button
                     type="button"
                     className="tool-btn tool-btn-ghost tool-btn-icon-only"

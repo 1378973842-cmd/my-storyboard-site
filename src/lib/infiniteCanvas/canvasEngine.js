@@ -9491,13 +9491,15 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
     const created = [];
     (data.files || []).forEach((file, i) => {
         const kind = file.kind || mediaKindForUpload(supported[i]);
+        // 优先浏览器 File.name（UTF-8 正确）；服务端 originalname 在部分环境会 Latin-1 乱码
+        const displayName = String(supported[i]?.name || file.name || '').trim() || outputImageName(file.url);
         const node = {
             id:uid('img'),
             type:'image',
             x:base.x + i * 36,
             y:base.y + i * 36,
             url:file.url,
-            name:file.name,
+            name:displayName,
             mediaKind:kind
         };
         nodes.push(node);
@@ -11285,7 +11287,26 @@ function imageEditOriginLabel(kind){
 function imageEditOriginBadgeHtml(node){
     const label = imageEditOriginLabel(node?.editOrigin);
     if(!label) return '';
-    return `<span class="canvas-float-title image-edit-origin-badge" data-edit-origin="${escapeAttr(node.editOrigin)}" title="${escapeAttr(label)}"><i data-lucide="image"></i><span>${escapeHtml(label)}</span></span>`;
+    return `<span class="canvas-float-title image-edit-origin-badge" data-edit-origin="${escapeAttr(node.editOrigin)}" title="${escapeAttr(label)}"><i data-lucide="image"></i><span class="float-title-label">${escapeHtml(label)}</span></span>`;
+}
+/** 画布外导入的图片/视频：左上浮标显示文件名（无编辑来源说明时） */
+function imageMediaFloatTitleLabel(node){
+    if(node?.type !== 'image' || !node.url) return '';
+    const raw = String(node.name || '').trim();
+    if(raw && raw !== '空白图片' && raw !== 'image' && raw !== 'Image' && raw !== 'blank') return raw;
+    const fromUrl = outputImageName(node.url);
+    if(fromUrl && fromUrl !== 'output image') return fromUrl;
+    return '';
+}
+function imageMediaFloatTitleHtml(node){
+    // 裁剪/画笔/旋转说明优先
+    const origin = imageEditOriginBadgeHtml(node);
+    if(origin) return origin;
+    const label = imageMediaFloatTitleLabel(node);
+    if(!label) return '';
+    const kind = mediaKindForNode(node);
+    const icon = kind === 'video' ? 'clapperboard' : kind === 'audio' ? 'audio-lines' : 'image';
+    return `<span class="canvas-float-title gen-float-title image-media-float-title" data-float-kind="media" data-media-kind="${escapeAttr(kind)}" title="${escapeAttr(label)}"><i data-lucide="${icon}"></i><span class="float-title-label">${escapeHtml(label)}</span></span>`;
 }
 /** 图台浮标序号：按 type 各自递增，首次写入 floatTitleIndex */
 function ensureNodeFloatIndex(node, type){
@@ -12555,15 +12576,15 @@ function renderNode(node){
             const skipBadge = isNodeDisabled(node)
                 ? `<span class="image-skip-badge" title="${escapeAttr(tr('canvas.nodeDisableHint'))}">${escapeHtml(tr('canvas.imageSkipBadge'))}</span>`
                 : '';
-            const originBadge = imageEditOriginBadgeHtml(node);
-            if(originBadge) el.classList.add('has-edit-origin');
-            // 说明在预览框上方（与图1一致），不叠在画面内角标上
-            body.innerHTML = `${originBadge}<div class="image-preview-wrap" title="${escapeAttr(node.name || 'image')}">${missing ? missingAssetHtml(node.url) : `<img src="${escapeAttr(node.url)}" draggable="false" alt="" loading="lazy" decoding="async">`}${skipBadge}</div>${stillCaption}`;
+            const floatBadge = imageMediaFloatTitleHtml(node);
+            if(floatBadge) el.classList.add('has-edit-origin');
+            // 说明/文件名在预览框上方，不叠在画面内角标上
+            body.innerHTML = `${floatBadge}<div class="image-preview-wrap" title="${escapeAttr(node.name || 'image')}">${missing ? missingAssetHtml(node.url) : `<img src="${escapeAttr(node.url)}" draggable="false" alt="" loading="lazy" decoding="async">`}${skipBadge}</div>${stillCaption}`;
             if(!missing && mediaKind !== 'image'){
                 const mediaHtml = mediaKind === 'video'
                     ? `<div class="media-card video-card"><div class="video-player-wrap"><video src="${escapeAttr(node.url)}" data-url="${escapeAttr(node.url)}" controls preload="auto" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video><button type="button" class="btn-capture-frame">${langIsEn() ? 'Capture frame' : '截取当前帧'}</button></div></div>`
                     : `<div class="media-card audio-card"><i data-lucide="file-audio" class="w-8 h-8"></i><div class="audio-title">${escapeHtml(node.name || 'Audio')}</div><div class="audio-sub">AUDIO</div><audio src="${escapeAttr(node.url)}" data-url="${escapeAttr(node.url)}" controls preload="metadata"></audio></div>`;
-                body.innerHTML = `<div class="image-preview-wrap">${mediaHtml}</div><div class="image-caption text-[11px] text-gray-400 truncate">${escapeHtml(node.name || nodeTitleForMedia(node))}</div>`;
+                body.innerHTML = `${floatBadge}<div class="image-preview-wrap">${mediaHtml}</div><div class="image-caption text-[11px] text-gray-400 truncate">${escapeHtml(node.name || nodeTitleForMedia(node))}</div>`;
                 if(mediaKind === 'video') bindVideoCaptureFrame(body, node);
             }
             const previewWrap = body.querySelector('.image-preview-wrap');
@@ -27931,7 +27952,21 @@ function renderOutputGrid(node, pendingHtml=''){
 function outputImageName(url){
     const clean = (url || '').split('?')[0];
     const name = clean.split('/').filter(Boolean).pop();
-    return name ? decodeURIComponent(name) : 'output image';
+    if(!name) return 'output image';
+    try {
+        const decoded = decodeURIComponent(name);
+        // 若仍是 Latin-1 乱码中文，尝试按 UTF-8 还原（与上传链路一致）
+        if(/[\u00C0-\u00FF]/.test(decoded) && !/[\u4e00-\u9fff]/.test(decoded)){
+            try {
+                const bytes = Uint8Array.from(decoded, ch => ch.charCodeAt(0) & 0xff);
+                const repaired = new TextDecoder('utf-8', {fatal:false}).decode(bytes);
+                if(repaired && !repaired.includes('\uFFFD') && /[\u4e00-\u9fff]/.test(repaired)) return repaired;
+            } catch(_){ /* ignore */ }
+        }
+        return decoded;
+    } catch(_) {
+        return name;
+    }
 }
 function setOutputDragPreview(event, img){
     if(!event.dataTransfer || !img) return;
@@ -28869,59 +28904,202 @@ function organizeSelectedNodes(){
 
 function canvasNodeSearchLabel(node){
     if(!node) return '';
-    const typeLabel = {
-        image:'Image', prompt:'Prompt', loop:'Loop', promptGroup:'Prompts', group:'Group',
-        output:'Output', imageBatch:'Image batch', frameStack:'Frame Stack', llm:'LLM',
-        replicaAgent:'Replica Agent', imageRepairAgent:'Repair Agent', batchPosterAgent:'Batch Poster',
-        nineGridAgent:'Nine Grid', slotsLoopVideoAgent:'Slots Loop', mxShellPromptAgent:'Mx-Shell', mxShellPolishAgent:'Mx-Shell Polish', textOutput:'Text Output', mxShellPromptView:'Mx-Shell View', deepWhiteShotAgent:'DeepWhite', deepWhiteShotView:'DeepWhite Doc', screenwritingAgent:'Screenwriting', pixarAdScriptAgent:'Story Anim', videoReverse:'Video Reverse',
-        comfy:'ComfyUI', ltxDirector:'LTX Director', rh:'RunningHub', msgen:'ModelScope',
-        video:'Video', generator:'Generator',
-    }[node.type] || node.type || 'Node';
-    const name = node.name || node.title || '';
-    return name ? `${typeLabel} · ${name}` : typeLabel;
+    return `${canvasNodeSearchTitle(node)} ${canvasNodeSearchSub(node)} ${node.type || ''} ${node.id || ''} ${node.name || ''}`;
+}
+function canvasNodeSearchTitle(node){
+    if(!node) return '';
+    if(node.type === 'generator' || node.type === 'msgen') return langIsEn() ? 'Image generate' : '图片生成';
+    if(node.type === 'video') return langIsEn() ? 'Video generate' : '视频生成';
+    if(node.type === 'prompt'){
+        const text = String(node.text || '').replace(/\s+/g, ' ').trim();
+        if(text) return text.slice(0, 42);
+        return langIsEn() ? 'Text' : '文本';
+    }
+    if(node.type === 'image'){
+        if(node.name && node.name !== '空白图片') return node.name;
+        return 'Image';
+    }
+    if(node.name) return String(node.name);
+    if(node.title) return String(node.title);
+    return canvasNodeSearchTypeFallback(node.type);
+}
+function canvasNodeSearchTypeFallback(type){
+    const map = {
+        loop:'Loop', promptGroup:'Prompts', group:'Group', output:'Output', imageBatch:'Image batch',
+        frameStack:'Frame Stack', llm:'LLM', replicaAgent:'Replica Agent', imageRepairAgent:'Repair Agent',
+        batchPosterAgent:'Batch Poster', nineGridAgent:'Nine Grid', slotsLoopVideoAgent:'Slots Loop',
+        mxShellPromptAgent:'Mx-Shell', mxShellPolishAgent:'Mx-Shell Polish', textOutput:'Text Output',
+        mxShellPromptView:'Mx-Shell View', deepWhiteShotAgent:'DeepWhite', deepWhiteShotView:'DeepWhite Doc',
+        screenwritingAgent:'Screenwriting', pixarAdScriptAgent:'Story Anim', videoReverse:'Video Reverse',
+        comfy:'ComfyUI', ltxDirector:'LTX Director', rh:'RunningHub',
+    };
+    return map[type] || type || 'Node';
+}
+function canvasNodeSearchSub(node){
+    const prompt = String(node?.prompt || node?.text || '').replace(/\s+/g, ' ').trim();
+    if(!prompt) return langIsEn() ? 'No prompt' : '无 Prompt';
+    return prompt.slice(0, 56);
+}
+function canvasNodeSearchThumbUrl(node){
+    if(!node) return '';
+    if(node.type === 'image' && node.url && mediaKindForNode(node) === 'image' && !isMissingAssetUrl(node.url)){
+        return node.url;
+    }
+    if(isGenConsoleNode(node)){
+        try {
+            const urls = generatorPreviewUrls(node) || [];
+            const hit = urls.find(u => u && !isMissingAssetUrl(u) && !isVideoUrl(u));
+            if(hit) return hit;
+            return urls.find(u => u && !isMissingAssetUrl(u)) || '';
+        } catch(_){ return ''; }
+    }
+    if(node.type === 'output' && Array.isArray(node.images) && node.images.length){
+        const url = outputUrlValue(node.images[0]);
+        if(url && !isMissingAssetUrl(url)) return url;
+    }
+    return '';
+}
+function canvasNodeSearchIcon(node){
+    if(node?.type === 'video' || (node?.type === 'image' && mediaKindForNode(node) === 'video')) return 'clapperboard';
+    if(node?.type === 'prompt' || node?.type === 'llm' || node?.type === 'textOutput') return 'align-left';
+    if(node?.type === 'image' && mediaKindForNode(node) === 'audio') return 'audio-lines';
+    if(node?.type === 'group' || node?.type === 'promptGroup' || node?.type === 'imageBatch') return 'folder';
+    if(node?.type === 'generator' || node?.type === 'msgen' || node?.type === 'image') return 'image';
+    return NODE_TYPE_ICON[node?.type] || 'box';
+}
+const CANVAS_NODE_SEARCH_CATS = [
+    { id:'all', labelZh:'全部', labelEn:'All', icon:'search' },
+    { id:'image', labelZh:'图片', labelEn:'Image', icon:'image' },
+    { id:'video', labelZh:'视频', labelEn:'Video', icon:'video' },
+    { id:'text', labelZh:'文本', labelEn:'Text', icon:'align-justify' },
+    { id:'audio', labelZh:'音频', labelEn:'Audio', icon:'audio-lines' },
+    { id:'world', labelZh:'World', labelEn:'World', icon:'globe-2' },
+    { id:'group', labelZh:'分组', labelEn:'Group', icon:'folder' },
+];
+function canvasNodeSearchCatMatch(node, cat){
+    if(!node || cat === 'all') return true;
+    const type = node.type;
+    const kind = type === 'image' ? mediaKindForNode(node) : '';
+    if(cat === 'image'){
+        return type === 'generator' || type === 'msgen' || type === 'output' || type === 'frameStack'
+            || type === 'imageRepairAgent' || type === 'batchPosterAgent' || type === 'nineGridAgent'
+            || (type === 'image' && kind === 'image');
+    }
+    if(cat === 'video'){
+        return type === 'video' || type === 'videoReverse' || type === 'slotsLoopVideoAgent'
+            || (type === 'image' && kind === 'video');
+    }
+    if(cat === 'text'){
+        return ['prompt','llm','textOutput','promptGroup','mxShellPromptAgent','mxShellPolishAgent','mxShellPromptView','deepWhiteShotAgent','deepWhiteShotView','screenwritingAgent','pixarAdScriptAgent'].includes(type);
+    }
+    if(cat === 'audio') return type === 'image' && kind === 'audio';
+    if(cat === 'world'){
+        return ['rh','comfy','ltxDirector','replicaAgent','loop'].includes(type);
+    }
+    if(cat === 'group') return type === 'group' || type === 'promptGroup' || type === 'imageBatch';
+    return true;
+}
+function setCanvasNodeSearchBtnActive(active){
+    const btn = document.getElementById('canvasNodeSearchBtn');
+    if(!btn) return;
+    btn.classList.toggle('is-active', Boolean(active));
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+}
+function flashLocateNodeOnCanvas(nodeId){
+    clearFavoriteImageHighlight();
+    if(!nodesEl || !nodeId) return false;
+    const nodeEl = nodesEl.querySelector(`.node[data-id="${CSS.escape(String(nodeId))}"]`);
+    if(!nodeEl) return false;
+    const prefer = nodeEl.querySelector(
+        '.image-preview-wrap, .gen-stage-stack-hero[data-preview-url], .gen-stage-hero[data-preview-url], .gen-stage-frame, .text-stage-frame, .output-img-wrap'
+    );
+    return flashFavoriteLocateEl(prefer || nodeEl);
 }
 function focusCanvasNodeById(nodeId){
+    if(!canvas || !board || !nodesEl) return;
+    rebindDomIfStale();
     const node = nodes.find(n => n.id === nodeId);
-    if(!node) return;
+    if(!node){
+        setStatus(langIsEn() ? 'Node not found on this canvas' : '未在画布上找到该节点');
+        return;
+    }
+    // 同收藏定位：不选中，避免弹出生成控制台；缩放到可视中心并边缘流光
     selected.clear();
-    selected.add(node.id);
-    const r = estimatedNodeRect(node);
-    centerViewportOnWorldPoint({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
-    applyViewport();
-    render();
+    refreshSelectionVisuals();
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            const box = nodeBounds([node.id]);
+            viewport.scale = 0.4;
+            centerViewportOnWorldPoint({ x: box.x + box.w / 2, y: box.y + box.h / 2 });
+            flashLocateNodeOnCanvas(node.id);
+            refreshGeometryAfterLayout();
+        });
+    });
+    setStatus(langIsEn() ? 'Located node on canvas' : '已定位到画布节点');
 }
 function closeCanvasNodeSearch(){
     document.getElementById('canvasNodeSearchModal')?.remove();
+    setCanvasNodeSearchBtnActive(false);
 }
 function openCanvasNodeSearch(){
     if(!canvas || !isInfiniteCanvasEditorOpen()) return;
-    closeCanvasNodeSearch();
+    if(document.getElementById('canvasNodeSearchModal')){
+        closeCanvasNodeSearch();
+        return;
+    }
     const root = canvasRoot || document.querySelector('.infinite-canvas-root');
     if(!root) return;
     const modal = document.createElement('div');
     modal.id = 'canvasNodeSearchModal';
     modal.className = 'canvas-node-search-modal';
+    const catHtml = CANVAS_NODE_SEARCH_CATS.map((cat, i) => {
+        const label = langIsEn() ? cat.labelEn : cat.labelZh;
+        return `<button type="button" class="canvas-node-search-cat${i === 0 ? ' is-active' : ''}" data-cat="${escapeAttr(cat.id)}" title="${escapeAttr(label)}"><i data-lucide="${escapeAttr(cat.icon)}"></i><span>${escapeHtml(label)}</span></button>`;
+    }).join('');
     modal.innerHTML = `
-        <div class="canvas-node-search-panel" role="dialog" aria-label="搜索节点">
-            <input class="canvas-node-search-input" type="search" placeholder="搜索节点名称 / 类型…" autocomplete="off" />
+        <div class="canvas-node-search-panel" role="dialog" aria-label="${escapeAttr(langIsEn() ? 'Search nodes' : '搜索节点')}">
+            <label class="canvas-node-search-field">
+                <i data-lucide="search" aria-hidden="true"></i>
+                <input class="canvas-node-search-input" type="search" placeholder="${escapeAttr(langIsEn() ? 'Search nodes…' : '搜索节点...')}" autocomplete="off" />
+            </label>
+            <div class="canvas-node-search-cats" role="tablist">${catHtml}</div>
             <div class="canvas-node-search-list"></div>
-            <div class="canvas-node-search-hint">Enter 定位 · Esc 关闭 · ↑↓ 选择</div>
+            <div class="canvas-node-search-hint">${escapeHtml(langIsEn() ? 'Enter locate · Esc close · ↑↓ select' : 'Enter 定位 · Esc 关闭 · ↑↓ 选择')}</div>
         </div>
     `;
     const input = modal.querySelector('.canvas-node-search-input');
     const list = modal.querySelector('.canvas-node-search-list');
+    const catsEl = modal.querySelector('.canvas-node-search-cats');
     let activeIndex = 0;
+    let activeCat = 'all';
     let matches = [];
     const renderList = () => {
         const q = String(input.value || '').trim().toLowerCase();
         matches = nodes
-            .map(n => ({ node:n, label:canvasNodeSearchLabel(n) }))
-            .filter(row => !q || row.label.toLowerCase().includes(q) || String(row.node.type || '').toLowerCase().includes(q) || String(row.node.id || '').toLowerCase().includes(q))
-            .slice(0, 40);
+            .filter(n => canvasNodeSearchCatMatch(n, activeCat))
+            .map(n => ({
+                node:n,
+                title:canvasNodeSearchTitle(n),
+                sub:canvasNodeSearchSub(n),
+                label:canvasNodeSearchLabel(n),
+                thumb:canvasNodeSearchThumbUrl(n),
+                icon:canvasNodeSearchIcon(n),
+            }))
+            .filter(row => !q
+                || row.label.toLowerCase().includes(q)
+                || row.title.toLowerCase().includes(q)
+                || String(row.node.type || '').toLowerCase().includes(q)
+                || String(row.node.id || '').toLowerCase().includes(q))
+            .slice(0, 60);
         activeIndex = Math.min(activeIndex, Math.max(0, matches.length - 1));
         list.innerHTML = matches.length
-            ? matches.map((row, i) => `<button type="button" class="canvas-node-search-item${i === activeIndex ? ' is-active' : ''}" data-idx="${i}"><span>${escapeHtml(row.label)}</span><span class="canvas-node-search-type">${escapeHtml(row.node.type || '')}</span></button>`).join('')
-            : `<div class="canvas-node-search-empty">没有匹配的节点</div>`;
+            ? matches.map((row, i) => {
+                const thumb = row.thumb
+                    ? `<span class="canvas-node-search-thumb"><img src="${escapeAttr(row.thumb)}" alt="" loading="lazy" decoding="async" draggable="false"></span>`
+                    : `<span class="canvas-node-search-thumb is-icon"><i data-lucide="${escapeAttr(row.icon)}"></i></span>`;
+                return `<button type="button" class="canvas-node-search-item${i === activeIndex ? ' is-active' : ''}" data-idx="${i}">${thumb}<span class="canvas-node-search-meta"><span class="canvas-node-search-title">${escapeHtml(row.title)}</span><span class="canvas-node-search-sub">${escapeHtml(row.sub)}</span></span></button>`;
+            }).join('')
+            : `<div class="canvas-node-search-empty">${escapeHtml(langIsEn() ? 'No matching nodes' : '没有匹配的节点')}</div>`;
         list.querySelectorAll('.canvas-node-search-item').forEach(btn => {
             btn.onmousedown = e => e.preventDefault();
             btn.onclick = () => {
@@ -28932,7 +29110,19 @@ function openCanvasNodeSearch(){
                 focusCanvasNodeById(hit.node.id);
             };
         });
+        refreshIcons(list);
     };
+    catsEl?.querySelectorAll('.canvas-node-search-cat').forEach(btn => {
+        btn.onmousedown = e => e.preventDefault();
+        btn.onclick = () => {
+            activeCat = btn.dataset.cat || 'all';
+            activeIndex = 0;
+            catsEl.querySelectorAll('.canvas-node-search-cat').forEach(el => {
+                el.classList.toggle('is-active', el === btn);
+            });
+            renderList();
+        };
+    });
     modal.addEventListener('mousedown', e => {
         if(e.target === modal) closeCanvasNodeSearch();
     });
@@ -28950,6 +29140,8 @@ function openCanvasNodeSearch(){
         }
     });
     root.appendChild(modal);
+    setCanvasNodeSearchBtnActive(true);
+    refreshIcons(modal);
     renderList();
     requestAnimationFrame(() => input.focus());
 }
@@ -31721,6 +31913,11 @@ export function isInfiniteCanvasEditorOpen() {
   const liveShell = canvasRoot.querySelector('#shell');
   if (!liveShell || liveShell.classList.contains('no-canvas')) return false;
   return Boolean(canvas || canvasRoot.dataset.canvasOpen === '1');
+}
+
+/** 当前打开画布 id（顶栏切换列表用） */
+export function getCurrentCanvasId() {
+  return canvas?.id ? String(canvas.id) : '';
 }
 
 export {
