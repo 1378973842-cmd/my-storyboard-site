@@ -411,15 +411,32 @@ export function saveCanvas(
 ) {
   const doc = getCanvas(id, true, ctx);
   const current = Number(doc.updated_at || 0);
-  if (payload.base_updated_at && current && Number(payload.base_updated_at) < current) {
+  // 仅改标题/图标时不做乐观锁：重命名常与自动保存并发，卡 409 会表现为「重命名失败」
+  const touchesContent =
+    payload.nodes !== undefined
+    || payload.connections !== undefined
+    || payload.viewport !== undefined
+    || payload.logs !== undefined
+    || payload.settings !== undefined;
+  if (
+    touchesContent
+    && payload.base_updated_at
+    && current
+    && Number(payload.base_updated_at) < current
+  ) {
     const err = new Error("画布已被其他页面更新") as Error & { status?: number; canvas?: CanvasDocument; updated_at?: number };
     err.status = 409;
     err.canvas = doc;
     err.updated_at = current;
     throw err;
   }
-  doc.title = (payload.title || doc.title || "Untitled").slice(0, 80);
-  doc.icon = (payload.icon || doc.icon || "🧩").slice(0, 32);
+  if (payload.title !== undefined) {
+    const nextTitle = String(payload.title || "").trim();
+    if (nextTitle) doc.title = nextTitle.slice(0, 80);
+  }
+  if (payload.icon !== undefined) {
+    doc.icon = (String(payload.icon || "").trim() || doc.icon || "🧩").slice(0, 32);
+  }
   const existingNodeCount = Array.isArray(doc.nodes) ? doc.nodes.length : 0;
   const existingUrlCount = countNodesWithUrl(doc.nodes);
   const incomingNodes = payload.nodes;

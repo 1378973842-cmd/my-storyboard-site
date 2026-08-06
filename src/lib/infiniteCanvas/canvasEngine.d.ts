@@ -38,6 +38,8 @@ export function redoEditDrawing(): void;
 export function clearEditDrawing(clearOnly?: boolean): void;
 export function restoreAnnotationBase(): Promise<void>;
 export function applyImageEdit(): void;
+export function rotateImageEditBy90(): void;
+export function toggleImageEditFlip(axis?: 'h' | 'v'): void;
 export function closeImageEditor(): void;
 export function resetCropBox(): void;
 export function resetImageEditZoom(): void;

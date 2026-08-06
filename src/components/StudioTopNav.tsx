@@ -293,7 +293,16 @@ function CanvasHeaderCluster({
                   onClick={e => e.stopPropagation()}
                 />
               ) : (
-                <div className="studio-canvas-meta-title">{meta.title}</div>
+                <div
+                  className="studio-canvas-meta-title"
+                  title="双击重命名"
+                  onDoubleClick={e => {
+                    e.stopPropagation();
+                    startRename();
+                  }}
+                >
+                  {meta.title}
+                </div>
               )}
               {meta.date ? <div className="studio-canvas-meta-date">{meta.date}</div> : null}
             </div>

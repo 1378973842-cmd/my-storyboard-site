@@ -14,10 +14,12 @@ import {
   resetCropBox,
   resetImageEditZoom,
   restoreAnnotationBase,
+  rotateImageEditBy90,
   setBrushTool,
   setCropAspectLock,
   setImageEditMode,
   toggleCropAspectMenu,
+  toggleImageEditFlip,
   undoEditDrawing,
 } from '../../lib/infiniteCanvas/canvasEngine.js';
 
@@ -87,7 +89,7 @@ const NODE_FLYOUT_GROUPS: FlyoutGroup[] = [
   {
     heading: '添加节点',
     items: [
-      { icon: 'align-left', label: '提示词', desc: '脚本、广告词、品牌文案', action: () => canvasWin['addPromptNode']?.() },
+      { icon: 'align-left', label: '文本', desc: '可编辑文本，LLM 写入图台，可作生图/生视频提示词', action: () => canvasWin['addPromptNode']?.() },
       { icon: 'circle-play', label: '视频生成', desc: '文生视频 / 图生视频', action: () => canvasWin['addVideoNode']?.() },
       { icon: 'repeat-2', label: '循环', desc: '批量循环执行', action: () => canvasWin['addLoopNode']?.() },
       { icon: 'message-square-text', label: 'LLM', desc: '文本推理与改写', action: () => canvasWin['addLLMNode']?.() },
@@ -709,8 +711,8 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                       <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('prompt')}>
                           <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="align-left" className="w-4 h-4"></i></span>
                           <span className="menu-btn-copy">
-                              <span className="menu-btn-title" data-i18n="canvas.prompt">提示词</span>
-                              <span className="menu-btn-desc">脚本、广告词、品牌文案</span>
+                              <span className="menu-btn-title" data-i18n="canvas.prompt">文本</span>
+                              <span className="menu-btn-desc" data-i18n="canvas.textNodeDesc">可编辑文本，LLM 写入图台，可作生图/生视频提示词</span>
                           </span>
                       </button>
                       <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('imageBatch')}>
@@ -1108,6 +1110,22 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                               <button id="annotationRestoreBtnInline" className="image-edit-dock-tool" type="button" onClick={() => restoreAnnotationBase()} title="恢复原图"><i data-lucide="rotate-ccw" className="w-4 h-4"></i></button>
                           </div>
                           <button id="imageEditBrushSaveBtn" type="button" className="image-edit-dock-save" onClick={() => applyImageEdit()}><i data-lucide="save" className="w-4 h-4"></i><span>Save</span></button>
+                      </div>
+
+                      {/* 旋转与镜像：图片上方工具栏（图2） */}
+                      <div id="imageEditRotateDock" className="image-edit-rotate-dock" onClick={(e) => e.stopPropagation()}>
+                          <button type="button" className="image-edit-dock-icon" onClick={() => closeImageEditor()} title="关闭" aria-label="close"><i data-lucide="x" className="w-4 h-4"></i></button>
+                          <span className="image-edit-rotate-title">旋转与镜像</span>
+                          <span className="image-edit-dock-sep" aria-hidden="true" />
+                          <span className="image-edit-rotate-angle" title="当前角度">
+                              <i data-lucide="rotate-ccw" className="w-3.5 h-3.5"></i>
+                              <span id="imageEditRotateAngle">0°</span>
+                          </span>
+                          <span className="image-edit-dock-sep" aria-hidden="true" />
+                          <button type="button" className="image-edit-dock-tool" onClick={() => rotateImageEditBy90()} title="旋转 90°" aria-label="rotate-90"><i data-lucide="rotate-cw" className="w-4 h-4"></i></button>
+                          <button type="button" className="image-edit-dock-tool" data-rotate-flip="h" onClick={() => toggleImageEditFlip('h')} title="水平镜像" aria-label="flip-h"><i data-lucide="flip-horizontal" className="w-4 h-4"></i></button>
+                          <button type="button" className="image-edit-dock-tool" data-rotate-flip="v" onClick={() => toggleImageEditFlip('v')} title="垂直镜像" aria-label="flip-v"><i data-lucide="flip-vertical" className="w-4 h-4"></i></button>
+                          <button id="imageEditRotateSaveBtn" type="button" className="image-edit-dock-save" onClick={() => applyImageEdit()}><span>保存</span></button>
                       </div>
 
                       <div id="imageEditStage" className="image-edit-stage">

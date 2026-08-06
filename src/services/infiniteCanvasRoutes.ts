@@ -176,6 +176,7 @@ export function registerInfiniteCanvasRoutes(
           logs: body.logs,
           settings: body.settings,
           base_updated_at: body.base_updated_at,
+          allow_empty_nodes: body.allow_empty_nodes === true,
         },
         canvasAccessCtx(req)
       );
