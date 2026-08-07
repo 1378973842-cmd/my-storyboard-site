@@ -996,10 +996,10 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                       <div className="studio-modal-head log-head">
                           <div className="studio-modal-head-text">
                               <div id="historyHubTitle" className="studio-modal-title log-title history-hub-title">
-                                  <i data-lucide="image" className="history-hub-title-icon" aria-hidden />
-                                  <span id="historyHubTitleText">图片历史</span>
+                                  <i data-lucide="images" className="history-hub-title-icon" aria-hidden />
+                                  <span id="historyHubTitleText">生成历史</span>
                               </div>
-                              <div id="logModalCount" className="studio-modal-sub">跨画布成片，点选放入当前板</div>
+                              <div id="logModalCount" className="studio-modal-sub">跨画布成片与本板记录</div>
                           </div>
                           <div className="history-hub-head-actions">
                               <div id="historyLibraryControls" className="history-library-controls" data-history-controls="library">
@@ -1021,6 +1021,13 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                           <button type="button" className="canvas-history-tab is-active" data-history-tab="library" role="tab" aria-selected="true">成片库</button>
                           <button type="button" className="canvas-history-tab" data-history-tab="logs" role="tab" aria-selected="false">本板日志</button>
                       </div>
+                      <div className="history-hub-chrome">
+                          <div className="history-kind-seg" role="tablist" aria-label="生成历史分类">
+                              <button type="button" className="history-kind-seg-btn is-active" data-history-kind="image" role="tab" aria-selected="true">图片</button>
+                              <button type="button" className="history-kind-seg-btn" data-history-kind="video" role="tab" aria-selected="false">视频</button>
+                              <button type="button" className="history-kind-seg-btn" data-history-kind="audio" role="tab" aria-selected="false" title="暂未开放">音频</button>
+                          </div>
+                      </div>
                       <div id="historyLibraryPane" className="history-hub-pane" data-history-pane="library">
                           <div className="studio-modal-toolbar history-library-toolbar">
                               <label className="studio-modal-search">
@@ -1033,7 +1040,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                           </div>
                       </div>
                       <div id="historyLogsPane" className="history-hub-pane" data-history-pane="logs" hidden>
-                          <div className="studio-modal-toolbar log-toolbar">
+                          <div className="studio-modal-toolbar log-toolbar history-hub-toolbar">
                               <label className="studio-modal-search">
                                   <i data-lucide="search" className="w-3.5 h-3.5" aria-hidden />
                                   <input id="logSearchInput" type="search" placeholder="搜索提示词、平台、任务 ID…" data-i18n-placeholder="canvas.logSearchPlaceholder" autoComplete="off" />

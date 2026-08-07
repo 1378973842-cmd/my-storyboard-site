@@ -61,7 +61,7 @@ import {
   updateCanvasCollection,
 } from "./canvasCollectionsStore.js";
 import { requireSiteGate } from "./siteAccessGate.js";
-import { recordFileOwnership } from "./canvasGenerations.js";
+import { recordCanvasGeneration, recordFileOwnership } from "./canvasGenerations.js";
 import {
   listRunningHubApiKeysForClient,
   listRunningHubAppsForConfig,
@@ -428,9 +428,22 @@ export function registerInfiniteCanvasRoutes(
   registerCanvasVideoRoutes(app, {
     projectRoot,
     requireGate: gate,
-    onPersisted: (localUrl, req) => {
+    onPersisted: (localUrl, req, meta) => {
       const userId = req.authUser?.id;
-      if (userId && deps?.db) recordFileOwnership(deps.db, localUrl, userId);
+      if (!userId || !deps?.db) return;
+      recordFileOwnership(deps.db, localUrl, userId);
+      recordCanvasGeneration(deps.db, {
+        userId,
+        thumbnailPath: localUrl,
+        prompt: meta?.prompt || "",
+        model: meta?.model || "hailuo-h3",
+        params: {
+          media_kind: "video",
+          duration: meta?.duration,
+          aspect_ratio: meta?.aspect_ratio,
+          resolution: meta?.resolution,
+        },
+      });
     },
   });
   registerCanvasBatchPosterRoutes(app, projectRoot, gate);

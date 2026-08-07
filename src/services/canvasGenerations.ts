@@ -360,6 +360,24 @@ export function canAccessUploadPath(
   return false;
 }
 
+function generationMediaKindFromItem(item: {
+  thumbnail_path?: string;
+  preview_path?: string;
+  media_kind?: string;
+  kind?: string;
+  params?: Record<string, unknown>;
+}): "image" | "video" | "audio" {
+  const params = item.params && typeof item.params === "object" ? item.params : {};
+  const explicit = String(
+    item.media_kind || item.kind || params.media_kind || params.kind || ""
+  ).toLowerCase();
+  if (explicit === "video" || explicit === "audio" || explicit === "image") return explicit;
+  const url = String(item.preview_path || item.thumbnail_path || "").split("?")[0].toLowerCase();
+  if (/\.(mp4|webm|mov|m4v)$/.test(url)) return "video";
+  if (/\.(mp3|wav|m4a|aac|ogg|flac)$/.test(url)) return "audio";
+  return "image";
+}
+
 export function registerCanvasGenerationsRoutes(
   app: Express,
   db: InstanceType<typeof Database>,
@@ -434,6 +452,9 @@ export function registerCanvasGenerationsRoutes(
     try {
       const userId = req.authUser!.id;
       const q = String(req.query.q || "").trim().slice(0, 120).toLowerCase();
+      const kindRaw = String(req.query.kind || "").trim().toLowerCase();
+      const kindFilter =
+        kindRaw === "video" || kindRaw === "audio" || kindRaw === "image" ? kindRaw : "";
       const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 80));
       const rows = db
         .prepare(
@@ -446,8 +467,12 @@ export function registerCanvasGenerationsRoutes(
         )
         .all(userId) as CanvasGenerationRow[];
       const items = rows
-        .map((row) => parseGenerationRow(row, projectRoot))
+        .map((row) => {
+          const item = parseGenerationRow(row, projectRoot);
+          return { ...item, media_kind: generationMediaKindFromItem(item) };
+        })
         .filter((item) => {
+          if (kindFilter && item.media_kind !== kindFilter) return false;
           if (!q) return true;
           const hay = `${item.prompt} ${item.model} ${item.canvas_id}`.toLowerCase();
           return hay.includes(q);
