@@ -121,7 +121,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     title: '编辑',
     rows: [
-      { label: '成组选中图片', keys: ['Ctrl', 'G'] },
+      { label: '打组（选类型）', keys: ['Ctrl', 'G'] },
       { label: '复制节点', keys: ['Ctrl', 'C'] },
       { label: '粘贴节点', keys: ['Ctrl', 'V'] },
       { label: '启用 / 禁用节点', keys: ['Ctrl', 'B'] },
@@ -138,7 +138,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     title: '选择与连线',
     rows: [
       { label: '多选节点', keys: ['Ctrl', '点击节点'] },
-      { label: '框选节点', keys: ['Ctrl', '拖动空白处'] },
+      { label: '框选节点', keys: ['拖动空白处'] },
       { label: '剪断连线', keys: ['Shift', '划过连线'] },
       { label: '拉出新连线', keys: ['拖动端口圆点'] },
     ],

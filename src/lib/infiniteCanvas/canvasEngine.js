@@ -76,7 +76,7 @@ function writeLastCanvasId(id){
     } catch(_) {}
 }
 function isCanvasInteracting(){
-    return Boolean(dragBoard || dragNode || pendingNodeDrag || resizeNode || minimapDrag || tempLink);
+    return Boolean(dragBoard || dragNode || pendingNodeDrag || resizeNode || minimapDrag || tempLink || selectDrag);
 }
 /** 焦点在画布可编辑控件内时的上下文（节点表单 / gen-dock） */
 function editingFocusContext(){
@@ -898,6 +898,13 @@ let knifeTrail = [];
 let knifeChanged = false;
 let knifeNeedsRender = false;
 let selectDrag = null;
+let selectBoxRaf = 0;
+let selectDragCleanup = null;
+let selectionActionBarEl = null;
+let selectionGroupTypeMenuEl = null;
+let frameGroupActionBarEl = null;
+let frameGroupActionBarNodeId = null;
+let frameGroupBgMenuEl = null;
 let menuPoint = null;
 let linkCreateState = null;
 let internalDrag = false;
@@ -3857,6 +3864,15 @@ function applyViewport(){
     if(genBatchPick?.nodeId){
         const pickNode = nodes.find(n => n.id === genBatchPick.nodeId);
         if(pickNode) positionGenBatchPickBar(pickNode);
+    }
+    if(selected.size >= 2) positionSelectionChrome();
+    else if(!selectDrag){
+        removeSelectionActionBar();
+        if(selectionBox) selectionBox.style.display = 'none';
+    }
+    if(frameGroupActionBarNodeId && frameGroupActionBarEl){
+        const fg = nodes.find(n => n.id === frameGroupActionBarNodeId);
+        if(fg) positionFrameGroupActionBar(fg);
     }
 }
 /** 视口外节点 visibility:hidden（保留布局，避免连线端点错位） */
@@ -6854,7 +6870,7 @@ function canStartBoardPanFromTarget(target){
     if(!board || !target) return false;
     if(isEditableTarget(target)) return false;
     if(target.closest?.(
-        '.node, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .image-gen-dock-host, .image-action-bar-host, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
+        '.node, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
     )) return false;
     return board.contains(target);
 }
@@ -6863,7 +6879,7 @@ function canStartForcedPanFromTarget(target){
     if(!board || !target) return false;
     if(isEditableTarget(target)) return false;
     if(target.closest?.(
-        'button, select, textarea, input, .port, .resize-handle, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .canvas-custom-select, .image-gen-dock-host, .image-action-bar-host, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
+        'button, select, textarea, input, .port, .resize-handle, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .canvas-custom-select, .image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
     )) return false;
     return board.contains(target);
 }
@@ -8415,10 +8431,17 @@ function isImageStackNode(node){
     return node && node.type === 'frameStack';
 }
 const GROUP_DROP_SNAP_PADDING = 16;
+/** 图片组：子图与外壳留边，便于拖组缘/缩放柄，避免贴边难抓 */
+const IMAGE_BATCH_EDGE_PADDING = 48;
+/** 图片组子图间距：须大于浮标 top:-44px，避免「图片节点 N」压到邻图 */
+const IMAGE_BATCH_CHILD_GAP = 56;
 const GROUP_DROP_HEAD_INSET = 48;
 const GROUP_CHILD_GAP = 12;
 const GROUP_DROP_OVERLAP_RATIO = 0.3;
 const GROUP_RESIZE_HANDLE_INSET = 32;
+function groupContentPadding(group){
+    return group?.type === 'imageBatch' ? IMAGE_BATCH_EDGE_PADDING : GROUP_DROP_SNAP_PADDING;
+}
 const GROUP_DEFAULT_W = 380;
 const GROUP_DEFAULT_H_IMAGE_BATCH = 300;
 const GROUP_DEFAULT_H_PROMPT_GROUP = 380;
@@ -8426,6 +8449,8 @@ const GROUP_PANEL_HEAD_IMAGE_BATCH = 64; // 顶栏约 56 + 缝；旧 144 是遗�
 const GROUP_PANEL_HEAD_PROMPT_GROUP = 228;
 function groupPanelHeadInset(group){
     if(!group) return GROUP_DROP_HEAD_INSET;
+    // 框组无顶栏文案，四周同宽留边
+    if(group.type === 'group') return 18;
     const fallback = group.type === 'imageBatch'
         ? GROUP_PANEL_HEAD_IMAGE_BATCH
         : group.type === 'promptGroup'
@@ -8463,16 +8488,18 @@ function groupUsesResizeHandleInset(group){
 }
 function groupInnerRect(group){
     const gr = nodeRect(group);
-    const pad = GROUP_DROP_SNAP_PADDING;
+    const pad = groupContentPadding(group);
     const head = groupPanelHeadInset(group);
+    // 图片组标题下再留一圈边，左右下同 pad
+    const topPad = group?.type === 'imageBatch' ? pad : 0;
     const handleInset = groupUsesResizeHandleInset(group) ? GROUP_RESIZE_HANDLE_INSET : 0;
     return {
         x: gr.x + pad,
-        y: gr.y + head,
+        y: gr.y + head + topPad,
         w: Math.max(48, gr.w - pad * 2 - handleInset),
-        h: Math.max(120, gr.h - head - pad - handleInset),
+        h: Math.max(120, gr.h - head - topPad - pad - handleInset),
         pad,
-        head,
+        head: head + topPad,
         handleInset,
     };
 }
@@ -8550,13 +8577,40 @@ function groupGridMetrics(group, children){
         childH: Math.max(...metrics.map(m => m.h), 120),
     };
 }
+/** 框组：只扩外框包住成员，不重排内部节点（无顶栏，四周等距留边） */
+function fitGroupFrameToChildren(group, opts={}){
+    if(!group || group.type !== 'group') return false;
+    const children = (group.items || [])
+        .map(id => nodes.find(n => n.id === id))
+        .filter(Boolean);
+    if(!children.length) return false;
+    const box = nodeBounds(children.map(c => c.id));
+    const pad = Number(groupPanelHeadInset(group) || 18);
+    group.x = Math.round(box.x - pad);
+    group.y = Math.round(box.y - pad);
+    group.w = Math.max(160, Math.round(box.w + pad * 2));
+    group.h = Math.max(120, Math.round(box.h + pad * 2));
+    if(opts.updateDom !== false){
+        const groupEl = nodesEl?.querySelector(`.node[data-id="${CSS.escape(group.id)}"]`);
+        if(groupEl){
+            groupEl.classList.add('sized');
+            groupEl.style.left = `${group.x}px`;
+            groupEl.style.top = `${group.y}px`;
+            groupEl.style.width = `${group.w}px`;
+            groupEl.style.height = `${group.h}px`;
+        }
+    }
+    return true;
+}
 function layoutGroupChildren(group, opts={}){
     if(!group || !['group','imageBatch','promptGroup'].includes(group.type)) return false;
+    // 框组 = 透明圆角框包住选中节点；勿走图片组网格重排
+    if(group.type === 'group') return fitGroupFrameToChildren(group, opts);
     const children = groupItemsForLayout(group, opts);
     if(!children.length) return false;
     const resizeMode = opts.resizeGroup;
     const inner = groupInnerRect(group);
-    const gap = GROUP_CHILD_GAP;
+    const gap = group.type === 'imageBatch' ? IMAGE_BATCH_CHILD_GAP : GROUP_CHILD_GAP;
     const minGroup = defaultNodeSize(group.type);
     const tailInset = (inner.handleInset || 0) + inner.pad;
     const { childW, childH } = groupGridMetrics(group, children);
@@ -8668,8 +8722,8 @@ function createImageBatchChild(batch, url, name, index){
     const child = {
         id:uid('img'),
         type:'image',
-        x:Number(batch.x || 0) + GROUP_DROP_SNAP_PADDING,
-        y:Number(batch.y || 0) + GROUP_DROP_HEAD_INSET + i * 28,
+        x:Number(batch.x || 0) + IMAGE_BATCH_EDGE_PADDING,
+        y:Number(batch.y || 0) + GROUP_DROP_HEAD_INSET + IMAGE_BATCH_EDGE_PADDING + i * 28,
         url,
         name:name || outputImageName(url),
     };
@@ -9092,7 +9146,6 @@ function openImageNodeMenu(nodeId, clientX, clientY){
     closeCreateMenu();
     const url = String(node.url || '').trim();
     const canPreview = url && mediaKindForNode(node) === 'image' && !isMissingAssetUrl(url);
-    const canEdit = canPreview;
     const canDownload = url && !isMissingAssetUrl(url);
     const canSaveLibrary = canPreview;
     const skipped = isNodeDisabled(node);
@@ -9102,7 +9155,6 @@ function openImageNodeMenu(nodeId, clientX, clientY){
     imageNodeMenu.innerHTML = `
         <button class="menu-btn" data-image-skip="${escapeAttr(nodeId)}" title="${escapeAttr(tr('canvas.nodeDisableHint'))}"><i data-lucide="${skipIcon}" class="w-4 h-4"></i><span>${escapeHtml(skipLabel)}</span></button>
         ${canPreview ? `<button class="menu-btn" data-image-preview="${escapeAttr(nodeId)}"><i data-lucide="maximize-2" class="w-4 h-4"></i><span>${en ? 'Enlarge' : '放大查看'}</span></button>` : ''}
-        ${canEdit ? `<button class="menu-btn" data-image-edit="${escapeAttr(nodeId)}"><i data-lucide="image" class="w-4 h-4"></i><span>${escapeHtml(tr('canvas.editImage'))}</span></button>` : ''}
         ${canDownload ? `<button class="menu-btn" data-image-download="${escapeAttr(nodeId)}"><i data-lucide="download" class="w-4 h-4"></i><span>${tr('canvas.outputDownloadImage')}</span></button>` : ''}
         ${canSaveLibrary ? `<button class="menu-btn" data-image-save-library="${escapeAttr(nodeId)}"><i data-lucide="folder-plus" class="w-4 h-4"></i><span>${en ? 'Save to library' : '保存到素材库'}</span></button>` : ''}
         <button class="menu-btn" data-image-duplicate="${escapeAttr(nodeId)}"><i data-lucide="copy-plus" class="w-4 h-4"></i><span>${en ? 'Create copy' : '创建副本'}</span></button>
@@ -9127,14 +9179,6 @@ function openImageNodeMenu(nodeId, clientX, clientY){
             e.stopPropagation();
             closeImageNodeMenu();
             openImageNodeLightbox(node);
-        };
-    }
-    const editBtn = imageNodeMenu.querySelector('[data-image-edit]');
-    if(editBtn){
-        editBtn.onclick = e => {
-            e.stopPropagation();
-            closeImageNodeMenu();
-            openImageEditor(nodeId);
         };
     }
     const downloadBtn = imageNodeMenu.querySelector('[data-image-download]');
@@ -13511,7 +13555,7 @@ function isNodeControl(target){
     // 图台/轻量结果台主媒体：允许拖节点与 Alt 复制（含 video 结果）
     if(target?.closest?.('.gen-stage-hero, .gen-stage-frame, .agent-result-hero, .agent-result-frame')) return false;
     // 注意：.gen-stage / 图台主图不计入控件，单击需选中节点以唤出下方控制台
-    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .image-action-bar-host, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs, .gen-stage-tile, .gen-stage-tile-actions, .gen-stage-grid, .gen-stage-stack-expand, .gen-stage-grid-collapse, .gen-stage-stack');
+    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .image-action-bar-host, .frame-group-action-bar-host, .frame-group-bg-menu, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs, .gen-stage-tile, .gen-stage-tile-actions, .gen-stage-grid, .gen-stage-stack-expand, .gen-stage-grid-collapse, .gen-stage-stack');
 }
 function destroyLTXEditor(node){
     if(!node?._ltxEditor) return;
@@ -13570,7 +13614,7 @@ function renderNode(node){
         }
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? tr('canvas.textNode') : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'imageBatch' ? (langIsEn() ? 'Image batch' : '图片组') : node.type === 'frameStack' ? (langIsEn() ? 'Frame Stack' : '截帧集') : node.type === 'llm' ? 'LLM' : node.type === 'replicaAgent' ? '复刻 Agent' : node.type === 'imageRepairAgent' ? (langIsEn() ? 'Repair Agent' : '修图 Agent') : node.type === 'batchPosterAgent' ? 'Batch Poster Agent' : node.type === 'nineGridAgent' ? (langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent') : node.type === 'slotsLoopVideoAgent' ? (langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent') : node.type === 'mxShellPromptAgent' ? (langIsEn() ? 'Mx-Shell Prompt Agent' : 'Mx-Shell 提示词 Agent') : node.type === 'mxShellPolishAgent' ? (langIsEn() ? 'Mx-Shell Polish Agent' : 'Mx-Shell 润色 Agent') : node.type === 'textOutput' ? textOutputKindLabel(node.kind) : node.type === 'mxShellPromptView' ? textOutputKindLabel('mxShell') : node.type === 'deepWhiteShotAgent' ? (langIsEn() ? 'DeepWhite Shot Agent' : 'DeepWhite 导演分镜 Agent') : node.type === 'deepWhiteShotView' ? textOutputKindLabel('deepWhite') : node.type === 'screenwritingAgent' ? (langIsEn() ? 'Screenwriting Agent' : '编剧 Agent') : node.type === 'pixarAdScriptAgent' ? (langIsEn() ? 'Story Anim Storyboard Agent' : '故事动画分镜 Agent') : node.type === 'videoReverse' ? '视频反推' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? tr('canvas.textNode') : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? (langIsEn() ? 'Prompt group' : '提示词组') : node.type === 'group' ? (langIsEn() ? 'Frame group' : '框组') : node.type === 'output' ? 'Output' : node.type === 'imageBatch' ? (langIsEn() ? 'Image group' : '图片组') : node.type === 'frameStack' ? (langIsEn() ? 'Frame Stack' : '截帧集') : node.type === 'llm' ? 'LLM' : node.type === 'replicaAgent' ? '复刻 Agent' : node.type === 'imageRepairAgent' ? (langIsEn() ? 'Repair Agent' : '修图 Agent') : node.type === 'batchPosterAgent' ? 'Batch Poster Agent' : node.type === 'nineGridAgent' ? (langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent') : node.type === 'slotsLoopVideoAgent' ? (langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent') : node.type === 'mxShellPromptAgent' ? (langIsEn() ? 'Mx-Shell Prompt Agent' : 'Mx-Shell 提示词 Agent') : node.type === 'mxShellPolishAgent' ? (langIsEn() ? 'Mx-Shell Polish Agent' : 'Mx-Shell 润色 Agent') : node.type === 'textOutput' ? textOutputKindLabel(node.kind) : node.type === 'mxShellPromptView' ? textOutputKindLabel('mxShell') : node.type === 'deepWhiteShotAgent' ? (langIsEn() ? 'DeepWhite Shot Agent' : 'DeepWhite 导演分镜 Agent') : node.type === 'deepWhiteShotView' ? textOutputKindLabel('deepWhite') : node.type === 'screenwritingAgent' ? (langIsEn() ? 'Screenwriting Agent' : '编剧 Agent') : node.type === 'pixarAdScriptAgent' ? (langIsEn() ? 'Story Anim Storyboard Agent' : '故事动画分镜 Agent') : node.type === 'videoReverse' ? '视频反推' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 运行状态徽章：含单节点失败与级联失败
     const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent','videoReverse'].includes(node.type) && node.runStatus
@@ -13587,19 +13631,27 @@ function renderNode(node){
     const rhLiveDot = node.type === 'rh'
         ? `<span class="rh-status-dot rh-head-dot ${(agentPendingCount(node.id) > 0 || Boolean(node.running)) ? 'is-on' : ''}" aria-hidden="true"></span>`
         : '';
-    el.innerHTML = `<div class="node-head"><span class="node-head-icon"><i data-lucide="${headIcon}" class="${node.type === 'imageBatch' ? 'w-5 h-5' : 'w-3 h-3'}"></i></span><span class="node-title">${displayTitle}</span>${rhLiveDot}<div style="display:flex;align-items:center;gap:8px;margin-left:auto">${promptGroupHeadToggle}${disabledBadge}${statusHtml}<button type="button" class="node-delete-btn text-gray-300 hover:text-red-500" aria-label="${escapeAttr(tr('common.delete'))}"><i data-lucide="x" class="${node.type === 'imageBatch' ? 'w-5 h-5' : 'w-4 h-4'}"></i></button></div></div>`;
-    const deleteBtn = el.querySelector('.node-delete-btn');
-    if(deleteBtn){
-        deleteBtn.onmousedown = e => e.stopPropagation();
-    }
-    if(node.type === 'promptGroup'){
-        const headToggle = el.querySelector('[data-pg-head-toggle]');
-        if(headToggle){
-            headToggle.onmousedown = e => e.stopPropagation();
-            headToggle.onclick = e => {
-                e.stopPropagation();
-                togglePromptGroupAllChildren(node);
-            };
+    // 框组：无标题/删除/文案，只留半透明底 + 缩放柄
+    if(node.type === 'group'){
+        el.classList.add('is-frame-group');
+        el.innerHTML = '';
+        if(node.frameBg) el.style.background = String(node.frameBg);
+        else el.style.removeProperty('background');
+    } else {
+        el.innerHTML = `<div class="node-head"><span class="node-head-icon"><i data-lucide="${headIcon}" class="${node.type === 'imageBatch' ? 'w-5 h-5' : 'w-3 h-3'}"></i></span><span class="node-title">${displayTitle}</span>${rhLiveDot}<div style="display:flex;align-items:center;gap:8px;margin-left:auto">${promptGroupHeadToggle}${disabledBadge}${statusHtml}<button type="button" class="node-delete-btn text-gray-300 hover:text-red-500" aria-label="${escapeAttr(tr('common.delete'))}"><i data-lucide="x" class="${node.type === 'imageBatch' ? 'w-5 h-5' : 'w-4 h-4'}"></i></button></div></div>`;
+        const deleteBtn = el.querySelector('.node-delete-btn');
+        if(deleteBtn){
+            deleteBtn.onmousedown = e => e.stopPropagation();
+        }
+        if(node.type === 'promptGroup'){
+            const headToggle = el.querySelector('[data-pg-head-toggle]');
+            if(headToggle){
+                headToggle.onmousedown = e => e.stopPropagation();
+                headToggle.onclick = e => {
+                    e.stopPropagation();
+                    togglePromptGroupAllChildren(node);
+                };
+            }
         }
     }
     const body = document.createElement('div');
@@ -13768,12 +13820,8 @@ function renderNode(node){
     }
     if(node.type === 'loop') body.appendChild(renderLoopBody(node));
     if(node.type === 'group') {
-        const items = (node.items || []).map(id => nodes.find(n => n.id === id)).filter(Boolean);
-        const imgCount = items.filter(n => n.type === 'image').length;
-        const parts = [];
-        if(imgCount) parts.push(`${imgCount} ${tr('canvas.imageCount')}`);
-        const text = parts.length ? `${parts.join(' · ')} ${tr('canvas.grouped')}` : tr('canvas.groupEmpty');
-        body.innerHTML = `<div class="text-[11px] text-gray-400">${text}</div>`;
+        body.classList.add('frame-group-body');
+        body.innerHTML = '';
     }
     if(node.type === 'promptGroup') {
         prunePromptGroupItems(node);
@@ -13882,8 +13930,12 @@ function renderNode(node){
         // 顶栏只留标题/删除；张数提示、上传/整理钮、整组禁用开关已去掉（右键仍可禁单张；拖入仍可上传）
         body.innerHTML = `<div class="image-batch-body"></div>`;
         bindImageBatchUpload(body, node);
-        // 顶栏 inset 已按实测收紧：重排子图，消掉标题下旧 144px 留空
-        scheduleImageBatchRelayout(node.id, 'auto');
+        // 仅首次（或显式脏标记）重排；每次 render 都 schedule 会闪一下子图
+        if(!node._batchLayoutReady || node._batchLayoutDirty){
+            node._batchLayoutReady = true;
+            node._batchLayoutDirty = false;
+            scheduleImageBatchRelayout(node.id, 'auto');
+        }
     }
     if(node.type === 'generator' || node.type === 'msgen' || node.type === 'video'){
         const scaleWrap = document.createElement('div');
@@ -13924,7 +13976,8 @@ function renderNode(node){
         startNodeDrag(e, node);
     };
     const canInput = ['generator','comfy','ltxDirector','output','llm','prompt','msgen','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent','textOutput','videoReverse','frameStack','loop','imageBatch'].includes(node.type);
-    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','replicaAgent','imageRepairAgent','videoReverse','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','textOutput','mxShellPromptView','deepWhiteShotAgent','deepWhiteShotView','screenwritingAgent','pixarAdScriptAgent','frameStack','imageBatch'].includes(node.type);
+    // 框组只做视觉框选，无左右端口；连线走框内节点自身
+    const canOutput = ['image','prompt','loop','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','replicaAgent','imageRepairAgent','videoReverse','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','textOutput','mxShellPromptView','deepWhiteShotAgent','deepWhiteShotView','screenwritingAgent','pixarAdScriptAgent','frameStack','imageBatch'].includes(node.type);
     // 图片组内子图：连线走组节点，子图两侧不显示端口圆点
     const hidePorts = node.type === 'image' && Boolean(imageBatchOwningImage(node.id));
     if(hidePorts) el.classList.add('in-image-batch');
@@ -19962,6 +20015,12 @@ function scheduleImageBatchRelayout(batchId, resizeGroup='auto'){
         _imageBatchRelayoutTimers.delete(batchId);
         const g = nodes.find(n => n.id === batchId);
         if(!g || g.type !== 'imageBatch') return;
+        const prevW = Number(g.w) || 0;
+        const prevH = Number(g.h) || 0;
+        const prevXY = (g.items || []).map(id => {
+            const c = nodes.find(n => n.id === id);
+            return c ? `${c.id}:${c.x},${c.y}` : '';
+        }).join('|');
         layoutGroupChildren(g, { resizeGroup, layoutAllItems: true, updateDom: true });
         const groupEl = nodesEl?.querySelector?.(`.node[data-id="${CSS.escape(g.id)}"]`);
         if(groupEl && g.w && g.h){
@@ -19969,11 +20028,24 @@ function scheduleImageBatchRelayout(batchId, resizeGroup='auto'){
             groupEl.style.width = `${g.w}px`;
             groupEl.style.height = `${g.h}px`;
         }
-        scheduleLinkGeometryRefresh(new Set([g.id, ...(g.items || [])]));
-        if(minimapState) updateMinimapNodePositions();
-        scheduleSave();
+        const nextXY = (g.items || []).map(id => {
+            const c = nodes.find(n => n.id === id);
+            return c ? `${c.id}:${c.x},${c.y}` : '';
+        }).join('|');
+        const geometryChanged = prevW !== Number(g.w) || prevH !== Number(g.h) || prevXY !== nextXY;
+        if(geometryChanged){
+            scheduleLinkGeometryRefresh(new Set([g.id, ...(g.items || [])]));
+            if(minimapState) updateMinimapNodePositions();
+            scheduleSave();
+        }
+        g._batchLayoutReady = true;
+        g._batchLayoutDirty = false;
     }, 64);
     _imageBatchRelayoutTimers.set(batchId, timer);
+}
+function markImageBatchLayoutDirty(batchId){
+    const g = nodes.find(n => n.id === batchId && n.type === 'imageBatch');
+    if(g) g._batchLayoutDirty = true;
 }
 function fitImageNodeToNaturalAspect(node, el, img){
     if(!node || node.type !== 'image' || !img) return;
@@ -22387,6 +22459,9 @@ function syncImageGenDock(){
     if(isImageEditOpen()){
         removeImageGenDock();
         removeImageActionBar();
+        removeSelectionActionBar();
+        removeFrameGroupActionBar();
+        if(selectionBox && !selectDrag) selectionBox.style.display = 'none';
         syncTextNodeChrome();
         return;
     }
@@ -22460,6 +22535,7 @@ function syncImageGenDock(){
     }
     // 顶部动作条与底部 dock 同刷新点（图片节点无 dock，仍靠这里唤出）
     syncImageActionBar();
+    syncFrameGroupActionBar();
     syncTextNodeChrome();
 }
 /** 单选图片 / 视频卡 / Gen 结果台：当前可操作的媒体 URL */
@@ -22725,17 +22801,25 @@ async function reloadAssetLibrarySaveModal(host){
     const saveBtn = host.querySelector('[data-asset-lib-save]');
     if(saveBtn) saveBtn.disabled = !assetLibrarySaveState.categoryId || assetLibrarySaveState.scope !== 'personal';
 }
-async function openAssetLibrarySaveModal(url, name=''){
-    const cleanUrl = String(url || '').trim();
+async function openAssetLibrarySaveModal(url, name='', items=null){
+    const list = Array.isArray(items) && items.length
+        ? items.map(it => ({
+            url: String(it?.url || '').trim(),
+            name: String(it?.name || outputImageName(it?.url) || '').trim(),
+        })).filter(it => it.url && !isMissingAssetUrl(it.url))
+        : [];
+    const cleanUrl = String(url || list[0]?.url || '').trim();
     if(!cleanUrl || isMissingAssetUrl(cleanUrl)){
         softAlert(langIsEn() ? 'No media to save' : '没有可保存的素材');
         return;
     }
     closeAssetLibrarySaveModal();
     const en = langIsEn();
+    const saveItems = list.length ? list : [{url: cleanUrl, name: String(name || outputImageName(cleanUrl) || '').trim()}];
     assetLibrarySaveState = {
         url: cleanUrl,
-        name: String(name || outputImageName(cleanUrl) || '').trim(),
+        name: String(name || saveItems[0]?.name || outputImageName(cleanUrl) || '').trim(),
+        items: saveItems,
         categoryId: 'character',
         scope: 'personal',
         categories: [],
@@ -22812,9 +22896,17 @@ async function openAssetLibrarySaveModal(url, name=''){
         }
         saveBtn.disabled = true;
         try {
-            await saveImageUrlToAssetCategory(categoryId, assetLibrarySaveState.url, assetLibrarySaveState.name);
+            const items = (assetLibrarySaveState.items?.length
+                ? assetLibrarySaveState.items
+                : [{url: assetLibrarySaveState.url, name: assetLibrarySaveState.name}])
+                .filter(it => it?.url);
+            for(const item of items){
+                await saveImageUrlToAssetCategory(categoryId, item.url, item.name);
+            }
             closeAssetLibrarySaveModal();
-            setStatus(en ? 'Saved to library' : '已保存到素材库');
+            setStatus(en
+                ? (items.length > 1 ? `Saved ${items.length} to library` : 'Saved to library')
+                : (items.length > 1 ? `已保存 ${items.length} 张到素材库` : '已保存到素材库'));
             window.dispatchEvent(new CustomEvent('canvas-asset-library-changed'));
         } catch(err) {
             softAlert(err?.message || (en ? 'Save failed' : '保存失败'));
@@ -30633,6 +30725,7 @@ function finalizeGroupSelection(created){
     refreshGeneratorInputViews();
     render();
     relayoutGroupsWithMeasuredChrome(created, 'auto');
+    syncSelectionActionBar();
     scheduleSave();
 }
 function mergeSelectedImagesToBatch(){
@@ -30663,6 +30756,353 @@ function createPromptGroupFromSelection(){
         ? buildPromptGroupFromPrompts(prompts)
         : addPromptGroupNode(defaultPoint(40, 0));
     finalizeGroupSelection([promptGroup.id]);
+}
+function selectionFrameGroupMembers(){
+    return [...selected]
+        .map(id => nodes.find(n => n.id === id))
+        .filter(n => n && !['group', 'imageBatch', 'promptGroup'].includes(n.type));
+}
+/** 第三种组：圆角半透明框，包住选中节点（不重排、不改成图片组/提示词组） */
+function buildFrameGroupFromSelection(){
+    const members = selectionFrameGroupMembers();
+    if(members.length < 2) return null;
+    members.forEach(child => {
+        nodes.forEach(g => {
+            if(!g || !['group', 'imageBatch', 'promptGroup'].includes(g.type) || !Array.isArray(g.items)) return;
+            if(g.items.includes(child.id)) g.items = g.items.filter(id => id !== child.id);
+        });
+    });
+    const box = nodeBounds(members.map(m => m.id));
+    const pad = 18;
+    const group = addNode({
+        id: uid('grp'),
+        type: 'group',
+        x: Math.round(box.x - pad),
+        y: Math.round(box.y - pad),
+        w: Math.max(160, Math.round(box.w + pad * 2)),
+        h: Math.max(120, Math.round(box.h + pad * 2)),
+        items: members.map(m => m.id),
+        frameBg: '',
+    });
+    return group;
+}
+function createFrameGroupFromSelection(){
+    if(!ensureCanvas()) return;
+    const members = selectionFrameGroupMembers();
+    if(members.length < 2){
+        softAlert(langIsEn() ? 'Select at least 2 nodes to frame' : '请至少选中 2 个节点再打框组');
+        return;
+    }
+    pushUndo();
+    const group = buildFrameGroupFromSelection();
+    if(!group) return;
+    finalizeGroupSelection([group.id]);
+}
+const FRAME_GROUP_BG_PRESETS = [
+    {id:'default', css:'', labelZh:'默认', labelEn:'Default'},
+    {id:'darker', css:'rgba(14,14,14,.55)', labelZh:'更深', labelEn:'Darker'},
+    {id:'soft', css:'rgba(48,48,52,.5)', labelZh:'浅灰', labelEn:'Soft gray'},
+    {id:'amber', css:'rgba(255,184,102,.14)', labelZh:'琥珀', labelEn:'Amber'},
+    {id:'slate', css:'rgba(90,120,160,.18)', labelZh:'冷蓝', labelEn:'Slate'},
+];
+function collectFrameGroupMediaItems(group){
+    const out = [];
+    const seen = new Set();
+    const push = (url, name) => {
+        const u = String(url || '').trim();
+        if(!u || isMissingAssetUrl(u) || seen.has(u)) return;
+        seen.add(u);
+        out.push({url: u, name: String(name || outputImageName(u) || '').trim()});
+    };
+    (group?.items || []).forEach(id => {
+        const n = nodes.find(x => x.id === id);
+        if(!n) return;
+        if(n.type === 'image' && n.url) push(n.url, n.name);
+        if(n.type === 'imageBatch'){
+            imageBatchAllChildImages(n).forEach(img => push(img.url, img.name));
+        }
+    });
+    return out;
+}
+function ungroupFrameGroup(groupId){
+    const group = nodes.find(n => n.id === groupId && n.type === 'group');
+    if(!group) return;
+    pushUndo();
+    const memberIds = [...(group.items || [])].filter(id => nodes.some(n => n.id === id));
+    connections = connections.filter(c => c.from !== group.id && c.to !== group.id);
+    nodes = nodes.filter(n => n.id !== group.id);
+    selected.clear();
+    memberIds.forEach(id => selected.add(id));
+    closeFrameGroupBgMenu();
+    removeFrameGroupActionBar();
+    render();
+    syncSelectionActionBar();
+    scheduleSave();
+    setStatus(langIsEn() ? 'Ungrouped' : '已解组');
+}
+async function downloadFrameGroupMedia(group){
+    const items = collectFrameGroupMediaItems(group);
+    const en = langIsEn();
+    if(!items.length){
+        softAlert(en ? 'No downloadable media in frame' : '框组内没有可下载的图片');
+        return;
+    }
+    for(const item of items){
+        try {
+            await downloadUrl(item.url, outputDownloadName(item.url));
+        } catch(err){
+            softAlert(err?.message || (en ? 'Download failed' : '下载失败'));
+            return;
+        }
+    }
+    setStatus(en ? `Downloaded ${items.length}` : `已下载 ${items.length} 张`);
+}
+function closeFrameGroupBgMenu(){
+    frameGroupBgMenuEl?.remove();
+    frameGroupBgMenuEl = null;
+}
+function openFrameGroupBgMenu(anchorEl, group){
+    if(!board || !group || group.type !== 'group') return;
+    closeFrameGroupBgMenu();
+    const en = langIsEn();
+    const menu = document.createElement('div');
+    menu.className = 'frame-group-bg-menu';
+    menu.innerHTML = `
+        ${FRAME_GROUP_BG_PRESETS.map(p => `
+            <button type="button" class="frame-group-bg-swatch ${(!group.frameBg && p.id === 'default') || group.frameBg === p.css ? 'is-on' : ''}" data-bg="${escapeAttr(p.css)}" title="${escapeAttr(en ? p.labelEn : p.labelZh)}">
+                <span class="frame-group-bg-chip" style="background:${escapeAttr(p.css || 'rgba(36,36,38,.42)')}"></span>
+                <span>${escapeHtml(en ? p.labelEn : p.labelZh)}</span>
+            </button>`).join('')}
+        <label class="frame-group-bg-custom">
+            <span>${escapeHtml(en ? 'Custom' : '自定义')}</span>
+            <input type="color" value="${escapeAttr((() => {
+                const m = String(group.frameBg || '').match(/rgba?\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+                if(!m) return '#242426';
+                return '#' + [m[1], m[2], m[3]].map(n => Number(n).toString(16).padStart(2, '0')).join('');
+            })())}" />
+        </label>`;
+    menu.onpointerdown = e => e.stopPropagation();
+    menu.onmousedown = e => e.stopPropagation();
+    const applyBg = (css) => {
+        pushUndo();
+        group.frameBg = css || '';
+        const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(group.id)}"]`);
+        if(el){
+            if(group.frameBg) el.style.background = group.frameBg;
+            else el.style.removeProperty('background');
+        }
+        closeFrameGroupBgMenu();
+        scheduleSave();
+    };
+    menu.querySelectorAll('[data-bg]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            applyBg(btn.getAttribute('data-bg') || '');
+        };
+    });
+    const colorInput = menu.querySelector('input[type="color"]');
+    if(colorInput){
+        colorInput.onchange = () => {
+            const hex = colorInput.value || '#242426';
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            applyBg(`rgba(${r},${g},${b},.42)`);
+        };
+    }
+    board.appendChild(menu);
+    frameGroupBgMenuEl = menu;
+    const boardRect = board.getBoundingClientRect();
+    const ar = anchorEl?.getBoundingClientRect?.();
+    const mw = menu.offsetWidth || 160;
+    const mh = menu.offsetHeight || 180;
+    let left = ar ? ar.left - boardRect.left + ar.width / 2 - mw / 2 : 40;
+    let top = ar ? ar.bottom - boardRect.top + 8 : 40;
+    left = Math.max(8, Math.min(left, boardRect.width - mw - 8));
+    top = Math.max(8, Math.min(top, boardRect.height - mh - 8));
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+}
+function removeFrameGroupActionBar(){
+    closeFrameGroupBgMenu();
+    frameGroupActionBarEl?.remove();
+    frameGroupActionBarEl = null;
+    frameGroupActionBarNodeId = null;
+}
+function positionFrameGroupActionBar(group){
+    if(!frameGroupActionBarEl || !group || !board) return;
+    const nodeEl = nodesEl?.querySelector(`.node[data-id="${CSS.escape(group.id)}"]`);
+    if(!nodeEl) return;
+    const nodeRect = nodeEl.getBoundingClientRect();
+    const boardRect = board.getBoundingClientRect();
+    const gap = 12;
+    const barH = frameGroupActionBarEl.offsetHeight || 40;
+    frameGroupActionBarEl.style.position = 'absolute';
+    frameGroupActionBarEl.style.left = `${nodeRect.left - boardRect.left + nodeRect.width / 2}px`;
+    frameGroupActionBarEl.style.top = `${nodeRect.top - boardRect.top - gap - barH}px`;
+    frameGroupActionBarEl.style.transform = 'translateX(-50%)';
+    frameGroupActionBarEl.style.zIndex = '83';
+    frameGroupActionBarEl.style.pointerEvents = 'auto';
+}
+function remountFrameGroupActionBar(group){
+    removeFrameGroupActionBar();
+    if(!board || !group || group.type !== 'group' || isImageEditOpen()) return;
+    const en = langIsEn();
+    const host = document.createElement('div');
+    host.className = 'frame-group-action-bar-host';
+    host.dataset.actionBarFor = group.id;
+    host.onpointerdown = e => e.stopPropagation();
+    host.onmousedown = e => e.stopPropagation();
+    host.onclick = e => e.stopPropagation();
+    host.innerHTML = `
+        <div class="image-action-bar frame-group-action-bar" role="toolbar" aria-label="${escapeAttr(en ? 'Frame group actions' : '框组操作')}">
+            <button type="button" class="image-action-bar-btn is-labeled" data-action="download" title="${escapeAttr(en ? 'Download' : '下载')}">
+                <i data-lucide="download"></i><span>${escapeHtml(en ? 'Download' : '下载')}</span>
+            </button>
+            <button type="button" class="image-action-bar-btn is-labeled" data-action="ungroup" title="${escapeAttr(en ? 'Ungroup' : '解组')}">
+                <i data-lucide="ungroup"></i><span>${escapeHtml(en ? 'Ungroup' : '解组')}</span>
+            </button>
+            <button type="button" class="image-action-bar-btn is-labeled" data-action="workflow" title="${escapeAttr(en ? 'Save as workflow' : '创建工作流')}">
+                <i data-lucide="bookmark-plus"></i><span>${escapeHtml(en ? 'Workflow' : '创建工作流')}</span>
+            </button>
+            <span class="image-action-bar-sep" aria-hidden="true"></span>
+            <button type="button" class="image-action-bar-btn is-labeled" data-action="bg" title="${escapeAttr(en ? 'Background color' : '背景颜色')}">
+                <i data-lucide="palette"></i><span>${escapeHtml(en ? 'Fill' : '背景颜色')}</span>
+            </button>
+        </div>`;
+    host.querySelector('[data-action="download"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void downloadFrameGroupMedia(group);
+    });
+    host.querySelector('[data-action="ungroup"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        ungroupFrameGroup(group.id);
+    });
+    host.querySelector('[data-action="workflow"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        // 沿用框选「保存为工作流」：buildWorkflowTemplateFromNodeIds 会展开框组成员
+        void saveSelectedAsWorkflowTemplate();
+    });
+    host.querySelector('[data-action="bg"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        if(frameGroupBgMenuEl) closeFrameGroupBgMenu();
+        else openFrameGroupBgMenu(e.currentTarget, group);
+    });
+    board.appendChild(host);
+    frameGroupActionBarEl = host;
+    frameGroupActionBarNodeId = group.id;
+    positionFrameGroupActionBar(group);
+    requestAnimationFrame(() => positionFrameGroupActionBar(group));
+    refreshIcons(host);
+}
+function syncFrameGroupActionBar(){
+    if(selectDrag || isImageEditOpen() || selected.size !== 1){
+        removeFrameGroupActionBar();
+        return;
+    }
+    const onlyId = [...selected][0];
+    const only = nodes.find(n => n.id === onlyId);
+    if(!only || only.type !== 'group'){
+        removeFrameGroupActionBar();
+        return;
+    }
+    if(frameGroupActionBarNodeId === only.id && frameGroupActionBarEl?.isConnected){
+        positionFrameGroupActionBar(only);
+        return;
+    }
+    remountFrameGroupActionBar(only);
+}
+function applySelectionGroupType(kind){
+    closeSelectionGroupTypeMenu();
+    if(kind === 'imageBatch'){
+        const images = [...selected].map(id => nodes.find(n => n.id === id)).filter(n => n?.type === 'image');
+        if(!images.length){
+            softAlert(langIsEn() ? 'Select image nodes for an image group' : '图片组需要选中图片节点');
+            return;
+        }
+        createImageBatchFromSelection();
+        return;
+    }
+    if(kind === 'promptGroup'){
+        const prompts = [...selected].map(id => nodes.find(n => n.id === id)).filter(n => n?.type === 'prompt');
+        if(!prompts.length){
+            softAlert(langIsEn() ? 'Select text nodes for a prompt group' : '提示词组需要选中文本节点');
+            return;
+        }
+        createPromptGroupFromSelection();
+        return;
+    }
+    if(kind === 'group'){
+        createFrameGroupFromSelection();
+    }
+}
+function closeSelectionGroupTypeMenu(){
+    selectionGroupTypeMenuEl?.remove();
+    selectionGroupTypeMenuEl = null;
+}
+function openSelectionGroupTypeMenu(anchorEl){
+    if(!board || selected.size < 2) return;
+    closeSelectionGroupTypeMenu();
+    const en = langIsEn();
+    const images = [...selected].map(id => nodes.find(n => n.id === id)).filter(n => n?.type === 'image');
+    const prompts = [...selected].map(id => nodes.find(n => n.id === id)).filter(n => n?.type === 'prompt');
+    const frameMembers = selectionFrameGroupMembers();
+    const menu = document.createElement('div');
+    menu.className = 'selection-group-type-menu';
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML = `
+        <button type="button" class="selection-group-type-btn" data-group-type="imageBatch" ${images.length < 1 ? 'disabled' : ''} role="menuitem">
+            <i data-lucide="images"></i>
+            <span class="selection-group-type-copy">
+                <span class="selection-group-type-title">${escapeHtml(en ? 'Image group' : '图片组')}</span>
+                <span class="selection-group-type-desc">${escapeHtml(en ? 'Batch / per-image generate' : '多图整理、逐张生图')}</span>
+            </span>
+        </button>
+        <button type="button" class="selection-group-type-btn" data-group-type="promptGroup" ${prompts.length < 1 ? 'disabled' : ''} role="menuitem">
+            <i data-lucide="layers"></i>
+            <span class="selection-group-type-copy">
+                <span class="selection-group-type-title">${escapeHtml(en ? 'Prompt group' : '提示词组')}</span>
+                <span class="selection-group-type-desc">${escapeHtml(en ? 'Bundle text prompts' : '多提示词成组')}</span>
+            </span>
+        </button>
+        <button type="button" class="selection-group-type-btn" data-group-type="group" ${frameMembers.length < 2 ? 'disabled' : ''} role="menuitem">
+            <i data-lucide="square-dashed"></i>
+            <span class="selection-group-type-copy">
+                <span class="selection-group-type-title">${escapeHtml(en ? 'Frame group' : '框组')}</span>
+                <span class="selection-group-type-desc">${escapeHtml(en ? 'Keep layout in a rounded frame' : '圆角半透明框住，不改排布')}</span>
+            </span>
+        </button>`;
+    menu.onpointerdown = e => e.stopPropagation();
+    menu.onmousedown = e => e.stopPropagation();
+    menu.querySelectorAll('[data-group-type]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            if(btn.disabled) return;
+            applySelectionGroupType(btn.dataset.groupType);
+        });
+    });
+    board.appendChild(menu);
+    selectionGroupTypeMenuEl = menu;
+    refreshIcons(menu);
+    const boardRect = board.getBoundingClientRect();
+    const anchor = anchorEl || selectionActionBarEl?.querySelector?.('[data-action="group"]');
+    const ar = anchor?.getBoundingClientRect?.();
+    const mw = menu.offsetWidth || 220;
+    const mh = menu.offsetHeight || 140;
+    let left;
+    let top;
+    if(ar){
+        left = ar.left - boardRect.left + ar.width / 2 - mw / 2;
+        top = ar.bottom - boardRect.top + 8;
+    } else {
+        const b = selectedNodesClientBounds();
+        left = b ? (b.left + b.right) / 2 - boardRect.left - mw / 2 : boardRect.width / 2 - mw / 2;
+        top = b ? b.top - boardRect.top - mh - 48 : 80;
+    }
+    left = Math.max(8, Math.min(left, boardRect.width - mw - 8));
+    top = Math.max(8, Math.min(top, boardRect.height - mh - 8));
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
 }
 function groupSelectedImages(){
     if(!ensureCanvas()) return;
@@ -31061,42 +31501,256 @@ function openCanvasNodeSearch(){
     requestAnimationFrame(() => input.focus());
 }
 
+function selectedNodesClientBounds(){
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    let any = false;
+    selected.forEach(id => {
+        const el = nodesEl?.querySelector?.(`.node[data-id="${CSS.escape(id)}"]`);
+        if(!el) return;
+        const r = el.getBoundingClientRect();
+        if(r.width < 1 && r.height < 1) return;
+        any = true;
+        left = Math.min(left, r.left);
+        top = Math.min(top, r.top);
+        right = Math.max(right, r.right);
+        bottom = Math.max(bottom, r.bottom);
+    });
+    if(!any) return null;
+    return {left, top, right, bottom, width: right - left, height: bottom - top};
+}
+function collectSelectedMediaItems(){
+    const out = [];
+    const seen = new Set();
+    const push = (url, name) => {
+        const u = String(url || '').trim();
+        if(!u || isMissingAssetUrl(u) || seen.has(u)) return;
+        seen.add(u);
+        out.push({url: u, name: String(name || outputImageName(u) || '').trim()});
+    };
+    selected.forEach(id => {
+        const n = nodes.find(x => x.id === id);
+        if(!n) return;
+        if(n.type === 'image' && n.url) push(n.url, n.name);
+        if(n.type === 'imageBatch'){
+            imageBatchAllChildImages(n).forEach(img => push(img.url, img.name));
+        }
+    });
+    return out;
+}
+function removeSelectionActionBar(){
+    closeSelectionGroupTypeMenu();
+    selectionActionBarEl?.remove();
+    selectionActionBarEl = null;
+}
+function applySelectionBoxRect(left, top, w, h){
+    if(!selectionBox) return;
+    selectionBox.style.display = 'block';
+    selectionBox.style.left = '0px';
+    selectionBox.style.top = '0px';
+    selectionBox.style.width = `${Math.max(0, w)}px`;
+    selectionBox.style.height = `${Math.max(0, h)}px`;
+    selectionBox.style.transform = `translate(${left}px, ${top}px)`;
+}
+function updateSelectionHullFromSelection(){
+    if(!selectionBox || selectDrag) return;
+    if(selected.size < 2){
+        selectionBox.style.display = 'none';
+        return;
+    }
+    const b = selectedNodesClientBounds();
+    if(!b){
+        selectionBox.style.display = 'none';
+        return;
+    }
+    const pad = 10;
+    applySelectionBoxRect(b.left - pad, b.top - pad, b.width + pad * 2, b.height + pad * 2);
+}
+function positionSelectionActionBar(){
+    if(!selectionActionBarEl || !board || selected.size < 2) return;
+    const b = selectedNodesClientBounds();
+    if(!b) return;
+    const boardRect = board.getBoundingClientRect();
+    const gap = 12;
+    const barH = selectionActionBarEl.offsetHeight || 40;
+    selectionActionBarEl.style.position = 'absolute';
+    selectionActionBarEl.style.left = `${(b.left + b.right) / 2 - boardRect.left}px`;
+    selectionActionBarEl.style.top = `${b.top - boardRect.top - gap - barH}px`;
+    selectionActionBarEl.style.transform = 'translateX(-50%)';
+    selectionActionBarEl.style.width = 'max-content';
+    selectionActionBarEl.style.zIndex = '83';
+    selectionActionBarEl.style.pointerEvents = 'auto';
+}
+function positionSelectionChrome(){
+    updateSelectionHullFromSelection();
+    positionSelectionActionBar();
+}
+function groupSelectedFromToolbar(anchorEl){
+    if(selected.size < 2){
+        softAlert(langIsEn() ? 'Select at least 2 nodes' : '请至少选中 2 个节点');
+        return;
+    }
+    if(selectionGroupTypeMenuEl){
+        closeSelectionGroupTypeMenu();
+        return;
+    }
+    openSelectionGroupTypeMenu(anchorEl);
+}
+async function downloadSelectedMedia(){
+    const items = collectSelectedMediaItems();
+    const en = langIsEn();
+    if(!items.length){
+        softAlert(en ? 'No downloadable media in selection' : '选中项没有可下载的图片');
+        return;
+    }
+    for(const item of items){
+        try {
+            await downloadUrl(item.url, outputDownloadName(item.url));
+        } catch(err){
+            softAlert(err?.message || (en ? 'Download failed' : '下载失败'));
+            return;
+        }
+    }
+    setStatus(en ? `Downloaded ${items.length}` : `已下载 ${items.length} 张`);
+}
+function remountSelectionActionBar(){
+    removeSelectionActionBar();
+    if(!board || selected.size < 2 || selectDrag || isImageEditOpen()) return;
+    const en = langIsEn();
+    const host = document.createElement('div');
+    host.className = 'selection-action-bar-host';
+    host.onpointerdown = e => e.stopPropagation();
+    host.onmousedown = e => e.stopPropagation();
+    host.onclick = e => e.stopPropagation();
+    host.innerHTML = `
+        <div class="image-action-bar selection-action-bar" role="toolbar" aria-label="${escapeAttr(en ? 'Selection actions' : '多选操作')}">
+            <button type="button" class="image-action-bar-btn is-labeled" data-action="group" title="${escapeAttr(en ? 'Group' : '打组')}">
+                <i data-lucide="group"></i><span>${escapeHtml(en ? 'Group' : '打组')}</span>
+            </button>
+            <span class="image-action-bar-sep" aria-hidden="true"></span>
+            <button type="button" class="image-action-bar-btn" data-action="save-library" title="${escapeAttr(en ? 'Save to library' : '保存到素材库')}" aria-label="save-library"><i data-lucide="folder-plus"></i></button>
+            <button type="button" class="image-action-bar-btn" data-action="download" title="${escapeAttr(en ? 'Batch download' : '批量下载')}" aria-label="download"><i data-lucide="download"></i></button>
+        </div>`;
+    host.querySelector('[data-action="group"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        groupSelectedFromToolbar(e.currentTarget);
+    });
+    host.querySelector('[data-action="save-library"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        const items = collectSelectedMediaItems();
+        if(!items.length){
+            softAlert(en ? 'No media in selection' : '选中项没有可保存的图片');
+            return;
+        }
+        void openAssetLibrarySaveModal(items[0].url, items[0].name, items);
+    });
+    host.querySelector('[data-action="download"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void downloadSelectedMedia();
+    });
+    board.appendChild(host);
+    selectionActionBarEl = host;
+    positionSelectionActionBar();
+    requestAnimationFrame(() => positionSelectionActionBar());
+    refreshIcons(host);
+}
+function syncSelectionActionBar(){
+    if(selectDrag || isImageEditOpen() || selected.size < 2){
+        removeSelectionActionBar();
+        if(selectionBox && !selectDrag) selectionBox.style.display = 'none';
+        return;
+    }
+    updateSelectionHullFromSelection();
+    if(!selectionActionBarEl?.isConnected) remountSelectionActionBar();
+    else positionSelectionActionBar();
+}
+function clearSelectDragListeners(){
+    if(selectDragCleanup){
+        selectDragCleanup();
+        selectDragCleanup = null;
+    }
+    if(selectBoxRaf){
+        cancelAnimationFrame(selectBoxRaf);
+        selectBoxRaf = 0;
+    }
+}
 function startSelection(e){
     e.preventDefault();
     e.stopPropagation();
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+    removeSelectionActionBar();
+    removeFrameGroupActionBar();
+    clearSelectDragListeners();
+    if(selectionBox) selectionBox.style.display = 'none';
     selectDrag = {sx:e.clientX, sy:e.clientY, x:e.clientX, y:e.clientY};
     withCanvasRootClass(list => list.add('canvas-selecting'));
-    selectionBox.style.display = 'block';
-    updateSelectionBox(e.clientX, e.clientY);
-    window.onmousemove = e2 => updateSelectionBox(e2.clientX, e2.clientY);
-    window.onmouseup = finishSelection;
+    clearAllPortMagnet();
+    setHoveredConnection('');
+    applySelectionBoxRect(e.clientX, e.clientY, 0, 0);
+    const onMove = e2 => updateSelectionBox(e2.clientX, e2.clientY);
+    const onUp = e2 => finishSelection(e2);
+    window.addEventListener('pointermove', onMove, {passive: true});
+    window.addEventListener('mousemove', onMove, {passive: true});
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('mouseup', onUp);
+    selectDragCleanup = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('mouseup', onUp);
+    };
 }
 function updateSelectionBox(x, y){
     if(!selectDrag) return;
-    selectDrag.x = x; selectDrag.y = y;
-    const left = Math.min(selectDrag.sx, x);
-    const top = Math.min(selectDrag.sy, y);
-    selectionBox.style.left = `${left}px`;
-    selectionBox.style.top = `${top}px`;
-    selectionBox.style.width = `${Math.abs(x - selectDrag.sx)}px`;
-    selectionBox.style.height = `${Math.abs(y - selectDrag.sy)}px`;
+    selectDrag.x = x;
+    selectDrag.y = y;
+    if(selectBoxRaf) return;
+    selectBoxRaf = requestAnimationFrame(() => {
+        selectBoxRaf = 0;
+        if(!selectDrag || !selectionBox) return;
+        const left = Math.min(selectDrag.sx, selectDrag.x);
+        const top = Math.min(selectDrag.sy, selectDrag.y);
+        applySelectionBoxRect(left, top, Math.abs(selectDrag.x - selectDrag.sx), Math.abs(selectDrag.y - selectDrag.sy));
+    });
 }
-function finishSelection(){
+function finishSelection(e){
     if(!selectDrag) return;
+    const moved = e ? pointerMovedEnough(selectDrag.sx, selectDrag.sy, e) : true;
+    if(selectBoxRaf){
+        cancelAnimationFrame(selectBoxRaf);
+        selectBoxRaf = 0;
+        if(e){
+            selectDrag.x = e.clientX;
+            selectDrag.y = e.clientY;
+            applySelectionBoxRect(
+                Math.min(selectDrag.sx, selectDrag.x),
+                Math.min(selectDrag.sy, selectDrag.y),
+                Math.abs(selectDrag.x - selectDrag.sx),
+                Math.abs(selectDrag.y - selectDrag.sy)
+            );
+        }
+    }
     const rect = selectionBox.getBoundingClientRect();
     selectionBox.style.display = 'none';
+    withCanvasRootClass(list => list.remove('canvas-selecting'));
+    clearSelectDragListeners();
+    selectDrag = null;
+    if(!moved){
+        if(selected.size){
+            selected.clear();
+            refreshSelectionVisuals();
+        } else {
+            syncSelectionActionBar();
+        }
+        return;
+    }
     selected.clear();
     nodesEl.querySelectorAll('.node').forEach(el => {
         const r = el.getBoundingClientRect();
         const overlaps = r.left < rect.right && r.right > rect.left && r.top < rect.bottom && r.bottom > rect.top;
         if(overlaps) selected.add(el.dataset.id);
     });
-    selectDrag = null;
-    withCanvasRootClass(list => list.remove('canvas-selecting'));
-    window.onmousemove = null;
-    window.onmouseup = null;
     render();
+    syncSelectionActionBar();
 }
 function startSelectionLink(e, kind){
     e.preventDefault();
@@ -31447,14 +32101,16 @@ function startNodeDrag(e, node){
     }
     const children = collectDragChildren(dragTarget);
     const payload = {node: dragTarget, children, sx:e.clientX, sy:e.clientY, ox:dragTarget.x, oy:dragTarget.y, duplicateCreated};
-    // 左键按下即显示抓取光标（不必等拖动阈值）
-    withCanvasRootClass(list => list.add('canvas-node-drag'));
     if(duplicateCreated){
+        // Alt 复制：立刻进入拖拽态
+        withCanvasRootClass(list => list.add('canvas-node-drag'));
         dragNode = {...payload, chromeActive: true};
         pendingNodeDrag = null;
         setDragNodesRaised(dragNode, true);
         collapseImageGenDockForDrag();
     } else {
+        // 纯点击勿加 canvas-node-drag：否则组节点会因 z-index/选中环跳变闪一下
+        // 真正拖过阈值后由 onNodePointerMove 再挂上
         applyNodeSelection(dragTarget.id, e);
         pendingNodeDrag = payload;
         dragNode = null;
@@ -31504,6 +32160,18 @@ function onNodeDrag(e){
     if(textNodeDockNodeId && movingIds.has(textNodeDockNodeId) && textNodeDockEl && !textNodeDockEl.hidden){
         const tDock = nodes.find(n => n.id === textNodeDockNodeId);
         if(tDock) positionTextNodeDock(tDock);
+    }
+    if(selected.size >= 2){
+        for(const id of movingIds){
+            if(selected.has(id)){
+                positionSelectionChrome();
+                break;
+            }
+        }
+    }
+    if(frameGroupActionBarNodeId && movingIds.has(frameGroupActionBarNodeId)){
+        const fg = nodes.find(n => n.id === frameGroupActionBarNodeId);
+        if(fg) positionFrameGroupActionBar(fg);
     }
 }
 function startNodeResize(e, node){
@@ -31802,6 +32470,8 @@ function canConnect(fromId, toId){
     const from = nodes.find(n => n.id === fromId);
     const to = nodes.find(n => n.id === toId);
     if(!from || !to) return false;
+    // 框组无端口，不能作为连线端点
+    if(from.type === 'group' || to.type === 'group') return false;
     if(to.type === 'replicaAgent'){
         if(['image','prompt','llm','frameStack','imageBatch','output','group','loop'].includes(from.type)) return true;
         return CANVAS_MEDIA_OUTPUT_TYPES.includes(from.type);
@@ -32067,8 +32737,8 @@ function snapNodeIntoGroup(node, group){
         ? isChildDropTargetForGroup(group, node, null)
         : isCenterInGroupRect(cr, gr);
     if(!inZone) return false;
-    const pad = GROUP_DROP_SNAP_PADDING;
-    const headInset = groupPanelHeadInset(group);
+    const pad = groupContentPadding(group);
+    const headInset = groupPanelHeadInset(group) + (group.type === 'imageBatch' ? pad : 0);
     const handleInset = groupUsesResizeHandleInset(group) ? GROUP_RESIZE_HANDLE_INSET : 0;
     const minX = gr.x + pad;
     const minY = gr.y + headInset;
@@ -32709,7 +33379,7 @@ function isLinkDeleteBlockedNearPort(from, to, hit){
 }
 function isPointerOverLinkUiChrome(el){
     return Boolean(el?.closest?.(
-        '.image-gen-dock-host, .image-action-bar-host, .text-format-bar-host, .text-node-dock-host, .gen-dock, .gen-history-panel, .node, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #selectionMenu, .minimap, .bottombar, .toolbar, .canvas-custom-select-panel'
+        '.image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .text-format-bar-host, .text-node-dock-host, .gen-dock, .gen-history-panel, .node, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #selectionMenu, .minimap, .bottombar, .toolbar, .canvas-custom-select-panel'
     ));
 }
 /** 图片/成片等实心媒体：线从底下穿过时，指针或剪刀落点在其上则不响应删线 */
@@ -32903,6 +33573,8 @@ function refreshSelectionVisuals(){
     updateLinkSelectionState();
     updateMinimapSelection();
     syncImageGenDock();
+    syncSelectionActionBar();
+    syncFrameGroupActionBar();
     if(touch.size) scheduleLinkGeometryRefresh(touch);
 }
 /** 单击/拖拽前更新选中态（Ctrl/Cmd 多选） */
@@ -33234,7 +33906,7 @@ board.onmousedown = e => {
         closeImageEditor();
         return;
     }
-    // 空白左键不再平移：留给框选/清选中，避免与端口十字拉线抢手势
+    // 空白左键拖拽框选（单击空白=清选中，在 finishSelection 里判断位移）
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     closeCreateMenu();
     collapseOpenGenStagesOnBoardClick();
@@ -33243,20 +33915,15 @@ board.onmousedown = e => {
         clearGenRefPick({refresh:true});
         return;
     }
-    if(e.ctrlKey || e.metaKey){
-        e.preventDefault();
-        startSelection(e);
-        return;
-    }
-    if(selected.size){
-        selected.clear();
-        refreshSelectionVisuals();
-    }
+    e.preventDefault();
+    startSelection(e);
 };
 on(board, 'pointerdown', onBoardPointerDown);
 const trackBoardPointer = e => {
     if(!canvas || !board) return;
     lastMouseBoard = screenToWorld(e.clientX, e.clientY);
+    // 框选拖拽时跳过磁吸，避免每帧量端口把框拖卡死
+    if(selectDrag) return;
     // 捕获阶段也刷磁吸：节点内部 stopPropagation 时右侧端口仍能跟手
     if(!tempLink && !dragNode && !dragBoard && !resizeNode){
         schedulePortMagnetUpdate(e.clientX, e.clientY);
@@ -33265,6 +33932,7 @@ const trackBoardPointer = e => {
 // 捕获阶段：节点/浮层 stopPropagation 时仍刷新粘贴落点 / 端口磁吸
 on(board, 'pointermove', trackBoardPointer, {capture: true});
 on(board, 'mousemove', e => {
+    if(selectDrag) return;
     trackBoardPointer(e);
     if(genRefPick) updateGenRefPickHover(e.clientX, e.clientY);
     scheduleConnectionHoverUpdate(e);
@@ -33327,7 +33995,7 @@ on(board, "wheel", e => {
         e.preventDefault();
         return;
     }
-    if(e.target.closest?.('.image-gen-dock-host, .image-action-bar-host, .gen-dock, .canvas-custom-select-panel, .canvas-custom-select-menu')) return;
+    if(e.target.closest?.('.image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .gen-dock, .canvas-custom-select-panel, .canvas-custom-select-menu')) return;
     if(isOpenScrollableCanvasMenu(e.target)) return;
     if(e.target.closest('.error-message, .node-retry-msg')) return;
     e.preventDefault();
@@ -33498,7 +34166,11 @@ on(window, 'keydown', e => {
         restoreImageGenDockAfterLink();
         return;
     }
-    if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') { e.preventDefault(); groupSelectedImages(); }
+    if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        if(selected.size >= 2) groupSelectedFromToolbar();
+        else groupSelectedImages();
+    }
     // Ctrl/Cmd+B：禁用/恢复选中节点。与 Ctrl+G 一致——焦点在 gen-dock 提示词框时也要生效
     // （旧逻辑遇到 TEXTAREA 直接 return，Gen Console 下几乎永远失效）
     if((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'b' || e.code === 'KeyB')) {
@@ -33601,10 +34273,10 @@ on(window, 'blur', () => {
 on(window, 'blur', () => {
     if(selectDrag){
         selectionBox.style.display = 'none';
+        clearSelectDragListeners();
         selectDrag = null;
         withCanvasRootClass(list => list.remove('canvas-selecting'));
-        window.onmousemove = null;
-        window.onmouseup = null;
+        syncSelectionActionBar();
     }
     if(pendingNodeDrag || dragNode || resizeNode){
         resetCanvasInteractionForEdit();
