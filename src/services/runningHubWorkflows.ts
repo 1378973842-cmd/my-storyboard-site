@@ -187,14 +187,37 @@ function isWorkflowLinkValue(value: unknown): boolean {
   return Array.isArray(value) && value.length === 2 && typeof value[0] === "string" && typeof value[1] === "number";
 }
 
+function isLikelyTextFieldName(fieldName: string): boolean {
+  const name = String(fieldName || "").trim().toLowerCase();
+  if (!name) return false;
+  if (/^(prompt|text|string|negative|positive|caption|description|content|query|instruction|system|user|note|msg|message)$/.test(name)) {
+    return true;
+  }
+  if (/(^|_)(prompt|text|caption|description|content)(_|$)/.test(name)) return true;
+  if (/提示词|文案|描述|内容|文本/.test(String(fieldName || ""))) return true;
+  return false;
+}
+
+function isPlainNumberValue(fieldValue: string): boolean {
+  const value = String(fieldValue || "").trim();
+  return Boolean(value) && value.length <= 12 && /^-?\d+(\.\d+)?$/.test(value) && !Number.isNaN(Number(value));
+}
+
 function inferFieldType(fieldName: string, fieldValue: string): string {
-  const key = `${fieldName || ""} ${fieldValue || ""}`.toLowerCase();
-  if (/\b(image|img|mask|photo|picture)\b/.test(key) || /\.(png|jpe?g|webp|gif|bmp)(\?|$)/i.test(key)) return "IMAGE";
-  if (/\b(video|movie|mp4)\b/.test(key) || /\.(mp4|webm|mov|m4v|mkv)(\?|$)/i.test(key)) return "VIDEO";
-  if (/\b(audio|sound|music|voice)\b/.test(key) || /\.(mp3|wav|ogg|m4a|flac|aac)(\?|$)/i.test(key)) return "AUDIO";
-  const text = String(fieldValue || "").trim();
-  if (text.toLowerCase() === "true" || text.toLowerCase() === "false") return "BOOLEAN";
-  if (text && !Number.isNaN(Number(text))) return "NUMBER";
+  const value = String(fieldValue || "").trim();
+  // prompt/text 类字段名：必须是文本，勿被默认值文案里的 image/mask 等词带偏成图片
+  if (isLikelyTextFieldName(fieldName)) {
+    if (/^(true|false)$/i.test(value)) return "BOOLEAN";
+    if (isPlainNumberValue(value)) return "NUMBER";
+    return "TEXT";
+  }
+  const name = String(fieldName || "").toLowerCase();
+  // 媒体：优先字段名；默认值只认扩展名，不认英语散文里的 image/picture
+  if (/\b(image|img|mask|photo|picture)\b/.test(name) || /\.(png|jpe?g|webp|gif|bmp)(\?|$)/i.test(value)) return "IMAGE";
+  if (/\b(video|movie|mp4)\b/.test(name) || /\.(mp4|webm|mov|m4v|mkv)(\?|$)/i.test(value)) return "VIDEO";
+  if (/\b(audio|sound|music|voice)\b/.test(name) || /\.(mp3|wav|ogg|m4a|flac|aac)(\?|$)/i.test(value)) return "AUDIO";
+  if (/^(true|false)$/i.test(value)) return "BOOLEAN";
+  if (isPlainNumberValue(value)) return "NUMBER";
   return "TEXT";
 }
 
@@ -324,7 +347,26 @@ function isSavedLinkField(field: RhWorkflowField): boolean {
 // 输出提取 / 本地落地
 // ---------------------------------------------------------------------------
 
-function extractOutputs(data: unknown): string[] {
+type RhOutputRef = { url: string; kind?: "image" | "video" | "audio"; fileType?: string };
+
+function inferKindFromFileType(raw: unknown): RhOutputRef["kind"] | "" {
+  const text = String(raw || "").trim().toLowerCase();
+  if (!text) return "";
+  if (/(^|\/)(video|mp4|webm|mov|m4v|mkv)(\b|$)/.test(text) || text === "video") return "video";
+  if (/(^|\/)(audio|mp3|wav|ogg|m4a|flac|aac)(\b|$)/.test(text) || text === "audio") return "audio";
+  if (/(^|\/)(image|png|jpe?g|webp|gif|bmp)(\b|$)/.test(text) || text === "image") return "image";
+  return "";
+}
+
+function inferKindFromUrl(url: string): RhOutputRef["kind"] | "" {
+  const clean = String(url || "").split("?")[0].split("#")[0].toLowerCase();
+  if (/\.(mp4|webm|mov|m4v|mkv)$/.test(clean)) return "video";
+  if (/\.(mp3|wav|ogg|m4a|flac|aac)$/.test(clean)) return "audio";
+  if (/\.(png|jpe?g|webp|gif|bmp)$/.test(clean)) return "image";
+  return "";
+}
+
+function extractOutputRefs(data: unknown): RhOutputRef[] {
   let arr: unknown[] = [];
   if (Array.isArray(data)) {
     arr = data;
@@ -339,56 +381,119 @@ function extractOutputs(data: unknown): string[] {
     }
     if (!arr.length && (obj.fileUrl || obj.url)) arr = [obj];
   }
-  const outputs: string[] = [];
+  const outputs: RhOutputRef[] = [];
+  const pushOne = (urlRaw: unknown, fileTypeRaw?: unknown) => {
+    const url = String(urlRaw || "").trim();
+    if (!url) return;
+    const fileType = String(fileTypeRaw || "").trim();
+    const kind = inferKindFromFileType(fileType) || inferKindFromUrl(url) || undefined;
+    outputs.push(kind ? { url, kind, fileType: fileType || undefined } : { url, fileType: fileType || undefined });
+  };
   for (const item of arr) {
     if (typeof item === "string") {
-      outputs.push(item);
+      pushOne(item);
     } else if (item && typeof item === "object") {
       const obj = item as Record<string, unknown>;
       const url = obj.fileUrl ?? obj.file_url ?? obj.url ?? obj.downloadUrl ?? obj.download_url;
-      if (Array.isArray(url)) outputs.push(...url.filter(Boolean).map(String));
-      else if (url) outputs.push(String(url));
+      const fileType = obj.fileType ?? obj.file_type ?? obj.type ?? obj.outputType ?? obj.mimeType ?? obj.contentType;
+      if (Array.isArray(url)) url.filter(Boolean).forEach((u) => pushOne(u, fileType));
+      else if (url) pushOne(url, fileType);
     }
   }
   return outputs;
+}
+
+/** @deprecated 兼容旧调用；新逻辑用 extractOutputRefs */
+function extractOutputs(data: unknown): string[] {
+  return extractOutputRefs(data).map((item) => item.url);
 }
 
 const OUTPUT_EXT_BY_CONTENT_TYPE: Array<[RegExp, string]> = [
   [/mp4/, "mp4"],
   [/webm/, "webm"],
   [/quicktime/, "mov"],
+  [/x-matroska|matroska/, "mkv"],
+  [/^video\//, "mp4"],
   [/mpeg/, "mp3"],
   [/wav/, "wav"],
   [/ogg/, "ogg"],
+  [/^audio\//, "mp3"],
   [/webp/, "webp"],
   [/jpeg/, "jpg"],
+  [/png/, "png"],
+  [/gif/, "gif"],
 ];
 const ALLOWED_OUTPUT_EXT = new Set([
   "png", "jpg", "jpeg", "webp", "gif", "bmp", "mp4", "webm", "mov", "m4v", "mkv", "mp3", "wav", "ogg", "m4a", "flac", "aac",
 ]);
+const EXT_BY_KIND: Record<string, string> = { video: "mp4", audio: "mp3", image: "png" };
 
-function outputExt(remote: string, contentType: string): string {
+function sniffMediaExt(buf: Buffer): string {
+  if (!buf || buf.length < 12) return "";
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "png";
+  if (buf[0] === 0xff && buf[1] === 0xd8) return "jpg";
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return "gif";
+  if (buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") return "webp";
+  // ISO BMFF: ....ftyp → mp4/mov
+  if (buf.toString("ascii", 4, 8) === "ftyp") return "mp4";
+  // EBML → webm/mkv
+  if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return "webm";
+  if (buf.toString("ascii", 0, 3) === "ID3") return "mp3";
+  if (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) return "mp3";
+  return "";
+}
+
+function outputExt(remote: string, contentType: string, hintExt = "", kind: RhOutputRef["kind"] | "" = ""): string {
+  const fromHint = String(hintExt || "").replace(/^\./, "").toLowerCase();
+  if (ALLOWED_OUTPUT_EXT.has(fromHint)) return fromHint === "jpeg" ? "jpg" : fromHint;
   const tail = String(remote || "").split("?")[0].split("#")[0];
-  const ext = path.extname(tail).replace(/^\./, "").toLowerCase();
-  if (ALLOWED_OUTPUT_EXT.has(ext)) return ext;
+  const fromUrl = path.extname(tail).replace(/^\./, "").toLowerCase();
+  if (ALLOWED_OUTPUT_EXT.has(fromUrl)) return fromUrl === "jpeg" ? "jpg" : fromUrl;
   const ct = String(contentType || "").toLowerCase();
   for (const [re, mapped] of OUTPUT_EXT_BY_CONTENT_TYPE) {
     if (re.test(ct)) return mapped;
   }
+  if (kind && EXT_BY_KIND[kind]) return EXT_BY_KIND[kind];
   return "png";
 }
 
-async function storeRemoteOutput(remote: string, projectRoot: string): Promise<string> {
-  if (!/^https?:\/\//.test(remote)) return remote;
-  const resp = await fetch(remote);
-  if (!resp.ok) return remote;
-  const ext = outputExt(remote, resp.headers.get("content-type") || "");
+function kindFromExt(ext: string): RhOutputRef["kind"] | "" {
+  const e = String(ext || "").toLowerCase();
+  if (["mp4", "webm", "mov", "m4v", "mkv"].includes(e)) return "video";
+  if (["mp3", "wav", "ogg", "m4a", "flac", "aac"].includes(e)) return "audio";
+  if (["png", "jpg", "jpeg", "webp", "gif", "bmp"].includes(e)) return "image";
+  return "";
+}
+
+async function storeRemoteOutput(
+  remote: string,
+  projectRoot: string,
+  opts: { fileType?: string; kind?: RhOutputRef["kind"] } = {}
+): Promise<RhOutputRef> {
+  const remoteUrl = String(remote || "").trim();
+  if (!/^https?:\/\//.test(remoteUrl)) {
+    const kind = opts.kind || inferKindFromFileType(opts.fileType) || inferKindFromUrl(remoteUrl) || undefined;
+    return kind ? { url: remoteUrl, kind, fileType: opts.fileType } : { url: remoteUrl, fileType: opts.fileType };
+  }
+  const resp = await fetch(remoteUrl);
+  if (!resp.ok) {
+    const kind = opts.kind || inferKindFromFileType(opts.fileType) || inferKindFromUrl(remoteUrl) || undefined;
+    return kind ? { url: remoteUrl, kind, fileType: opts.fileType } : { url: remoteUrl, fileType: opts.fileType };
+  }
+  const buf = Buffer.from(await resp.arrayBuffer());
+  const sniffed = sniffMediaExt(buf);
+  const hintFromType = String(opts.fileType || "").split("/").pop()?.replace(/^\./, "") || "";
+  const ext = sniffed || outputExt(remoteUrl, resp.headers.get("content-type") || "", hintFromType, opts.kind || "");
+  const kind = opts.kind || kindFromExt(ext) || inferKindFromFileType(opts.fileType) || inferKindFromUrl(remoteUrl) || undefined;
   const filename = `rh_${uuidv4().replace(/-/g, "").slice(0, 12)}.${ext}`;
   const dir = path.join(projectRoot, "public", "uploads", "runninghub");
   mkdirSync(dir, { recursive: true });
-  const buf = Buffer.from(await resp.arrayBuffer());
   writeFileSync(path.join(dir, filename), buf);
-  return `/uploads/runninghub/${filename}`;
+  return {
+    url: `/uploads/runninghub/${filename}`,
+    kind,
+    fileType: opts.fileType || (kind ? EXT_BY_KIND[kind] || ext : ext),
+  };
 }
 
 function failReason(raw: unknown): string {
@@ -698,22 +803,36 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
       const raw = (await rhJson(resp)) as Record<string, unknown>;
       if (!resp.ok) throw httpError(resp.status, JSON.stringify(raw).slice(0, 800));
       const code = raw.code;
-      const urls: string[] = [];
+      const outputs: RhOutputRef[] = [];
       let status: string;
       if (isSuccessCode(code)) {
         status = "SUCCESS";
-        for (const remote of extractOutputs(raw.data)) {
+        for (const remote of extractOutputRefs(raw.data)) {
           try {
-            urls.push(await storeRemoteOutput(remote, deps.projectRoot));
+            outputs.push(await storeRemoteOutput(remote.url, deps.projectRoot, {
+              fileType: remote.fileType,
+              kind: remote.kind,
+            }));
           } catch {
-            urls.push(remote);
+            outputs.push(remote);
           }
         }
       } else if (code === 804 || code === "804") status = "RUNNING";
       else if (code === 813 || code === "813") status = "QUEUED";
       else if (code === 805 || code === "805") status = "FAILED";
       else status = "UNKNOWN";
-      res.json({ success: true, data: { status, urls, failReason: failReason(raw), code, raw } });
+      // urls：兼容旧前端；outputs：带 kind，避免视频被当成图片
+      res.json({
+        success: true,
+        data: {
+          status,
+          urls: outputs.map((item) => item.url),
+          outputs,
+          failReason: failReason(raw),
+          code,
+          raw,
+        },
+      });
     } catch (err) {
       sendError(res, err, "查询任务失败");
     }

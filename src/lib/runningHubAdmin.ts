@@ -217,12 +217,22 @@ export function normalizeRhField(raw: unknown): RhField {
         .split(/\r?\n|,/)
         .map((o) => o.trim())
         .filter(Boolean);
+  const fieldName = String(src.fieldName || "");
+  let fieldType = String(src.fieldType || (options.length ? "SELECT" : "TEXT"));
+  // 治愈：prompt 类字段曾被默认值文案误判成 IMAGE/VIDEO/AUDIO
+  if (isLikelyTextFieldName(fieldName) && ["IMAGE", "VIDEO", "AUDIO"].includes(fieldType.toUpperCase())) {
+    fieldType = "TEXT";
+  }
+  // 有选项列表时按 SELECT 暴露（避免管理台已填选项仍显示成文本）
+  if (options.length && ["TEXT", "STRING", "PROMPT", ""].includes(fieldType.toUpperCase())) {
+    fieldType = "SELECT";
+  }
   return emptyRhField({
-    id: String(src.id || `${src.nodeId || ""}::${src.fieldName || ""}`),
+    id: String(src.id || `${src.nodeId || ""}::${fieldName}`),
     nodeId: String(src.nodeId || ""),
-    fieldName: String(src.fieldName || ""),
+    fieldName,
     fieldValue: src.fieldValue == null ? "" : String(src.fieldValue),
-    fieldType: String(src.fieldType || (options.length ? "SELECT" : "TEXT")),
+    fieldType,
     label: String(src.label || src.fieldName || ""),
     enabled: src.enabled === true,
     sourceFromUpstream: src.sourceFromUpstream !== false,
@@ -288,13 +298,35 @@ function extractRhFieldOptions(field: Record<string, unknown>): string[] {
   return [];
 }
 
+function isLikelyTextFieldName(fieldName: string): boolean {
+  const name = String(fieldName || "").trim().toLowerCase();
+  if (!name) return false;
+  if (/^(prompt|text|string|negative|positive|caption|description|content|query|instruction|system|user|note|msg|message)$/.test(name)) {
+    return true;
+  }
+  if (/(^|_)(prompt|text|caption|description|content)(_|$)/.test(name)) return true;
+  if (/提示词|文案|描述|内容|文本/.test(String(fieldName || ""))) return true;
+  return false;
+}
+
+function isPlainNumberValue(fieldValue: string): boolean {
+  const value = String(fieldValue || "").trim();
+  return Boolean(value) && value.length <= 12 && /^-?\d+(\.\d+)?$/.test(value) && !Number.isNaN(Number(value));
+}
+
 function inferFieldTypeFromNameValue(fieldName: string, fieldValue: string): RhFieldType {
-  const key = `${fieldName || ""} ${fieldValue || ""}`.toLowerCase();
-  if (/\b(image|img|mask|photo|picture)\b/.test(key) || /\.(png|jpe?g|webp|gif|bmp)(\?|$)/i.test(key)) return "IMAGE";
-  if (/\b(video|movie|mp4)\b/.test(key) || /\.(mp4|webm|mov|m4v|mkv)(\?|$)/i.test(key)) return "VIDEO";
-  if (/\b(audio|sound|music|voice)\b/.test(key) || /\.(mp3|wav|ogg|m4a|flac|aac)(\?|$)/i.test(key)) return "AUDIO";
-  if (/^(true|false)$/i.test(String(fieldValue || ""))) return "BOOLEAN";
-  if (String(fieldValue || "").trim() !== "" && !Number.isNaN(Number(fieldValue))) return "NUMBER";
+  const value = String(fieldValue || "").trim();
+  if (isLikelyTextFieldName(fieldName)) {
+    if (/^(true|false)$/i.test(value)) return "BOOLEAN";
+    if (isPlainNumberValue(value)) return "NUMBER";
+    return "TEXT";
+  }
+  const name = String(fieldName || "").toLowerCase();
+  if (/\b(image|img|mask|photo|picture)\b/.test(name) || /\.(png|jpe?g|webp|gif|bmp)(\?|$)/i.test(value)) return "IMAGE";
+  if (/\b(video|movie|mp4)\b/.test(name) || /\.(mp4|webm|mov|m4v|mkv)(\?|$)/i.test(value)) return "VIDEO";
+  if (/\b(audio|sound|music|voice)\b/.test(name) || /\.(mp3|wav|ogg|m4a|flac|aac)(\?|$)/i.test(value)) return "AUDIO";
+  if (/^(true|false)$/i.test(value)) return "BOOLEAN";
+  if (isPlainNumberValue(value)) return "NUMBER";
   return "TEXT";
 }
 

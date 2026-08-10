@@ -904,7 +904,11 @@ let selectionActionBarEl = null;
 let selectionGroupTypeMenuEl = null;
 let frameGroupActionBarEl = null;
 let frameGroupActionBarNodeId = null;
-let frameGroupBgMenuEl = null;
+let frameGroupBgMenuEl = null; // legacy alias → canvasBgRailEl
+let imageBatchActionBarEl = null;
+let imageBatchActionBarNodeId = null;
+let imageBatchBgMenuEl = null; // legacy alias → canvasBgRailEl
+let canvasBgRailEl = null;
 let menuPoint = null;
 let linkCreateState = null;
 let internalDrag = false;
@@ -3874,6 +3878,10 @@ function applyViewport(){
         const fg = nodes.find(n => n.id === frameGroupActionBarNodeId);
         if(fg) positionFrameGroupActionBar(fg);
     }
+    if(imageBatchActionBarNodeId && imageBatchActionBarEl){
+        const ib = nodes.find(n => n.id === imageBatchActionBarNodeId);
+        if(ib) positionImageBatchActionBar(ib);
+    }
 }
 /** 视口外节点 visibility:hidden（保留布局，避免连线端点错位） */
 function scheduleViewportNodeCull(){
@@ -3958,8 +3966,6 @@ function resetPortMagnet(port){
     if(nodeEl && id && !selected.has(id) && !nodeEl.matches(':hover') && !nodeEl.querySelector('.port.is-magnetic')){
         if(nodeEl.classList.contains('ports-open')){
             nodeEl.classList.remove('ports-open');
-            // 生成能量流动中勿刷连线几何，否则反复写 path d 会卡顿
-            if(!hasFlowingLinkEnergy()) scheduleLinkGeometryRefresh(new Set([id]));
         }
     }
 }
@@ -4014,8 +4020,6 @@ function runPortMagnetUpdate(){
                 port.classList.add('is-magnetic');
                 el.classList.add('ports-open');
                 beginPortMagnetSnap(port);
-                // 生成中锁线几何：磁吸只动圆点，不重算连线 path
-                if(!hasFlowingLinkEnergy()) scheduleLinkGeometryRefresh(new Set([n.id]));
             } else {
                 port.classList.add('is-magnetic');
             }
@@ -4757,9 +4761,9 @@ async function saveCanvas(){
     const savedSettings = canvas.settings || {};
     const savedLogs = canvas.logs || [];
     const savedViewport = viewport;
-    const savedConnections = connections;
     const savedBaseUpdatedAt = Number(lastCanvasUpdatedAt || canvas.updated_at || 0);
     sanitizeConnections();
+    const savedConnections = connections;
     const nodePayload = serializableCanvasNodes();
     const knownNodeCount = Math.max(
         lastKnownSavedNodeCount || 0,
@@ -6870,7 +6874,7 @@ function canStartBoardPanFromTarget(target){
     if(!board || !target) return false;
     if(isEditableTarget(target)) return false;
     if(target.closest?.(
-        '.node, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
+        '.node, .selection-box, #selectionBox, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
     )) return false;
     return board.contains(target);
 }
@@ -6879,7 +6883,7 @@ function canStartForcedPanFromTarget(target){
     if(!board || !target) return false;
     if(isEditableTarget(target)) return false;
     if(target.closest?.(
-        'button, select, textarea, input, .port, .resize-handle, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .canvas-custom-select, .image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
+        'button, select, textarea, input, .port, .resize-handle, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .canvas-custom-select, .image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
     )) return false;
     return board.contains(target);
 }
@@ -8439,31 +8443,32 @@ const GROUP_DROP_HEAD_INSET = 48;
 const GROUP_CHILD_GAP = 12;
 const GROUP_DROP_OVERLAP_RATIO = 0.3;
 const GROUP_RESIZE_HANDLE_INSET = 32;
+/** 框组：侧/底留边；顶边须盖住子图浮标（top:-44px） */
+const FRAME_GROUP_PAD_X = 24;
+const FRAME_GROUP_PAD_TOP = 56;
+const FRAME_GROUP_PAD_BOTTOM = 24;
 function groupContentPadding(group){
-    return group?.type === 'imageBatch' ? IMAGE_BATCH_EDGE_PADDING : GROUP_DROP_SNAP_PADDING;
+    if(group?.type === 'imageBatch') return IMAGE_BATCH_EDGE_PADDING;
+    if(group?.type === 'group') return FRAME_GROUP_PAD_X;
+    return GROUP_DROP_SNAP_PADDING;
 }
 const GROUP_DEFAULT_W = 380;
 const GROUP_DEFAULT_H_IMAGE_BATCH = 300;
 const GROUP_DEFAULT_H_PROMPT_GROUP = 380;
-const GROUP_PANEL_HEAD_IMAGE_BATCH = 64; // 顶栏约 56 + 缝；旧 144 是遗留 chrome 高度，会在标题下留空
 const GROUP_PANEL_HEAD_PROMPT_GROUP = 228;
 function groupPanelHeadInset(group){
     if(!group) return GROUP_DROP_HEAD_INSET;
-    // 框组无顶栏文案，四周同宽留边
-    if(group.type === 'group') return 18;
-    const fallback = group.type === 'imageBatch'
-        ? GROUP_PANEL_HEAD_IMAGE_BATCH
-        : group.type === 'promptGroup'
-            ? GROUP_PANEL_HEAD_PROMPT_GROUP
-            : GROUP_DROP_HEAD_INSET;
+    // 框组 / 图片组：标题改为壳外左上浮标，内区不再扣顶栏高度
+    if(group.type === 'group' || group.type === 'imageBatch') return 0;
+    const fallback = group.type === 'promptGroup'
+        ? GROUP_PANEL_HEAD_PROMPT_GROUP
+        : GROUP_DROP_HEAD_INSET;
     const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(group.id)}"]`);
     if(!el) return fallback;
-    const headH = el.querySelector('.node-head')?.offsetHeight || (group.type === 'imageBatch' ? 56 : 42);
+    const headH = el.querySelector('.node-head')?.offsetHeight || 42;
     const chrome = el.querySelector('.group-panel-chrome');
     const chromeH = chrome?.offsetHeight || 0;
-    // 有实测 chrome 用实测；图片组无 chrome 时勿回退到虚高 fallback
     if(chromeH > 0) return headH + chromeH + 8;
-    if(group.type === 'imageBatch') return headH + 8;
     return fallback;
 }
 function isImageBatchMember(group, child){
@@ -8490,14 +8495,19 @@ function groupInnerRect(group){
     const gr = nodeRect(group);
     const pad = groupContentPadding(group);
     const head = groupPanelHeadInset(group);
-    // 图片组标题下再留一圈边，左右下同 pad
-    const topPad = group?.type === 'imageBatch' ? pad : 0;
+    // 图片组/框组：顶边留出浮标高度；左右下同 pad
+    const topPad = group?.type === 'imageBatch'
+        ? pad
+        : group?.type === 'group'
+            ? FRAME_GROUP_PAD_TOP
+            : 0;
+    const bottomPad = group?.type === 'group' ? FRAME_GROUP_PAD_BOTTOM : pad;
     const handleInset = groupUsesResizeHandleInset(group) ? GROUP_RESIZE_HANDLE_INSET : 0;
     return {
         x: gr.x + pad,
         y: gr.y + head + topPad,
         w: Math.max(48, gr.w - pad * 2 - handleInset),
-        h: Math.max(120, gr.h - head - topPad - pad - handleInset),
+        h: Math.max(120, gr.h - head - topPad - bottomPad - handleInset),
         pad,
         head: head + topPad,
         handleInset,
@@ -8577,7 +8587,7 @@ function groupGridMetrics(group, children){
         childH: Math.max(...metrics.map(m => m.h), 120),
     };
 }
-/** 框组：只扩外框包住成员，不重排内部节点（无顶栏，四周等距留边） */
+/** 框组：只扩外框包住成员，不重排内部；顶边加大以包住子图浮标 */
 function fitGroupFrameToChildren(group, opts={}){
     if(!group || group.type !== 'group') return false;
     const children = (group.items || [])
@@ -8585,11 +8595,10 @@ function fitGroupFrameToChildren(group, opts={}){
         .filter(Boolean);
     if(!children.length) return false;
     const box = nodeBounds(children.map(c => c.id));
-    const pad = Number(groupPanelHeadInset(group) || 18);
-    group.x = Math.round(box.x - pad);
-    group.y = Math.round(box.y - pad);
-    group.w = Math.max(160, Math.round(box.w + pad * 2));
-    group.h = Math.max(120, Math.round(box.h + pad * 2));
+    group.x = Math.round(box.x - FRAME_GROUP_PAD_X);
+    group.y = Math.round(box.y - FRAME_GROUP_PAD_TOP);
+    group.w = Math.max(160, Math.round(box.w + FRAME_GROUP_PAD_X * 2));
+    group.h = Math.max(120, Math.round(box.h + FRAME_GROUP_PAD_TOP + FRAME_GROUP_PAD_BOTTOM));
     if(opts.updateDom !== false){
         const groupEl = nodesEl?.querySelector(`.node[data-id="${CSS.escape(group.id)}"]`);
         if(groupEl){
@@ -8723,7 +8732,7 @@ function createImageBatchChild(batch, url, name, index){
         id:uid('img'),
         type:'image',
         x:Number(batch.x || 0) + IMAGE_BATCH_EDGE_PADDING,
-        y:Number(batch.y || 0) + GROUP_DROP_HEAD_INSET + IMAGE_BATCH_EDGE_PADDING + i * 28,
+        y:Number(batch.y || 0) + IMAGE_BATCH_EDGE_PADDING + i * 28,
         url,
         name:name || outputImageName(url),
     };
@@ -9155,6 +9164,7 @@ function openImageNodeMenu(nodeId, clientX, clientY){
     imageNodeMenu.innerHTML = `
         <button class="menu-btn" data-image-skip="${escapeAttr(nodeId)}" title="${escapeAttr(tr('canvas.nodeDisableHint'))}"><i data-lucide="${skipIcon}" class="w-4 h-4"></i><span>${escapeHtml(skipLabel)}</span></button>
         ${canPreview ? `<button class="menu-btn" data-image-preview="${escapeAttr(nodeId)}"><i data-lucide="maximize-2" class="w-4 h-4"></i><span>${en ? 'Enlarge' : '放大查看'}</span></button>` : ''}
+        ${canPreview ? `<button class="menu-btn" data-image-copy="${escapeAttr(nodeId)}"><i data-lucide="copy" class="w-4 h-4"></i><span>${en ? 'Copy image' : '复制图片'}</span></button>` : ''}
         ${canDownload ? `<button class="menu-btn" data-image-download="${escapeAttr(nodeId)}"><i data-lucide="download" class="w-4 h-4"></i><span>${tr('canvas.outputDownloadImage')}</span></button>` : ''}
         ${canSaveLibrary ? `<button class="menu-btn" data-image-save-library="${escapeAttr(nodeId)}"><i data-lucide="folder-plus" class="w-4 h-4"></i><span>${en ? 'Save to library' : '保存到素材库'}</span></button>` : ''}
         <button class="menu-btn" data-image-duplicate="${escapeAttr(nodeId)}"><i data-lucide="copy-plus" class="w-4 h-4"></i><span>${en ? 'Create copy' : '创建副本'}</span></button>
@@ -9179,6 +9189,16 @@ function openImageNodeMenu(nodeId, clientX, clientY){
             e.stopPropagation();
             closeImageNodeMenu();
             openImageNodeLightbox(node);
+        };
+    }
+    const copyImgBtn = imageNodeMenu.querySelector('[data-image-copy]');
+    if(copyImgBtn){
+        copyImgBtn.onclick = e => {
+            e.stopPropagation();
+            closeImageNodeMenu();
+            void copyImageUrlToClipboard(url)
+                .then(() => setStatus(en ? 'Image copied' : '已复制图片'))
+                .catch(err => softAlert(err?.message || (en ? 'Copy failed' : '复制失败')));
         };
     }
     const downloadBtn = imageNodeMenu.querySelector('[data-image-download]');
@@ -9759,11 +9779,10 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
         nodes.push(node);
         created.push(node);
     });
-    if(opts.group){
-        const imageNodes = created.filter(n => n?.type === 'image' && n?.url && mediaKindForNode(n) === 'image');
-        if(imageNodes.length > 1){
-            created.batch = createImageBatchForUploadedNodes(created, base);
-        }
+    // 多张静帧默认打成图片组（opts.group === false 时才散落）
+    const imageNodes = created.filter(n => n?.type === 'image' && n?.url && mediaKindForNode(n) === 'image');
+    if(imageNodes.length > 1 && opts.group !== false){
+        created.batch = createImageBatchForUploadedNodes(created, base);
     }
     render();
     if(created.batch?.id){
@@ -10895,13 +10914,20 @@ function renderHistoryLibrary(){
                     const url = item.preview_path || item.thumbnail_path || '';
                     const thumb = item.preview_path || item.thumbnail_path || url;
                     const prompt = String(item.prompt || '').trim();
-                    const tip = prompt || item.model || '';
+                    const params = item.params && typeof item.params === 'object' ? item.params : {};
+                    const runMs = Number(params.run_ms || params.runMs || 0) || 0;
+                    const durationLabel = String(params.duration_label || (runMs ? formatRunDuration(runMs) : '')).trim();
+                    const tip = [prompt || item.model || '', durationLabel ? (langIsEn() ? `Took ${durationLabel}` : `用时 ${durationLabel}`) : ''].filter(Boolean).join(' · ');
                     const kind = historyItemMediaKind(item);
                     const media = kind === 'video'
                         ? `<video class="history-library-card-media" src="${escapeAttr(thumb)}" muted playsinline preload="metadata"></video><span class="history-library-card-badge">${langIsEn() ? 'Video' : '视频'}</span>`
                         : `<img class="history-library-card-media" src="${escapeAttr(thumb)}" alt="" loading="lazy" />`;
+                    const durBadge = durationLabel
+                        ? `<span class="history-library-card-duration">${escapeHtml(durationLabel)}</span>`
+                        : '';
                     return `<button type="button" class="history-library-card${kind === 'video' ? ' is-video' : ''}" data-url="${escapeAttr(url)}" data-name="${escapeAttr((item.model || 'gen') + '')}" data-kind="${escapeAttr(kind)}" title="${escapeAttr(tip)}">
                         ${media}
+                        ${durBadge}
                     </button>`;
                 }).join('')}
             </div>
@@ -10988,14 +11014,25 @@ async function createImageCardsFromLocalPaths(paths, point){
     setStatus(langIsEn() ? 'Importing images...' : '导入图片...');
     try {
         const files = await importLocalImages(paths);
-        const base = point || screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
+        const base = point || lastMouseBoard || screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
         const created = [];
         files.forEach((file, i) => {
             const node = {id:uid('img'), type:'image', x:base.x + i * 36, y:base.y + i * 36, url:file.url, name:file.name, mediaKind:'image'};
             nodes.push(node);
             created.push(node);
         });
+        // 多张本地图同样打成图片组
+        if(created.length > 1){
+            created.batch = createImageBatchForUploadedNodes(created, base);
+        }
         render();
+        if(created.batch?.id){
+            relayoutGroupsWithMeasuredChrome([created.batch.id], 'auto');
+            requestAnimationFrame(() => {
+                relayoutGroupsWithMeasuredChrome([created.batch.id], 'auto');
+                scheduleImageBatchRelayout(created.batch.id, 'auto');
+            });
+        }
         scheduleSave();
         setStatus('Ready');
         return created;
@@ -11006,7 +11043,9 @@ async function createImageCardsFromLocalPaths(paths, point){
 }
 async function applyImageDropPayloadToBoard(payload, point){
     if(payload.type === 'files'){
-        if(payload.files.length > 1) return uploadImageGroup(payload.files, point);
+        const imageCount = payload.files.filter(f => mediaKindForUpload(f) === 'image').length;
+        // 多张静帧 → 图片组；仅视频/音频或多媒混进仍走 uploadMediaFiles 自动成组
+        if(imageCount > 1 || payload.files.length > 1) return uploadImageGroup(payload.files, point);
         return uploadImages(payload.files, point);
     }
     if(payload.type === 'localPaths') return createImageCardsFromLocalPaths(payload.localPaths, point);
@@ -12220,11 +12259,39 @@ function imageEditOriginLabel(kind){
     if(k === 'crop') return langIsEn() ? 'Crop' : '裁剪';
     return '';
 }
+/** 用户双击浮标改过的显示名（优先于默认「图片节点 N」等） */
+function nodeFloatTitleCustom(node){
+    const ft = String(node?.floatTitle || '').trim();
+    if(ft) return ft;
+    if(node?.type === 'imageBatch' || node?.type === 'group'){
+        return String(node?.name || node?.title || '').trim();
+    }
+    return '';
+}
+function applyNodeFloatTitleCustom(node, next){
+    if(!node) return;
+    const v = String(next || '').trim().slice(0, 80);
+    if(!v){
+        delete node.floatTitle;
+        if(node.type === 'imageBatch' || node.type === 'group'){
+            delete node.name;
+            delete node.title;
+        }
+        return;
+    }
+    node.floatTitle = v;
+    if(node.type === 'imageBatch' || node.type === 'group') node.name = v;
+    // 导入媒体浮标与文件名同步（截帧/剪辑/修图来源仍只改 floatTitle）
+    if(node.type === 'image' && !floatTitleKindMeta(node.floatTitleKind) && !normalizeImageEditOrigin(node.editOrigin)){
+        node.name = v;
+    }
+}
 /** 结果图框上方左对齐说明（节点内绝对定位，随拖动；不压在画面上） */
 function imageEditOriginBadgeHtml(node){
-    const label = imageEditOriginLabel(node?.editOrigin);
-    if(!label) return '';
-    return `<span class="canvas-float-title image-edit-origin-badge" data-edit-origin="${escapeAttr(node.editOrigin)}" title="${escapeAttr(label)}"><i data-lucide="image"></i><span class="float-title-label">${escapeHtml(label)}</span></span>`;
+    const fallback = imageEditOriginLabel(node?.editOrigin);
+    if(!fallback) return '';
+    const label = nodeFloatTitleCustom(node) || fallback;
+    return `<span class="canvas-float-title image-edit-origin-badge" data-edit-origin="${escapeAttr(node.editOrigin)}" title="${escapeAttr(label)}"><i data-lucide="image"></i><span class="float-title-label" data-float-rename="1">${escapeHtml(label)}</span></span>`;
 }
 /** 画布外导入的图片/视频：左上浮标显示文件名（无编辑来源说明时） */
 function imageMediaFloatTitleLabel(node){
@@ -12261,8 +12328,9 @@ function derivedFloatTitleHtml(node){
     const meta = floatTitleKindMeta(node?.floatTitleKind);
     if(!meta) return '';
     const n = ensureFloatTitleIndexByKind(node, meta.kind);
-    const label = langIsEn() ? `${meta.en} ${n}` : `${meta.zh} ${n}`;
-    return `<span class="canvas-float-title gen-float-title" data-float-kind="${escapeAttr(meta.kind)}" data-float-index="${n}" title="${escapeAttr(label)}"><i data-lucide="${meta.icon}"></i><span class="float-title-label">${escapeHtml(label)}</span></span>`;
+    const fallback = langIsEn() ? `${meta.en} ${n}` : `${meta.zh} ${n}`;
+    const label = nodeFloatTitleCustom(node) || fallback;
+    return `<span class="canvas-float-title gen-float-title" data-float-kind="${escapeAttr(meta.kind)}" data-float-index="${n}" title="${escapeAttr(label)}"><i data-lucide="${meta.icon}"></i><span class="float-title-label" data-float-rename="1">${escapeHtml(label)}</span></span>`;
 }
 function imageMediaFloatTitleHtml(node){
     // 裁剪/画笔/旋转说明优先
@@ -12270,11 +12338,11 @@ function imageMediaFloatTitleHtml(node){
     if(origin) return origin;
     const derived = derivedFloatTitleHtml(node);
     if(derived) return derived;
-    const label = imageMediaFloatTitleLabel(node);
+    const label = nodeFloatTitleCustom(node) || imageMediaFloatTitleLabel(node);
     if(!label) return '';
     const kind = mediaKindForNode(node);
     const icon = kind === 'video' ? 'clapperboard' : kind === 'audio' ? 'audio-lines' : 'image';
-    return `<span class="canvas-float-title gen-float-title image-media-float-title" data-float-kind="media" data-media-kind="${escapeAttr(kind)}" title="${escapeAttr(label)}"><i data-lucide="${icon}"></i><span class="float-title-label">${escapeHtml(label)}</span></span>`;
+    return `<span class="canvas-float-title gen-float-title image-media-float-title" data-float-kind="media" data-media-kind="${escapeAttr(kind)}" title="${escapeAttr(label)}"><i data-lucide="${icon}"></i><span class="float-title-label" data-float-rename="1">${escapeHtml(label)}</span></span>`;
 }
 /** 图台浮标序号：按 type 各自递增，首次写入 floatTitleIndex */
 function ensureNodeFloatIndex(node, type){
@@ -12315,8 +12383,85 @@ function nodeFloatTitleHtml(node){
     const meta = nodeFloatTitleMeta(node?.type);
     if(!meta) return '';
     const n = ensureNodeFloatIndex(node, node.type);
-    const label = langIsEn() ? `${meta.en} ${n}` : `${meta.zh} ${n}`;
-    return `<span class="canvas-float-title gen-float-title" data-float-kind="${escapeAttr(meta.kind)}" data-float-index="${n}" title="${escapeAttr(label)}">${nodeFloatTitleIconHtml(meta.kind)}<span class="float-title-label">${escapeHtml(label)}</span></span>`;
+    const fallback = langIsEn() ? `${meta.en} ${n}` : `${meta.zh} ${n}`;
+    const label = nodeFloatTitleCustom(node) || fallback;
+    return `<span class="canvas-float-title gen-float-title" data-float-kind="${escapeAttr(meta.kind)}" data-float-index="${n}" title="${escapeAttr(label)}">${nodeFloatTitleIconHtml(meta.kind)}<span class="float-title-label" data-float-rename="1">${escapeHtml(label)}</span></span>`;
+}
+/** 框组 / 图片组：壳外左上浮标（纯文字，无图标/删除） */
+function groupShellFloatTitleHtml(node){
+    if(node?.type === 'group'){
+        const label = nodeFloatTitleCustom(node) || (langIsEn() ? 'New group' : '新建组');
+        return `<span class="canvas-float-title group-shell-float-title" data-float-kind="frame-group" title="${escapeAttr(label)}"><span class="float-title-label" data-float-rename="1">${escapeHtml(label)}</span></span>`;
+    }
+    if(node?.type === 'imageBatch'){
+        const n = ensureNodeFloatIndex(node, 'imageBatch');
+        const label = nodeFloatTitleCustom(node) || (langIsEn() ? `Image group ${n}` : `图片组 ${n}`);
+        return `<span class="canvas-float-title group-shell-float-title" data-float-kind="image-batch" data-float-index="${n}" title="${escapeAttr(label)}"><span class="float-title-label" data-float-rename="1">${escapeHtml(label)}</span></span>`;
+    }
+    return '';
+}
+/** 浮标名双击原地改名 */
+function beginNodeFloatTitleRename(node, labelEl){
+    if(!node || !labelEl || labelEl.querySelector('input')) return;
+    const host = labelEl.closest('.canvas-float-title');
+    const current = String(labelEl.textContent || '').trim();
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 80;
+    input.value = current;
+    input.className = 'float-title-input';
+    input.setAttribute('aria-label', langIsEn() ? 'Rename' : '重命名');
+    labelEl.textContent = '';
+    labelEl.appendChild(input);
+    host?.classList.add('is-renaming');
+    const stop = e => e.stopPropagation();
+    input.addEventListener('mousedown', stop);
+    input.addEventListener('click', stop);
+    input.addEventListener('dblclick', stop);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (commit) => {
+        if(done) return;
+        done = true;
+        const next = commit ? input.value.trim() : current;
+        if(commit && next !== current){
+            pushUndo();
+            applyNodeFloatTitleCustom(node, next);
+            scheduleSave();
+        }
+        host?.classList.remove('is-renaming');
+        const currentEl = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
+        if(currentEl){
+            const fresh = renderNode(node);
+            try { transplantNodeMediaElement(currentEl, fresh); } catch(_){ /* ignore */ }
+            currentEl.replaceWith(fresh);
+            refreshIcons(fresh);
+        } else {
+            render();
+        }
+        try { refreshSelectionVisuals(); } catch(_){ /* ignore */ }
+    };
+    input.onblur = () => finish(true);
+    input.onkeydown = e => {
+        e.stopPropagation();
+        if(e.key === 'Enter'){ e.preventDefault(); input.blur(); }
+        if(e.key === 'Escape'){ e.preventDefault(); finish(false); }
+    };
+}
+function bindNodeFloatTitleRename(el, node){
+    if(!el || !node) return;
+    el.querySelectorAll('[data-float-rename="1"]').forEach(labelEl => {
+        labelEl.title = langIsEn() ? 'Double-click to rename' : '双击重命名';
+        labelEl.onmousedown = e => e.stopPropagation();
+        labelEl.onclick = e => e.stopPropagation();
+        labelEl.ondblclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation?.();
+            beginNodeFloatTitleRename(node, labelEl);
+        };
+    });
 }
 function generatorFloatTitleHtml(node){
     return nodeFloatTitleHtml(node);
@@ -13555,7 +13700,7 @@ function isNodeControl(target){
     // 图台/轻量结果台主媒体：允许拖节点与 Alt 复制（含 video 结果）
     if(target?.closest?.('.gen-stage-hero, .gen-stage-frame, .agent-result-hero, .agent-result-frame')) return false;
     // 注意：.gen-stage / 图台主图不计入控件，单击需选中节点以唤出下方控制台
-    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .image-action-bar-host, .frame-group-action-bar-host, .frame-group-bg-menu, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs, .gen-stage-tile, .gen-stage-tile-actions, .gen-stage-grid, .gen-stage-stack-expand, .gen-stage-grid-collapse, .gen-stage-stack');
+    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .image-action-bar-host, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs, .gen-stage-tile, .gen-stage-tile-actions, .gen-stage-grid, .gen-stage-stack-expand, .gen-stage-grid-collapse, .gen-stage-stack, .float-title-label, .float-title-input, .canvas-float-title.is-renaming');
 }
 function destroyLTXEditor(node){
     if(!node?._ltxEditor) return;
@@ -13614,7 +13759,7 @@ function renderNode(node){
         }
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? tr('canvas.textNode') : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? (langIsEn() ? 'Prompt group' : '提示词组') : node.type === 'group' ? (langIsEn() ? 'Frame group' : '框组') : node.type === 'output' ? 'Output' : node.type === 'imageBatch' ? (langIsEn() ? 'Image group' : '图片组') : node.type === 'frameStack' ? (langIsEn() ? 'Frame Stack' : '截帧集') : node.type === 'llm' ? 'LLM' : node.type === 'replicaAgent' ? '复刻 Agent' : node.type === 'imageRepairAgent' ? (langIsEn() ? 'Repair Agent' : '修图 Agent') : node.type === 'batchPosterAgent' ? 'Batch Poster Agent' : node.type === 'nineGridAgent' ? (langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent') : node.type === 'slotsLoopVideoAgent' ? (langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent') : node.type === 'mxShellPromptAgent' ? (langIsEn() ? 'Mx-Shell Prompt Agent' : 'Mx-Shell 提示词 Agent') : node.type === 'mxShellPolishAgent' ? (langIsEn() ? 'Mx-Shell Polish Agent' : 'Mx-Shell 润色 Agent') : node.type === 'textOutput' ? textOutputKindLabel(node.kind) : node.type === 'mxShellPromptView' ? textOutputKindLabel('mxShell') : node.type === 'deepWhiteShotAgent' ? (langIsEn() ? 'DeepWhite Shot Agent' : 'DeepWhite 导演分镜 Agent') : node.type === 'deepWhiteShotView' ? textOutputKindLabel('deepWhite') : node.type === 'screenwritingAgent' ? (langIsEn() ? 'Screenwriting Agent' : '编剧 Agent') : node.type === 'pixarAdScriptAgent' ? (langIsEn() ? 'Story Anim Storyboard Agent' : '故事动画分镜 Agent') : node.type === 'videoReverse' ? '视频反推' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? tr('canvas.textNode') : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? (langIsEn() ? 'Prompt group' : '提示词组') : node.type === 'group' ? (langIsEn() ? 'New group' : '新建组') : node.type === 'output' ? 'Output' : node.type === 'imageBatch' ? (langIsEn() ? 'Image group' : '图片组') : node.type === 'frameStack' ? (langIsEn() ? 'Frame Stack' : '截帧集') : node.type === 'llm' ? 'LLM' : node.type === 'replicaAgent' ? '复刻 Agent' : node.type === 'imageRepairAgent' ? (langIsEn() ? 'Repair Agent' : '修图 Agent') : node.type === 'batchPosterAgent' ? 'Batch Poster Agent' : node.type === 'nineGridAgent' ? (langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent') : node.type === 'slotsLoopVideoAgent' ? (langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent') : node.type === 'mxShellPromptAgent' ? (langIsEn() ? 'Mx-Shell Prompt Agent' : 'Mx-Shell 提示词 Agent') : node.type === 'mxShellPolishAgent' ? (langIsEn() ? 'Mx-Shell Polish Agent' : 'Mx-Shell 润色 Agent') : node.type === 'textOutput' ? textOutputKindLabel(node.kind) : node.type === 'mxShellPromptView' ? textOutputKindLabel('mxShell') : node.type === 'deepWhiteShotAgent' ? (langIsEn() ? 'DeepWhite Shot Agent' : 'DeepWhite 导演分镜 Agent') : node.type === 'deepWhiteShotView' ? textOutputKindLabel('deepWhite') : node.type === 'screenwritingAgent' ? (langIsEn() ? 'Screenwriting Agent' : '编剧 Agent') : node.type === 'pixarAdScriptAgent' ? (langIsEn() ? 'Story Anim Storyboard Agent' : '故事动画分镜 Agent') : node.type === 'videoReverse' ? '视频反推' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 运行状态徽章：含单节点失败与级联失败
     const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','deepWhiteShotAgent','screenwritingAgent','pixarAdScriptAgent','videoReverse'].includes(node.type) && node.runStatus
@@ -13631,14 +13776,19 @@ function renderNode(node){
     const rhLiveDot = node.type === 'rh'
         ? `<span class="rh-status-dot rh-head-dot ${(agentPendingCount(node.id) > 0 || Boolean(node.running)) ? 'is-on' : ''}" aria-hidden="true"></span>`
         : '';
-    // 框组：无标题/删除/文案，只留半透明底 + 缩放柄
+    // 框组 / 图片组：壳外左上浮标；框组无顶栏删除
     if(node.type === 'group'){
         el.classList.add('is-frame-group');
-        el.innerHTML = '';
-        if(node.frameBg) el.style.background = String(node.frameBg);
-        else el.style.removeProperty('background');
+        el.innerHTML = groupShellFloatTitleHtml(node);
+        syncShellBgDom(el, node.frameBg);
+    } else if(node.type === 'imageBatch'){
+        el.classList.add('is-image-batch-shell');
+        el.innerHTML = groupShellFloatTitleHtml(node);
+        syncShellBgDom(el, node.frameBg);
+        const deleteBtn = el.querySelector('.node-delete-btn');
+        if(deleteBtn) deleteBtn.onmousedown = e => e.stopPropagation();
     } else {
-        el.innerHTML = `<div class="node-head"><span class="node-head-icon"><i data-lucide="${headIcon}" class="${node.type === 'imageBatch' ? 'w-5 h-5' : 'w-3 h-3'}"></i></span><span class="node-title">${displayTitle}</span>${rhLiveDot}<div style="display:flex;align-items:center;gap:8px;margin-left:auto">${promptGroupHeadToggle}${disabledBadge}${statusHtml}<button type="button" class="node-delete-btn text-gray-300 hover:text-red-500" aria-label="${escapeAttr(tr('common.delete'))}"><i data-lucide="x" class="${node.type === 'imageBatch' ? 'w-5 h-5' : 'w-4 h-4'}"></i></button></div></div>`;
+        el.innerHTML = `<div class="node-head"><span class="node-head-icon"><i data-lucide="${headIcon}" class="w-3 h-3"></i></span><span class="node-title">${displayTitle}</span>${rhLiveDot}<div style="display:flex;align-items:center;gap:8px;margin-left:auto">${promptGroupHeadToggle}${disabledBadge}${statusHtml}<button type="button" class="node-delete-btn text-gray-300 hover:text-red-500" aria-label="${escapeAttr(tr('common.delete'))}"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
         const deleteBtn = el.querySelector('.node-delete-btn');
         if(deleteBtn){
             deleteBtn.onmousedown = e => e.stopPropagation();
@@ -13711,6 +13861,7 @@ function renderNode(node){
             body.oncontextmenu = e => {
                 e.preventDefault();
                 e.stopPropagation();
+                // 右键只出菜单，勿选中（选中会 syncImageActionBar / 与视频卡控制台同路径）
                 openImageNodeMenu(node.id, e.clientX, e.clientY);
             };
             if(loadedImg && isEditableImage){
@@ -13994,6 +14145,7 @@ function renderNode(node){
         scheduleFitRhNodeFrame(node);
     }
     mountCanvasCustomSelects(el);
+    bindNodeFloatTitleRename(el, node);
     return el;
 }
 async function loadFavoriteOutputPaths(){
@@ -20483,7 +20635,7 @@ function bindGenStageInteractions(root, node){
             }
             e.preventDefault();
             e.stopPropagation();
-            applyNodeSelection(node.id, e);
+            // 右键只出结果菜单，勿 applyNodeSelection（会 syncImageGenDock 唤出控制台）
             const url = hero.getAttribute('data-preview-url') || '';
             if(url) node._lightboxFocusUrl = outputUrlValue(url);
             const urls = generatorPreviewUrls(node);
@@ -20491,13 +20643,12 @@ function bindGenStageInteractions(root, node){
             openResultsMenu(e.clientX, e.clientY, {url, previewIndex: idx >= 0 ? idx : Number(node.previewIndex || 0)});
         };
     } else {
-        // 空图台：仍可右键「复制节点」（避免落到节点左右端口菜单）
+        // 空图台：仍可右键「复制节点」（避免落到节点左右端口菜单）；不选中以免唤出控制台
         const emptyStage = root?.querySelector?.('.gen-stage.is-empty, .gen-stage-frame');
         if(emptyStage){
             emptyStage.oncontextmenu = e => {
                 e.preventDefault();
                 e.stopPropagation();
-                applyNodeSelection(node.id, e);
                 openResultsMenu(e.clientX, e.clientY, {});
             };
         }
@@ -20564,7 +20715,7 @@ function bindGenStageInteractions(root, node){
         tile.oncontextmenu = e => {
             e.preventDefault();
             e.stopPropagation();
-            applyNodeSelection(node.id, e);
+            // 右键菜单不选中节点，避免唤出下方生成控制台
             const url = tile.getAttribute('data-preview-url') || '';
             if(url) node._lightboxFocusUrl = outputUrlValue(url);
             const idx = Number(tile.dataset.previewIndex || 0);
@@ -21603,7 +21754,7 @@ function openGenStageResultMenu(nodeId, clientX, clientY, opts={}){
     imageNodeMenu.classList.remove('output-node-menu');
     if(!urls.length){
         imageNodeMenu.innerHTML = `
-            <button class="menu-btn" type="button" data-gen-duplicate="1"><i data-lucide="copy-plus" class="w-4 h-4"></i><span>${en ? 'Copy node' : '复制节点'}</span></button>
+            <button class="menu-btn" type="button" data-gen-duplicate="1"><i data-lucide="copy-plus" class="w-4 h-4"></i><span>${en ? 'Create copy' : '创建副本'}</span></button>
         `;
         placeImageNodeMenuNearPointer(clientX, clientY);
         bindGenStageDuplicateMenuAction(nodeId);
@@ -21634,7 +21785,8 @@ function openGenStageResultMenu(nodeId, clientX, clientY, opts={}){
         <button class="menu-btn" type="button" data-gen-preview="1"><i data-lucide="maximize-2" class="w-4 h-4"></i><span>${en ? 'Open preview' : '进入预览'}</span></button>
         ${multi ? `<button class="menu-btn" type="button" data-gen-set-primary="1"><i data-lucide="pin" class="w-4 h-4"></i><span>${en ? 'Set as primary' : '设为主图'}</span></button>` : ''}
         <button class="menu-btn" type="button" data-gen-favorite="1"><i data-lucide="star" class="w-4 h-4"></i><span>${favorited ? (en ? 'Remove favorite' : '取消收藏') : (en ? 'Save to favorites' : '保存到我的收藏')}</span></button>
-        <button class="menu-btn" type="button" data-gen-duplicate="1"><i data-lucide="copy-plus" class="w-4 h-4"></i><span>${en ? 'Copy node' : '复制节点'}</span></button>
+        <button class="menu-btn" type="button" data-gen-duplicate="1"><i data-lucide="copy-plus" class="w-4 h-4"></i><span>${en ? 'Create copy' : '创建副本'}</span></button>
+        ${!isVideoGen && url && !isMissingAssetUrl(url) ? `<button class="menu-btn" type="button" data-gen-copy-image="1"><i data-lucide="copy" class="w-4 h-4"></i><span>${en ? 'Copy image' : '复制图片'}</span></button>` : ''}
         <button class="menu-btn" type="button" data-gen-download-one="1"><i data-lucide="download" class="w-4 h-4"></i><span>${en ? 'Download' : '下载'}</span></button>
         ${canSaveLibrary ? `<button class="menu-btn" type="button" data-gen-save-library="1"><i data-lucide="folder-plus" class="w-4 h-4"></i><span>${en ? 'Save to library' : '保存到素材库'}</span></button>` : ''}
         ${isVideoGen ? '' : `<button class="menu-btn" type="button" data-gen-join-batch="1"><i data-lucide="images" class="w-4 h-4"></i><span>${en ? 'Add to image group' : '加入图片组'}</span></button>`}
@@ -21668,6 +21820,13 @@ function openGenStageResultMenu(nodeId, clientX, clientY, opts={}){
         e.stopPropagation();
         closeImageNodeMenu();
         void toggleFavoriteForUrl(url, histItem, node, null);
+    });
+    imageNodeMenu.querySelector('[data-gen-copy-image]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        closeImageNodeMenu();
+        void copyImageUrlToClipboard(url)
+            .then(() => setStatus(en ? 'Image copied' : '已复制图片'))
+            .catch(err => softAlert(err?.message || (en ? 'Copy failed' : '复制失败')));
     });
     imageNodeMenu.querySelector('[data-gen-download-one]')?.addEventListener('click', e => {
         e.stopPropagation();
@@ -22461,6 +22620,7 @@ function syncImageGenDock(){
         removeImageActionBar();
         removeSelectionActionBar();
         removeFrameGroupActionBar();
+        removeImageBatchActionBar();
         if(selectionBox && !selectDrag) selectionBox.style.display = 'none';
         syncTextNodeChrome();
         return;
@@ -23117,6 +23277,7 @@ function exitTextNodeEdit(nodeId){
     }
 }
 function removeTextFormatBar(){
+    closeCanvasBgRailMenu();
     textFormatBarEl?.remove();
     textFormatBarEl = null;
     textFormatBarNodeId = null;
@@ -23341,13 +23502,11 @@ function applyTextNodeStageBg(node, color){
     node.stageBg = hex;
     const frame = nodesEl?.querySelector?.(`.node[data-id="${CSS.escape(node.id)}"] .text-stage-frame`);
     if(frame) frame.style.background = hex;
-    const swatch = textFormatBarEl?.querySelector?.('.text-format-bg-swatch');
+    const swatch = textFormatBarEl?.querySelector?.('.text-format-bg-swatch, .canvas-bg-chip');
     if(swatch && textFormatBarNodeId === node.id){
-        swatch.style.background = hex;
+        swatch.style.background = canvasBgChipCss(hex, 'text');
         swatch.classList.toggle('is-default', hex.toLowerCase() === TEXT_NODE_DEFAULT_BG);
     }
-    const colorInput = textFormatBarEl?.querySelector?.('.text-format-bg-input');
-    if(colorInput && textFormatBarNodeId === node.id) colorInput.value = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : TEXT_NODE_DEFAULT_BG;
     scheduleSave();
 }
 function closeTextNodeExpand(){
@@ -23555,10 +23714,9 @@ function remountTextFormatBar(node){
     host.onclick = e => e.stopPropagation();
     host.innerHTML = `
         <div class="text-format-bar" role="toolbar" aria-label="${escapeAttr(en ? 'Text format' : '文本格式')}">
-            <button type="button" class="text-format-bar-btn text-format-bg-btn" data-cmd="stageBg" title="${escapeAttr(en ? 'Background color' : '背景颜色')}" aria-label="background">
-                <span class="text-format-bg-swatch ${bg.toLowerCase() === TEXT_NODE_DEFAULT_BG ? 'is-default' : ''}" style="background:${escapeAttr(bg)}"></span>
+            <button type="button" class="canvas-bg-chip-btn text-format-bg-btn" data-cmd="stageBg" title="${escapeAttr(en ? 'Background color' : '背景颜色')}" aria-label="background">
+                <span class="canvas-bg-chip text-format-bg-swatch ${bg.toLowerCase() === TEXT_NODE_DEFAULT_BG ? 'is-default' : ''}" style="background:${escapeAttr(canvasBgChipCss(bg, 'text'))}"></span>
             </button>
-            <input type="color" class="text-format-bg-input" value="${escapeAttr(/^#[0-9a-fA-F]{6}$/.test(bg) ? bg : TEXT_NODE_DEFAULT_BG)}" tabindex="-1" aria-hidden="true" />
             <button type="button" class="text-format-bar-btn" data-cmd="formatBlock" data-val="h1" title="H1">H1</button>
             <button type="button" class="text-format-bar-btn" data-cmd="formatBlock" data-val="h2" title="H2">H2</button>
             <button type="button" class="text-format-bar-btn" data-cmd="formatBlock" data-val="h3" title="H3">H3</button>
@@ -23574,22 +23732,19 @@ function remountTextFormatBar(node){
             <button type="button" class="text-format-bar-btn" data-cmd="expand" title="${escapeAttr(en ? 'Expand editor' : '展开编辑')}"><i data-lucide="maximize-2"></i></button>
         </div>
     `;
-    const colorInput = host.querySelector('.text-format-bg-input');
     host.querySelector('.text-format-bg-btn')?.addEventListener('click', e => {
         e.preventDefault();
         e.stopPropagation();
-        colorInput?.click();
+        if(canvasBgRailEl) closeCanvasBgRailMenu();
+        else openCanvasBgRailMenu(e.currentTarget, {
+            mode: 'text',
+            current: node.stageBg || TEXT_NODE_DEFAULT_BG,
+            onPick: hex => {
+                pushUndo();
+                applyTextNodeStageBg(node, hex || TEXT_NODE_DEFAULT_BG);
+            },
+        });
     });
-    if(colorInput){
-        colorInput.oninput = e => {
-            e.stopPropagation();
-            applyTextNodeStageBg(node, e.target.value);
-        };
-        colorInput.onchange = e => {
-            e.stopPropagation();
-            applyTextNodeStageBg(node, e.target.value);
-        };
-    }
     host.querySelectorAll('[data-cmd]').forEach(btn => {
         if(btn.dataset.cmd === 'stageBg') return;
         btn.onmousedown = e => { e.preventDefault(); e.stopPropagation(); };
@@ -24499,18 +24654,35 @@ function rhFieldKind(field){
     if(type === 'AUDIO') return 'audio';
     if(['NUMBER','FLOAT','INTEGER','INT'].includes(type)) return 'number';
     if(['BOOLEAN','BOOL'].includes(type)) return 'boolean';
+    // 下拉必须独立成 select，勿并进 text（否则易进提示词区变成 textarea）
+    if(['LIST','SELECT','DROPDOWN','COMBO','ENUM'].includes(type)) return 'select';
+    // 管理台已显式标成文本：必须尊重，勿再被 fieldName（如 image）或默认值 *.png 猜回上传槽
+    if(['TEXT','STRING','PROMPT'].includes(type)) return 'text';
+    // 未标注类型时才走启发式（兼容旧稿 / 裸 workflow JSON）
     const key = `${field?.fieldName || ''} ${field?.fieldValue || ''}`.toLowerCase();
     if(/\b(image|img|mask|photo|picture)\b/.test(key) || /\.(png|jpe?g|webp|gif|bmp)(\?|$)/i.test(key)) return 'image';
     if(/\b(video|movie|mp4)\b/.test(key) || /\.(mp4|webm|mov|m4v|mkv)(\?|$)/i.test(key)) return 'video';
     if(/\b(audio|sound|music|voice)\b/.test(key) || /\.(mp3|wav|ogg|m4a|flac|aac)(\?|$)/i.test(key)) return 'audio';
+    if(rhExtractFieldOptions(field)?.length) return 'select';
     return 'text';
+}
+function rhLooksLikePromptField(field){
+    // 只用 fieldName/label 判断；group 常是节点路径（如 CLIPTextEncode），含 text 会误伤 ratio 等下拉
+    const name = String(field?.fieldName || '').trim().toLowerCase();
+    const label = String(field?.label || '').trim().toLowerCase();
+    const zh = `${field?.fieldName || ''} ${field?.label || ''}`;
+    if(/^(prompt|positive|negative|caption|description|content|query|instruction|system|user|note|msg|message|text|string)$/.test(name)) return true;
+    if(/^(prompt|positive|negative|caption|description|content|text|string)$/.test(label)) return true;
+    if(/(^|_)(prompt|text|caption|description|content)(_|$)/.test(name)) return true;
+    if(/\b(prompt|positive|negative|caption|description)\b/.test(`${name} ${label}`)) return true;
+    if(/关键词|提示词|正向|负向|输入文本|文本|文案|描述|内容/.test(zh)) return true;
+    return false;
 }
 function rhFieldRole(field){
     const kind = rhFieldKind(field);
-    if(['image','video','audio','number','boolean'].includes(kind)) return kind;
-    const text = `${field?.fieldName || ''} ${field?.label || ''} ${field?.group || ''}`.toLowerCase();
-    // 含「输入文本 / 文案 / 描述」等也进右侧提示词区，勿落到左侧参数栏
-    if(/prompt|positive|negative|text|caption|description|关键词|提示词|正向|负向|输入文本|文本|文案|描述|内容/.test(text)) return 'prompt';
+    if(['image','video','audio','number','boolean','select'].includes(kind)) return kind;
+    if(rhExtractFieldOptions(field)?.length) return 'select';
+    if(rhLooksLikePromptField(field)) return 'prompt';
     return 'text';
 }
 /** 右侧舞台：图片/视频/音频/提示词，以及无选项的自由文本 */
@@ -24523,14 +24695,23 @@ function rhIsStageField(field){
 function rhIsSideParamField(field){
     return !rhIsStageField(field);
 }
+function rhNormalizeOptionList(candidate){
+    if(typeof candidate === 'string'){
+        const parts = candidate.split(/[\r\n,]+/).map(s => s.trim()).filter(Boolean);
+        return parts.length ? parts : null;
+    }
+    if(!Array.isArray(candidate) || !candidate.length) return null;
+    if(candidate.every(x => ['string','number'].includes(typeof x))) return candidate.map(String);
+    if(candidate.every(x => x && typeof x === 'object' && ('value' in x || 'label' in x || 'name' in x))){
+        return candidate.map(x => x.value ?? x.label ?? x.name).filter(v => v !== undefined && v !== null).map(String);
+    }
+    return null;
+}
 function rhExtractFieldOptions(field){
     const candidates = [field?.fieldData, field?.options, field?.list, field?.values, field?.enum, field?.choices, field?.items, field?.selectOptions, field?.dropdown];
     for(const candidate of candidates){
-        if(!Array.isArray(candidate) || !candidate.length) continue;
-        if(candidate.every(x => ['string','number'].includes(typeof x))) return candidate.map(String);
-        if(candidate.every(x => x && typeof x === 'object' && ('value' in x || 'label' in x || 'name' in x))){
-            return candidate.map(x => x.value ?? x.label ?? x.name).filter(v => v !== undefined && v !== null).map(String);
-        }
+        const normalized = rhNormalizeOptionList(candidate);
+        if(normalized?.length) return normalized;
     }
     const fieldType = String(field?.fieldType || '').toUpperCase();
     if(['LIST','SELECT','DROPDOWN','COMBO','ENUM'].includes(fieldType) && Array.isArray(field?.fieldValue)){
@@ -24591,12 +24772,22 @@ function rhWorkflowNodeInfoList(data){
     return list;
 }
 function rhInferWorkflowFieldType(fieldName, fieldValue){
-    const key = `${fieldName || ''} ${fieldValue || ''}`.toLowerCase();
-    if(/\b(image|img|mask|photo|picture)\b/.test(key) || /\.(png|jpe?g|webp|gif|bmp)(\?|$)/i.test(key)) return 'IMAGE';
-    if(/\b(video|movie|mp4)\b/.test(key) || /\.(mp4|webm|mov|m4v|mkv)(\?|$)/i.test(key)) return 'VIDEO';
-    if(/\b(audio|sound|music|voice)\b/.test(key) || /\.(mp3|wav|ogg|m4a|flac|aac)(\?|$)/i.test(key)) return 'AUDIO';
-    if(/^(true|false)$/i.test(String(fieldValue || ''))) return 'BOOLEAN';
-    if(String(fieldValue || '').trim() !== '' && !Number.isNaN(Number(fieldValue))) return 'NUMBER';
+    const name = String(fieldName || '').trim().toLowerCase();
+    const value = String(fieldValue || '').trim();
+    const looksText = /^(prompt|text|string|negative|positive|caption|description|content|query|instruction|system|user|note|msg|message)$/.test(name)
+        || /(^|_)(prompt|text|caption|description|content)(_|$)/.test(name)
+        || /提示词|文案|描述|内容|文本/.test(String(fieldName || ''));
+    if(looksText){
+        if(/^(true|false)$/i.test(value)) return 'BOOLEAN';
+        if(value && value.length <= 12 && /^-?\d+(\.\d+)?$/.test(value) && !Number.isNaN(Number(value))) return 'NUMBER';
+        return 'TEXT';
+    }
+    // 媒体：优先字段名；默认值只认扩展名，勿被提示词正文里的 image/mask 带偏
+    if(/\b(image|img|mask|photo|picture)\b/.test(name) || /\.(png|jpe?g|webp|gif|bmp)(\?|$)/i.test(value)) return 'IMAGE';
+    if(/\b(video|movie|mp4)\b/.test(name) || /\.(mp4|webm|mov|m4v|mkv)(\?|$)/i.test(value)) return 'VIDEO';
+    if(/\b(audio|sound|music|voice)\b/.test(name) || /\.(mp3|wav|ogg|m4a|flac|aac)(\?|$)/i.test(value)) return 'AUDIO';
+    if(/^(true|false)$/i.test(value)) return 'BOOLEAN';
+    if(value && value.length <= 12 && /^-?\d+(\.\d+)?$/.test(value) && !Number.isNaN(Number(value))) return 'NUMBER';
     return 'TEXT';
 }
 function rhIsWorkflowLinkValue(value){
@@ -24925,12 +25116,34 @@ async function rhBuildWorkflowRequestExtras(node, media, nodeInfoList){
 function rhMediaPreviewHtml(ref, kind){
     const safe = escapeAttr(typeof ref === 'string' ? ref : (ref?.url || ''));
     if(kind === 'video') {
+        // 无 VIDEO 角标：点击即可开灯箱播放，角标只会挡画面
         return safe
-            ? `<video src="${safe}" muted preload="metadata" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video>`
+            ? `<video src="${safe}" data-url="${safe}" muted preload="metadata" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video>`
             : `<i data-lucide="file-video" class="w-6 h-6"></i>`;
     }
     if(kind === 'audio') return `<i data-lucide="file-audio" class="w-6 h-6"></i>`;
-    return safe && !isMissingAssetUrl(safe) ? `<img src="${safe}" alt="" draggable="false">` : `<i data-lucide="image" class="w-6 h-6"></i>`;
+    return safe && !isMissingAssetUrl(safe)
+        ? `<img src="${safe}" data-url="${safe}" alt="" draggable="false">`
+        : `<i data-lucide="image" class="w-6 h-6"></i>`;
+}
+/** 输入/输出框跟媒体真实比例，避免固定 1:1 裁切 */
+function rhApplyFrameAspect(frameEl, mediaEl, opts={}){
+    if(!frameEl || !mediaEl) return;
+    const apply = () => {
+        const nw = Number(mediaEl.naturalWidth || mediaEl.videoWidth || 0);
+        const nh = Number(mediaEl.naturalHeight || mediaEl.videoHeight || 0);
+        if(!nw || !nh) return;
+        frameEl.style.aspectRatio = `${nw} / ${nh}`;
+        if(opts.cssVar) frameEl.style.setProperty(opts.cssVar, `${nw} / ${nh}`);
+        if(typeof opts.onApplied === 'function') opts.onApplied(nw, nh);
+    };
+    if(mediaEl.tagName === 'VIDEO'){
+        if(mediaEl.readyState >= 1 && mediaEl.videoWidth > 0) apply();
+        else mediaEl.addEventListener('loadedmetadata', apply, {once:true});
+        return;
+    }
+    if(mediaEl.complete && mediaEl.naturalWidth > 0) apply();
+    else mediaEl.addEventListener('load', apply, {once:true});
 }
 function rhSlotHasMedia(node, field, media=null){
     return Boolean(String(rhFieldValue(node, field, media) || '').trim());
@@ -24976,8 +25189,28 @@ function rhFileMatchesKind(file, kind){
 function rhOutputPreviewRef(node){
     const refs = generatedImageRefs(node);
     if(!refs.length) return null;
-    const idx = Math.max(0, Math.min(refs.length - 1, Number(node.previewIndex ?? refs.length - 1)));
-    return refs[idx] || refs[refs.length - 1] || null;
+    // 用户点过切换：尊重 previewIndex；否则优先视频（工作流常附带封面图）
+    if(node.previewIndex != null && Number.isFinite(Number(node.previewIndex))){
+        const idx = Math.max(0, Math.min(refs.length - 1, Number(node.previewIndex)));
+        return refs[idx] || refs[refs.length - 1] || null;
+    }
+    const video = [...refs].reverse().find(r => r.kind === 'video');
+    if(video) return video;
+    return refs[refs.length - 1] || null;
+}
+function rhOutputPaneKind(node){
+    const current = rhOutputPreviewRef(node);
+    if(current?.kind === 'video' || isVideoUrl(current?.url)) return 'video';
+    if(current?.kind === 'audio' || isAudioUrl(current?.url)) return 'audio';
+    const refs = generatedImageRefs(node);
+    if(refs.some(r => r.kind === 'video' || isVideoUrl(r.url))) return 'video';
+    return 'image';
+}
+function rhOutputPaneTitle(node){
+    const kind = rhOutputPaneKind(node);
+    if(kind === 'video') return langIsEn() ? 'Output Video' : '输出视频';
+    if(kind === 'audio') return langIsEn() ? 'Output Audio' : '输出音频';
+    return langIsEn() ? 'Output Image' : '输出图像';
 }
 function rhRenderOutputPane(container, node){
     if(!container) return;
@@ -24985,10 +25218,19 @@ function rhRenderOutputPane(container, node){
     const refs = generatedImageRefs(node);
     const current = rhOutputPreviewRef(node);
     const url = current?.url || '';
-    const kind = current?.kind || (isVideoUrl(url) ? 'video' : 'image');
+    const kind = current?.kind || (isVideoUrl(url) ? 'video' : isAudioUrl(url) ? 'audio' : 'image');
     const filled = Boolean(url);
     container.classList.toggle('is-filled', filled);
+    const paneHead = container.closest?.('.rh-pane-out')?.querySelector?.('.rh-pane-head');
+    // 同步右侧标题：有视频结果时显示「输出视频」
+    const titleEl = paneHead?.querySelector?.('.rh-pane-title span:last-child');
+    if(titleEl) titleEl.textContent = rhOutputPaneTitle(node);
+    const titleIcon = paneHead?.querySelector?.('.rh-pane-title i[data-lucide]');
+    if(titleIcon && !running){
+        titleIcon.setAttribute('data-lucide', kind === 'video' ? 'video' : kind === 'audio' ? 'music' : 'image');
+    }
     if(running && !url){
+        if(paneHead) paneHead.hidden = false;
         container.innerHTML = `<div class="rh-output-empty is-running">
             <i data-lucide="loader-circle" class="w-6 h-6 spin-icon"></i>
             <span>${langIsEn() ? 'Generating…' : '生成中…'}</span>
@@ -24997,27 +25239,66 @@ function rhRenderOutputPane(container, node){
         return;
     }
     if(!url){
+        if(paneHead) paneHead.hidden = false;
         container.innerHTML = `<div class="rh-output-empty">
-            <i data-lucide="image" class="rh-media-ph-icon"></i>
+            <i data-lucide="${rhOutputPaneKind(node) === 'video' ? 'video' : 'image'}" class="rh-media-ph-icon"></i>
             <span>${langIsEn() ? 'Output appears here' : '运行后结果会显示在这里'}</span>
         </div>`;
         refreshIcons();
         return;
     }
+    const idx = Math.max(0, Math.min(refs.length - 1, Number(node.previewIndex ?? refs.length - 1)));
+    const runMs = Math.max(0, Number(current?.runMs || 0) || 0);
+    const durationText = runMs ? formatRunDuration(runMs) : '';
+    const title = rhOutputPaneTitle(node);
+    // 切换条放在媒体下方，避免盖住视频画面；去掉多余 VIDEO 角标
     container.innerHTML = `
-        <div class="rh-output-media" data-rh-output-count="${refs.length}">
-            ${rhMediaPreviewHtml(url, kind)}
-            ${refs.length > 1 ? `<span class="rh-output-count">${refs.length}</span>` : ''}
+        <div class="rh-output-shell" data-rh-output-count="${refs.length}" data-rh-output-kind="${escapeAttr(kind)}">
+            <div class="rh-output-media" data-preview-url="${escapeAttr(url)}" style="${kind === 'video' ? 'aspect-ratio:9/16' : 'aspect-ratio:3/4'}">
+                ${rhMediaPreviewHtml(url, kind)}
+            </div>
+            <div class="rh-output-toolbar">
+                <div class="rh-output-toolbar-meta">
+                    <span class="rh-output-toolbar-title">${escapeHtml(title)}</span>
+                    ${durationText ? `<span class="rh-output-duration" title="${escapeAttr(langIsEn() ? 'Generation time' : '生成用时')}">${escapeHtml(durationText)}</span>` : ''}
+                </div>
+                ${refs.length > 1 ? `<div class="rh-output-history" role="group" aria-label="${langIsEn() ? 'Output history' : '生成历史'}">
+                    <button type="button" class="rh-output-nav" data-rh-hist="-1" title="${langIsEn() ? 'Previous' : '上一条'}" aria-label="${langIsEn() ? 'Previous' : '上一条'}"><i data-lucide="chevron-left" class="w-3.5 h-3.5"></i></button>
+                    <button type="button" class="rh-output-count" data-rh-hist="1" title="${langIsEn() ? 'Next output' : '下一条'}">${idx + 1}/${refs.length}</button>
+                    <button type="button" class="rh-output-nav" data-rh-hist="1" title="${langIsEn() ? 'Next' : '下一条'}" aria-label="${langIsEn() ? 'Next' : '下一条'}"><i data-lucide="chevron-right" class="w-3.5 h-3.5"></i></button>
+                </div>` : ''}
+            </div>
         </div>
     `;
-    if(refs.length > 1){
-        container.querySelector('.rh-output-media')?.addEventListener('click', e => {
-            e.stopPropagation();
-            node.previewIndex = ((Number(node.previewIndex ?? refs.length - 1) + 1) % refs.length);
-            rhRenderOutputPane(container, node);
-            scheduleSave();
+    const mediaEl = container.querySelector('.rh-output-media');
+    const mediaTag = mediaEl?.querySelector('img, video');
+    if(mediaEl && mediaTag){
+        rhApplyFrameAspect(mediaEl, mediaTag, {
+            onApplied: () => scheduleFitRhNodeFrame(node),
         });
     }
+    const stepHistory = (delta) => {
+        if(refs.length <= 1) return;
+        const cur = Math.max(0, Math.min(refs.length - 1, Number(node.previewIndex ?? refs.length - 1)));
+        node.previewIndex = (cur + delta + refs.length) % refs.length;
+        rhRenderOutputPane(container, node);
+        scheduleSave();
+    };
+    container.querySelectorAll('[data-rh-hist]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            stepHistory(Number(btn.getAttribute('data-rh-hist') || 1) || 1);
+        });
+    });
+    mediaEl?.addEventListener('click', e => {
+        e.stopPropagation();
+        if(!url) return;
+        openOutputLightbox(url, node);
+    });
+    // 标题已并入输出工具条，隐藏重复的 pane-head
+    if(paneHead) paneHead.hidden = true;
+    refreshIcons(container.closest?.('.rh-pane-out') || container);
 }
 function renderRhBody(node){
     // 无进行中 pending 时清掉存档里卡住的「运行中」徽章（按钮可能已是空闲态）
@@ -25053,8 +25334,8 @@ function renderRhBody(node){
             <section class="rh-pane rh-pane-out">
                 <div class="rh-pane-head">
                     <span class="rh-pane-title">
-                        <i data-lucide="${running ? 'loader-circle' : 'image'}" class="w-3.5 h-3.5 ${running ? 'spin-icon' : ''}"></i>
-                        <span>${langIsEn() ? 'Output Image' : '输出图像'}</span>
+                        <i data-lucide="${running ? 'loader-circle' : (rhOutputPaneKind(node) === 'video' ? 'video' : 'image')}" class="w-3.5 h-3.5 ${running ? 'spin-icon' : ''}"></i>
+                        <span>${escapeHtml(rhOutputPaneTitle(node))}</span>
                     </span>
                 </div>
                 <div class="rh-well rh-output-stage"></div>
@@ -25384,11 +25665,18 @@ function bindRhMediaTiles(list, node){
         }
         // 连线 URL 失效/裂图时回落到占位，避免整块纯黑
         const mediaEl = tile.querySelector('.rh-media-tile-media img, .rh-media-tile-media video');
+        const frameEl = tile.querySelector('.rh-media-tile-frame');
+        if(mediaEl && frameEl){
+            rhApplyFrameAspect(frameEl, mediaEl, {
+                onApplied: () => scheduleFitRhNodeFrame(node),
+            });
+        }
         if(mediaEl){
             const markBroken = () => {
                 tile.classList.add('is-broken');
                 tile.classList.remove('has-media');
                 tile.classList.add('empty');
+                if(frameEl) frameEl.style.aspectRatio = '';
                 const mediaWrap = tile.querySelector('.rh-media-tile-media');
                 if(mediaWrap) mediaWrap.remove();
                 if(!tile.querySelector('.rh-media-tile-empty')){
@@ -25423,11 +25711,12 @@ function renderRhInputs(list, node, media){
 }
 function renderRhPromptFields(container, node, fields){
     if(!container) return;
-    // 右侧文本区：prompt + 无选项自由文本（如「输入文本」）
+    // 右侧文本区：prompt + 无选项自由文本（如「输入文本」）；SELECT/有选项绝不进这里
     const prompts = (fields || []).filter(field => {
+        if(rhFieldRole(field) === 'select' || rhExtractFieldOptions(field)?.length) return false;
         const role = rhFieldRole(field);
         if(role === 'prompt') return true;
-        if(role === 'text' && !(rhExtractFieldOptions(field)?.length)) return true;
+        if(role === 'text') return true;
         return false;
     });
     if(!prompts.length){
@@ -25448,7 +25737,17 @@ function renderRhPromptFields(container, node, fields){
         </label>`;
     }).join('');
     bindRhParamControls(container, node);
+    // prompt 按内容长高，避免小框内出现滚动条
+    container.querySelectorAll('textarea.rh-prompt-tile-input').forEach(ta => {
+        const grow = () => {
+            ta.style.height = 'auto';
+            ta.style.height = `${Math.max(72, ta.scrollHeight)}px`;
+        };
+        ta.addEventListener('input', grow);
+        grow();
+    });
     refreshIcons();
+    scheduleFitRhNodeFrame(node);
 }
 function renderRhParams(container, node, fields, media){
     if(!container) return;
@@ -25481,9 +25780,15 @@ function renderRhSettingField(node, field, key, kind, label, value, options, wid
             </div>
         </div>`;
     }
-    if(options?.length){
+    if(kind === 'select' || options?.length){
+        const opts = options?.length ? options : [String(value || '')].filter(Boolean);
+        const selected = String(value ?? '');
+        const optionHtml = opts.map(opt => `<option value="${escapeAttr(opt)}" ${selected === String(opt) ? 'selected' : ''}>${escapeHtml(opt)}</option>`).join('');
+        const extra = selected && !opts.some(opt => String(opt) === selected)
+            ? `<option value="${escapeAttr(selected)}" selected>${escapeHtml(selected)}</option>`
+            : '';
         return `<div class="gen-settings-row rh-param-row ${wide ? 'wide' : ''}">
-            <label class="field rh-param-field">${titleHtml}<select class="select-lite rh-param-input" data-rh-param="${escapeAttr(key)}" data-rh-type="select" style="width:100%">${options.map(opt => `<option value="${escapeAttr(opt)}" ${String(value) === String(opt) ? 'selected' : ''}>${escapeHtml(opt)}</option>`).join('')}</select></label>
+            <label class="field rh-param-field">${titleHtml}<select class="select-lite rh-param-input" data-rh-param="${escapeAttr(key)}" data-rh-type="select" style="width:100%">${extra}${optionHtml}</select></label>
         </div>`;
     }
     if(rhRandomEnabled(field)){
@@ -25766,14 +26071,42 @@ async function runRhNode(nodeId, opts={}){
         }
         if(!result) throw new Error(tr('canvas.rhTimeout'));
         if(!isPendingActive(host, pendingId)) return;
-        const outputs = result.urls || [];
-        if(!outputs.length) throw new Error(tr('canvas.rhOutputsEmpty'));
         const meta = collectRunMeta(host, pendingId);
+        const runMs = Math.max(0, Number(meta.runMs || 0) || 0);
+        const typedOutputs = Array.isArray(result.outputs) ? result.outputs : [];
+        const outputs = (typedOutputs.length
+            ? typedOutputs.map(item => {
+                const url = outputUrlValue(item);
+                if(!url) return null;
+                const kind = String(item?.kind || item?.mediaKind || '').toLowerCase()
+                    || (isVideoUrl(url) ? 'video' : isAudioUrl(url) ? 'audio' : 'image');
+                return {url, kind, runMs};
+            }).filter(Boolean)
+            : (result.urls || []).map(url => {
+                const u = outputUrlValue(url);
+                if(!u) return null;
+                const kind = isVideoUrl(u) ? 'video' : isAudioUrl(u) ? 'audio' : 'image';
+                return {url:u, kind, runMs};
+            }).filter(Boolean));
+        if(!outputs.length) throw new Error(tr('canvas.rhOutputsEmpty'));
         clearNodePending(host, [pendingId]);
-        commitMediaOutputs(host, node, outputs, media.refs[0], [meta], {cascade:opts.cascade});
-        addGenerationLog({run, outputs, runMs:meta.runMs || 0});
+        // 追加历史，勿覆盖；预览指到本轮最新一张
+        commitMediaOutputs(host, node, outputs, media.refs[0], [meta], {
+            cascade:opts.cascade,
+            appendGenerated:true,
+        });
+        if((node.generatedOutputs || []).length > MAX_GEN_HISTORY){
+            node.generatedOutputs = node.generatedOutputs.slice(-MAX_GEN_HISTORY);
+        }
+        node.previewIndex = Math.max(0, (node.generatedOutputs || []).length - 1);
+        addGenerationLog({run, outputs:outputs.map(outputUrlValue).filter(Boolean), runMs});
+        void recordRhOutputsToHistoryLibrary(outputs, run, node, runMs);
         syncAgentRunStatusAfterTask(node, {completed:agentPendingCount(node.id) === 0});
         refreshRunNodes(node, host);
+        if(historyHubTab === 'logs' && logModal?.classList.contains('open')) renderCanvasLog();
+        setStatus(langIsEn()
+            ? `RunningHub done · ${formatRunDuration(runMs)}`
+            : `RunningHub 完成 · 用时 ${formatRunDuration(runMs)}`);
         scheduleSave();
     } catch(err) {
         if(!isPendingActive(host, pendingId)){
@@ -25787,6 +26120,7 @@ async function runRhNode(nodeId, opts={}){
         clearNodePending(host, [pendingId]);
         syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
         refreshRunNodes(node, host);
+        if(historyHubTab === 'logs' && logModal?.classList.contains('open')) renderCanvasLog();
         if(opts.cascade) throw err;
     }
     };
@@ -25962,6 +26296,8 @@ function agentResultPreviewUrls(node){
 }
 function renderAgentResultStageHtml(node){
     if(!node || isGenConsoleNode(node)) return '';
+    // RH 自带三栏输出区，勿再挂顶部结果台（会与右侧输出重复并撑出滚动条）
+    if(node.type === 'rh') return '';
     if(!CANVAS_GENERATOR_TYPES.includes(node.type)) return '';
     const urls = agentResultPreviewUrls(node);
     const pendingN = (node._pending || []).length;
@@ -26029,6 +26365,7 @@ function bindAgentResultStage(wrap, node){
 }
 function mountAgentResultStage(body, node){
     if(!body || !node || isGenConsoleNode(node)) return;
+    if(node.type === 'rh') return;
     if(!CANVAS_GENERATOR_TYPES.includes(node.type)) return;
     const host = body.querySelector('.generator-body') || body;
     const html = renderAgentResultStageHtml(node);
@@ -26140,7 +26477,14 @@ function generatedImageRefs(node){
             const url = outputUrlValue(item);
             if(!url) return null;
             const kind = mediaKindForOutputItem(item);
-            return {url, name:outputImageName(url) || `${node.type || 'generated'}-${i + 1}`, kind, index:i};
+            const runMs = Number(item?.runMs || 0) || 0;
+            return {
+                url,
+                name:outputImageName(url) || `${node.type || 'generated'}-${i + 1}`,
+                kind,
+                ...(runMs ? {runMs} : {}),
+                index:i,
+            };
         })
         .filter(Boolean)
         .filter(ref => keepGeneratedMedia || ref.kind === 'image')
@@ -28392,7 +28736,7 @@ function outputDownloadName(url){
 }
 function isVideoUrl(url){
     const clean = (url || '').split('?')[0].toLowerCase();
-    return /\.(mp4|webm|mov|m4v)$/.test(clean);
+    return /\.(mp4|webm|mov|m4v|mkv)$/.test(clean);
 }
 function mediaKindForOutputItem(item){
     const explicit = String(item?.kind || item?.mediaKind || '').toLowerCase();
@@ -28525,11 +28869,47 @@ function requestMetaFromResult(result={}){
 function runPlatformLabel(run){
     const node = run?.node || {};
     if(run?.nodeType === 'generator') return providerDisplayName(providerById(legacyImageProviderId(node.apiProvider || 'runninghub'))) || 'RunningHub';
+    if(run?.nodeType === 'rh') return 'RunningHub';
     if(run?.nodeType === 'msgen') return 'ModelScope';
     if(run?.nodeType === 'video') return providerById(node.apiProvider || 'comfly')?.name || node.apiProvider || 'Video';
     if(run?.nodeType === 'comfy') return 'ComfyUI';
     if(run?.nodeType === 'ltxDirector') return 'ComfyUI';
     return run?.nodeType || 'Generate';
+}
+/** RH 本地落盘结果写入跨画布成片库（图片 + 视频，含用时） */
+async function recordRhOutputsToHistoryLibrary(outputs, run, node, runMs = 0){
+    const list = Array.isArray(outputs) ? outputs : [];
+    const elapsed = Math.max(0, Number(runMs || 0) || 0);
+    for(const item of list){
+        const url = outputUrlValue(item);
+        if(!url || !String(url).startsWith('/uploads/')) continue;
+        const kind = typeof item === 'string'
+            ? (isVideoUrl(item) ? 'video' : isAudioUrl(item) ? 'audio' : 'image')
+            : mediaKindForOutputItem(item);
+        const itemMs = Math.max(0, Number(item?.runMs || elapsed) || 0);
+        try {
+            await apiFetch('/api/canvas-generations', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({
+                    thumbnail_path:url,
+                    prompt:run?.prompt || '',
+                    model:run?.taskLabel || runTaskLabel(run) || 'RunningHub',
+                    params:{
+                        media_kind:kind === 'video' || kind === 'audio' ? kind : 'image',
+                        backend:'runninghub',
+                        task_id:run?.request?.task_id || '',
+                        workflowId:run?.request?.workflowId || '',
+                        webappId:run?.request?.webappId || '',
+                        run_ms:itemMs,
+                        duration_label:itemMs ? formatRunDuration(itemMs) : '',
+                    },
+                    canvas_id:canvas?.id || '',
+                    node_id:node?.id || '',
+                }),
+            });
+        } catch(_){ /* 成片库失败不阻断画布结果 */ }
+    }
 }
 function comfyLabelFromWorkflow(workflow){
     const name = String(workflow || '').toLowerCase();
@@ -29040,13 +29420,17 @@ function mergeGeneratedOutputs(node, outputs, append=false){
     const clean = (outputs || []).map(item => {
         const url = outputUrlValue(item);
         if(!url) return null;
+        // 显式 kind（含 RH 查询返回的 video）优先，勿只靠 URL 后缀
         const kind = node.type === 'video'
             ? 'video'
-            : ['rh','ltxDirector'].includes(node.type) && isVideoUrl(url)
-                ? 'video'
-                : mediaKindForOutputItem(item);
+            : (mediaKindForOutputItem(item)
+                || (['rh','ltxDirector'].includes(node.type) && isVideoUrl(url) ? 'video' : '')
+                || 'image');
         if(!keepGeneratedMedia && kind !== 'image') return null;
-        return kind === 'image' ? url : {url, kind};
+        const runMs = Number(item?.runMs || 0) || 0;
+        // 有用时或非图片时保留对象，避免 RH 用时被压成纯 URL 丢掉
+        if(kind === 'image' && !runMs) return url;
+        return runMs ? {url, kind, runMs} : {url, kind};
     }).filter(Boolean);
     if(!append){
         node.generatedOutputs = clean;
@@ -30566,6 +30950,17 @@ function syncOutputLightboxPortal(open){
         anchor.appendChild(outputLightbox);
     }
 }
+function outputLightboxIsVideo(url, out){
+    if(isVideoUrl(url)) return true;
+    const items = [
+        ...(Array.isArray(out?.generatedOutputs) ? out.generatedOutputs : []),
+        ...(Array.isArray(out?.images) ? out.images : []),
+    ];
+    const hit = items.find(item => outputUrlValue(item) === url);
+    if(hit && mediaKindForOutputItem(hit) === 'video') return true;
+    if(out?.type === 'video' || out?.type === 'image' && mediaKindForNode(out) === 'video') return true;
+    return false;
+}
 function openOutputLightbox(url, out){
     if(!url) return;
     resetOutputPreviewZoom();
@@ -30578,7 +30973,7 @@ function openOutputLightbox(url, out){
     outputResolutionText('--', meta);
     currentOutputCompareUrl = outputCompareUrlFor(url, liveOut || out);
     setOutputCompareMode(false);
-    const videoMode = isVideoUrl(url);
+    const videoMode = outputLightboxIsVideo(url, liveOut || out);
     outputLightboxImg.style.display = videoMode ? 'none' : 'block';
     outputLightboxVideo.style.display = videoMode ? 'block' : 'none';
     outputCompareResult.style.display = videoMode ? 'none' : 'block';
@@ -30696,8 +31091,22 @@ function imageStackGeneratorSources(n){
     }).filter(Boolean);
 }
 function buildImageBatchFromImages(images, anchor){
-    const p = anchor || defaultPoint(0, 0);
-    const batch = addImageBatchNode({x:p.x - 24, y:p.y - 58});
+    const box = images?.length ? nodeBounds(images.map(img => img.id)) : null;
+    let ox;
+    let oy;
+    if(anchor){
+        ox = Math.round(anchor.x - 24);
+        oy = Math.round(anchor.y - 58);
+    } else if(box && Number.isFinite(box.x) && Number.isFinite(box.y)){
+        // 落在选区包围盒旁，避免整组跳到视口中心
+        ox = Math.round(box.x - IMAGE_BATCH_EDGE_PADDING);
+        oy = Math.round(box.y - IMAGE_BATCH_EDGE_PADDING);
+    } else {
+        const p = defaultPoint(0, 0);
+        ox = Math.round(p.x - 24);
+        oy = Math.round(p.y - 58);
+    }
+    const batch = addImageBatchNode({x: ox, y: oy});
     batch.items = images.map(img => img.id);
     handoffExistingInputsToGroup(batch, images);
     layoutGroupChildren(batch, { resizeGroup: true, layoutAllItems: true, updateDom: true });
@@ -30773,14 +31182,13 @@ function buildFrameGroupFromSelection(){
         });
     });
     const box = nodeBounds(members.map(m => m.id));
-    const pad = 18;
     const group = addNode({
         id: uid('grp'),
         type: 'group',
-        x: Math.round(box.x - pad),
-        y: Math.round(box.y - pad),
-        w: Math.max(160, Math.round(box.w + pad * 2)),
-        h: Math.max(120, Math.round(box.h + pad * 2)),
+        x: Math.round(box.x - FRAME_GROUP_PAD_X),
+        y: Math.round(box.y - FRAME_GROUP_PAD_TOP),
+        w: Math.max(160, Math.round(box.w + FRAME_GROUP_PAD_X * 2)),
+        h: Math.max(120, Math.round(box.h + FRAME_GROUP_PAD_TOP + FRAME_GROUP_PAD_BOTTOM)),
         items: members.map(m => m.id),
         frameBg: '',
     });
@@ -30798,13 +31206,100 @@ function createFrameGroupFromSelection(){
     if(!group) return;
     finalizeGroupSelection([group.id]);
 }
-const FRAME_GROUP_BG_PRESETS = [
-    {id:'default', css:'', labelZh:'默认', labelEn:'Default'},
-    {id:'darker', css:'rgba(14,14,14,.55)', labelZh:'更深', labelEn:'Darker'},
-    {id:'soft', css:'rgba(48,48,52,.5)', labelZh:'浅灰', labelEn:'Soft gray'},
-    {id:'amber', css:'rgba(255,184,102,.14)', labelZh:'琥珀', labelEn:'Amber'},
-    {id:'slate', css:'rgba(90,120,160,.18)', labelZh:'冷蓝', labelEn:'Slate'},
+const CANVAS_BG_PRESETS = [
+    {id:'none', shell:'', text:'', chip:'#f2f2f2'},
+    {id:'rose', shell:'rgba(168,90,90,.55)', text:'#a85a5a', chip:'#a85a5a'},
+    {id:'brown', shell:'rgba(140,95,58,.55)', text:'#8c5f3a', chip:'#8c5f3a'},
+    {id:'olive', shell:'rgba(150,138,58,.52)', text:'#968a3a', chip:'#968a3a'},
+    {id:'green', shell:'rgba(62,110,78,.55)', text:'#3e6e4e', chip:'#3e6e4e'},
+    {id:'teal', shell:'rgba(45,118,122,.55)', text:'#2d767a', chip:'#2d767a'},
+    {id:'blue', shell:'rgba(74,110,168,.55)', text:'#4a6ea8', chip:'#4a6ea8'},
+    {id:'purple', shell:'rgba(118,82,148,.55)', text:'#765294', chip:'#765294'},
 ];
+function syncShellBgDom(el, css){
+    if(!el) return;
+    const v = String(css || '').trim();
+    if(v){
+        el.classList.add('has-custom-bg');
+        el.style.setProperty('--shell-bg', v);
+        el.style.background = v;
+    } else {
+        el.classList.remove('has-custom-bg');
+        el.style.removeProperty('--shell-bg');
+        el.style.removeProperty('background');
+    }
+}
+function canvasBgChipCss(current, mode='shell'){
+    const cur = String(current || '').trim();
+    if(!cur || (mode === 'text' && cur.toLowerCase() === TEXT_NODE_DEFAULT_BG)) return '#f2f2f2';
+    const hit = CANVAS_BG_PRESETS.find(p => (mode === 'text' ? p.text : p.shell) === cur || p.chip === cur);
+    return hit?.chip || cur;
+}
+function closeCanvasBgRailMenu(){
+    canvasBgRailEl?.remove();
+    canvasBgRailEl = null;
+    frameGroupBgMenuEl = null;
+    imageBatchBgMenuEl = null;
+}
+function openCanvasBgRailMenu(anchorEl, opts={}){
+    if(!board || !anchorEl) return;
+    closeCanvasBgRailMenu();
+    const en = langIsEn();
+    const mode = opts.mode === 'text' ? 'text' : 'shell';
+    const current = String(opts.current || '').trim();
+    const isNone = typeof opts.isNone === 'function'
+        ? opts.isNone
+        : (v => !String(v || '').trim() || (mode === 'text' && String(v).toLowerCase() === TEXT_NODE_DEFAULT_BG));
+    const menu = document.createElement('div');
+    menu.className = 'canvas-bg-rail';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', en ? 'Background color' : '背景颜色');
+    menu.innerHTML = CANVAS_BG_PRESETS.map(p => {
+        const value = mode === 'text' ? (p.id === 'none' ? TEXT_NODE_DEFAULT_BG : p.text) : p.shell;
+        const on = p.id === 'none' ? isNone(current) : (current === value || current === p.chip);
+        if(p.id === 'none'){
+            return `<button type="button" class="canvas-bg-dot is-none ${on ? 'is-on' : ''}" data-bg="${escapeAttr(value)}" title="${escapeAttr(en ? 'None' : '无')}" aria-label="${escapeAttr(en ? 'None' : '无')}"></button>`;
+        }
+        return `<button type="button" class="canvas-bg-dot ${on ? 'is-on' : ''}" data-bg="${escapeAttr(value)}" style="background:${escapeAttr(p.chip)}" title="${escapeAttr(en ? 'Fill' : '背景')}"></button>`;
+    }).join('');
+    menu.onpointerdown = e => e.stopPropagation();
+    menu.onmousedown = e => e.stopPropagation();
+    menu.querySelectorAll('[data-bg]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            const next = btn.getAttribute('data-bg') || '';
+            opts.onPick?.(next, btn);
+            closeCanvasBgRailMenu();
+        };
+    });
+    board.appendChild(menu);
+    canvasBgRailEl = menu;
+    frameGroupBgMenuEl = menu;
+    imageBatchBgMenuEl = menu;
+    const boardRect = board.getBoundingClientRect();
+    const ar = anchorEl.getBoundingClientRect?.();
+    const mw = menu.offsetWidth || 44;
+    const mh = menu.offsetHeight || 280;
+    let left = ar ? ar.left - boardRect.left + ar.width / 2 - mw / 2 : 40;
+    let top = ar ? ar.bottom - boardRect.top + 10 : 40;
+    left = Math.max(8, Math.min(left, boardRect.width - mw - 8));
+    if(top + mh > boardRect.height - 8){
+        top = Math.max(8, (ar ? ar.top - boardRect.top - mh - 10 : 40));
+    }
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+}
+function applyShellNodeBg(node, css){
+    if(!node || (node.type !== 'group' && node.type !== 'imageBatch')) return;
+    pushUndo();
+    node.frameBg = css || '';
+    const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
+    syncShellBgDom(el, node.frameBg);
+    const chip = (node.type === 'imageBatch' ? imageBatchActionBarEl : frameGroupActionBarEl)
+        ?.querySelector?.('.canvas-bg-chip, .image-batch-bg-chip');
+    if(chip) chip.style.background = canvasBgChipCss(node.frameBg, 'shell');
+    scheduleSave();
+}
 function collectFrameGroupMediaItems(group){
     const out = [];
     const seen = new Set();
@@ -30858,73 +31353,18 @@ async function downloadFrameGroupMedia(group){
     setStatus(en ? `Downloaded ${items.length}` : `已下载 ${items.length} 张`);
 }
 function closeFrameGroupBgMenu(){
-    frameGroupBgMenuEl?.remove();
-    frameGroupBgMenuEl = null;
+    closeCanvasBgRailMenu();
 }
 function openFrameGroupBgMenu(anchorEl, group){
-    if(!board || !group || group.type !== 'group') return;
-    closeFrameGroupBgMenu();
-    const en = langIsEn();
-    const menu = document.createElement('div');
-    menu.className = 'frame-group-bg-menu';
-    menu.innerHTML = `
-        ${FRAME_GROUP_BG_PRESETS.map(p => `
-            <button type="button" class="frame-group-bg-swatch ${(!group.frameBg && p.id === 'default') || group.frameBg === p.css ? 'is-on' : ''}" data-bg="${escapeAttr(p.css)}" title="${escapeAttr(en ? p.labelEn : p.labelZh)}">
-                <span class="frame-group-bg-chip" style="background:${escapeAttr(p.css || 'rgba(36,36,38,.42)')}"></span>
-                <span>${escapeHtml(en ? p.labelEn : p.labelZh)}</span>
-            </button>`).join('')}
-        <label class="frame-group-bg-custom">
-            <span>${escapeHtml(en ? 'Custom' : '自定义')}</span>
-            <input type="color" value="${escapeAttr((() => {
-                const m = String(group.frameBg || '').match(/rgba?\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
-                if(!m) return '#242426';
-                return '#' + [m[1], m[2], m[3]].map(n => Number(n).toString(16).padStart(2, '0')).join('');
-            })())}" />
-        </label>`;
-    menu.onpointerdown = e => e.stopPropagation();
-    menu.onmousedown = e => e.stopPropagation();
-    const applyBg = (css) => {
-        pushUndo();
-        group.frameBg = css || '';
-        const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(group.id)}"]`);
-        if(el){
-            if(group.frameBg) el.style.background = group.frameBg;
-            else el.style.removeProperty('background');
-        }
-        closeFrameGroupBgMenu();
-        scheduleSave();
-    };
-    menu.querySelectorAll('[data-bg]').forEach(btn => {
-        btn.onclick = e => {
-            e.stopPropagation();
-            applyBg(btn.getAttribute('data-bg') || '');
-        };
+    if(!group || group.type !== 'group') return;
+    openCanvasBgRailMenu(anchorEl, {
+        mode: 'shell',
+        current: group.frameBg,
+        onPick: css => applyShellNodeBg(group, css),
     });
-    const colorInput = menu.querySelector('input[type="color"]');
-    if(colorInput){
-        colorInput.onchange = () => {
-            const hex = colorInput.value || '#242426';
-            const r = parseInt(hex.slice(1, 3), 16);
-            const g = parseInt(hex.slice(3, 5), 16);
-            const b = parseInt(hex.slice(5, 7), 16);
-            applyBg(`rgba(${r},${g},${b},.42)`);
-        };
-    }
-    board.appendChild(menu);
-    frameGroupBgMenuEl = menu;
-    const boardRect = board.getBoundingClientRect();
-    const ar = anchorEl?.getBoundingClientRect?.();
-    const mw = menu.offsetWidth || 160;
-    const mh = menu.offsetHeight || 180;
-    let left = ar ? ar.left - boardRect.left + ar.width / 2 - mw / 2 : 40;
-    let top = ar ? ar.bottom - boardRect.top + 8 : 40;
-    left = Math.max(8, Math.min(left, boardRect.width - mw - 8));
-    top = Math.max(8, Math.min(top, boardRect.height - mh - 8));
-    menu.style.left = `${left}px`;
-    menu.style.top = `${top}px`;
 }
 function removeFrameGroupActionBar(){
-    closeFrameGroupBgMenu();
+    closeCanvasBgRailMenu();
     frameGroupActionBarEl?.remove();
     frameGroupActionBarEl = null;
     frameGroupActionBarNodeId = null;
@@ -30935,7 +31375,7 @@ function positionFrameGroupActionBar(group){
     if(!nodeEl) return;
     const nodeRect = nodeEl.getBoundingClientRect();
     const boardRect = board.getBoundingClientRect();
-    const gap = 12;
+    const gap = nodeTopToolbarGapPx(nodeEl, nodeRect, 12);
     const barH = frameGroupActionBarEl.offsetHeight || 40;
     frameGroupActionBarEl.style.position = 'absolute';
     frameGroupActionBarEl.style.left = `${nodeRect.left - boardRect.left + nodeRect.width / 2}px`;
@@ -30966,8 +31406,8 @@ function remountFrameGroupActionBar(group){
                 <i data-lucide="bookmark-plus"></i><span>${escapeHtml(en ? 'Workflow' : '创建工作流')}</span>
             </button>
             <span class="image-action-bar-sep" aria-hidden="true"></span>
-            <button type="button" class="image-action-bar-btn is-labeled" data-action="bg" title="${escapeAttr(en ? 'Background color' : '背景颜色')}">
-                <i data-lucide="palette"></i><span>${escapeHtml(en ? 'Fill' : '背景颜色')}</span>
+            <button type="button" class="canvas-bg-chip-btn" data-action="bg" title="${escapeAttr(en ? 'Background color' : '背景颜色')}" aria-label="${escapeAttr(en ? 'Background color' : '背景颜色')}">
+                <span class="canvas-bg-chip" style="background:${escapeAttr(canvasBgChipCss(group.frameBg, 'shell'))}"></span>
             </button>
         </div>`;
     host.querySelector('[data-action="download"]')?.addEventListener('click', e => {
@@ -30985,7 +31425,7 @@ function remountFrameGroupActionBar(group){
     });
     host.querySelector('[data-action="bg"]')?.addEventListener('click', e => {
         e.stopPropagation();
-        if(frameGroupBgMenuEl) closeFrameGroupBgMenu();
+        if(canvasBgRailEl) closeCanvasBgRailMenu();
         else openFrameGroupBgMenu(e.currentTarget, group);
     });
     board.appendChild(host);
@@ -31011,6 +31451,123 @@ function syncFrameGroupActionBar(){
         return;
     }
     remountFrameGroupActionBar(only);
+}
+/** 图片组背景色：图1 圆点触发 → 图2 竖条色板（共用 CANVAS_BG_PRESETS） */
+function imageBatchBgChipCss(batch){
+    return canvasBgChipCss(batch?.frameBg, 'shell');
+}
+function applyImageBatchFrameBg(batch, css){
+    applyShellNodeBg(batch, css);
+}
+function ungroupImageBatch(batchId){
+    const batch = nodes.find(n => n.id === batchId && n.type === 'imageBatch');
+    if(!batch) return;
+    pushUndo();
+    const memberIds = [...(batch.items || [])].filter(id => nodes.some(n => n.id === id));
+    connections = connections.filter(c => c.from !== batch.id && c.to !== batch.id);
+    nodes = nodes.filter(n => n.id !== batch.id);
+    selected.clear();
+    memberIds.forEach(id => selected.add(id));
+    removeImageBatchActionBar();
+    render();
+    syncSelectionActionBar();
+    scheduleSave();
+    setStatus(langIsEn() ? 'Ungrouped' : '已解组');
+}
+function closeImageBatchBgMenu(){
+    closeCanvasBgRailMenu();
+}
+function openImageBatchBgMenu(anchorEl, batch){
+    if(!batch || batch.type !== 'imageBatch') return;
+    openCanvasBgRailMenu(anchorEl, {
+        mode: 'shell',
+        current: batch.frameBg,
+        onPick: css => applyImageBatchFrameBg(batch, css),
+    });
+}
+function removeImageBatchActionBar(){
+    closeCanvasBgRailMenu();
+    imageBatchActionBarEl?.remove();
+    imageBatchActionBarEl = null;
+    imageBatchActionBarNodeId = null;
+}
+function positionImageBatchActionBar(batch){
+    if(!imageBatchActionBarEl || !batch || !board) return;
+    const nodeEl = nodesEl?.querySelector(`.node[data-id="${CSS.escape(batch.id)}"]`);
+    if(!nodeEl) return;
+    const nodeRect = nodeEl.getBoundingClientRect();
+    const boardRect = board.getBoundingClientRect();
+    const gap = nodeTopToolbarGapPx(nodeEl, nodeRect, 12);
+    const barH = imageBatchActionBarEl.offsetHeight || 40;
+    imageBatchActionBarEl.style.position = 'absolute';
+    imageBatchActionBarEl.style.left = `${nodeRect.left - boardRect.left + nodeRect.width / 2}px`;
+    imageBatchActionBarEl.style.top = `${nodeRect.top - boardRect.top - gap - barH}px`;
+    imageBatchActionBarEl.style.transform = 'translateX(-50%)';
+    imageBatchActionBarEl.style.zIndex = '83';
+    imageBatchActionBarEl.style.pointerEvents = 'auto';
+}
+function remountImageBatchActionBar(batch){
+    removeImageBatchActionBar();
+    if(!board || !batch || batch.type !== 'imageBatch' || isImageEditOpen()) return;
+    const en = langIsEn();
+    const disabled = imageBatchEffectivelyDisabled(batch);
+    const host = document.createElement('div');
+    host.className = 'image-batch-action-bar-host';
+    host.dataset.actionBarFor = batch.id;
+    host.onpointerdown = e => e.stopPropagation();
+    host.onmousedown = e => e.stopPropagation();
+    host.onclick = e => e.stopPropagation();
+    host.innerHTML = `
+        <div class="image-action-bar image-batch-action-bar" role="toolbar" aria-label="${escapeAttr(en ? 'Image group actions' : '图片组操作')}">
+            <button type="button" class="image-action-bar-btn is-labeled" data-action="ungroup" title="${escapeAttr(en ? 'Ungroup' : '解组')}">
+                <i data-lucide="ungroup"></i><span>${escapeHtml(en ? 'Ungroup' : '解组')}</span>
+            </button>
+            <button type="button" class="image-action-bar-btn is-labeled ${disabled ? 'is-on' : ''}" data-action="disable" title="${escapeAttr(disabled ? (en ? 'Enable all' : '启用所有') : (en ? 'Disable all' : '禁用所有'))}">
+                <i data-lucide="${disabled ? 'eye' : 'eye-off'}"></i><span>${escapeHtml(disabled ? (en ? 'Enable all' : '启用所有') : (en ? 'Disable all' : '禁用所有'))}</span>
+            </button>
+            <span class="image-action-bar-sep" aria-hidden="true"></span>
+            <button type="button" class="canvas-bg-chip-btn" data-action="bg" title="${escapeAttr(en ? 'Background color' : '背景颜色')}" aria-label="${escapeAttr(en ? 'Background color' : '背景颜色')}">
+                <span class="canvas-bg-chip image-batch-bg-chip" style="background:${escapeAttr(imageBatchBgChipCss(batch))}"></span>
+            </button>
+        </div>`;
+    host.querySelector('[data-action="ungroup"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        ungroupImageBatch(batch.id);
+    });
+    host.querySelector('[data-action="disable"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        toggleNodesDisabled([batch.id]);
+        const live = nodes.find(n => n.id === batch.id && n.type === 'imageBatch');
+        if(live) remountImageBatchActionBar(live);
+    });
+    host.querySelector('[data-action="bg"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        if(canvasBgRailEl) closeCanvasBgRailMenu();
+        else openImageBatchBgMenu(e.currentTarget, batch);
+    });
+    board.appendChild(host);
+    imageBatchActionBarEl = host;
+    imageBatchActionBarNodeId = batch.id;
+    positionImageBatchActionBar(batch);
+    requestAnimationFrame(() => positionImageBatchActionBar(batch));
+    refreshIcons(host);
+}
+function syncImageBatchActionBar(){
+    if(selectDrag || isImageEditOpen() || selected.size !== 1){
+        removeImageBatchActionBar();
+        return;
+    }
+    const onlyId = [...selected][0];
+    const only = nodes.find(n => n.id === onlyId);
+    if(!only || only.type !== 'imageBatch'){
+        removeImageBatchActionBar();
+        return;
+    }
+    if(imageBatchActionBarNodeId === only.id && imageBatchActionBarEl?.isConnected){
+        positionImageBatchActionBar(only);
+        return;
+    }
+    remountImageBatchActionBar(only);
 }
 function applySelectionGroupType(kind){
     closeSelectionGroupTypeMenu();
@@ -31068,7 +31625,7 @@ function openSelectionGroupTypeMenu(anchorEl){
         <button type="button" class="selection-group-type-btn" data-group-type="group" ${frameMembers.length < 2 ? 'disabled' : ''} role="menuitem">
             <i data-lucide="square-dashed"></i>
             <span class="selection-group-type-copy">
-                <span class="selection-group-type-title">${escapeHtml(en ? 'Frame group' : '框组')}</span>
+                <span class="selection-group-type-title">${escapeHtml(en ? 'New group' : '新建组')}</span>
                 <span class="selection-group-type-desc">${escapeHtml(en ? 'Keep layout in a rounded frame' : '圆角半透明框住，不改排布')}</span>
             </span>
         </button>`;
@@ -31551,19 +32108,25 @@ function applySelectionBoxRect(left, top, w, h){
     selectionBox.style.height = `${Math.max(0, h)}px`;
     selectionBox.style.transform = `translate(${left}px, ${top}px)`;
 }
+function setSelectionBoxHullInteractive(on){
+    selectionBox?.classList.toggle('is-selection-hull', Boolean(on));
+}
 function updateSelectionHullFromSelection(){
     if(!selectionBox || selectDrag) return;
     if(selected.size < 2){
         selectionBox.style.display = 'none';
+        setSelectionBoxHullInteractive(false);
         return;
     }
     const b = selectedNodesClientBounds();
     if(!b){
         selectionBox.style.display = 'none';
+        setSelectionBoxHullInteractive(false);
         return;
     }
     const pad = 10;
     applySelectionBoxRect(b.left - pad, b.top - pad, b.width + pad * 2, b.height + pad * 2);
+    setSelectionBoxHullInteractive(true);
 }
 function positionSelectionActionBar(){
     if(!selectionActionBarEl || !board || selected.size < 2) return;
@@ -31656,7 +32219,10 @@ function remountSelectionActionBar(){
 function syncSelectionActionBar(){
     if(selectDrag || isImageEditOpen() || selected.size < 2){
         removeSelectionActionBar();
-        if(selectionBox && !selectDrag) selectionBox.style.display = 'none';
+        if(selectionBox && !selectDrag){
+            selectionBox.style.display = 'none';
+            setSelectionBoxHullInteractive(false);
+        }
         return;
     }
     updateSelectionHullFromSelection();
@@ -31679,8 +32245,10 @@ function startSelection(e){
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     removeSelectionActionBar();
     removeFrameGroupActionBar();
+    removeImageBatchActionBar();
     clearSelectDragListeners();
     if(selectionBox) selectionBox.style.display = 'none';
+    setSelectionBoxHullInteractive(false);
     selectDrag = {sx:e.clientX, sy:e.clientY, x:e.clientX, y:e.clientY};
     withCanvasRootClass(list => list.add('canvas-selecting'));
     clearAllPortMagnet();
@@ -31731,6 +32299,7 @@ function finishSelection(e){
     }
     const rect = selectionBox.getBoundingClientRect();
     selectionBox.style.display = 'none';
+    setSelectionBoxHullInteractive(false);
     withCanvasRootClass(list => list.remove('canvas-selecting'));
     clearSelectDragListeners();
     selectDrag = null;
@@ -31749,8 +32318,8 @@ function finishSelection(e){
         const overlaps = r.left < rect.right && r.right > rect.left && r.top < rect.bottom && r.bottom > rect.top;
         if(overlaps) selected.add(el.dataset.id);
     });
-    render();
-    syncSelectionActionBar();
+    // 只刷选中态，禁止整板 render——否则后续节点 DOM 重建会闪一下
+    refreshSelectionVisuals();
 }
 function startSelectionLink(e, kind){
     e.preventDefault();
@@ -31836,10 +32405,16 @@ function snapshotCanvasState(){
     return cloneCanvasHistoryPayload();
 }
 function applyCanvasHistoryState(state){
-    nodes = state.nodes;
-    connections = state.connections;
+    nodes = Array.isArray(state?.nodes) ? state.nodes : [];
+    connections = Array.isArray(state?.connections) ? state.connections : [];
     selected.clear();
-    render();
+    // 回滚后立刻丢掉孤儿边，避免随后 save 把无效连线写盘
+    sanitizeConnections();
+    try { syncGeneratorInputs(); } catch(_){ /* ignore */ }
+    // 必须 force：普通 render 在拖拽/框选等 interacting 时会早退，
+    // 内存已回滚但 DOM 仍是旧图，再 scheduleSave → 刷新后表现为节点/线「突然消失」
+    render({ force: true });
+    try { refreshSelectionVisuals(); } catch(_){ /* ignore */ }
     scheduleSave();
 }
 function performUndo(){
@@ -32072,6 +32647,7 @@ function onNodePointerMove(e){
     onNodeDrag(e);
 }
 function onNodePointerUp(e){
+    clearSelectionHullPtrUp();
     if(pendingNodeDrag){
         pendingNodeDrag = null;
         clearWindowPointerHandlers();
@@ -32117,6 +32693,56 @@ function startNodeDrag(e, node){
     }
     window.onmousemove = onNodePointerMove;
     window.onmouseup = onNodePointerUp;
+}
+let selectionHullPtrUpCleanup = null;
+function clearSelectionHullPtrUp(){
+    if(!selectionHullPtrUpCleanup) return;
+    selectionHullPtrUpCleanup();
+    selectionHullPtrUpCleanup = null;
+}
+/** 多选外框：按住拖动整组（不折叠多选） */
+function startSelectionHullDrag(e){
+    if(e.button !== 0) return;
+    if(selectDrag || dragNode || resizeNode || pendingNodeDrag) return;
+    if(selected.size < 2) return;
+    let primary = null;
+    for(const id of selected){
+        const n = nodes.find(x => x.id === id);
+        if(n){ primary = n; break; }
+    }
+    if(!primary) return;
+    // 只用 mousedown 路径的 preventDefault；pointerdown+preventDefault 会压制 mouseup，外框会黏住鼠标
+    if(e.type === 'mousedown' && e.cancelable) e.preventDefault();
+    e.stopPropagation();
+    clearSelectionHullPtrUp();
+    const children = collectDragChildren(primary);
+    pendingNodeDrag = {
+        node: primary,
+        children,
+        sx: e.clientX,
+        sy: e.clientY,
+        ox: primary.x,
+        oy: primary.y,
+        duplicateCreated: false
+    };
+    dragNode = null;
+    window.onmousemove = onNodePointerMove;
+    window.onmouseup = onNodePointerUp;
+    // pointerup 兜底：即使兼容鼠标事件被吞，也能松手结束拖拽
+    const onPtrUp = e2 => {
+        if(e2.button != null && e2.button !== 0) return;
+        clearSelectionHullPtrUp();
+        onNodePointerUp(e2);
+    };
+    window.addEventListener('pointerup', onPtrUp, true);
+    selectionHullPtrUpCleanup = () => window.removeEventListener('pointerup', onPtrUp, true);
+}
+function onSelectionBoxMouseDown(e){
+    if(!canvas || !selectionBox || e.button !== 0) return;
+    if(selectDrag || selected.size < 2 || !selectionBox.classList.contains('is-selection-hull')) return;
+    if(spacePanArmed || isImageEditOpen()) return;
+    // 外框盖在节点上：空白垫边 / 已选节点区域都整组拖，且不折叠多选
+    startSelectionHullDrag(e);
 }
 function onNodeDrag(e){
     if(!dragNode) return;
@@ -32172,6 +32798,10 @@ function onNodeDrag(e){
     if(frameGroupActionBarNodeId && movingIds.has(frameGroupActionBarNodeId)){
         const fg = nodes.find(n => n.id === frameGroupActionBarNodeId);
         if(fg) positionFrameGroupActionBar(fg);
+    }
+    if(imageBatchActionBarNodeId && movingIds.has(imageBatchActionBarNodeId)){
+        const ib = nodes.find(n => n.id === imageBatchActionBarNodeId);
+        if(ib) positionImageBatchActionBar(ib);
     }
 }
 function startNodeResize(e, node){
@@ -32977,13 +33607,13 @@ function startFlowLinkEnergyLoop(){
     };
     flowLinkEnergyRAF = requestAnimationFrame(tick);
 }
-/** 连线端点：生成中锁贴边，忽略 ports-open/磁吸 outset，防止 path d 被鼠标改掉 */
-function portPointForConnection(id, kind, flowing){
+/** 已有连线端点始终贴边：悬停/选中只动端口圆点，不改 path d（否则对端节点会跟着闪） */
+function portPointForConnection(id, kind, _flowing){
     ensureLiveCanvasDom();
     const n = nodes.find(x => x.id === id);
     if(!n) return {x:0, y:0};
     const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
-    return portPointFromLayout(n, kind, el, flowing ? { expanded:false } : {});
+    return portPointFromLayout(n, kind, el, { expanded:false });
 }
 function linksGeometryStale(){
     if(!linksEl) return true;
@@ -33379,7 +34009,7 @@ function isLinkDeleteBlockedNearPort(from, to, hit){
 }
 function isPointerOverLinkUiChrome(el){
     return Boolean(el?.closest?.(
-        '.image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .text-format-bar-host, .text-node-dock-host, .gen-dock, .gen-history-panel, .node, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #selectionMenu, .minimap, .bottombar, .toolbar, .canvas-custom-select-panel'
+        '.image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .text-format-bar-host, .text-node-dock-host, .gen-dock, .gen-history-panel, .node, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #selectionMenu, .minimap, .bottombar, .toolbar, .canvas-custom-select-panel'
     ));
 }
 /** 图片/成片等实心媒体：线从底下穿过时，指针或剪刀落点在其上则不响应删线 */
@@ -33575,6 +34205,7 @@ function refreshSelectionVisuals(){
     syncImageGenDock();
     syncSelectionActionBar();
     syncFrameGroupActionBar();
+    syncImageBatchActionBar();
     if(touch.size) scheduleLinkGeometryRefresh(touch);
 }
 /** 单击/拖拽前更新选中态（Ctrl/Cmd 多选） */
@@ -33796,13 +34427,12 @@ function setNodePortsOpen(el, open){
     if(open){
         if(el.classList.contains('ports-open')) return;
         el.classList.add('ports-open');
-        if(!hasFlowingLinkEnergy()) scheduleLinkGeometryRefresh(new Set([id]));
+        // 连线几何已贴边；勿因悬停刷 path（对端节点会闪）
         return;
     }
     if(selected.has(id) || el.querySelector('.port.is-magnetic')) return;
     if(!el.classList.contains('ports-open')) return;
     el.classList.remove('ports-open');
-    if(!hasFlowingLinkEnergy()) scheduleLinkGeometryRefresh(new Set([id]));
 }
 function wireBoardEvents() {
 if(!board || boardEventsWired) return;
@@ -33919,6 +34549,8 @@ board.onmousedown = e => {
     startSelection(e);
 };
 on(board, 'pointerdown', onBoardPointerDown);
+// 必须用 mousedown（勿用 pointerdown+preventDefault，否则 mouseup 被压制，外框黏鼠标）
+if(selectionBox) on(selectionBox, 'mousedown', onSelectionBoxMouseDown);
 const trackBoardPointer = e => {
     if(!canvas || !board) return;
     lastMouseBoard = screenToWorld(e.clientX, e.clientY);
@@ -33995,7 +34627,7 @@ on(board, "wheel", e => {
         e.preventDefault();
         return;
     }
-    if(e.target.closest?.('.image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .gen-dock, .canvas-custom-select-panel, .canvas-custom-select-menu')) return;
+    if(e.target.closest?.('.image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .gen-dock, .canvas-custom-select-panel, .canvas-custom-select-menu')) return;
     if(isOpenScrollableCanvasMenu(e.target)) return;
     if(e.target.closest('.error-message, .node-retry-msg')) return;
     e.preventDefault();

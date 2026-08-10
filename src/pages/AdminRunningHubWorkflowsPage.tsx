@@ -29,9 +29,12 @@ import {
   type RhAppConfig,
   type RhAppSummary,
   type RhField,
+  type RhFieldType,
   type RhWorkflowConfig,
   type RhWorkflowSummary,
 } from '../lib/runningHubAdmin';
+
+const RH_INLINE_FIELD_TYPES: RhFieldType[] = ['TEXT', 'NUMBER', 'BOOLEAN', 'SELECT', 'IMAGE', 'VIDEO', 'AUDIO'];
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
@@ -408,6 +411,7 @@ export const AdminRunningHubWorkflowsPage = memo(function AdminRunningHubWorkflo
                 onFetchRemote={() => void handleFetchRemote()}
                 onSave={() => void handleSave()}
                 onToggleField={toggleFieldEnabled}
+                onUpdateField={updateField}
                 onReorderFields={reorderFields}
                 onFieldNoteChange={(fieldId, note) => updateField(fieldId, { note })}
                 onOpenFieldEditor={(fieldId, rect) => {
@@ -514,6 +518,7 @@ function RhEditorOverlay({
   onFetchRemote,
   onSave,
   onToggleField,
+  onUpdateField,
   onReorderFields,
   onFieldNoteChange,
   onOpenFieldEditor,
@@ -530,6 +535,7 @@ function RhEditorOverlay({
   onFetchRemote: () => void;
   onSave: () => void;
   onToggleField: (fieldId: string) => void;
+  onUpdateField: (fieldId: string, patch: Partial<RhField>) => void;
   onReorderFields: (fields: RhField[]) => void;
   onFieldNoteChange: (fieldId: string, note: string) => void;
   onOpenFieldEditor: (fieldId: string, rect: DOMRect) => void;
@@ -707,9 +713,24 @@ function RhEditorOverlay({
                             {field.fieldValue ? field.fieldValue.slice(0, 60) : '（空）'}
                           </p>
                         </button>
-                        <span className="shrink-0 rounded-full bg-[#1c1b1b] px-2.5 py-1 text-[10px] uppercase tracking-[0.1em] text-[#e5e2e1]/55">
-                          {RH_FIELD_TYPE_LABELS[rhWorkflowFieldKind(field)] || field.fieldType}
-                        </span>
+                        <label className="shrink-0" title="字段类型">
+                          <span className="sr-only">字段类型</span>
+                          <select
+                            value={rhWorkflowFieldKind(field)}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              onUpdateField(field.id, { fieldType: e.target.value });
+                            }}
+                            className="max-w-[7.5rem] cursor-pointer appearance-none rounded-full bg-[#1c1b1b] px-2.5 py-1 text-[10px] tracking-[0.06em] text-[#e5e2e1]/75 outline-none outline-[0.5px] outline-[#45464d]/25 hover:text-[#ffb866] focus:shadow-[0_0_0_3px_rgba(255,184,102,0.16)]"
+                          >
+                            {RH_INLINE_FIELD_TYPES.map((t) => (
+                              <option key={t} value={t}>
+                                {RH_FIELD_TYPE_LABELS[t]}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
                       </li>
                     ))}
                   </ul>

@@ -156,9 +156,27 @@ function resolveSourcePath(url: string): string | null {
   return abs;
 }
 
+const ASSET_IMAGE_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".gif"] as const;
+const ASSET_VIDEO_EXTS = [".mp4", ".webm", ".mov", ".m4v"] as const;
+const ASSET_MEDIA_EXTS = [...ASSET_IMAGE_EXTS, ...ASSET_VIDEO_EXTS] as const;
+
 function guessExtFromPath(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
-  if ([".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(ext)) return ext;
+  if ((ASSET_MEDIA_EXTS as readonly string[]).includes(ext)) return ext;
+  return ".png";
+}
+
+function guessExtFromMime(mime: string, filename = ""): string {
+  const fromName = path.extname(filename || "").toLowerCase();
+  if ((ASSET_MEDIA_EXTS as readonly string[]).includes(fromName)) return fromName;
+  const m = String(mime || "").toLowerCase();
+  if (m.includes("jpeg")) return ".jpg";
+  if (m.includes("webp")) return ".webp";
+  if (m.includes("gif")) return ".gif";
+  if (m.includes("webm")) return ".webm";
+  if (m.includes("quicktime") || m.includes("mov")) return ".mov";
+  if (m.includes("mp4") || m.includes("m4v")) return ".mp4";
+  if (m.startsWith("video/")) return ".mp4";
   return ".png";
 }
 
@@ -266,7 +284,7 @@ export function addAssetItem(
   const lib = readLibrary(ownerId);
   const cat = findCategory(lib, payload.category_id);
   const src = resolveSourcePath(payload.url);
-  if (!src) throw new Error("只支持保存本站 /uploads/ 下的图片");
+  if (!src) throw new Error("只支持保存本站 /uploads/ 下的图片或视频");
   const ext = guessExtFromPath(src);
   const safeBase = sanitizeName(payload.name || path.basename(src, ext), "asset");
   const destName = `lib_${uuidv4().replace(/-/g, "").slice(0, 12)}_${safeBase}${ext}`;
@@ -291,10 +309,7 @@ export function addAssetItemFromBuffer(
   const lib = readLibrary(ownerId);
   const cat = findCategory(lib, payload.category_id);
   const mime = String(payload.mime || "").toLowerCase();
-  let ext = path.extname(payload.filename || "").toLowerCase();
-  if (![".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(ext)) {
-    ext = mime.includes("jpeg") ? ".jpg" : mime.includes("webp") ? ".webp" : mime.includes("gif") ? ".gif" : ".png";
-  }
+  const ext = guessExtFromMime(mime, payload.filename);
   const safeBase = sanitizeName(path.basename(payload.filename || "upload", ext), "asset");
   const destName = `lib_${uuidv4().replace(/-/g, "").slice(0, 12)}_${safeBase}${ext}`;
   const destAbs = path.join(ownerAssetDir(ownerId), destName);

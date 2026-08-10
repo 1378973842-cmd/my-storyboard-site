@@ -484,6 +484,44 @@ export function registerCanvasGenerationsRoutes(
     }
   });
 
+  /** 客户端登记一次生成（RH / 其它本地落盘结果 → 成片库） */
+  app.post("/api/canvas-generations", requireAuth, (req, res) => {
+    try {
+      const body = (req.body || {}) as Record<string, unknown>;
+      const thumbnailPath = String(body.thumbnail_path || body.url || "").trim();
+      if (!normalizeUploadPath(thumbnailPath)) {
+        return res.status(400).json({ error: "无效的本地素材路径" });
+      }
+      const params = (body.params && typeof body.params === "object"
+        ? (body.params as CanvasGenerationParams)
+        : {}) as CanvasGenerationParams;
+      const id = recordCanvasGeneration(db, {
+        userId: req.authUser!.id,
+        thumbnailPath,
+        prompt: String(body.prompt || ""),
+        model: String(body.model || ""),
+        params,
+        canvasId: String(body.canvas_id || body.canvasId || ""),
+        nodeId: String(body.node_id || body.nodeId || ""),
+      });
+      if (!id) return res.status(400).json({ error: "登记失败" });
+      const row = db
+        .prepare(
+          `SELECT id, user_id, thumbnail_path, prompt, model, params_json, canvas_id, node_id,
+                  favorited_at, shared_at, created_at
+           FROM canvas_generations WHERE id = ?`
+        )
+        .get(id) as CanvasGenerationRow | undefined;
+      res.json({
+        success: true,
+        id,
+        item: row ? parseGenerationRow(row, projectRoot) : null,
+      });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "登记历史生成失败" });
+    }
+  });
+
   // GET /api/gallery 已迁至 galleryWorks.ts（含 gallery_works + 旧分享兼容）
 
   app.post("/api/my-favorites/:id/share", requireAuth, async (req, res) => {
