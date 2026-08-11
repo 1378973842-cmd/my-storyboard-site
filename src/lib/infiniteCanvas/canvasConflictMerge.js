@@ -2,6 +2,8 @@
  * 画布 409 冲突合并（纯函数）。
  * 原则：本地结构为准（删除/断线不复活）；同 id 可吸取远端媒体更丰内容；
  * 坐标与表单文本始终本地（避免打字中被远端旧 prompt 冲掉）。
+ *
+ * 生图「删除其他图片」会缩短 history：不得因远端 history 更长就把已删图复活。
  */
 
 /** 用户可编辑的标量/文本字段：充实远端媒体时不得覆盖 */
@@ -22,8 +24,10 @@ export function canvasNodeMergeScore(node) {
   if (!node || typeof node !== 'object') return 0;
   let score = 1;
   if (String(node.url || '').trim()) score += 10;
-  score += Array.isArray(node.history) ? node.history.length * 2 : 0;
-  score += Array.isArray(node.generatedOutputs) ? node.generatedOutputs.length : 0;
+  // 有无结果台媒体用固定分，禁止按 history.length 加分——否则「删除其他图片」后本地更短会被远端旧稿盖回
+  if (Array.isArray(node.history) && node.history.length) score += 2;
+  if (Array.isArray(node.generatedOutputs) && node.generatedOutputs.length) score += 1;
+  if (Array.isArray(node.previewRoundUrls) && node.previewRoundUrls.length) score += 1;
   if (String(node.prompt || node.text || '').trim()) score += 3;
   if (node.disabled) score -= 1;
   return score;
@@ -43,6 +47,14 @@ function pickLocalEditorFields(local) {
   keep._userSized = local._userSized;
   keep._layoutW = local._layoutW;
   keep._layoutH = local._layoutH;
+  // 本地已有结果列表时以本地为准（缩短=用户删过）；空数组仍允许吸取远端补图
+  if (Array.isArray(local.history) && local.history.length) keep.history = local.history;
+  if (Array.isArray(local.previewRoundUrls) && local.previewRoundUrls.length) {
+    keep.previewRoundUrls = local.previewRoundUrls;
+  }
+  if (Array.isArray(local.generatedOutputs) && local.generatedOutputs.length) {
+    keep.generatedOutputs = local.generatedOutputs;
+  }
   return keep;
 }
 

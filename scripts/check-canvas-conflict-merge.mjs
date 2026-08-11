@@ -57,4 +57,53 @@ import {
   assert.equal(ref.prompt, 'live-typing');
 }
 
+// 「删除其他图片」后本地 history 更短：不得被远端更长历史复活
+{
+  const keep = { url: '/keep.png' };
+  const live = [{
+    id: 'gen1',
+    type: 'generator',
+    prompt: 'p',
+    history: [keep],
+    previewRoundUrls: ['/keep.png'],
+    generatedOutputs: ['/keep.png'],
+    primaryUrl: '/keep.png',
+  }];
+  const ref = live[0];
+  const changed = enrichLiveNodesFromRemote(live, [{
+    id: 'gen1',
+    type: 'generator',
+    prompt: 'old',
+    url: '/extra-anchor.png',
+    history: [{ url: '/a.png' }, { url: '/b.png' }, keep, { url: '/c.png' }],
+    previewRoundUrls: ['/a.png', '/b.png', '/keep.png', '/c.png'],
+    generatedOutputs: ['/a.png', '/b.png', '/keep.png', '/c.png'],
+  }]);
+  assert.equal(live[0], ref);
+  assert.equal(ref.history.length, 1);
+  assert.equal(ref.history[0].url, '/keep.png');
+  assert.equal(ref.previewRoundUrls.length, 1);
+  assert.equal(ref.generatedOutputs.length, 1);
+  assert.equal(ref.prompt, 'p');
+  // 即使因远端 url 字段更高分而充实，结果列表仍须保留本地裁剪
+  if (changed) {
+    assert.equal(ref.url, '/extra-anchor.png');
+  }
+}
+
+// 本地尚无结果：仍可吸取远端 history 补图
+{
+  const live = [{ id: 'gen2', type: 'generator', prompt: 'typing', history: [], previewRoundUrls: [] }];
+  const changed = enrichLiveNodesFromRemote(live, [{
+    id: 'gen2',
+    type: 'generator',
+    prompt: 'stale',
+    history: [{ url: '/new.png' }, { url: '/new2.png' }],
+    previewRoundUrls: ['/new.png', '/new2.png'],
+  }]);
+  assert.equal(changed, true);
+  assert.equal(live[0].history.length, 2);
+  assert.equal(live[0].prompt, 'typing');
+}
+
 console.log('check-canvas-conflict-merge: ok');

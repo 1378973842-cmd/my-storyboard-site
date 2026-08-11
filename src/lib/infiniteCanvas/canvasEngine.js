@@ -20639,7 +20639,7 @@ function bindGenStageInteractions(root, node){
             const url = hero.getAttribute('data-preview-url') || '';
             if(url) node._lightboxFocusUrl = outputUrlValue(url);
             const urls = generatorPreviewUrls(node);
-            const idx = Math.max(0, urls.indexOf(url));
+            const idx = genStageFindPreviewIndex(urls, url);
             openResultsMenu(e.clientX, e.clientY, {url, previewIndex: idx >= 0 ? idx : Number(node.previewIndex || 0)});
         };
     } else {
@@ -21763,16 +21763,17 @@ function openGenStageResultMenu(nodeId, clientX, clientY, opts={}){
     }
     let url = String(opts.url || '').trim();
     let previewIndex = Number(opts.previewIndex);
-    if(!url || !urls.includes(url)){
+    // 与 deleteOther / 设为主图同一套定位，避免 includes 严格匹配失败后误绑错图或删失败
+    let resolvedIdx = url ? genStageFindPreviewIndex(urls, url) : -1;
+    if(resolvedIdx < 0){
         if(Number.isFinite(previewIndex) && previewIndex >= 0 && previewIndex < urls.length){
-            url = urls[previewIndex];
+            resolvedIdx = previewIndex;
         } else {
-            previewIndex = Math.max(0, Math.min(urls.length - 1, Number(node.previewIndex ?? 0)));
-            url = urls[previewIndex];
+            resolvedIdx = Math.max(0, Math.min(urls.length - 1, Number(node.previewIndex ?? 0)));
         }
-    } else if(!Number.isFinite(previewIndex) || previewIndex < 0){
-        previewIndex = urls.indexOf(url);
     }
+    previewIndex = resolvedIdx;
+    url = urls[resolvedIdx] || url;
     const multi = urls.length > 1;
     const isVideoGen = node.type === 'video';
     const favorited = isOutputUrlFavorited(url);

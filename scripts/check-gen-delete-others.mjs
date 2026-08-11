@@ -130,4 +130,28 @@ if(generatorPreviewUrls(gen2)[0] !== '/y.png'){
   process.exit(1);
 }
 
+// 菜单定位：opts.url 与列表不完全相等时，须用 findIndex 归一后再删
+{
+  const gen3 = {
+    history: [{url:'/p.png'}, {url:'/q.png'}],
+    previewRoundUrls: ['/p.png', '/q.png'],
+    _stageSlots: [{kind:'url', url:'/p.png'}, {kind:'url', url:'/q.png'}],
+  };
+  const urls = generatorPreviewUrls(gen3);
+  const optsUrl = {url:'/q.png'};
+  const resolvedIdx = genStageFindPreviewIndex(urls, optsUrl);
+  if(resolvedIdx !== 1){
+    console.error('FAIL: menu resolve idx', resolvedIdx);
+    process.exit(1);
+  }
+  if(!deleteOtherGeneratorPreviews(gen3, urls[resolvedIdx])){
+    console.error('FAIL: resolved keep delete');
+    process.exit(1);
+  }
+  if(generatorPreviewUrls(gen3)[0] !== '/q.png'){
+    console.error('FAIL: resolved keep preview', gen3);
+    process.exit(1);
+  }
+}
+
 console.log('check-gen-delete-others: ok');
