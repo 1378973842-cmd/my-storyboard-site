@@ -225,6 +225,7 @@
         { "id": "AG213", "desc": "动效：Pin 圆点取色出现/取消/换色弹簧过渡，避免硬切定位", "status": "done", "priority": 247 },
         { "id": "AG214", "desc": "动效：顶栏 Pin Hub / 搜索 / 收藏定位改 animateViewportTo 弹簧飞镜，到达后再流光", "status": "done", "priority": 248 },
         { "id": "AG215", "desc": "修：定位飞过去又弹回——locate 标记交互+落盘视口；远端同步保留定位/动画中的本地 viewport", "status": "done", "priority": 249 },
+        { "id": "AG216", "desc": "修：RH 高级设置展开先加高再露面板（同帧 fit），消除挤壳闪一下", "status": "done", "priority": 250 },
         { "id": "AG206c", "desc": "check：image-edit-viewport-focus", "status": "done", "priority": 240 },
         { "id": "AG199c", "desc": "check：rh-output-layout（含 RH skip stage / 去框）", "status": "done", "priority": 233 },
         { "id": "AG30", "desc": "图片组：子图自然尺寸落地后防抖重排扩容，避免默认框装不下", "status": "done", "priority": 51 },

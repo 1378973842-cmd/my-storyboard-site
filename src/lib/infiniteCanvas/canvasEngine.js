@@ -25997,13 +25997,25 @@ function renderRhBody(node){
         advToggle.onclick = e => {
             e.preventDefault();
             e.stopPropagation();
-            node.rhAdvancedOpen = !node.rhAdvancedOpen;
-            wrap.querySelector('.rh-advanced')?.classList.toggle('is-open', node.rhAdvancedOpen);
-            advToggle.classList.toggle('is-open', node.rhAdvancedOpen);
-            advToggle.setAttribute('aria-expanded', node.rhAdvancedOpen ? 'true' : 'false');
-            // 展开后按完整内容下延壳高（顶边不动）；等一帧让 display:grid 参与测高
+            const nextOpen = !node.rhAdvancedOpen;
+            const adv = wrap.querySelector('.rh-advanced');
+            const nodeEl = wrap.closest('.node');
+            node.rhAdvancedOpen = nextOpen;
+            advToggle.classList.toggle('is-open', nextOpen);
+            advToggle.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+            // 先加高再露面板，避免「挤进旧壳→下一帧撑开」闪一下
+            if(nextOpen && nodeEl && isScaleShellNode(node)){
+                const scale = Math.max(0.2, Number(scaleShellUiScale(node) || RH_DEFAULT_SCALE));
+                const bump = Math.max(80, Math.round(108 * scale));
+                const curH = Math.max(120, Math.round(Number(node.h || nodeEl.offsetHeight || 0)));
+                node.h = curH + bump;
+                nodeEl.style.height = `${node.h}px`;
+                nodeEl.classList.remove('rh-content-scroll');
+            }
+            adv?.classList.toggle('is-open', nextOpen);
             delete node._rhBaseFrameH;
-            requestAnimationFrame(() => scheduleFitRhNodeFrame(node));
+            if(nodeEl && isScaleShellNode(node)) fitRhNodeFrame(node, nodeEl);
+            else scheduleFitRhNodeFrame(node);
             scheduleSave();
         };
     }

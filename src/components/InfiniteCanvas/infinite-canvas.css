@@ -6708,6 +6708,7 @@ html.canvas-text-expand-open { overflow:hidden; }
   flex:0 0 auto;
 }
 .rh-advanced.is-open { display:grid; }
+/* 展开时勿用动画改 display，壳高由 JS 同帧加好再露面板 */
 .rh-progress {
   display:none;
   height:3px;

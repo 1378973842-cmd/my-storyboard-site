@@ -12,11 +12,13 @@ const css = fs.readFileSync(path.join(root, 'src/components/InfiniteCanvas/infin
 
 assert.match(eng, /advancedOpen \? contentH : Math\.min\(RH_MAX_BASE_H/);
 assert.match(eng, /!advancedOpen && contentH > RH_MAX_BASE_H/);
-assert.match(eng, /requestAnimationFrame\(\(\) => scheduleFitRhNodeFrame\(node\)\)/);
+assert.match(eng, /先加高再露面板/);
+assert.match(eng, /fitRhNodeFrame\(node, nodeEl\)/);
+assert.doesNotMatch(eng, /requestAnimationFrame\(\(\) => scheduleFitRhNodeFrame\(node\)\)/);
 assert.match(css, /\.rh-advanced\.is-open/);
 assert.match(css, /\.rh-advanced-toggle\.is-open i \{\s*transform:\s*none/);
 
 console.log('OK: advanced open bypasses RH_MAX_BASE_H cap');
-console.log('OK: fit scheduled after display frame');
+console.log('OK: advanced opens with sync grow-before-show');
 console.log('OK: chevron stays down when open');
 console.log('\ncheck-rh-advanced-expand-down: all passed');
