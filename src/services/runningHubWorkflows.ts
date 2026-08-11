@@ -368,18 +368,27 @@ function inferKindFromUrl(url: string): RhOutputRef["kind"] | "" {
 
 function extractOutputRefs(data: unknown): RhOutputRef[] {
   let arr: unknown[] = [];
-  if (Array.isArray(data)) {
+  // RH 偶发直接返回 URL 字符串 / 单对象，不能只认数组
+  if (typeof data === "string") {
+    arr = [data];
+  } else if (Array.isArray(data)) {
     arr = data;
   } else if (data && typeof data === "object") {
     const obj = data as Record<string, unknown>;
-    for (const key of ["outputs", "results", "files", "data"]) {
+    for (const key of ["outputs", "results", "files", "data", "fileList", "fileUrls"]) {
       const value = obj[key];
+      if (typeof value === "string" && value.trim()) {
+        arr = [value];
+        break;
+      }
       if (Array.isArray(value)) {
         arr = value;
         break;
       }
     }
-    if (!arr.length && (obj.fileUrl || obj.url)) arr = [obj];
+    if (!arr.length && (obj.fileUrl || obj.file_url || obj.url || obj.downloadUrl || obj.download_url || obj.outputUrl)) {
+      arr = [obj];
+    }
   }
   const outputs: RhOutputRef[] = [];
   const pushOne = (urlRaw: unknown, fileTypeRaw?: unknown) => {
@@ -394,8 +403,17 @@ function extractOutputRefs(data: unknown): RhOutputRef[] {
       pushOne(item);
     } else if (item && typeof item === "object") {
       const obj = item as Record<string, unknown>;
-      const url = obj.fileUrl ?? obj.file_url ?? obj.url ?? obj.downloadUrl ?? obj.download_url;
-      const fileType = obj.fileType ?? obj.file_type ?? obj.type ?? obj.outputType ?? obj.mimeType ?? obj.contentType;
+      const url =
+        obj.fileUrl ??
+        obj.file_url ??
+        obj.url ??
+        obj.downloadUrl ??
+        obj.download_url ??
+        obj.outputUrl ??
+        obj.output_url ??
+        obj.path;
+      const fileType =
+        obj.fileType ?? obj.file_type ?? obj.type ?? obj.outputType ?? obj.output_type ?? obj.mimeType ?? obj.contentType;
       if (Array.isArray(url)) url.filter(Boolean).forEach((u) => pushOne(u, fileType));
       else if (url) pushOne(url, fileType);
     }
@@ -821,6 +839,10 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
       else if (code === 813 || code === "813") status = "QUEUED";
       else if (code === 805 || code === "805") status = "FAILED";
       else status = "UNKNOWN";
+      // 便于排查「一直运行中却无结果」：落一条短日志（勿 dump 全 raw）
+      console.log(
+        `[runninghub] query taskId=${taskId} code=${String(code)} status=${status} outputs=${outputs.length}`
+      );
       // urls：兼容旧前端；outputs：带 kind，避免视频被当成图片
       res.json({
         success: true,

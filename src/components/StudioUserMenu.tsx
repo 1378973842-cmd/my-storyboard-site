@@ -200,7 +200,7 @@ export const StudioUserMenu: React.FC<StudioUserMenuProps> = ({
         ref={triggerRef}
         type="button"
         className={cn(
-          'relative inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full',
+          'relative inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full',
           'outline outline-0.5 outline-white/10 transition-[outline-color,transform] duration-200',
           open ? 'outline-[#ffb866]/40 scale-[1.03]' : 'hover:outline-white/25',
         )}

@@ -436,7 +436,14 @@ export function RhLivePreviewPanel({
           break;
         }
         if (data.status === 'FAILED') throw new Error(summarizeRhTaskError(data.failReason || data.raw));
-        setStatus(data.status === 'QUEUED' ? '排队中...' : '运行中...');
+        if (data.status === 'QUEUED' || data.status === 'RUNNING') {
+          setStatus(data.status === 'QUEUED' ? '排队中...' : '运行中...');
+          continue;
+        }
+        throw new Error(
+          summarizeRhTaskError(data.failReason || data.raw)
+          || `RunningHub 状态异常 ${data.status || 'UNKNOWN'}（code=${data.code ?? '?'}）`
+        );
       }
       if (!result) throw new Error('RunningHub 任务超时');
       const resultUrls: string[] = Array.isArray(result.urls) ? result.urls : [];

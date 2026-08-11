@@ -22,9 +22,14 @@ const checks = [
   [nav.includes('<Check') && nav.includes('studio-canvas-pill-status'), 'saved check icon'],
   [!nav.includes('studio-canvas-meta-date'), 'no paren date in header'],
   [nav.includes('onDoubleClick') && nav.includes('startRename'), 'dblclick rename kept'],
+  [nav.includes("id: 'personal', label: '个人空间'") && nav.includes("id: 'gallery', label: '公共画廊'"), 'brand menu personal/gallery'],
+  [nav.includes("id === 'personal'") && nav.includes('openPersonal()'), 'personal action wired'],
+  [nav.includes("id === 'gallery'") && nav.includes('openGallery()'), 'gallery action wired'],
+  [nav.indexOf("id: 'gate'") < nav.indexOf("id: 'personal'") && nav.indexOf("id: 'personal'") < nav.indexOf("id: 'rename'"), 'menu order under gate'],
   [eng.includes('export function getCurrentCanvasId'), 'getCurrentCanvasId export'],
   [css.includes('studio-canvas-header-pill') && css.includes('studio-canvas-switcher'), 'pill/switcher css'],
   [css.includes('backdrop-filter: blur(12px)'), 'lighter switcher blur'],
+  [css.includes('.studio-canvas-switcher-list::-webkit-scrollbar'), 'switcher scrollbar hidden'],
 ];
 
 let failed = 0;

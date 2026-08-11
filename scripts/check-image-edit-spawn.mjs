@@ -47,6 +47,8 @@ const checks = [
   [css.includes('.image-edit-rotate-dock'), 'rotate dock CSS'],
   [css.includes('is-rotate-mode'), 'rotate mode CSS'],
   [!eng.includes('replaceGeneratorMediaUrl(owner, oldUrl, file.url'), 'generator no longer in-place replace on edit'],
+  [eng.includes('imageEditOpenedAt') && eng.includes('image-edit-rotate-dock'), 'edit open guard + rotate dock safe'],
+  [/isCanvasInteracting\([\s\S]{0,280}isImageEditOpen\(/.test(eng), 'interacting includes image edit open'],
 ];
 
 // 落点：展示宽 496 时不应落在 260+36

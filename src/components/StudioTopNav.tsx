@@ -106,6 +106,13 @@ const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 const OVERLAY_BRAND_CLASS =
   'pointer-events-auto z-[2] absolute left-3 top-5 md:left-5 md:top-6 max-w-[min(560px,calc(100vw-1.5rem))]';
 
+/** 主页四栏：品牌与中栏/右栏共用同一顶距与行高，保证视觉平齐 */
+const COVER_HOME_BRAND_CLASS =
+  'pointer-events-auto z-[3] absolute left-3 top-3 md:left-5 md:top-3.5 flex h-10 items-center max-w-[min(560px,calc(100vw-1.5rem))]';
+
+const COVER_HOME_NAV_CLASS =
+  'pointer-events-none !absolute inset-x-0 top-0 z-[2] flex items-center justify-between px-3 pt-3 md:px-5 md:pt-3.5';
+
 export type StudioNavId = 'cover' | 'storyboard' | 'canvas' | 'grid' | 'editor' | 'director';
 
 type NavItem = {
@@ -138,6 +145,8 @@ type StudioTopNavProps = {
 const CANVAS_BRAND_MENU = [
   { id: 'home', label: '返回主页', icon: Home },
   { id: 'gate', label: '返回选择画布', icon: ArrowLeft },
+  { id: 'personal', label: '个人空间', icon: UserRound },
+  { id: 'gallery', label: '公共画廊', icon: Images },
   { id: 'rename', label: '重命名', icon: Pencil },
 ] as const;
 
@@ -170,6 +179,7 @@ function CanvasHeaderCluster({
   heroTone?: boolean;
   className?: string;
 }) {
+  const { openPersonal, openGallery } = useShellNavigation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -347,8 +357,16 @@ function CanvasHeaderCluster({
     }
     if (id === 'gate') {
       await returnToCanvasManager();
+      return;
     }
-  }, [closeMenus, onHome, startRename]);
+    if (id === 'personal') {
+      openPersonal();
+      return;
+    }
+    if (id === 'gallery') {
+      openGallery();
+    }
+  }, [closeMenus, onHome, openGallery, openPersonal, startRename]);
 
   const openCanvasById = useCallback(async (id: string) => {
     if (!id || id === meta?.canvasId || switchBusy) {
@@ -846,7 +864,11 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
           heroTone={isOverlayNav}
           showName
           className={cn(
-            isOverlayNav ? OVERLAY_BRAND_CLASS : 'pointer-events-auto shrink-0',
+            isCoverHomeNav
+              ? COVER_HOME_BRAND_CLASS
+              : isOverlayNav
+                ? OVERLAY_BRAND_CLASS
+                : 'pointer-events-auto shrink-0',
             subPage && 'z-[4]',
           )}
         />
@@ -875,15 +897,16 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
 
       {isCoverHomeNav ? (
         <nav
-          className={cn(
-            'pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-3 pt-5 md:px-5 md:pt-6',
-          )}
+          className={COVER_HOME_NAV_CLASS}
           aria-label={`${BRAND_NAME} navigation`}
         >
+          {/* 左占位：与品牌同宽区，避免右栏被挤；品牌仍绝对定位叠在上面 */}
+          <div className="h-10 w-[min(200px,28vw)] shrink-0" aria-hidden />
+
           <div
             className={cn(
-              'pointer-events-auto absolute left-1/2 top-5 z-[3] hidden -translate-x-1/2 items-center gap-5 md:top-6 md:flex md:gap-6 lg:gap-7',
-              coverNavGlass && 'cover-glass-nav cover-hero-nav-pill !px-4 !py-2',
+              'pointer-events-auto absolute left-1/2 top-3 z-[3] hidden h-10 -translate-x-1/2 items-center gap-5 md:top-3.5 md:flex md:gap-6 lg:gap-7',
+              coverNavGlass && 'cover-glass-nav cover-hero-nav-pill !px-4 !py-0',
             )}
           >
             {coverCenterItems.map((item) => (
@@ -891,14 +914,14 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
             ))}
           </div>
 
-          <div className="pointer-events-auto ml-auto flex items-center gap-1.5">
-            <div className="flex items-center gap-2.5 overflow-x-auto custom-scrollbar md:hidden">
+          <div className="pointer-events-auto ml-auto flex h-10 items-center gap-1.5">
+            <div className="flex h-10 items-center gap-2.5 overflow-x-auto custom-scrollbar md:hidden">
               {coverCenterItems.map((item) => (
                 <CoverCenterLink key={item.id} item={item} />
               ))}
             </div>
             {user ? (
-              <div className="hidden shrink-0 items-center gap-1.5 md:flex">
+              <div className="hidden h-10 shrink-0 items-center gap-1.5 md:flex">
                 <StudioAnnouncementsBell isAdmin={isAdmin} heroTone />
                 <StudioUserMenu
                   user={user}

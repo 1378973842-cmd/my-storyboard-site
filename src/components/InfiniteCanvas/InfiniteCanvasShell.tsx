@@ -113,15 +113,15 @@ const NODE_FLYOUT_GROUPS: FlyoutGroup[] = [
     ],
   },
 ];
-type ShortcutRow = { label: string; keys: string[] };
+type ShortcutRow = { label: string; keys: string[]; joiner?: '+' | '/' };
 type ShortcutGroup = { title: string; rows: ShortcutRow[] };
 
-// 与 canvasEngine.js 中实际绑定的交互保持一致，不臆造未实现的快捷键
+// 与 canvasEngine.js 中实际绑定保持一致（空白拖=框选；滚轮=平移；Ctrl+滚轮=缩放）
 const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     title: '编辑',
     rows: [
-      { label: '打组（选类型）', keys: ['Ctrl', 'G'] },
+      { label: '打组（多选时选类型）', keys: ['Ctrl', 'G'] },
       { label: '复制节点', keys: ['Ctrl', 'C'] },
       { label: '粘贴节点', keys: ['Ctrl', 'V'] },
       { label: '启用 / 禁用节点', keys: ['Ctrl', 'B'] },
@@ -130,8 +130,9 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { label: '重做', keys: ['Ctrl', 'Y'] },
       { label: '自动排布选中', keys: ['Ctrl', 'L'] },
       { label: '搜索节点', keys: ['Ctrl', 'K'] },
-      { label: '删除选中 / 连线', keys: ['Delete'] },
+      { label: '删除选中 / 悬停连线', keys: ['Delete', 'Backspace'], joiner: '/' },
       { label: '拖动节点时创建副本', keys: ['Alt', '拖动节点'] },
+      { label: '双击浮标重命名', keys: ['双击浮标名'] },
     ],
   },
   {
@@ -139,21 +140,17 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     rows: [
       { label: '多选节点', keys: ['Ctrl', '点击节点'] },
       { label: '框选节点', keys: ['拖动空白处'] },
+      { label: '拖动多选外框', keys: ['拖动选区框'] },
       { label: '剪断连线', keys: ['Shift', '划过连线'] },
       { label: '拉出新连线', keys: ['拖动端口圆点'] },
     ],
   },
   {
-    title: '缩放',
+    title: '缩放与平移',
     rows: [
-      { label: '放大 / 缩小画布', keys: ['鼠标滚轮'] },
-      { label: '放大 / 缩小画布', keys: ['触控板双指滑动'] },
-    ],
-  },
-  {
-    title: '移动画布',
-    rows: [
-      { label: '平移画布（空白处）', keys: ['拖动空白处'] },
+      { label: '平移画布', keys: ['鼠标滚轮'] },
+      { label: '平移画布', keys: ['触控板双指滑动'] },
+      { label: '放大 / 缩小画布', keys: ['Ctrl', '滚轮'] },
       { label: '平移画布（含节点上）', keys: ['Space', '拖动'] },
       { label: '平移画布（含节点上）', keys: ['鼠标中键拖动'] },
       { label: '快速定位视图', keys: ['拖动小地图'] },
@@ -163,7 +160,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     title: '其他',
     rows: [
       { label: '取消拉线 / 关闭弹窗', keys: ['Esc'] },
-      { label: '大图预览上一张 / 下一张', keys: ['←', '→'] },
+      { label: '大图预览上一张 / 下一张', keys: ['←', '→'], joiner: '/' },
     ],
   },
 ];
@@ -227,7 +224,9 @@ function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () => void 
                       <span className="shortcuts-keys">
                         {row.keys.map((k, ki) => (
                           <span key={ki} className="shortcut-key-group">
-                            {ki > 0 ? <span className="shortcut-plus">+</span> : null}
+                            {ki > 0 ? (
+                              <span className="shortcut-plus">{row.joiner === '/' ? '/' : '+'}</span>
+                            ) : null}
                             <span className="shortcut-key">{k}</span>
                           </span>
                         ))}
@@ -875,7 +874,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                       </div>
                   </div>
               </div>
-              <div className="hint editor-only" data-i18n="canvas.hint">拖拽空白处或按住空格拖动画布；滚轮平移；Ctrl + 滚轮缩放；中键平移。Ctrl 框选多选，拖动节点标题栏可移动节点。</div>
+              <div className="hint editor-only" data-i18n="canvas.hint">空白处拖拽框选；空格/中键拖动画布；滚轮平移；Ctrl+滚轮缩放。Ctrl+点击多选；拖动选区框可整组移动。</div>
               <div id="outputLightbox" className="output-lightbox">
                   <div id="outputLightboxShell" className="output-lightbox-shell">
                   <div id="outputPreview" className="output-preview">

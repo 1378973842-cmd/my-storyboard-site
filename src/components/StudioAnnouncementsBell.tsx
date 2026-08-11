@@ -135,7 +135,7 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
         ref={triggerRef}
         type="button"
         className={cn(
-          'relative inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#242424] text-[#e5e2e1]/75 transition-colors',
+          'relative inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-[#242424] text-[#e5e2e1]/75 transition-colors',
           'outline outline-0.5 outline-white/10',
           open ? 'bg-[#2c2c2c] text-[#e5e2e1] outline-[#ffb866]/35' : 'hover:bg-[#2c2c2c] hover:text-[#e5e2e1]',
         )}
