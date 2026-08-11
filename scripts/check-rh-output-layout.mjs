@@ -13,10 +13,11 @@ const css = fs.readFileSync(path.join(root, 'src/components/InfiniteCanvas/infin
 const checks = [
   [!eng.includes('rh-output-video-badge'), 'VIDEO badge removed from preview html'],
   [eng.includes('rh-output-toolbar'), 'history toolbar outside media'],
+  [eng.includes('rh-output-toolbar-slot'), 'toolbar slot under output column'],
   [eng.includes('function rhApplyFrameAspect'), 'aspect helper exists'],
   [eng.includes('rhApplyFrameAspect(frameEl, mediaEl'), 'input tiles apply aspect'],
   [eng.includes('rhApplyFrameAspect(mediaEl, mediaTag'), 'output applies aspect'],
-  [eng.includes('paneHead.hidden = true'), 'hides duplicate pane-head when filled'],
+  [eng.includes('paneHead.hidden = false') && !/有结果时藏头|隐藏重复的 pane-head/.test(eng), 'keeps pane-head for IO top align'],
   [/if\s*\(\s*node\.type\s*===\s*['"]rh['"]\s*\)\s*return\s*['"]['"]/.test(eng)
     || /if\s*\(\s*node\.type\s*===\s*['"]rh['"]\s*\)\s*return\s*;/.test(eng), 'RH skips agent-result-stage'],
   [eng.includes("ta.style.height = `${Math.max(72, ta.scrollHeight)}px`"), 'prompt auto-grows'],
@@ -25,6 +26,7 @@ const checks = [
   [css.includes('.rh-input-stack::-webkit-scrollbar'), 'input scrollbars hidden'],
   [css.includes('.rh-media-tile.has-media .rh-media-tile-veil') && /has-media\s+\.rh-media-tile-veil\s*\{\s*opacity:\s*0/.test(css), 'has-media veil off'],
   [css.includes('.rh-media-grid.is-solo .rh-media-tile.has-media'), 'solo filled tile no forced well'],
+  [css.includes('.rh-input-stack:has(.rh-media-tile.has-media)'), 'filled input clears padding'],
   [!css.includes('.rh-output-video-badge'), 'video badge css removed'],
 ];
 

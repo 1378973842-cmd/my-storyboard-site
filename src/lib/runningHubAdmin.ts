@@ -369,6 +369,48 @@ export function fieldsFromAppInfoRaw(raw: unknown): RhField[] {
   return rhAppFieldSourceList(raw).map((f, i) => normalizeFetchedAppField(f, i));
 }
 
+function hasRhScalar(value: string | number | undefined | null): boolean {
+  return value !== undefined && value !== null && String(value).trim() !== "";
+}
+
+/**
+ * 「重新拉取」时合并字段：结构以远端为准（新增/删除节点输入），
+ * 但本站已调过的显示名/类型/默认值/启停/排序/说明等一律保留，避免每次重配从零再调。
+ * 对齐键：优先 id，其次 nodeId::fieldName。
+ */
+export function mergeRhFieldsOnRefetch(fetched: RhField[], previous: RhField[]): RhField[] {
+  const byId = new Map<string, RhField>();
+  const byKey = new Map<string, RhField>();
+  for (const raw of previous || []) {
+    const field = normalizeRhField(raw);
+    if (field.id) byId.set(field.id, field);
+    byKey.set(rhWorkflowFieldKey(field), field);
+  }
+  return (fetched || []).map((raw) => {
+    const base = normalizeRhField(raw);
+    const existing = byId.get(base.id) || byKey.get(rhWorkflowFieldKey(base));
+    if (!existing) return base;
+    return {
+      ...base,
+      enabled: existing.enabled,
+      label: existing.label || base.label,
+      note: existing.note || base.note,
+      fieldType: existing.fieldType || base.fieldType,
+      fieldValue: existing.fieldValue,
+      order: Number.isFinite(Number(existing.order)) ? Number(existing.order) : base.order,
+      options: existing.options.length ? existing.options : base.options,
+      group: existing.group || base.group,
+      sourceFromUpstream: existing.sourceFromUpstream,
+      random_enabled: existing.random_enabled,
+      min: hasRhScalar(existing.min) ? existing.min : base.min,
+      max: hasRhScalar(existing.max) ? existing.max : base.max,
+      step: hasRhScalar(existing.step) ? existing.step : base.step,
+      imageOrder: existing.imageOrder || base.imageOrder,
+      required: existing.required,
+    };
+  });
+}
+
 export function sortRhFields(fields: RhField[]): RhField[] {
   return [...(fields || [])].sort((a, b) => {
     const ak = rhWorkflowFieldKind(a);

@@ -3172,6 +3172,7 @@ function scheduleFitRhNodeFrame(node){
  * - 内部永远按 RH_BASE_W 排版
  * - 默认视觉 RH_DEFAULT_SCALE（2.5×）；RH/视频反推超高封顶内滚；Premium Agent 全量展高无壳内滚动
  * - 手改宽：transform scale；外壳 = min(内容,上限) × scale
+ * - 高级设置展开：壳高按完整内容下挂，勿在封顶内把主区往上挤
  */
 function fitRhNodeFrame(node, elHint=null){
     if(!isScaleShellNode(node)) return;
@@ -3180,8 +3181,10 @@ function fitRhNodeFrame(node, elHint=null){
     el.style.setProperty('--rh-base-w', `${scaleShellBaseW(node)}px`);
     const contentH = measureRhBaseFrame(node, el);
     const agentFullBleed = isAgentPremiumScaleNode(node);
-    const baseH = agentFullBleed ? contentH : Math.min(RH_MAX_BASE_H, contentH);
-    const needsScroll = !agentFullBleed && contentH > RH_MAX_BASE_H + 1;
+    const advancedOpen = Boolean(node.rhAdvancedOpen) && Boolean(el.querySelector?.('.rh-advanced.is-open'));
+    // 高级区打开时用完整内容高（顶边不动、底边下延）；关闭时仍受 RH_MAX_BASE_H 约束
+    const baseH = agentFullBleed || advancedOpen ? contentH : Math.min(RH_MAX_BASE_H, contentH);
+    const needsScroll = !agentFullBleed && !advancedOpen && contentH > RH_MAX_BASE_H + 1;
     node._rhBaseFrameH = baseH;
     const defW = scaleShellDefaultW(node);
     if(!node._userSized){
@@ -4321,14 +4324,8 @@ function focusCanvasFavoriteTarget({ nodeId = '', imageUrl = '' } = {}){
     // 不选中、不强刷：避免弹出生成控制台 + 整板 force render 卡顿闪屏
     selected.clear();
     refreshSelectionVisuals();
-    requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-            const box = nodeBounds([node.id]);
-            viewport.scale = 0.4;
-            centerViewportOnWorldPoint({ x: box.x + box.w / 2, y: box.y + box.h / 2 });
-            flashFavoriteOutputImage(node.id, imageUrl);
-            refreshGeometryAfterLayout();
-        });
+    void animateCanvasLocateToNode(node.id, {
+        onArrived: () => flashFavoriteOutputImage(node.id, imageUrl),
     });
     setStatus(langIsEn() ? 'Located favorite on canvas' : '已定位到画布中的收藏图片');
     return true;
@@ -4350,12 +4347,25 @@ function focusCanvasPinnedTarget(nodeId){
     setStatus(langIsEn() ? 'Located pinned node' : '已定位到 Pin 节点');
     return true;
 }
-function syncNodePinDot(el, node){
+function syncNodePinDot(el, node, { animate = false } = {}){
     if(!el) return;
     let dot = el.querySelector(':scope > .canvas-pin-dot');
     const color = normalizePinColor(node?.pinColor);
+    const reduceMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const useAnim = animate && !reduceMotion;
     if(!isPinCapableNode(node) || !color){
-        dot?.remove();
+        if(!dot) return;
+        if(!useAnim){
+            dot.remove();
+            return;
+        }
+        // 取消 Pin：淡出上移后再卸，避免硬切消失
+        if(dot.dataset.pinLeaving === '1') return;
+        dot.dataset.pinLeaving = '1';
+        dot.classList.add('is-leave');
+        const finish = () => { try { dot.remove(); } catch(_){ /* ignore */ } };
+        dot.addEventListener('transitionend', finish, { once: true });
+        setTimeout(finish, 420);
         return;
     }
     if(!dot){
@@ -4363,7 +4373,24 @@ function syncNodePinDot(el, node){
         dot.className = 'canvas-pin-dot';
         dot.setAttribute('aria-hidden', 'true');
         el.appendChild(dot);
+        if(useAnim){
+            // 从框内角升起落到框外，避免直接「切」到终点
+            dot.classList.add('is-enter');
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => dot.classList.remove('is-enter'));
+            });
+        }
+    } else if(useAnim && dot.dataset.pinColor && dot.dataset.pinColor !== color){
+        dot.classList.remove('is-pop');
+        // 强制重启动画
+        void dot.offsetWidth;
+        dot.classList.add('is-pop');
+        const clearPop = () => dot.classList.remove('is-pop');
+        dot.addEventListener('animationend', clearPop, { once: true });
+        setTimeout(clearPop, 420);
     }
+    delete dot.dataset.pinLeaving;
+    dot.classList.remove('is-leave');
     dot.style.background = pinColorHex(color);
     dot.dataset.pinColor = color;
 }
@@ -4409,7 +4436,7 @@ function setNodePinColor(node, colorId){
         return;
     }
     const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
-    syncNodePinDot(el, node);
+    syncNodePinDot(el, node, { animate: true });
     closeCanvasPinSwatchRail();
     // 刷新工具栏 pin 按钮态
     if(imageActionBarNodeId === node.id && imageActionBarEl) remountImageActionBar(node);
@@ -6822,7 +6849,10 @@ function applyRemoteCanvasData(remote, opts = {}){
     }
     applyingRemoteCanvas = true;
     try {
-        const keepLocalViewport = isImageEditOpen() || Boolean(imageEditViewportBackup) || Date.now() - lastBoardInteractionAt < 6000;
+        const keepLocalViewport = isImageEditOpen()
+            || Boolean(imageEditViewportBackup)
+            || imageEditViewportAnimActive
+            || Date.now() - lastBoardInteractionAt < 6000;
         const localViewport = keepLocalViewport ? {...viewport} : null;
         const viewportOnly = remoteCanvasContentEquals(remote);
         const remoteUpdatedAt = Number(remote.updated_at || Date.now());
@@ -25754,7 +25784,11 @@ function rhRenderOutputPane(container, node){
     const kind = current?.kind || (isVideoUrl(url) ? 'video' : isAudioUrl(url) ? 'audio' : 'image');
     const filled = Boolean(url);
     container.classList.toggle('is-filled', filled);
-    const paneHead = container.closest?.('.rh-pane-out')?.querySelector?.('.rh-pane-head');
+    const paneOut = container.closest?.('.rh-pane-out');
+    const paneHead = paneOut?.querySelector?.('.rh-pane-head');
+    const toolbarSlot = paneOut?.closest?.('.rh-tri')?.querySelector?.('.rh-output-toolbar-slot')
+        || container.closest?.('.rh-body')?.querySelector?.('.rh-output-toolbar-slot');
+    const clearToolbar = () => { if(toolbarSlot) toolbarSlot.innerHTML = ''; };
     // 同步右侧标题：有视频结果时显示「输出视频」
     const titleEl = paneHead?.querySelector?.('.rh-pane-title span:last-child');
     if(titleEl) titleEl.textContent = rhOutputPaneTitle(node);
@@ -25762,8 +25796,10 @@ function rhRenderOutputPane(container, node){
     if(titleIcon && !running){
         titleIcon.setAttribute('data-lucide', kind === 'video' ? 'video' : kind === 'audio' ? 'music' : 'image');
     }
+    // 左右标题常显，保证输入/输出媒体顶边对齐
+    if(paneHead) paneHead.hidden = false;
     if(running && !url){
-        if(paneHead) paneHead.hidden = false;
+        clearToolbar();
         container.innerHTML = `<div class="rh-output-empty is-running">
             <i data-lucide="loader-circle" class="w-6 h-6 spin-icon"></i>
             <span>${langIsEn() ? 'Generating…' : '生成中…'}</span>
@@ -25772,7 +25808,7 @@ function rhRenderOutputPane(container, node){
         return;
     }
     if(!url && node.runStatus === 'failed' && node.runError){
-        if(paneHead) paneHead.hidden = false;
+        clearToolbar();
         const msg = summarizeGenDockError(node.runError);
         container.innerHTML = `<div class="rh-output-empty is-failed">
             <i data-lucide="triangle-alert" class="rh-media-ph-icon"></i>
@@ -25782,7 +25818,7 @@ function rhRenderOutputPane(container, node){
         return;
     }
     if(!url){
-        if(paneHead) paneHead.hidden = false;
+        clearToolbar();
         container.innerHTML = `<div class="rh-output-empty">
             <i data-lucide="${rhOutputPaneKind(node) === 'video' ? 'video' : 'image'}" class="rh-media-ph-icon"></i>
             <span>${langIsEn() ? 'Output appears here' : '运行后结果会显示在这里'}</span>
@@ -25793,17 +25829,19 @@ function rhRenderOutputPane(container, node){
     const idx = Math.max(0, Math.min(refs.length - 1, Number(node.previewIndex ?? refs.length - 1)));
     const runMs = Math.max(0, Number(current?.runMs || 0) || 0);
     const durationText = runMs ? formatRunDuration(runMs) : '';
-    const title = rhOutputPaneTitle(node);
-    // 切换条放在媒体下方；比例等图片/视频元数据到位后再写，避免先套 3/4 裁切
+    // 媒体独占输出井（与左侧输入图同高）；用时/历史条挪到运行钮上方，避免把输出图顶矮
     container.innerHTML = `
         <div class="rh-output-shell" data-rh-output-count="${refs.length}" data-rh-output-kind="${escapeAttr(kind)}">
             <div class="rh-output-media" data-preview-url="${escapeAttr(url)}">
                 ${rhMediaPreviewHtml(url, kind)}
             </div>
+        </div>
+    `;
+    if(toolbarSlot){
+        toolbarSlot.innerHTML = `
             <div class="rh-output-toolbar">
                 <div class="rh-output-toolbar-meta">
-                    <span class="rh-output-toolbar-title">${escapeHtml(title)}</span>
-                    ${durationText ? `<span class="rh-output-duration" title="${escapeAttr(langIsEn() ? 'Generation time' : '生成用时')}">${escapeHtml(durationText)}</span>` : ''}
+                    ${durationText ? `<span class="rh-output-duration" title="${escapeAttr(langIsEn() ? 'Generation time' : '生成用时')}">${escapeHtml(durationText)}</span>` : '<span class="rh-output-toolbar-spacer"></span>'}
                 </div>
                 ${refs.length > 1 ? `<div class="rh-output-history" role="group" aria-label="${langIsEn() ? 'Output history' : '生成历史'}">
                     <button type="button" class="rh-output-nav" data-rh-hist="-1" title="${langIsEn() ? 'Previous' : '上一条'}" aria-label="${langIsEn() ? 'Previous' : '上一条'}"><i data-lucide="chevron-left" class="w-3.5 h-3.5"></i></button>
@@ -25811,8 +25849,8 @@ function rhRenderOutputPane(container, node){
                     <button type="button" class="rh-output-nav" data-rh-hist="1" title="${langIsEn() ? 'Next' : '下一条'}" aria-label="${langIsEn() ? 'Next' : '下一条'}"><i data-lucide="chevron-right" class="w-3.5 h-3.5"></i></button>
                 </div>` : ''}
             </div>
-        </div>
-    `;
+        `;
+    }
     const mediaEl = container.querySelector('.rh-output-media');
     const mediaTag = mediaEl?.querySelector('img, video');
     if(mediaEl && mediaTag){
@@ -25827,7 +25865,8 @@ function rhRenderOutputPane(container, node){
         rhRenderOutputPane(container, node);
         scheduleSave();
     };
-    container.querySelectorAll('[data-rh-hist]').forEach(btn => {
+    const histRoot = toolbarSlot || container;
+    histRoot.querySelectorAll('[data-rh-hist]').forEach(btn => {
         btn.addEventListener('click', e => {
             e.preventDefault();
             e.stopPropagation();
@@ -25839,9 +25878,7 @@ function rhRenderOutputPane(container, node){
         if(!url) return;
         openOutputLightbox(url, node);
     });
-    // 标题已并入输出工具条，隐藏重复的 pane-head
-    if(paneHead) paneHead.hidden = true;
-    refreshIcons(container.closest?.('.rh-pane-out') || container);
+    refreshIcons(paneOut || container);
 }
 function renderRhBody(node){
     // 无进行中 pending 时清掉存档里卡住的「运行中」徽章（按钮可能已是空闲态）
@@ -25857,16 +25894,15 @@ function renderRhBody(node){
     const running = agentPendingCount(node.id) > 0 || Boolean(node.running);
     const advancedOpen = Boolean(node.rhAdvancedOpen);
     const rhBtn = agentPendingRunState(node.id, langIsEn() ? 'Run Node' : '运行节点', langIsEn() ? 'Running…' : '运行中…');
-    // 一整块 satin 面板：左右凹井 + 中间参数贴面（无三分栏外框）
+    // 两行网格：上行输入|参数|输出顶对齐；下行提示词横跨到参数右缘，运行钮贴输出下方
     wrap.innerHTML = `
-        <div class="rh-tri">
+        <div class="rh-tri rh-tri-io">
             <section class="rh-pane rh-pane-in">
                 <div class="rh-pane-head">
                     <span class="rh-pane-title"><i data-lucide="image" class="w-3.5 h-3.5"></i><span>${langIsEn() ? 'Input Image' : '输入图像'}</span></span>
                 </div>
                 <div class="rh-input-stack">
                     <div class="rh-input-list rh-media-grid"></div>
-                    <div class="rh-prompt-list"></div>
                 </div>
             </section>
             <section class="rh-pane rh-pane-params">
@@ -25883,13 +25919,19 @@ function renderRhBody(node){
                 </div>
                 <div class="rh-well rh-output-stage"></div>
             </section>
+            <div class="rh-prompt-rail">
+                <div class="rh-prompt-list"></div>
+            </div>
+            <div class="rh-out-actions">
+                <div class="rh-output-toolbar-slot"></div>
+                <div class="gen-run-row rh-run-row">
+                    ${agentGenRunActionsHtml(node.id, `<button class="gen-btn rh-run ${rhBtn.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''}><span>${escapeHtml(rhBtn.label)}</span></button>`)}
+                    ${cascadeBtnHtml(node)}
+                </div>
+                <div class="rh-progress ${running ? 'is-on' : ''}" aria-hidden="true"><div class="rh-progress-bar"></div></div>
+            </div>
         </div>
         <div class="rh-foot">
-            <div class="gen-run-row rh-run-row">
-                ${agentGenRunActionsHtml(node.id, `<button class="gen-btn rh-run ${rhBtn.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''}><span>${escapeHtml(rhBtn.label)}</span></button>`)}
-                ${cascadeBtnHtml(node)}
-            </div>
-            <div class="rh-progress ${running ? 'is-on' : ''}" aria-hidden="true"><div class="rh-progress-bar"></div></div>
             <button type="button" class="rh-advanced-toggle ${advancedOpen ? 'is-open' : ''}" aria-expanded="${advancedOpen ? 'true' : 'false'}">
                 <span>${langIsEn() ? 'Advanced Settings' : '高级设置'}</span>
                 <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
@@ -25959,9 +26001,9 @@ function renderRhBody(node){
             wrap.querySelector('.rh-advanced')?.classList.toggle('is-open', node.rhAdvancedOpen);
             advToggle.classList.toggle('is-open', node.rhAdvancedOpen);
             advToggle.setAttribute('aria-expanded', node.rhAdvancedOpen ? 'true' : 'false');
-            // 高级区开合改变内容高：合并到下一帧测高，避免连闪
+            // 展开后按完整内容下延壳高（顶边不动）；等一帧让 display:grid 参与测高
             delete node._rhBaseFrameH;
-            scheduleFitRhNodeFrame(node);
+            requestAnimationFrame(() => scheduleFitRhNodeFrame(node));
             scheduleSave();
         };
     }
@@ -32560,19 +32602,60 @@ function focusCanvasNodeById(nodeId){
         setStatus(langIsEn() ? 'Node not found on this canvas' : '未在画布上找到该节点');
         return;
     }
-    // 同收藏定位：不选中，避免弹出生成控制台；缩放到可视中心并边缘流光
+    // 同收藏定位：不选中，避免弹出生成控制台；弹簧飞到可视中心并边缘流光
     selected.clear();
     refreshSelectionVisuals();
-    requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-            const box = nodeBounds([node.id]);
-            viewport.scale = 0.4;
-            centerViewportOnWorldPoint({ x: box.x + box.w / 2, y: box.y + box.h / 2 });
-            flashLocateNodeOnCanvas(node.id);
-            refreshGeometryAfterLayout();
-        });
+    void animateCanvasLocateToNode(node.id, {
+        onArrived: () => flashLocateNodeOnCanvas(node.id),
     });
     setStatus(langIsEn() ? 'Located node on canvas' : '已定位到画布节点');
+}
+/** Pin / 搜索 / 收藏共用：缩放到 0.4 并居中的视口目标 */
+function viewportTargetForCanvasLocate(nodeId){
+    if(!board || !nodeId) return null;
+    const box = nodeBounds([nodeId]);
+    if(!box || !(box.w > 0 || box.h > 0 || Number.isFinite(box.x))) return null;
+    const rect = board.getBoundingClientRect();
+    if(!(rect.width > 0) || !(rect.height > 0)) return null;
+    const scale = 0.4;
+    const cx = box.x + box.w / 2;
+    const cy = box.y + box.h / 2;
+    return {
+        x: rect.width / 2 - cx * scale,
+        y: rect.height / 2 - cy * scale,
+        scale,
+    };
+}
+/** 视口弹簧飞到节点；到达后再打流光，避免硬切 */
+async function animateCanvasLocateToNode(nodeId, { onArrived = null } = {}){
+    const target = viewportTargetForCanvasLocate(nodeId);
+    if(!target){
+        onArrived?.();
+        return false;
+    }
+    // 标记交互：防止定位途中/刚结束后的远端同步把视口拽回保存前的旧位置
+    touchBoardInteraction();
+    const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if(reduce){
+        viewport.x = target.x;
+        viewport.y = target.y;
+        viewport.scale = target.scale;
+        applyViewport();
+        refreshGeometryAfterLayout();
+        touchBoardInteraction();
+        scheduleViewportSave();
+        onArrived?.();
+        return true;
+    }
+    const ok = await animateViewportTo(target, { stiffness: 260, damping: 32, maxMs: 920 });
+    refreshGeometryAfterLayout();
+    // 无论动画是否被中途取消，都以当前视口续命；成功落到目标后再落盘
+    touchBoardInteraction();
+    if(ok){
+        scheduleViewportSave();
+        onArrived?.();
+    }
+    return ok;
 }
 function closeCanvasNodeSearch(){
     document.getElementById('canvasNodeSearchModal')?.remove();

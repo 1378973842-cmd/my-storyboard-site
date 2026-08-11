@@ -34,7 +34,16 @@ const checks = [
   [eng.includes('canvas-pin-hub-triggers') && eng.includes('data-pin-hub-color'), 'hub multi color triggers'],
   [eng.includes('function canvasPinUsedColorIds'), 'used colors ordered'],
   [eng.includes('focusCanvasNodeById(node.id)') || eng.includes('flashLocateNodeOnCanvas(nodeId)'), 'pin locate reuses canvas locate'],
+  [eng.includes('function animateCanvasLocateToNode') && eng.includes('animateViewportTo(target'), 'pin locate uses viewport spring'],
+  [eng.includes('function viewportTargetForCanvasLocate'), 'locate viewport target helper'],
+  [/function animateCanvasLocateToNode[\s\S]*?touchBoardInteraction\(\)/.test(eng), 'locate touches board interaction'],
+  [/function animateCanvasLocateToNode[\s\S]*?scheduleViewportSave\(\)/.test(eng), 'locate persists viewport'],
+  [/keepLocalViewport[\s\S]{0,200}imageEditViewportAnimActive/.test(eng), 'remote sync keeps viewport during anim'],
   [css.includes('.canvas-pin-hub-triggers') && css.includes('.canvas-pin-hub-trigger.is-open'), 'multi-trigger CSS'],
+  [/\.node\s*>\s*\.canvas-pin-dot\s*\{[^}]*top:\s*-?\d+px/s.test(css) && css.includes('top:-22px'), 'pin dot sits above node'],
+  [/width:\s*18px/.test(css) && /\.node\s*>\s*\.canvas-pin-dot[\s\S]*?width:\s*18px/.test(css), 'pin dot enlarged'],
+  [eng.includes("syncNodePinDot(el, node, { animate: true })"), 'pin set animates'],
+  [css.includes('.canvas-pin-dot.is-enter') && css.includes('.canvas-pin-dot.is-leave'), 'pin enter/leave CSS'],
 ];
 
 let failed = 0;

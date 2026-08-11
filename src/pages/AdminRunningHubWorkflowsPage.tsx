@@ -21,7 +21,7 @@ import { RhFieldEditorPopover } from '../components/RhFieldEditorPopover';
 import { RhLivePreviewPanel } from '../components/RhLivePreviewPanel';
 import {
   fieldsFromAppInfoRaw,
-  normalizeRhField,
+  mergeRhFieldsOnRefetch,
   parseRunningHubRunRef,
   RH_FIELD_TYPE_LABELS,
   rhWorkflowFieldKind,
@@ -208,11 +208,7 @@ export const AdminRunningHubWorkflowsPage = memo(function AdminRunningHubWorkflo
         const fetched = data.data as { fields: RhField[]; workflowJson: Record<string, unknown>; raw: unknown };
         setEditor((prev) => {
           if (!prev || prev.kind !== 'workflow') return prev;
-          const prevFieldsById = new Map(prev.config.fields.map((f) => [f.id, f]));
-          const mergedFields = fetched.fields.map((f) => {
-            const existing = prevFieldsById.get(f.id);
-            return existing ? { ...normalizeRhField(f), enabled: existing.enabled, label: existing.label || f.label, note: existing.note } : normalizeRhField(f);
-          });
+          const mergedFields = mergeRhFieldsOnRefetch(fetched.fields || [], prev.config.fields);
           return {
             ...prev,
             fetching: false,
@@ -228,11 +224,7 @@ export const AdminRunningHubWorkflowsPage = memo(function AdminRunningHubWorkflo
         const fetchedFields = fieldsFromAppInfoRaw(data);
         setEditor((prev) => {
           if (!prev || prev.kind !== 'app') return prev;
-          const prevFieldsById = new Map(prev.config.fields.map((f) => [f.id, f]));
-          const mergedFields = fetchedFields.map((f) => {
-            const existing = prevFieldsById.get(f.id);
-            return existing ? { ...f, enabled: existing.enabled, label: existing.label || f.label, note: existing.note || f.note } : f;
-          });
+          const mergedFields = mergeRhFieldsOnRefetch(fetchedFields, prev.config.fields);
           return { ...prev, fetching: false, dirty: true, saveOkUntil: 0, config: { ...prev.config, fields: mergedFields, raw: data.data ?? data } };
         });
       }

@@ -2056,8 +2056,10 @@
 .node.sized.generator-node .gen-run-row,
 .node.sized.comfy-node .gen-run-row,
 .node.sized.ltxDirector-node .gen-run-row,
-.node.sized.rh-node .gen-run-row,
 .node.sized.llm-node .gen-run-row { margin-top:auto; }
+/* RH 运行钮改在输出列下方，勿再 margin-top:auto 把底栏撑乱 */
+.node.sized.rh-node .rh-out-actions .gen-run-row { margin-top:0; }
+.node.sized.rh-node .rh-foot .gen-run-row { margin-top:auto; }
 .gen-cascade-btn { height:40px; width:100%; flex:0 0 40px; border-radius:16px; background:transparent; border:1.5px solid var(--strong); color:var(--strong); display:flex; align-items:center; justify-content:center; gap:8px; font-size:11px; font-weight:800; letter-spacing:.12em; transition:all .15s ease; }
 .gen-cascade-btn:hover { background:var(--strong); color:var(--strong-text); }
 .gen-cascade-btn:disabled { opacity:.4; cursor:not-allowed; }
@@ -4431,16 +4433,58 @@ html.canvas-text-expand-open { overflow:hidden; }
 .canvas-pin-btn.is-on svg { color:inherit; }
 .node > .canvas-pin-dot {
   position:absolute;
-  top:10px;
-  right:10px;
-  width:12px;
-  height:12px;
+  /* 挂在框外右上，勿压住图台/叠卡角标 */
+  top:-22px;
+  right:4px;
+  width:18px;
+  height:18px;
   border-radius:999px;
   z-index:7;
   pointer-events:none;
+  transform:translateY(0) scale(1);
+  opacity:1;
   box-shadow:
-    0 0 0 2px rgba(14,14,14,.72),
-    0 6px 14px -6px rgba(0,0,0,.55);
+    0 0 0 2.5px rgba(14,14,14,.78),
+    0 8px 18px -6px rgba(0,0,0,.55);
+  transition:
+    transform .42s cubic-bezier(.22,1,.36,1),
+    opacity .28s cubic-bezier(.22,.61,.36,1),
+    background-color .28s ease,
+    box-shadow .28s ease;
+  will-change:transform, opacity;
+}
+/* 出现：从框内角柔和升到框外 */
+.node > .canvas-pin-dot.is-enter {
+  transform:translateY(18px) scale(.45);
+  opacity:0;
+}
+/* 取消：轻轻沉回并淡出 */
+.node > .canvas-pin-dot.is-leave {
+  transform:translateY(12px) scale(.55);
+  opacity:0;
+}
+/* 换色轻弹一下 */
+.node > .canvas-pin-dot.is-pop {
+  animation:canvasPinDotPop .38s cubic-bezier(.22,1,.36,1);
+}
+@keyframes canvasPinDotPop {
+  0% { transform:translateY(0) scale(1); }
+  42% { transform:translateY(-3px) scale(1.18); }
+  100% { transform:translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .node > .canvas-pin-dot {
+    transition:none;
+    will-change:auto;
+  }
+  .node > .canvas-pin-dot.is-enter,
+  .node > .canvas-pin-dot.is-leave {
+    transform:none;
+    opacity:1;
+  }
+  .node > .canvas-pin-dot.is-pop {
+    animation:none;
+  }
 }
 .canvas-pin-hub {
   position:absolute;
@@ -6204,6 +6248,51 @@ html.canvas-text-expand-open { overflow:hidden; }
   min-width:0;
   align-items:stretch;
 }
+/* RH：上行三栏顶对齐；下行提示词右缘对齐参数列，运行钮在输出列下 */
+.rh-tri.rh-tri-io {
+  grid-template-rows:minmax(0, 1fr) auto;
+  grid-template-areas:
+    "in params out"
+    "prompt prompt actions";
+  align-items:stretch;
+}
+.rh-tri.rh-tri-io:not(:has(.rh-prompt-tile)) {
+  grid-template-areas:
+    "in params out"
+    ". . actions";
+}
+.rh-tri.rh-tri-io > .rh-pane-in { grid-area:in; }
+.rh-tri.rh-tri-io > .rh-pane-params { grid-area:params; }
+.rh-tri.rh-tri-io > .rh-pane-out { grid-area:out; }
+.rh-tri.rh-tri-io > .rh-prompt-rail { grid-area:prompt; }
+.rh-tri.rh-tri-io > .rh-out-actions { grid-area:actions; }
+.rh-prompt-rail {
+  min-width:0;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.rh-prompt-rail:not(:has(.rh-prompt-tile)) {
+  display:none;
+}
+.rh-out-actions {
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  justify-content:flex-start;
+  gap:8px;
+  padding-top:2px;
+}
+.rh-out-actions .rh-run-row {
+  width:100%;
+  margin:0;
+}
+.rh-out-actions .rh-progress {
+  width:100%;
+  margin:0;
+}
 .rh-node.sized .rh-tri,
 .rh-node.rh-content-scroll .rh-tri {
   min-height:0;
@@ -6279,6 +6368,32 @@ html.canvas-text-expand-open { overflow:hidden; }
   box-shadow:none;
   padding:10px;
 }
+/* 有图时与输出 is-filled 同样去内边距，避免左右媒体顶边再偏 10px */
+.rh-tri-io > .rh-pane-in .rh-input-stack:has(.rh-media-tile.has-media) {
+  padding:0;
+}
+/* 与输出井同高起步，上行输入/输出顶底对齐 */
+.rh-tri-io > .rh-pane-in .rh-input-stack,
+.rh-tri-io > .rh-pane-out .rh-well {
+  flex:1 1 auto;
+  min-height:200px;
+}
+.rh-node.sized .rh-tri-io > .rh-pane-in .rh-input-stack,
+.rh-node.rh-content-scroll .rh-tri-io > .rh-pane-in .rh-input-stack,
+.rh-node.sized .rh-tri-io > .rh-pane-out .rh-well,
+.rh-node.rh-content-scroll .rh-tri-io > .rh-pane-out .rh-well {
+  min-height:140px;
+}
+/* 有图时隐藏「拖入上传」提示，避免把输入列撑得比输出高 */
+.rh-media-grid:has(.rh-media-tile.has-media) .rh-media-grid-hint {
+  display:none;
+}
+.rh-output-toolbar-slot:empty {
+  display:none;
+}
+.rh-out-actions .rh-output-toolbar {
+  width:100%;
+}
 .rh-pane-params {
   padding-top:22px; /* 与两侧标题行对齐 */
 }
@@ -6323,11 +6438,15 @@ html.canvas-text-expand-open { overflow:hidden; }
 .rh-node.rh-measure .rh-input-stack,
 .rh-node.rh-measure .rh-side-scroll,
 .rh-node.rh-measure .rh-well,
+.rh-node.rh-measure .rh-prompt-rail,
+.rh-node.rh-measure .rh-out-actions,
 .rh-measure-probe .rh-tri,
 .rh-measure-probe .rh-pane,
 .rh-measure-probe .rh-input-stack,
 .rh-measure-probe .rh-side-scroll,
-.rh-measure-probe .rh-well {
+.rh-measure-probe .rh-well,
+.rh-measure-probe .rh-prompt-rail,
+.rh-measure-probe .rh-out-actions {
   overflow:visible !important;
   min-height:min-content !important;
   flex:0 0 auto !important;
@@ -6549,6 +6668,7 @@ html.canvas-text-expand-open { overflow:hidden; }
   padding-right:28px; /* 避开右下角缩放手柄 */
   /* 共用模版：底栏永远贴在壳底，不被字段顶出裁切区 */
   margin-top:auto;
+  flex-shrink:0;
 }
 .rh-advanced-toggle {
   align-self:flex-end;
@@ -6569,11 +6689,13 @@ html.canvas-text-expand-open { overflow:hidden; }
   cursor:pointer;
   position:relative;
   z-index:2;
+  order:0;
 }
 .rh-advanced-toggle i {
   transition:transform .18s cubic-bezier(.22,.61,.36,1);
 }
-.rh-advanced-toggle.is-open i { transform:rotate(180deg); }
+/* 面板在按钮下方展开；箭头保持朝下，勿翻成「往上收」 */
+.rh-advanced-toggle.is-open i { transform:none; }
 .rh-advanced {
   display:none;
   grid-template-columns:repeat(3, minmax(0, 1fr));
@@ -6581,6 +6703,9 @@ html.canvas-text-expand-open { overflow:hidden; }
   padding:10px;
   border-radius:14px;
   background:rgba(0,0,0,.14);
+  position:relative;
+  order:1;
+  flex:0 0 auto;
 }
 .rh-advanced.is-open { display:grid; }
 .rh-progress {
@@ -6710,6 +6835,10 @@ html.canvas-text-expand-open { overflow:hidden; }
   width:100%;
 }
 .rh-prompt-list:empty { display:none; }
+.rh-prompt-rail .rh-prompt-list {
+  grid-template-columns:minmax(0, 1fr);
+  width:100%;
+}
 .rh-prompt-tile {
   min-width:0;
   grid-column:1 / -1;

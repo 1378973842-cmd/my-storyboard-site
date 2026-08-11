@@ -1,16 +1,16 @@
 ﻿# 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  1. **本会话**：本地 **AG200～AG207** 一并提交（此前 AG207 已单独推送 `3428cea`）。
-  2. **AG200～AG206**：连线悬停跳变、RH 运行/预览、Pin Hub、建组闪黑、框选图片组、编辑聚焦视口。
-  3. **AG207**：删除其他图片不被冲突合并复活（已在 `deploy`）。
-- **验证状态**：相关 check + 此前 `node init.mjs` 已通过。
-- **明日焦点**：硬刷新抽检 AG200～AG206；需要时 `deploy:safe`。
-- **Blockers**：视频剪辑仍无服务端 ffmpeg；跨域源可能影响胶片条/导出；RH 任务无服务端 resume（刷新会丢轮询）。
+  1. **线上已部署**：`deploy` @ `6f18b85`（含 AG200～AG207）。
+  2. **本会话未上线**：AG208～AG215。
+     - AG215：定位飞过去又弹回——根因是远端同步用服务器旧 viewport 覆盖；已 touchBoardInteraction + scheduleViewportSave，同步时保留动画中本地视口。
+- **验证状态**：`check-canvas-pin` + `node init.mjs` 通过。
+- **明日焦点**：导演 commit 后部署。
+- **Blockers**：视频剪辑无服务端 ffmpeg；RH 无服务端 resume；云盘偏紧。
 
 ## 新对话开场白（复制给 Agent）
 
 ```
 继续 gemini-deploy。先读 docs/HANDOFF.md。
-AG200～AG207 已提交；按导演下一条继续。
+本会话 AG208～AG215（含定位弹回修复），未 commit/未上线。按导演下一条继续。
 ```
