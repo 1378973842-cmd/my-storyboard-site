@@ -21321,28 +21321,19 @@ function bindGenStageInteractions(root, node){
             const idx = Number(tile.dataset.previewIndex || 0);
             openResultsMenu(e.clientX, e.clientY, {url, previewIndex: idx});
         };
-        tile.ondblclick = e => {
-            if(e.target.closest('button')) return;
-            e.preventDefault();
-            e.stopPropagation();
-            const url = tile.getAttribute('data-preview-url');
-            if(url) openGeneratorHistoryLightbox(node, url);
-        };
         tile.onclick = e => {
             if(e.target.closest('button')) return;
             e.stopPropagation();
             applyNodeSelection(node.id, e);
             const url = tile.getAttribute('data-preview-url') || '';
             if(url) node._lightboxFocusUrl = outputUrlValue(url);
-            // 单击不设主图；批量勾选除外。普通单击直接预览当前格（点哪看哪）
+            // 展开网格：单击不进灯箱；仅批量勾选 / 选中节点
             if(isGenBatchPicking(node)){
                 if(toggleGenBatchPickUrl(url)){
                     refresh();
                     syncGenBatchPickBar();
                 }
-                return;
             }
-            if(url) openGeneratorHistoryLightbox(node, url);
         };
         const media = tile.querySelector('img, video');
         const url = tile.getAttribute('data-preview-url') || media?.getAttribute('src') || '';
