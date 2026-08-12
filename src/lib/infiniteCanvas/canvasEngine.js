@@ -33384,8 +33384,33 @@ function pasteNodes(){
 function clearWindowPointerHandlers(){
     window.onmousemove = null;
     window.onmouseup = null;
+    clearNodeDragWindowPtrUp();
+}
+let nodeDragWindowPtrUpCleanup = null;
+function clearNodeDragWindowPtrUp(){
+    if(!nodeDragWindowPtrUpCleanup) return;
+    nodeDragWindowPtrUpCleanup();
+    nodeDragWindowPtrUpCleanup = null;
+}
+/** mousedown+preventDefault 会压制 mouseup（文本 contenteditable 尤甚）；pointerup 兜底 */
+function wireNodeDragWindowListeners(){
+    window.onmousemove = onNodePointerMove;
+    window.onmouseup = onNodePointerUp;
+    clearNodeDragWindowPtrUp();
+    const onPtrUp = e2 => {
+        if(e2.button != null && e2.button !== 0) return;
+        clearNodeDragWindowPtrUp();
+        onNodePointerUp(e2);
+    };
+    window.addEventListener('pointerup', onPtrUp, true);
+    nodeDragWindowPtrUpCleanup = () => window.removeEventListener('pointerup', onPtrUp, true);
 }
 function onNodePointerMove(e){
+    // 松手后 mouseup 被吞时，下一帧 move 的 buttons=0 仍须结束拖拽
+    if((pendingNodeDrag || dragNode) && (e.buttons ?? 0) === 0){
+        onNodePointerUp(e);
+        return;
+    }
     if(pendingNodeDrag){
         if(!pointerMovedEnough(pendingNodeDrag.sx, pendingNodeDrag.sy, e)) return;
         let payload = pendingNodeDrag;
@@ -33406,7 +33431,6 @@ function onNodePointerMove(e){
     onNodeDrag(e);
 }
 function onNodePointerUp(e){
-    clearSelectionHullPtrUp();
     if(pendingNodeDrag){
         pendingNodeDrag = null;
         clearWindowPointerHandlers();
@@ -33424,7 +33448,8 @@ function startNodeDrag(e, node){
     if(tryHandleGenRefPickPointer(e, node)) return;
     if(dragNode || resizeNode || pendingNodeDrag) return;
     if(startKnifeDrag(e)) return;
-    e.preventDefault();
+    // ponytail: 文本图台 mousedown+preventDefault 会吞 mouseup，松手后节点仍黏鼠标
+    if(node?.type !== 'prompt' && e.cancelable) e.preventDefault();
     e.stopPropagation();
     let dragTarget = node;
     let duplicateCreated = false;
@@ -33450,14 +33475,7 @@ function startNodeDrag(e, node){
         pendingNodeDrag = payload;
         dragNode = null;
     }
-    window.onmousemove = onNodePointerMove;
-    window.onmouseup = onNodePointerUp;
-}
-let selectionHullPtrUpCleanup = null;
-function clearSelectionHullPtrUp(){
-    if(!selectionHullPtrUpCleanup) return;
-    selectionHullPtrUpCleanup();
-    selectionHullPtrUpCleanup = null;
+    wireNodeDragWindowListeners();
 }
 /** 多选外框：按住拖动整组（不折叠多选） */
 function startSelectionHullDrag(e){
@@ -33473,7 +33491,6 @@ function startSelectionHullDrag(e){
     // 只用 mousedown 路径的 preventDefault；pointerdown+preventDefault 会压制 mouseup，外框会黏住鼠标
     if(e.type === 'mousedown' && e.cancelable) e.preventDefault();
     e.stopPropagation();
-    clearSelectionHullPtrUp();
     const children = collectDragChildren(primary);
     pendingNodeDrag = {
         node: primary,
@@ -33485,16 +33502,7 @@ function startSelectionHullDrag(e){
         duplicateCreated: false
     };
     dragNode = null;
-    window.onmousemove = onNodePointerMove;
-    window.onmouseup = onNodePointerUp;
-    // pointerup 兜底：即使兼容鼠标事件被吞，也能松手结束拖拽
-    const onPtrUp = e2 => {
-        if(e2.button != null && e2.button !== 0) return;
-        clearSelectionHullPtrUp();
-        onNodePointerUp(e2);
-    };
-    window.addEventListener('pointerup', onPtrUp, true);
-    selectionHullPtrUpCleanup = () => window.removeEventListener('pointerup', onPtrUp, true);
+    wireNodeDragWindowListeners();
 }
 function onSelectionBoxMouseDown(e){
     if(!canvas || !selectionBox || e.button !== 0) return;
@@ -34001,8 +34009,7 @@ function endDrag(event=null){
     });
     board?.classList.remove('is-panning');
     cancelTempLink();
-    window.onmousemove = null;
-    window.onmouseup = null;
+    clearWindowPointerHandlers();
     if(shouldRenderKnife) safeRender({ force: true });
     if(boardPanMoved || nodeDragMoved || resizeMoved) lastBoardInteractionAt = Date.now();
     clearGroupDropHighlights();
