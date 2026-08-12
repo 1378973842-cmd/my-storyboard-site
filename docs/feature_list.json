@@ -228,6 +228,7 @@
         { "id": "AG216", "desc": "修：RH 高级设置展开先加高再露面板（同帧 fit），消除挤壳闪一下", "status": "done", "priority": 250 },
         { "id": "AG217", "desc": "UI：画布侧栏工具条 + 顶栏 logo pill 改毛玻璃半透明（blur40 / 55% 底；顶栏 translateZ 减闪）", "status": "done", "priority": 251 },
         { "id": "AG218", "desc": "修：小地图结构变更跟手——全量 rAF 合并；拖动仍 positionsOnly；增删 mismatch 回退 renderMinimap", "status": "done", "priority": 252 },
+        { "id": "AG219", "desc": "修：上层图片盖住下层端口时，磁吸不再抢十字拉线光标（elementFromPoint 遮挡）", "status": "done", "priority": 253 },
         { "id": "AG206c", "desc": "check：image-edit-viewport-focus", "status": "done", "priority": 240 },
         { "id": "AG199c", "desc": "check：rh-output-layout（含 RH skip stage / 去框）", "status": "done", "priority": 233 },
         { "id": "AG30", "desc": "图片组：子图自然尺寸落地后防抖重排扩容，避免默认框装不下", "status": "done", "priority": 51 },

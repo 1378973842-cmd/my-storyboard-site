@@ -3998,6 +3998,21 @@ function isOutsidePortSemicircle(kind, dx, dy, radius){
     if(kind === 'out') return dx >= 0;
     return dx <= 0;
 }
+/**
+ * 层级遮挡：磁吸按几何算半圆，但上层图片盖住端口时不应抢十字光标。
+ * hit 是别的节点 / 别的端口 / 浮动 chrome → 视为挡住。
+ */
+function isPortMagnetOccluded(port, portNodeEl, hitEl){
+    if(!hitEl || !port || !portNodeEl) return false;
+    const hitPort = hitEl.closest?.('.port');
+    if(hitPort) return hitPort !== port;
+    const hitNode = hitEl.closest?.('.node');
+    if(hitNode) return hitNode !== portNodeEl;
+    // 空白板 / 世界 / 连线层：未挡住
+    if(hitEl.closest?.('#board, .board, #world, .world, #nodes, #links, .links')) return false;
+    // dock / 顶栏等浮动层盖住时也不吸
+    return true;
+}
 function setPortMagnetCursor(on){
     withCanvasRootClass(list => {
         if(on) list.add('canvas-port-magnetic');
@@ -4060,6 +4075,10 @@ function runPortMagnetUpdate(){
     const world = screenToWorld(mouse.x, mouse.y);
     const radiusWorld = PORT_MAGNET_LEAVE / scale + 28;
     const stillActive = new Set();
+    // 每帧一次命中探测：上层图片盖住下层端口时跳过磁吸
+    const hitEl = typeof document !== 'undefined'
+        ? document.elementFromPoint(mouse.x, mouse.y)
+        : null;
     nodes.forEach(n => {
         const rect = estimatedNodeRect(n);
         if(world.x < rect.x - radiusWorld || world.x > rect.x + rect.w + radiusWorld ||
@@ -4070,12 +4089,16 @@ function runPortMagnetUpdate(){
             const dot = port.querySelector('.port-dot');
             if(!dot) return;
             const kind = port.classList.contains('in') ? 'in' : 'out';
+            const wasActive = portMagnetActivePorts.has(port);
+            if(isPortMagnetOccluded(port, el, hitEl)){
+                if(wasActive) resetPortMagnet(port);
+                return;
+            }
             // 磁吸始终按展开位计算（圆环落点），与连线收起态解耦
             const wp = portPointFromLayout(n, kind, el, { expanded:true });
             const sp = worldToScreen(wp.x, wp.y, boardRect);
             const dx = mouse.x - sp.x;
             const dy = mouse.y - sp.y;
-            const wasActive = portMagnetActivePorts.has(port);
             const radius = wasActive ? PORT_MAGNET_LEAVE : PORT_MAGNET_ENTER;
             if(!isOutsidePortSemicircle(kind, dx, dy, radius)){
                 if(wasActive) resetPortMagnet(port);
