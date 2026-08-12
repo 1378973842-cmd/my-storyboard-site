@@ -320,7 +320,7 @@ function resetCanvasInteractionForEdit(){
         board.classList.remove('is-panning');
         if(!spacePanArmed) board.style.cursor = '';
     }
-    withCanvasRootClass(list => list.remove('canvas-node-drag', 'canvas-node-resize', 'canvas-selecting', 'canvas-space-pan'));
+    withCanvasRootClass(list => list.remove('canvas-node-drag', 'canvas-node-resize', 'canvas-selecting', 'canvas-space-pan', 'canvas-crop-move', 'canvas-crop-resize'));
     if(spacePanArmed) withCanvasRootClass(list => list.add('canvas-space-pan'));
 }
 function syncCanvasModelFromState(){
@@ -4702,7 +4702,6 @@ function renderCanvasPinHubTriggers(host, colorIds){
         const label = pinLabelForColor(colorId);
         const open = canvasPinHubOpen && canvasPinHubOpenColor === colorId;
         return `<button type="button" class="canvas-pin-hub-trigger ${open ? 'is-open' : ''}" data-pin-hub-color="${escapeAttr(colorId)}" style="--pin-hub-accent:${hex}" title="${escapeAttr(label)}" aria-label="${escapeAttr(label)}" aria-expanded="${open ? 'true' : 'false'}">
-            <span class="canvas-pin-hub-ring" aria-hidden="true"></span>
             <span class="canvas-pin-hub-core" aria-hidden="true" style="background:${hex}"></span>
         </button>`;
     }).join('');
@@ -7308,13 +7307,24 @@ function ensureImageEditorUi(){
         setCropAspectMenuOpen(false);
     }, true);
     on(document, 'mousedown', event => {
-        if(!isImageEditOpen()) return;
+        if(!isImageEditOpen() || imageEditMode !== 'crop') return;
         if(event.target.closest('#cropHandle')){
             beginCropDrag(event, 'resize');
         } else if(event.target.closest('#cropBox') && !event.target.closest('#cropHandle')){
             beginCropDrag(event, 'move');
         }
+    }, true);
+    on(document, 'pointermove', event => {
+        if(!cropDrag || !cropState || imageEditMode !== 'crop') return;
+        if(event.buttons === 0){
+            cropDrag = null;
+            clearCropDragCursor();
+            return;
+        }
+        moveCropDrag(event);
     });
+    on(document, 'pointerup', () => { cropDrag = null; clearCropDragCursor(); });
+    on(document, 'pointercancel', () => { cropDrag = null; clearCropDragCursor(); });
     on(document, 'pointerdown', event => {
         if(!isImageEditOpen() || imageEditMode !== 'brush') return;
         if(event.target.closest('.image-edit-head, .image-edit-tools, .image-edit-actions, .image-edit-mode, .image-edit-crop-dock, .image-edit-brush-dock, .crop-aspect-menu, #cropBox, #cropHandle')) return;
@@ -12934,7 +12944,7 @@ function imageMediaFloatTitleHtml(node){
     if(!label) return '';
     const kind = mediaKindForNode(node);
     const icon = kind === 'video' ? 'clapperboard' : kind === 'audio' ? 'audio-lines' : 'image';
-    return `<span class="canvas-float-title gen-float-title image-media-float-title" data-float-kind="media" data-media-kind="${escapeAttr(kind)}" title="${escapeAttr(label)}"><i data-lucide="${icon}"></i><span class="float-title-label" data-float-rename="1">${escapeHtml(label)}</span></span>`;
+    return `<span class="canvas-float-title gen-float-title image-media-float-title" data-float-kind="media" data-media-kind="${escapeAttr(kind)}"><i data-lucide="${icon}"></i><span class="float-title-label" data-float-rename="1">${escapeHtml(label)}</span></span>`;
 }
 /** 图台浮标序号：按 type 各自递增，首次写入 floatTitleIndex */
 function ensureNodeFloatIndex(node, type){
@@ -13043,6 +13053,17 @@ function beginNodeFloatTitleRename(node, labelEl){
 }
 function bindNodeFloatTitleRename(el, node){
     if(!el || !node) return;
+    const stopTitlePointer = e => {
+        e.stopPropagation();
+    };
+    el.querySelectorAll('.canvas-float-title, .gen-float-title, .image-edit-origin-badge').forEach(host => {
+        host.addEventListener('mousedown', stopTitlePointer);
+        host.addEventListener('dblclick', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation?.();
+        });
+    });
     el.querySelectorAll('[data-float-rename="1"]').forEach(labelEl => {
         labelEl.title = langIsEn() ? 'Double-click to rename' : '双击重命名';
         labelEl.onmousedown = e => e.stopPropagation();
@@ -13234,6 +13255,13 @@ function renderCropBox(){
 function resetCropBox(){
     if(!cropState) return;
     const {w, h} = cropBounds();
+    if(w < 8 || h < 8){
+        requestAnimationFrame(() => {
+            if(!cropState || imageEditMode !== 'crop') return;
+            resetCropBox();
+        });
+        return;
+    }
     const img = editExportImage() || editDisplayImage();
     const aspect = cropAspectRatioValue(img);
     // 默认略内缩，方便抓边调整（对齐参考：裁剪框小于整图）
@@ -13594,6 +13622,7 @@ function closeImageEditor(){
     clearEditDrawing(true);
     cropState = null;
     cropDrag = null;
+    clearCropDragCursor();
     editDrawState = null;
     resetEditDrawingHistory();
     gridCustomDrag = null;
@@ -13654,18 +13683,30 @@ function clampCrop(){
     cropState.x = Math.max(0, Math.min(cropState.x, w - cropState.w));
     cropState.y = Math.max(0, Math.min(cropState.y, h - cropState.h));
 }
+function syncCropDragCursor(mode){
+    withCanvasRootClass(list => {
+        list.remove('canvas-crop-move', 'canvas-crop-resize');
+        if(mode === 'move') list.add('canvas-crop-move');
+        else if(mode === 'resize') list.add('canvas-crop-resize');
+    });
+}
+function clearCropDragCursor(){
+    withCanvasRootClass(list => list.remove('canvas-crop-move', 'canvas-crop-resize'));
+}
 function beginCropDrag(event, mode){
-    if(!cropState) return;
+    if(!cropState || imageEditMode !== 'crop') return;
     event.preventDefault();
     event.stopPropagation();
+    event.stopImmediatePropagation?.();
     // 原地编辑时 crop 坐标是相对显示图的 CSS 像素；拖动要按当前视口缩放换算
     const display = editDisplayImage();
     const rect = display?.getBoundingClientRect?.();
     const scaleX = rect && display.clientWidth ? rect.width / display.clientWidth : 1;
     const scaleY = rect && display.clientHeight ? rect.height / display.clientHeight : 1;
     cropDrag = {mode, sx:event.clientX, sy:event.clientY, start:{...cropState}, scaleX, scaleY};
+    syncCropDragCursor(mode);
 }
-on(window, 'mousemove', event => {
+function moveCropDrag(event){
     if(!cropDrag || !cropState) return;
     const dx = (event.clientX - cropDrag.sx) / Math.max(0.0001, cropDrag.scaleX || 1);
     const dy = (event.clientY - cropDrag.sy) / Math.max(0.0001, cropDrag.scaleY || 1);
@@ -13701,8 +13742,12 @@ on(window, 'mousemove', event => {
     }
     clampCrop();
     renderCropBox();
+}
+on(window, 'mousemove', event => {
+    if(!cropDrag || !cropState || imageEditMode !== 'crop') return;
+    moveCropDrag(event);
 });
-on(window, 'mouseup', () => { cropDrag = null; });
+on(window, 'mouseup', () => { cropDrag = null; clearCropDragCursor(); });
 async function uploadCroppedBlob(blob, name){
     const form = new FormData();
     form.append('files', blob, name);
@@ -13726,17 +13771,24 @@ function shouldUseCrossOriginImage(url){
     }
 }
 async function applyImageCrop(){
-    if(!cropState) return;
-    const img = editExportImage();
+    if(!cropState || imageEditMode !== 'crop') return;
+    const exportImg = editExportImage();
     const display = editDisplayImage();
-    if(!img?.naturalWidth || !img?.naturalHeight){
+    let drawImg = exportImg;
+    const viewW = display?.clientWidth || exportImg?.clientWidth || 1;
+    const viewH = display?.clientHeight || exportImg?.clientHeight || 1;
+    const srcUrl = String(exportImg?.currentSrc || exportImg?.src || cropState.saveTarget?.url || '').trim();
+    if(!drawImg?.naturalWidth || !drawImg?.naturalHeight){
+        try {
+            if(srcUrl) drawImg = await loadImageBitmapForExport(srcUrl);
+        } catch(_){ /* fall through */ }
+    }
+    if(!drawImg?.naturalWidth || !drawImg?.naturalHeight){
         softAlert(langIsEn() ? 'Image not loaded yet. Close and reopen the editor.' : '图片尚未加载完成，请关闭后重新打开编辑。');
         return;
     }
-    const viewW = display?.clientWidth || img.clientWidth || 1;
-    const viewH = display?.clientHeight || img.clientHeight || 1;
-    const scaleX = img.naturalWidth / viewW;
-    const scaleY = img.naturalHeight / viewH;
+    const scaleX = drawImg.naturalWidth / viewW;
+    const scaleY = drawImg.naturalHeight / viewH;
     const sx = Math.max(0, Math.round(cropState.x * scaleX));
     const sy = Math.max(0, Math.round(cropState.y * scaleY));
     const sw = Math.max(1, Math.round(cropState.w * scaleX));
@@ -13744,7 +13796,15 @@ async function applyImageCrop(){
     const canvasEl = document.createElement('canvas');
     canvasEl.width = sw;
     canvasEl.height = sh;
-    canvasEl.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    try {
+        canvasEl.getContext('2d').drawImage(drawImg, sx, sy, sw, sh, 0, 0, sw, sh);
+    } catch(err){
+        console.warn('[applyImageCrop]', err);
+        softAlert(langIsEn()
+            ? 'Crop export failed. Re-upload the image or use a same-site file.'
+            : '裁剪导出失败。请用「替换」重新上传本地图片后再试。');
+        return;
+    }
     const blob = await new Promise(resolve => canvasEl.toBlob(resolve, 'image/png'));
     if(!blob){
         softAlert(langIsEn()
@@ -14295,6 +14355,9 @@ function restoreOutputScrolls(state){
         });
     });
 }
+function isImageNodeFloatChromeTarget(target){
+    return Boolean(target?.closest?.('.canvas-float-title, .gen-float-title, .image-edit-origin-badge, .float-title-label, .float-title-input'));
+}
 function isNodeControl(target){
     // 图台/轻量结果台主媒体：允许拖节点与 Alt 复制（含 video 结果）
     if(target?.closest?.('.gen-stage-hero, .gen-stage-frame, .agent-result-hero, .agent-result-frame')) return false;
@@ -14420,7 +14483,7 @@ function renderNode(node){
             const floatBadge = imageMediaFloatTitleHtml(node);
             if(floatBadge) el.classList.add('has-edit-origin');
             // 说明/文件名在预览框上方，不叠在画面内角标上
-            body.innerHTML = `${floatBadge}<div class="image-preview-wrap" title="${escapeAttr(node.name || 'image')}">${missing ? missingAssetHtml(node.url) : `<img src="${escapeAttr(node.url)}" draggable="false" alt="" loading="lazy" decoding="async">`}${skipBadge}</div>${stillCaption}`;
+            body.innerHTML = `${floatBadge}<div class="image-preview-wrap">${missing ? missingAssetHtml(node.url) : `<img src="${escapeAttr(node.url)}" draggable="false" alt="" loading="lazy" decoding="async">`}${skipBadge}</div>${stillCaption}`;
             if(!missing && mediaKind !== 'image'){
                 const mediaHtml = mediaKind === 'video'
                     ? `<div class="media-card video-card"><div class="video-player-wrap"><video src="${escapeAttr(node.url)}" data-url="${escapeAttr(node.url)}" controls preload="auto" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video><button type="button" class="btn-capture-frame">${langIsEn() ? 'Capture frame' : '截取当前帧'}</button></div></div>`
@@ -14433,6 +14496,7 @@ function renderNode(node){
             const inImageBatch = Boolean(imageBatchOwningImage(node.id));
             const openPreview = e => {
                 if(!isEditableImage) return;
+                if(isImageNodeFloatChromeTarget(e.target)) return;
                 e.preventDefault();
                 e.stopPropagation();
                 e.stopImmediatePropagation();
@@ -14441,10 +14505,12 @@ function renderNode(node){
                 else openImageEditor(node.id);
             };
             if(inImageBatch && previewWrap){
-                previewWrap.title = langIsEn() ? `${node.name || 'image'} · double-click to enlarge` : `${node.name || 'image'} · 双击放大查看`;
                 previewWrap.classList.add('is-batch-previewable');
             }
             body.onmousedown = e => {
+                if(isImageEditOpen()) return;
+                if(isImageNodeFloatChromeTarget(e.target)) return;
+                if(e.target?.closest?.('#cropBox, #cropHandle, #editDrawCanvas, .crop-canvas.is-canvas-inplace')) return;
                 if(e.detail >= 2){
                     openPreview(e);
                     return;
@@ -14469,7 +14535,7 @@ function renderNode(node){
                 }, true);
                 loadedImg.addEventListener('dblclick', openPreview, true);
             }
-            if(isEditableImage) body.addEventListener('dblclick', openPreview, true);
+            if(isEditableImage) body.addEventListener('dblclick', openPreview);
             if(loadedImg && loadedImg.complete && loadedImg.naturalHeight > 0){
                 fitImageNodeToNaturalAspect(node, el, loadedImg);
                 requestAnimationFrame(refreshGeometry);
@@ -33445,6 +33511,8 @@ function onNodePointerUp(e){
 }
 function startNodeDrag(e, node){
     if(e.button !== 0) return;
+    if(isImageEditOpen()) return;
+    if(e.target?.closest?.('#cropBox, #cropHandle, #editDrawCanvas, .crop-canvas.is-canvas-inplace')) return;
     if(tryHandleGenRefPickPointer(e, node)) return;
     if(dragNode || resizeNode || pendingNodeDrag) return;
     if(startKnifeDrag(e)) return;
@@ -33572,6 +33640,7 @@ function onNodeDrag(e){
     }
 }
 function startNodeResize(e, node){
+    if(isImageEditOpen()) return;
     e.preventDefault();
     e.stopPropagation();
     const el = nodesEl.querySelector(`.node[data-id="${node.id}"]`);
@@ -35303,7 +35372,7 @@ board.onmousedown = e => {
         // 刚打开时卸掉动作条，同一指针周期易点到空白——短窗内勿关，否则会放大后又缩回
         if(Date.now() - imageEditOpenedAt < 480) return;
         if(e.target.closest?.(
-            '.crop-canvas.is-canvas-inplace, #cropBox, #cropHandle, #editDrawCanvas, .image-edit-crop-dock, .image-edit-brush-dock, .image-edit-rotate-dock, .crop-aspect-menu, #imageEditModal, .image-edit-modal'
+            '.crop-canvas.is-canvas-inplace, #cropBox, #cropHandle, #editDrawCanvas, .image-edit-crop-dock, .image-edit-brush-dock, .image-edit-rotate-dock, .crop-aspect-menu, #imageEditModal, .image-edit-modal, .canvas-float-title, .gen-float-title, .image-edit-origin-badge, .float-title-label, .float-title-input'
         )) return;
         closeImageEditor();
         return;
