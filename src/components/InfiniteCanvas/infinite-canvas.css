@@ -66,28 +66,26 @@
   outline:0.5px solid rgba(255,255,255,.1);
   box-shadow:0 20px 48px -32px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.05);
 }
-/* 侧边工具栏：参考胶囊轨——深炭底 + 整条内轮廓光 */
+/* 侧边工具栏：毛玻璃半透明胶囊轨 */
 .infinite-canvas-root.theme-dark .canvas-side-dock.panel {
-  background:#1e1e1e;
-  outline:none;
-  backdrop-filter:blur(28px) saturate(1.05);
-  -webkit-backdrop-filter:blur(28px) saturate(1.05);
+  background:rgba(30,30,30,.55);
+  outline:0.5px solid rgba(255,255,255,.12);
+  outline-offset:-0.5px;
+  backdrop-filter:blur(40px) saturate(175%);
+  -webkit-backdrop-filter:blur(40px) saturate(175%);
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.16),
+    inset 0 1px 0 rgba(255,255,255,.14),
     inset 0 -1px 0 rgba(255,255,255,.04),
-    inset 1px 0 0 rgba(255,255,255,.08),
-    inset -1px 0 0 rgba(255,255,255,.05),
-    inset 0 0 0 1px rgba(255,255,255,.06),
-    0 28px 64px -28px rgba(0,0,0,.72);
+    0 28px 64px -28px rgba(0,0,0,.55);
 }
 .infinite-canvas-root:not(.theme-dark) .canvas-side-dock.panel {
-  background:rgba(255,255,255,.78);
+  background:rgba(255,255,255,.55);
   outline:0.5px solid rgba(15,23,42,.08);
-  backdrop-filter:blur(28px) saturate(150%);
-  -webkit-backdrop-filter:blur(28px) saturate(150%);
+  backdrop-filter:blur(40px) saturate(160%);
+  -webkit-backdrop-filter:blur(40px) saturate(160%);
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.8),
-    0 20px 48px -28px rgba(15,23,42,.18);
+    inset 0 1px 0 rgba(255,255,255,.7),
+    0 20px 48px -28px rgba(15,23,42,.16);
 }
 /* 侧边工具栏：同一套面板复用 .bottombar 的显隐/淡入时机，仅覆盖布局方向为纵向 */
 .canvas-side-dock {

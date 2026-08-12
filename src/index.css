@@ -840,10 +840,16 @@ html[data-theme="light"] body {
     min-height: 44px;
     padding: 4px 6px 4px 4px;
     border-radius: 999px;
-    /* 实底：勿用 backdrop-filter，否则悬停下方节点时顶区合成重算会闪 */
-    background: #1c1b1b;
-    outline: 0.5px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 18px 48px -24px rgba(0, 0, 0, 0.72);
+    /* 毛玻璃：半透底 + blur；translateZ 独立合成层，减轻节点悬停时顶区闪烁 */
+    background: rgba(28, 27, 27, 0.55);
+    outline: 0.5px solid rgba(255, 255, 255, 0.12);
+    outline-offset: -0.5px;
+    backdrop-filter: blur(40px) saturate(175%);
+    -webkit-backdrop-filter: blur(40px) saturate(175%);
+    transform: translateZ(0);
+    box-shadow:
+      0 18px 48px -24px rgba(0, 0, 0, 0.55),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
 
   .studio-canvas-pill-seg {

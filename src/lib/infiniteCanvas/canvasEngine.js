@@ -351,7 +351,7 @@ function commitCanvasStructureEdit(){
     syncLinkDomToConnections();
     refreshGeometry();
     refreshGeometryAfterLayout();
-    if(minimapState) updateMinimapNodePositions();
+    scheduleMinimapRender();
 }
 /** 局部挂载一颗节点（不整板 render） */
 function mountNodeDom(node){
@@ -411,8 +411,7 @@ function commitStructureDomPatch({ addedIds = [], removedIds = [], refreshIds = 
         const touch = new Set([...added, ...removed, ...refresh]);
         scheduleLinkGeometryRefresh(touch.size ? touch : null);
         refreshGeometryAfterLayout();
-        if(minimapState) updateMinimapNodePositions();
-        else scheduleMinimapRender({ positionsOnly: true });
+        scheduleMinimapRender();
         syncImageGenDock();
         scheduleViewportNodeCull();
     } catch(err) {
@@ -862,6 +861,8 @@ let dragBoard = null;
 let minimapDrag = false;
 let minimapState = null;
 let minimapRenderQueued = false;
+/** 合并帧内请求：任一处要全量，本帧末走 renderMinimap */
+let minimapNeedsFull = false;
 const MINIMAP_VISIBLE_KEY = 'infinite-canvas-minimap-visible';
 function readMinimapVisiblePref(){
     try {
@@ -4165,20 +4166,43 @@ function minimapBounds(){
 }
 function scheduleMinimapRender({ positionsOnly = false } = {}){
     if(!minimapVisible) return;
+    // 全量优先：同帧先 positionsOnly 再结构变更时，仍要重建 DOM
+    if(!positionsOnly) minimapNeedsFull = true;
     if(minimapRenderQueued) return;
     minimapRenderQueued = true;
     requestAnimationFrame(() => {
         minimapRenderQueued = false;
+        const wantFull = minimapNeedsFull;
+        minimapNeedsFull = false;
         if(!minimapVisible) return;
+        if(wantFull){
+            renderMinimap();
+            return;
+        }
+        // 拖动画布：只挪视口框；拖节点：挪点位（冻结 bounds，避免每帧整图重建）
         if(dragBoard) updateMinimapViewport();
-        else if(dragNode || (positionsOnly && minimapState)) updateMinimapNodePositions();
+        else if(dragNode || minimapState) updateMinimapNodePositions();
         else renderMinimap();
     });
 }
 function updateMinimapNodePositions(){
     if(!minimapVisible || !minimapContent || !minimapState) return;
+    const live = nodes || [];
+    const existing = minimapContent.querySelectorAll('.minimap-node[data-node-id]');
+    // 增删节点后若只改 left/top，新点不会出现、旧点残留 → 回退全量
+    if(existing.length !== live.length){
+        renderMinimap();
+        return;
+    }
+    const liveIds = new Set(live.map(n => n.id));
+    for(const el of existing){
+        if(!liveIds.has(el.dataset.nodeId)){
+            renderMinimap();
+            return;
+        }
+    }
     const {bounds, scale, ox, oy} = minimapState;
-    (nodes || []).forEach(n => {
+    live.forEach(n => {
         const el = minimapContent.querySelector(`.minimap-node[data-node-id="${CSS.escape(n.id)}"]`);
         if(!el) return;
         const r = estimatedNodeRect(n);
@@ -9212,7 +9236,7 @@ function organizeGroupChildren(groupId){
     const resizeMode = (group.type === 'imageBatch' || group.type === 'promptGroup') ? 'auto' : false;
     layoutGroupChildren(group, { resizeGroup: resizeMode, layoutAllItems: true, updateDom: true });
     scheduleLinkGeometryRefresh(new Set([group.id, ...(group.items || [])]));
-    if(minimapState) updateMinimapNodePositions();
+    scheduleMinimapRender();
     scheduleSave();
 }
 function bindGroupTidyButton(body, group){
@@ -14044,6 +14068,7 @@ function render(options = {}){
     refreshOutputTimer();
     syncImageGenDock();
     syncCanvasPinHub();
+    scheduleMinimapRender();
 }
 function refreshNodes(ids=[]){
     const uniqueIds = [...new Set((ids || []).filter(Boolean))];
@@ -20739,7 +20764,7 @@ function scheduleImageBatchRelayout(batchId, resizeGroup='auto'){
         const geometryChanged = prevW !== Number(g.w) || prevH !== Number(g.h) || prevXY !== nextXY;
         if(geometryChanged){
             scheduleLinkGeometryRefresh(new Set([g.id, ...(g.items || [])]));
-            if(minimapState) updateMinimapNodePositions();
+            scheduleMinimapRender();
             scheduleSave();
         }
         g._batchLayoutReady = true;
@@ -32488,7 +32513,7 @@ function organizeSelectedNodes(){
     render();
     requestAnimationFrame(() => {
         refreshGeometryAfterLayout();
-        if(minimapState) updateMinimapNodePositions();
+        scheduleMinimapRender();
     });
     scheduleSave();
 }
@@ -33979,14 +34004,13 @@ function endDrag(event=null){
         scheduleNodeDragSave();
         requestAnimationFrame(() => {
             refreshGeometryAfterLayout();
-            if(minimapState) updateMinimapNodePositions();
-            else scheduleMinimapRender({ positionsOnly: true });
+            // 松手后全量一次：重算 bounds（拖动中只挪点不扩图）
+            scheduleMinimapRender();
             if(deferredMembership){
                 const snapped = snapNodesToGroups(deferredMembership, lastMouseBoard);
                 if(snapped){
                     scheduleLinkGeometryRefresh(new Set(deferredMembership.map(n => n.id)));
-                    if(minimapState) updateMinimapNodePositions();
-                    else scheduleMinimapRender({ positionsOnly: true });
+                    scheduleMinimapRender();
                 }
                 updateGroupMembership(deferredMembership);
             }
@@ -35710,8 +35734,7 @@ function restoreEditorSurface(){
     syncSaveSubtitleTime();
     renderCanvasList();
     ensureEditorDomFromModel();
-    if(!minimapState) renderMinimap();
-    else updateMinimapNodePositions();
+    scheduleMinimapRender();
     resumeCanvasImageTasks();
     startCanvasRemotePolling();
     refreshIcons();
@@ -36009,4 +36032,6 @@ export function disposeInfiniteCanvasEngine({ preserveEditor = false } = {}) {
   linksEl = null;
   shell = null;
   minimapState = null;
+  minimapRenderQueued = false;
+  minimapNeedsFull = false;
 }
