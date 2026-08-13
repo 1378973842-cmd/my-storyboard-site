@@ -884,7 +884,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
           <button
             type="button"
             onClick={goBack}
-            className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-[#131313]/75 px-3 py-1.5 text-[13px] text-[#e5e2e1]/75 transition-colors hover:bg-[#1c1b1b] hover:text-[#e5e2e1]"
+            className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-[#131313]/75 px-3 py-1.5 text-[13px] text-white/90 transition-colors hover:bg-[#1c1b1b] hover:text-white"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden />
             返回

@@ -455,9 +455,9 @@ function MenuRow({
       type="button"
       role="menuitem"
       onClick={onClick}
-      className="flex w-full items-center gap-3 px-4 py-[11px] text-left text-[13px] text-[#e5e2e1]/88 transition-colors hover:bg-white/[0.04]"
+      className="flex w-full items-center gap-3 px-4 py-[11px] text-left text-[13px] text-white transition-colors hover:bg-white/[0.04]"
     >
-      <Icon className="h-[18px] w-[18px] shrink-0 text-[#e5e2e1]/45" strokeWidth={1.6} aria-hidden />
+      <Icon className="h-[18px] w-[18px] shrink-0 text-white/85" strokeWidth={1.6} aria-hidden />
       {label}
     </button>
   );

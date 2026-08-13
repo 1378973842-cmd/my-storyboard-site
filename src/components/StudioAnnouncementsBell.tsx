@@ -135,9 +135,9 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
         ref={triggerRef}
         type="button"
         className={cn(
-          'relative inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-[#242424] text-[#e5e2e1]/75 transition-colors',
+          'relative inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-[#242424] text-white/90 transition-colors',
           'outline outline-0.5 outline-white/10',
-          open ? 'bg-[#2c2c2c] text-[#e5e2e1] outline-[#ffb866]/35' : 'hover:bg-[#2c2c2c] hover:text-[#e5e2e1]',
+          open ? 'bg-[#2c2c2c] text-white outline-[#ffb866]/35' : 'hover:bg-[#2c2c2c] hover:text-white',
         )}
         title="消息"
         aria-label={unreadCount > 0 ? `消息，${unreadCount} 条未读` : '消息'}
@@ -237,7 +237,7 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
                           type="button"
                           onClick={() => void onMarkAll()}
                           disabled={unreadCount === 0}
-                          className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#242424] px-3 py-2.5 text-[13px] font-medium text-[#e5e2e1]/75 transition-colors hover:bg-[#2c2c2c] hover:text-[#e5e2e1] disabled:opacity-35"
+                          className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#242424] px-3 py-2.5 text-[13px] font-medium text-white transition-colors hover:bg-[#2c2c2c] disabled:opacity-35"
                         >
                           <CheckCheck className="h-4 w-4" strokeWidth={1.75} />
                           一键已读

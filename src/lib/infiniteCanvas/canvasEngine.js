@@ -1581,6 +1581,17 @@ let editDrawUndoStack = [];
 let editDrawRedoStack = [];
 /** 画笔层是否有未应用笔迹（避免对大图全量 getImageData） */
 let editDrawDirty = false;
+/** 文字工具：画布上变换框（PS 式拉伸/等比/旋转）；Enter 后仍保留为可点选对象，保存时才烙印 */
+let brushTextInline = null;
+let brushTextItems = [];
+let brushTextTransformDrag = null;
+const BRUSH_TEXT_MIN_W = 36;
+const BRUSH_TEXT_MIN_H = 24;
+const BRUSH_TEXT_LINE = 1.25;
+const BRUSH_TEXT_PAD_X = 12;
+const BRUSH_TEXT_STROKE_PAD = 6;
+const BRUSH_TEXT_ROT_GAP = 22;
+const BRUSH_TEXT_ROT_ARM = 40;
 const EDIT_DRAW_HISTORY_MAX = 40;
 let brushTool = 'free';
 let brushLabelCounter = 1;
@@ -7327,8 +7338,8 @@ function ensureImageEditorUi(){
     on(document, 'pointercancel', () => { cropDrag = null; clearCropDragCursor(); });
     on(document, 'pointerdown', event => {
         if(!isImageEditOpen() || imageEditMode !== 'brush') return;
-        if(event.target.closest('.image-edit-head, .image-edit-tools, .image-edit-actions, .image-edit-mode, .image-edit-crop-dock, .image-edit-brush-dock, .crop-aspect-menu, #cropBox, #cropHandle')) return;
-        if(!event.target.closest('.crop-canvas, #cropCanvas')) return;
+        if(event.target.closest('.brush-text-transform, .image-edit-head, .image-edit-tools, .image-edit-actions, .image-edit-mode, .image-edit-crop-dock, .image-edit-brush-dock, .crop-aspect-menu, #cropBox, #cropHandle')) return;
+        if(!event.target.closest('.crop-canvas, #cropCanvas, #editDrawCanvas')) return;
         beginEditDraw(event);
     }, true);
     on(document, 'pointermove', event => {
@@ -12022,8 +12033,9 @@ function resizeEditDrawCanvas(){
         canvasEl.width = w;
         canvasEl.height = h;
     }
-    canvasEl.style.width = `${display.clientWidth || 1}px`;
-    canvasEl.style.height = `${display.clientHeight || 1}px`;
+        canvasEl.style.width = `${display.clientWidth || 1}px`;
+        canvasEl.style.height = `${display.clientHeight || 1}px`;
+    brushTextItems.forEach(syncBrushTextItemBox);
 }
 function setImageEditMode(mode, userTouched=false){
     rebindDomIfStale();
@@ -12084,6 +12096,7 @@ function setImageEditMode(mode, userTouched=false){
         syncBrushTextFieldUI();
         syncAnnotationRestoreButton();
     } else {
+        flushBrushTextToCanvas();
         syncAnnotationLabelPickUI();
         syncBrushTextFieldUI();
         syncAnnotationRestoreButton();
@@ -12159,16 +12172,470 @@ function syncAnnotationLabelPickUI(){
 function syncBrushTextFieldUI(){
     const wrap = domGet('brushTextFieldWrap');
     if(!wrap) return;
-    const show = imageEditMode === 'brush' && brushTool === 'text';
-    wrap.hidden = !show;
-    wrap.style.display = show ? 'inline-flex' : 'none';
-    if(show){
-        const input = domGet('brushTextInput');
-        if(input && document.activeElement !== input){
-            // ponytail: 不强制抢焦点，避免打断刚点工具栏；首次空值给占位提示即可
-            input.placeholder = langIsEn() ? 'Type then click canvas' : '输入文字后点画布放置';
-        }
+    // 文字改为画布内联输入；工具栏字段保留 DOM 兼容旧检查，不再展示
+    wrap.hidden = true;
+    wrap.style.display = 'none';
+}
+function brushTextOverlayHost(){
+    return editDrawCanvas()?.parentElement || imageEditInplaceHost || domGet('cropCanvas');
+}
+function brushTextFontSize(){
+    return Math.max(18, editBrushSize() * 2.2);
+}
+function brushTextLocalFromWorld(px, py, cx, cy, rotDeg){
+    const rad = -rotDeg * Math.PI / 180;
+    const dx = px - cx;
+    const dy = py - cy;
+    return { x: dx * Math.cos(rad) - dy * Math.sin(rad), y: dx * Math.sin(rad) + dy * Math.cos(rad) };
+}
+function brushTextWorldFromLocal(lx, ly, cx, cy, rotDeg){
+    const rad = rotDeg * Math.PI / 180;
+    return { x: cx + lx * Math.cos(rad) - ly * Math.sin(rad), y: cy + lx * Math.sin(rad) + ly * Math.cos(rad) };
+}
+function brushTextCornerSign(handle){
+    if(handle === 'nw') return [-1, -1];
+    if(handle === 'ne') return [1, -1];
+    if(handle === 'se') return [1, 1];
+    if(handle === 'sw') return [-1, 1];
+    return [0, 0];
+}
+function brushTextPlaceholder(){
+    return langIsEn() ? 'Type here' : '输入文字';
+}
+function brushTextPlain(editor){
+    return String(editor?.innerText || editor?.textContent || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function brushTextItemPlain(st){
+    if(!st) return '';
+    return st.editor ? brushTextPlain(st.editor) : String(st.text || '').trim();
+}
+function hasBrushTextWork(){
+    return brushTextItems.some(st => brushTextItemPlain(st) || st.text);
+}
+function serializeBrushTextItems(){
+    return brushTextItems.map(st => ({
+        id: st.id,
+        cx: st.cx,
+        cy: st.cy,
+        w: st.w,
+        h: st.h,
+        rot: st.rot,
+        text: String(st.text || '').trim(),
+        color: st.color || brushColor(),
+        userScaled: Boolean(st.userScaled),
+    })).filter(it => it.text);
+}
+function measureBrushTextBox(text, fontSize){
+    const fs = Math.max(8, Number(fontSize) || 18);
+    const th = Math.max(BRUSH_TEXT_MIN_H, fs * BRUSH_TEXT_LINE);
+    const canvasEl = editDrawCanvas();
+    const ctx = canvasEl?.getContext?.('2d');
+    const sample = String(text || '').trim() || brushTextPlaceholder();
+    if(!ctx) return { w: Math.max(BRUSH_TEXT_MIN_W, fs * sample.length + BRUSH_TEXT_PAD_X), h: th };
+    ctx.font = `700 ${fs}px "Inter", "Noto Sans SC", sans-serif`;
+    const tw = ctx.measureText(sample).width;
+    const pad = BRUSH_TEXT_PAD_X + BRUSH_TEXT_STROKE_PAD * 2;
+    return { w: Math.max(BRUSH_TEXT_MIN_W, tw + pad), h: th };
+}
+function fitBrushTextItemBox(st, { force = false } = {}){
+    if(!st) return;
+    const text = brushTextItemPlain(st);
+    const fontSize = st.userScaled && !force
+        ? Math.max(8, st.h / BRUSH_TEXT_LINE)
+        : brushTextFontSize();
+    const box = measureBrushTextBox(text, fontSize);
+    if(st.userScaled && !force){
+        st.w = Math.max(st.w, box.w);
+        st.h = Math.max(st.h, box.h);
+    } else {
+        st.w = box.w;
+        st.h = box.h;
     }
+}
+function syncBrushTextBoxFromEditor(){
+    const st = brushTextInline;
+    if(!st?.editor) return;
+    fitBrushTextItemBox(st);
+    syncBrushTextItemBox(st);
+}
+function syncBrushTextItemBox(st){
+    if(!st?.root) return;
+    const canvasEl = editDrawCanvas();
+    const cw = Math.max(1, canvasEl?.width || 1);
+    const ch = Math.max(1, canvasEl?.height || 1);
+    const rect = canvasEl?.getBoundingClientRect?.();
+    st.root.style.left = `${((st.cx - st.w / 2) / cw) * 100}%`;
+    st.root.style.top = `${((st.cy - st.h / 2) / ch) * 100}%`;
+    st.root.style.width = `${(st.w / cw) * 100}%`;
+    st.root.style.height = `${(st.h / ch) * 100}%`;
+    st.root.style.transform = `rotate(${st.rot}deg)`;
+    if(st.editor && rect?.height){
+        const cssH = (st.h / ch) * rect.height;
+        st.editor.style.fontSize = `${Math.max(12, cssH / BRUSH_TEXT_LINE)}px`;
+        st.editor.style.color = st.color || brushColor();
+    }
+}
+function syncBrushTextTransformBox(){
+    if(brushTextInline) syncBrushTextItemBox(brushTextInline);
+}
+function endBrushTextTransformDrag(event){
+    if(!brushTextTransformDrag) return;
+    const cap = brushTextTransformDrag.captureEl;
+    if(cap && event?.pointerId != null){
+        try { cap.releasePointerCapture(event.pointerId); } catch(_){ /* already released */ }
+    }
+    brushTextTransformDrag = null;
+    withCanvasRootClass(list => list.remove('canvas-brush-text-drag'));
+    window.removeEventListener('pointermove', moveBrushTextTransformDrag);
+    window.removeEventListener('pointerup', endBrushTextTransformDrag);
+    window.removeEventListener('pointercancel', endBrushTextTransformDrag);
+}
+function applyBrushTextTransformDrag(p){
+    const drag = brushTextTransformDrag;
+    const st = brushTextInline;
+    if(!drag || !st) return;
+    const start = drag.start;
+    const mode = drag.mode;
+    if(mode !== 'move' && mode !== 'rotate') st.userScaled = true;
+    if(mode === 'move'){
+        st.cx = start.cx + (p.x - drag.startPointer.x);
+        st.cy = start.cy + (p.y - drag.startPointer.y);
+        syncBrushTextTransformBox();
+        return;
+    }
+    if(mode === 'rotate'){
+        const a0 = Math.atan2(drag.startPointer.y - start.cy, drag.startPointer.x - start.cx);
+        const a1 = Math.atan2(p.y - start.cy, p.x - start.cx);
+        st.rot = start.rot + (a1 - a0) * 180 / Math.PI;
+        syncBrushTextTransformBox();
+        return;
+    }
+    const rad = start.rot * Math.PI / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const anchorCorner = mode.length === 2 ? mode : '';
+    if(anchorCorner){
+        const [ox, oy] = brushTextCornerSign(anchorCorner === 'nw' ? 'se' : anchorCorner === 'ne' ? 'sw' : anchorCorner === 'se' ? 'nw' : 'ne');
+        const anchor = brushTextWorldFromLocal(ox * start.w / 2, oy * start.h / 2, start.cx, start.cy, start.rot);
+        const local = brushTextLocalFromWorld(p.x, p.y, anchor.x, anchor.y, start.rot);
+        const rawW = Math.max(BRUSH_TEXT_MIN_W, Math.abs(local.x));
+        const rawH = Math.max(BRUSH_TEXT_MIN_H, Math.abs(local.y));
+        const scale = Math.max(rawW / Math.max(1, start.w), rawH / Math.max(1, start.h));
+        st.w = Math.max(BRUSH_TEXT_MIN_W, start.w * scale);
+        st.h = Math.max(BRUSH_TEXT_MIN_H, start.h * scale);
+        st.cx = anchor.x + (-ox * st.w / 2) * cos - (-oy * st.h / 2) * sin;
+        st.cy = anchor.y + (-ox * st.w / 2) * sin + (-oy * st.h / 2) * cos;
+        st.rot = start.rot;
+        syncBrushTextTransformBox();
+        return;
+    }
+    if(mode === 'e' || mode === 'w'){
+        const edge = brushTextWorldFromLocal((mode === 'e' ? -1 : 1) * start.w / 2, 0, start.cx, start.cy, start.rot);
+        const local = brushTextLocalFromWorld(p.x, p.y, edge.x, edge.y, start.rot);
+        const newW = Math.max(BRUSH_TEXT_MIN_W, mode === 'e' ? local.x : -local.x);
+        const nc = brushTextWorldFromLocal((mode === 'e' ? 1 : -1) * newW / 2, 0, edge.x, edge.y, start.rot);
+        st.w = newW;
+        st.cx = nc.x;
+        st.cy = nc.y;
+        st.rot = start.rot;
+        syncBrushTextTransformBox();
+        return;
+    }
+    if(mode === 'n' || mode === 's'){
+        const edge = brushTextWorldFromLocal(0, (mode === 's' ? -1 : 1) * start.h / 2, start.cx, start.cy, start.rot);
+        const local = brushTextLocalFromWorld(p.x, p.y, edge.x, edge.y, start.rot);
+        const newH = Math.max(BRUSH_TEXT_MIN_H, mode === 's' ? local.y : -local.y);
+        const nc = brushTextWorldFromLocal(0, (mode === 's' ? 1 : -1) * newH / 2, edge.x, edge.y, start.rot);
+        st.h = newH;
+        st.cx = nc.x;
+        st.cy = nc.y;
+        st.rot = start.rot;
+        syncBrushTextTransformBox();
+    }
+}
+function moveBrushTextTransformDrag(event){
+    if(!brushTextTransformDrag) return;
+    event.preventDefault();
+    applyBrushTextTransformDrag(editDrawPoint(event));
+}
+function beginBrushTextTransformDrag(event, mode){
+    if(!brushTextInline) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+    endBrushTextTransformDrag();
+    withCanvasRootClass(list => list.add('canvas-brush-text-drag'));
+    const dragTarget = event.currentTarget;
+    dragTarget?.setPointerCapture?.(event.pointerId);
+    pushEditDrawHistory();
+    brushTextTransformDrag = {
+        mode,
+        pointerId: event.pointerId,
+        captureEl: dragTarget,
+        startPointer: editDrawPoint(event),
+        start: {
+            cx: brushTextInline.cx,
+            cy: brushTextInline.cy,
+            w: brushTextInline.w,
+            h: brushTextInline.h,
+            rot: brushTextInline.rot,
+        },
+    };
+    window.addEventListener('pointermove', moveBrushTextTransformDrag);
+    window.addEventListener('pointerup', endBrushTextTransformDrag);
+    window.addEventListener('pointercancel', endBrushTextTransformDrag);
+}
+function drawFreeTextTransform({ cx, cy, w, h, rot, text, color, userScaled }){
+    const canvasEl = editDrawCanvas();
+    const ctx = canvasEl?.getContext?.('2d');
+    const plain = String(text || '').trim();
+    if(!ctx || !plain) return false;
+    const fontSize = Math.max(8, h / BRUSH_TEXT_LINE);
+    setupDrawStyle(ctx);
+    ctx.save();
+    ctx.font = `700 ${fontSize}px "Inter", "Noto Sans SC", sans-serif`;
+    const tw = Math.max(1, ctx.measureText(plain).width);
+    const availW = Math.max(BRUSH_TEXT_MIN_W, w) - BRUSH_TEXT_PAD_X;
+    const scaleX = userScaled ? Math.min(1, Math.max(0.01, availW / tw)) : 1;
+    ctx.translate(cx, cy);
+    ctx.rotate(rot * Math.PI / 180);
+    ctx.scale(scaleX, 1);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = Math.max(2, fontSize / 10);
+    ctx.strokeStyle = 'rgba(10,10,10,0.72)';
+    ctx.strokeText(plain, 0, 0);
+    ctx.fillStyle = color || brushColor();
+    ctx.fillText(plain, 0, 0);
+    ctx.restore();
+    return true;
+}
+function pickBrushTextItemAt(point){
+    for(let i = brushTextItems.length - 1; i >= 0; i--){
+        const st = brushTextItems[i];
+        const local = brushTextLocalFromWorld(point.x, point.y, st.cx, st.cy, st.rot);
+        const pad = 10;
+        if(Math.abs(local.x) <= st.w / 2 + pad && Math.abs(local.y) <= st.h / 2 + pad) return st;
+    }
+    return null;
+}
+function activateBrushTextItem(st, { editing = true, selectAll = false } = {}){
+    if(!st) return;
+    if(brushTextInline && brushTextInline !== st) confirmBrushTextInline();
+    setBrushTextSelection(st, editing);
+    if(editing) requestAnimationFrame(() => focusBrushTextEditor(st, selectAll));
+}
+function setBrushTextSelection(st, editing){
+    brushTextItems.forEach(item => {
+        const on = item === st;
+        item.root?.classList.toggle('is-selected', on);
+        item.root?.classList.toggle('is-editing', on && editing);
+        if(item.editor) item.editor.contentEditable = (on && editing) ? 'true' : 'false';
+    });
+    brushTextInline = st || null;
+}
+function removeBrushTextItem(st){
+    if(!st) return;
+    st.root?.remove();
+    brushTextItems = brushTextItems.filter(item => item !== st);
+    if(brushTextInline === st) brushTextInline = null;
+}
+function confirmBrushTextInline(){
+    endBrushTextTransformDrag();
+    const st = brushTextInline;
+    if(!st) return false;
+    const text = brushTextItemPlain(st);
+    if(!text){
+        removeBrushTextItem(st);
+        return false;
+    }
+    if(!st.confirmed || st.text !== text) pushEditDrawHistory();
+    fitBrushTextItemBox(st, { force: true });
+    st.text = text;
+    st.color = st.color || brushColor();
+    st.confirmed = true;
+    if(st.editor) st.editor.textContent = text;
+    setBrushTextSelection(st, false);
+    syncBrushTextItemBox(st);
+    markEditDrawDirty();
+    syncEditDrawingHistoryButtons();
+    return true;
+}
+function discardBrushTextEdit(){
+    endBrushTextTransformDrag();
+    const st = brushTextInline;
+    if(!st) return;
+    if(st.confirmed && st.text){
+        if(st.editor) st.editor.textContent = st.text;
+        setBrushTextSelection(null, false);
+        syncBrushTextItemBox(st);
+        return;
+    }
+    removeBrushTextItem(st);
+}
+function clearBrushTextItems(){
+    endBrushTextTransformDrag();
+    brushTextItems.forEach(st => st.root?.remove());
+    brushTextItems = [];
+    brushTextInline = null;
+}
+function flushBrushTextToCanvas(){
+    confirmBrushTextInline();
+    const items = serializeBrushTextItems();
+    if(!items.length){
+        clearBrushTextItems();
+        return false;
+    }
+    pushEditDrawHistory();
+    items.forEach(it => {
+        if(!it.userScaled) fitBrushTextItemBox(it, { force: true });
+        drawFreeTextTransform(it);
+    });
+    clearBrushTextItems();
+    markEditDrawDirty();
+    syncEditDrawingHistoryButtons();
+    return true;
+}
+function restoreBrushTextItems(list){
+    clearBrushTextItems();
+    (list || []).forEach(data => mountBrushTextItem(data, { editing: false, select: false }));
+}
+function focusBrushTextEditor(st, selectAll){
+    const editor = st?.editor;
+    if(!editor) return;
+    editor.focus();
+    const sel = window.getSelection();
+    if(!sel) return;
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    if(!selectAll) range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+}
+function dismissBrushTextInline(opts = {}){
+    if(opts.commit) confirmBrushTextInline();
+    else discardBrushTextEdit();
+}
+function buildBrushTextTransformHtml(){
+    const handles = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+    return `
+        <div class="brush-text-transform-rotate-arm" aria-hidden="true">
+            <button type="button" class="brush-text-transform-handle is-rotate" data-handle="rotate" title="${escapeAttr(langIsEn() ? 'Rotate' : '旋转')}"></button>
+        </div>
+        <div class="brush-text-transform-body">
+            <div class="brush-text-transform-editor" contenteditable="true" spellcheck="false" data-placeholder="${escapeAttr(langIsEn() ? 'Type here' : '输入文字')}"></div>
+            <div class="brush-text-transform-frame" aria-hidden="true"></div>
+            ${handles.map(h => `<button type="button" class="brush-text-transform-handle is-${h}" data-handle="${h}"></button>`).join('')}
+        </div>`;
+}
+function bindBrushTextTransform(root, st){
+    root.querySelectorAll('.brush-text-transform-handle').forEach(btn => {
+        btn.addEventListener('pointerdown', ev => beginBrushTextTransformDrag(ev, btn.dataset.handle || 'move'));
+    });
+    const frame = root.querySelector('.brush-text-transform-frame');
+    frame?.addEventListener('pointerdown', ev => {
+        if(ev.target?.closest?.('.brush-text-transform-editor, .brush-text-transform-handle')) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        beginBrushTextTransformDrag(ev, 'move');
+    });
+    const editor = root.querySelector('.brush-text-transform-editor');
+    if(!editor) return null;
+    root.addEventListener('pointerdown', ev => {
+        if(brushTool !== 'text') setBrushTool('text');
+        const onHandle = Boolean(ev.target.closest('.brush-text-transform-handle'));
+        const onEditor = Boolean(ev.target.closest('.brush-text-transform-editor'));
+        if(brushTextInline && brushTextInline !== st) confirmBrushTextInline();
+        const editing = onEditor || (!onHandle && !st.confirmed);
+        if(brushTextInline !== st || (editing && !st.root.classList.contains('is-editing')) || (!editing && !st.root.classList.contains('is-selected'))){
+            setBrushTextSelection(st, editing);
+            if(editing) requestAnimationFrame(() => focusBrushTextEditor(st, false));
+        }
+    }, true);
+    root.addEventListener('dblclick', ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if(brushTextInline && brushTextInline !== st) confirmBrushTextInline();
+        activateBrushTextItem(st, { editing: true, selectAll: false });
+    });
+    root.addEventListener('pointerdown', ev => ev.stopPropagation());
+    editor.addEventListener('input', () => {
+        if(brushTextInline === st) syncBrushTextBoxFromEditor();
+    });
+    editor.addEventListener('keydown', ev => {
+        ev.stopPropagation();
+        if(ev.isComposing || ev.keyCode === 229) return;
+        if(ev.key === 'Enter' && !ev.shiftKey){ ev.preventDefault(); confirmBrushTextInline(); }
+        if(ev.key === 'Escape'){ ev.preventDefault(); discardBrushTextEdit(); }
+    });
+    editor.addEventListener('mousedown', ev => ev.stopPropagation());
+    editor.addEventListener('pointerdown', ev => {
+        ev.stopPropagation();
+        if(ev.altKey){
+            ev.preventDefault();
+            beginBrushTextTransformDrag(ev, 'move');
+        }
+    });
+    return editor;
+}
+function mountBrushTextItem(data, { editing = true, select = true } = {}){
+    const host = brushTextOverlayHost();
+    if(!host) return null;
+    const root = document.createElement('div');
+    root.className = 'brush-text-transform';
+    root.innerHTML = buildBrushTextTransformHtml();
+    host.appendChild(root);
+    const st = {
+        id: data.id || uid('bt'),
+        root,
+        editor: null,
+        cx: data.cx,
+        cy: data.cy,
+        w: data.w,
+        h: data.h,
+        rot: data.rot || 0,
+        text: String(data.text || ''),
+        color: data.color || brushColor(),
+        userScaled: Boolean(data.userScaled),
+        confirmed: Boolean(String(data.text || '').trim()),
+    };
+    const editor = bindBrushTextTransform(root, st);
+    if(!editor){
+        root.remove();
+        return null;
+    }
+    st.editor = editor;
+    editor.textContent = st.text;
+    fitBrushTextItemBox(st, { force: !st.userScaled });
+    brushTextItems.push(st);
+    if(select) setBrushTextSelection(st, editing);
+    else {
+        root.classList.remove('is-selected', 'is-editing');
+        editor.contentEditable = 'false';
+    }
+    syncBrushTextItemBox(st);
+    return st;
+}
+function openBrushTextInline(point, seedText = ''){
+    confirmBrushTextInline();
+    const initialText = String(seedText || '').trim();
+    const fontSize = brushTextFontSize();
+    const box = measureBrushTextBox(initialText, fontSize);
+    const st = mountBrushTextItem({
+        cx: point.x,
+        cy: point.y,
+        w: box.w,
+        h: box.h,
+        rot: 0,
+        text: initialText,
+        color: brushColor(),
+        userScaled: false,
+    }, { editing: true, select: true });
+    if(!st) return;
+    requestAnimationFrame(() => {
+        focusBrushTextEditor(st, Boolean(initialText));
+        if(document.activeElement !== st.editor) requestAnimationFrame(() => focusBrushTextEditor(st, Boolean(initialText)));
+    });
 }
 function syncAnnotationRestoreButton(){
     const btns = [domGet('annotationRestoreBtn'), domGet('annotationRestoreBtnInline')].filter(Boolean);
@@ -12245,6 +12712,7 @@ function editDrawSnapshot(){
     return {
         imageData: canvasEl.getContext('2d').getImageData(0, 0, canvasEl.width, canvasEl.height),
         labelCounter: brushLabelCounter,
+        textItems: serializeBrushTextItems(),
     };
 }
 function restoreEditDrawSnapshot(snapshot){
@@ -12253,6 +12721,7 @@ function restoreEditDrawSnapshot(snapshot){
     const imageData = snapshot.imageData || snapshot;
     canvasEl.getContext('2d').putImageData(imageData, 0, 0);
     if(snapshot.labelCounter) brushLabelCounter = snapshot.labelCounter;
+    restoreBrushTextItems(snapshot.textItems || []);
 }
 function pushEditDrawHistory(){
     editDrawUndoStack.push(editDrawSnapshot());
@@ -12288,6 +12757,7 @@ function clearEditDrawing(silent=false){
     canvasEl.getContext('2d').clearRect(0, 0, canvasEl.width, canvasEl.height);
     brushLabelCounter = 1;
     editDrawDirty = false;
+    clearBrushTextItems();
     syncEditDrawingHistoryButtons();
 }
 function resetEditDrawingHistory(){
@@ -12295,13 +12765,19 @@ function resetEditDrawingHistory(){
     editDrawRedoStack = [];
     brushLabelCounter = 1;
     editDrawDirty = false;
+    clearBrushTextItems();
     syncEditDrawingHistoryButtons();
 }
 function markEditDrawDirty(){
     editDrawDirty = true;
 }
 function setBrushTool(tool){
-    brushTool = ['free','rect','ellipse','label','text'].includes(tool) ? tool : 'free';
+    const next = ['free','rect','ellipse','label','text'].includes(tool) ? tool : 'free';
+    if(brushTool === 'text' && next !== 'text') dismissBrushTextInline({ commit: true });
+    brushTool = next;
+    if(brushTool === 'text' && isImageEditOpen() && imageEditMode !== 'brush'){
+        setImageEditMode('brush', true);
+    }
     syncBrushToolButtons();
     syncBrushApplyLabel();
     syncAnnotationLabelPickUI();
@@ -12319,10 +12795,13 @@ function syncBrushToolButtons(){
 }
 function editDrawPoint(event){
     const canvasEl = editDrawCanvas();
+    if(!canvasEl) return {x:0, y:0};
     const rect = canvasEl.getBoundingClientRect();
+    const rw = Math.max(1, rect.width);
+    const rh = Math.max(1, rect.height);
     return {
-        x:(event.clientX - rect.left) * canvasEl.width / Math.max(1, rect.width),
-        y:(event.clientY - rect.top) * canvasEl.height / Math.max(1, rect.height),
+        x:(event.clientX - rect.left) * canvasEl.width / rw,
+        y:(event.clientY - rect.top) * canvasEl.height / rh,
     };
 }
 function gridCustomLineHit(point){
@@ -12408,29 +12887,12 @@ function drawNumberLabel(point){
     ctx.fillText(text, point.x, point.y);
     ctx.restore();
 }
-function drawFreeTextAt(point){
-    const input = domGet('brushTextInput');
-    let text = String(input?.value || '').trim();
-    if(!text){
-        text = String(window.prompt(langIsEn() ? 'Enter text' : '输入要放置的文字', '') || '').trim();
-        if(input && text) input.value = text;
-    }
+function drawFreeTextAt(point, textOverride){
+    let text = String(textOverride ?? '').trim();
+    if(!text) text = String(domGet('brushTextInput')?.value || '').trim();
     if(!text) return false;
-    const canvasEl = editDrawCanvas();
-    const ctx = canvasEl.getContext('2d');
-    const size = Math.max(18, editBrushSize() * 2.2);
-    setupDrawStyle(ctx);
-    ctx.save();
-    ctx.font = `700 ${size}px "Inter", "Noto Sans SC", sans-serif`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.lineWidth = Math.max(2, size / 10);
-    ctx.strokeStyle = 'rgba(10,10,10,0.72)';
-    ctx.strokeText(text, point.x, point.y);
-    ctx.fillStyle = brushColor();
-    ctx.fillText(text, point.x, point.y);
-    ctx.restore();
-    return true;
+    const box = measureBrushTextBox(text, brushTextFontSize());
+    return drawFreeTextTransform({ cx: point.x, cy: point.y, w: box.w, h: box.h, rot: 0, text });
 }
 function beginEditDraw(event){
     if(imageEditMode === 'crop') return;
@@ -12460,29 +12922,40 @@ function beginEditDraw(event){
         refreshGridSplitPreview();
         return;
     }
-    event.preventDefault();
-    event.stopPropagation();
     const canvasEl = editDrawCanvas();
     if(!canvasEl?.getContext) return;
+    const p = editDrawPoint(event);
+    if(imageEditMode === 'brush' && brushTool === 'text'){
+        if(event.detail >= 2){
+            event.stopPropagation();
+            return;
+        }
+        const hit = pickBrushTextItemAt(p);
+        if(hit){
+            event.stopPropagation();
+            activateBrushTextItem(hit, { editing: true, selectAll: false });
+            editDrawState = null;
+            return;
+        }
+        event.stopPropagation();
+        openBrushTextInline(p);
+        editDrawState = null;
+        return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
     canvasEl.setPointerCapture?.(event.pointerId);
     const ctx = canvasEl.getContext('2d');
-    const p = editDrawPoint(event);
-    pushEditDrawHistory();
     if(imageEditMode === 'brush' && brushTool === 'label'){
+        pushEditDrawHistory();
         drawNumberLabel(p);
         markEditDrawDirty();
         editDrawState = null;
-        canvasEl.releasePointerCapture?.(event.pointerId);
+        try { canvasEl.releasePointerCapture(event.pointerId); } catch(_){ /* already released */ }
         syncEditDrawingHistoryButtons();
         return;
     }
-    if(imageEditMode === 'brush' && brushTool === 'text'){
-        if(drawFreeTextAt(p)) markEditDrawDirty();
-        editDrawState = null;
-        canvasEl.releasePointerCapture?.(event.pointerId);
-        syncEditDrawingHistoryButtons();
-        return;
-    }
+    pushEditDrawHistory();
     editDrawState = {x:p.x, y:p.y, sx:p.x, sy:p.y, pointerId:event.pointerId, snapshot:(imageEditMode === 'brush' && brushTool !== 'free') ? editDrawSnapshot() : null};
     setupDrawStyle(ctx);
     ctx.beginPath();
@@ -12522,8 +12995,9 @@ function moveEditDraw(event){
     editDrawState.y = p.y;
 }
 function endEditDraw(event){
-    if(editDrawState && event?.pointerId != null) editDrawCanvas().releasePointerCapture?.(event.pointerId);
-    if(gridCustomDrag && event?.pointerId != null) editDrawCanvas().releasePointerCapture?.(event.pointerId);
+    if(event?.pointerId != null){
+        try { editDrawCanvas()?.releasePointerCapture?.(event.pointerId); } catch(_){ /* already released */ }
+    }
     editDrawState = null;
     gridCustomDrag = null;
     syncEditDrawingHistoryButtons();
@@ -13619,6 +14093,7 @@ function closeImageEditor(){
         imageEditInplaceImg.style.top = '';
         imageEditInplaceImg.style.objectFit = '';
     }
+    dismissBrushTextInline({ commit: true });
     clearEditDrawing(true);
     cropState = null;
     cropDrag = null;
@@ -13853,6 +14328,7 @@ async function canvasToPngBlob(canvasEl){
 }
 async function applyImageBrush(){
     if(!cropState) return;
+    flushBrushTextToCanvas();
     const exportImg = editExportImage();
     const draw = editDrawCanvas();
     if(!draw?.width || !draw?.height){
@@ -14496,13 +14972,13 @@ function renderNode(node){
             const inImageBatch = Boolean(imageBatchOwningImage(node.id));
             const openPreview = e => {
                 if(!isEditableImage) return;
+                if(isImageEditOpen()) return;
                 if(isImageNodeFloatChromeTarget(e.target)) return;
                 e.preventDefault();
                 e.stopPropagation();
                 e.stopImmediatePropagation();
-                // 图片组内：双击放大查看；独立图片卡：双击进修图
-                if(inImageBatch) openImageNodeLightbox(node);
-                else openImageEditor(node.id);
+                // 双击统一放大查看；裁剪/画笔/旋转走选中后的浮动动作条，避免误触进裁剪
+                openImageNodeLightbox(node);
             };
             if(inImageBatch && previewWrap){
                 previewWrap.classList.add('is-batch-previewable');
@@ -14531,9 +15007,13 @@ function renderNode(node){
             };
             if(loadedImg && isEditableImage){
                 loadedImg.addEventListener('mousedown', e => {
+                    if(isImageEditOpen()) return;
                     if(e.detail >= 2) openPreview(e);
                 }, true);
-                loadedImg.addEventListener('dblclick', openPreview, true);
+                loadedImg.addEventListener('dblclick', e => {
+                    if(isImageEditOpen()) return;
+                    openPreview(e);
+                }, true);
             }
             if(isEditableImage) body.addEventListener('dblclick', openPreview);
             if(loadedImg && loadedImg.complete && loadedImg.naturalHeight > 0){
@@ -35626,7 +36106,12 @@ on(window, 'keydown', e => {
     if(e.key === 'Escape' && document.getElementById('canvasGenerationBrowser')) { closeCanvasGenerationBrowser(); return; }
     if(e.key === 'Escape' && document.getElementById('canvasNodeSearchModal')) { closeCanvasNodeSearch(); return; }
     if(e.key === 'Escape' && videoTrimState?.host){ e.preventDefault(); closeVideoTrimDock(); return; }
-    if(e.key === 'Escape' && domGet('imageEditModal')?.classList.contains('open')) { closeImageEditor(); return; }
+    if(e.key === 'Escape' && brushTextInline){
+        e.preventDefault();
+        dismissBrushTextInline({ commit: false });
+        return;
+    }
+    if(e.key === 'Escape' && isImageEditOpen()) { closeImageEditor(); return; }
     if(outputLightbox?.classList.contains('open') && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')){
         if(navigateOutputLightbox(e.key === 'ArrowRight' ? 1 : -1)){
             e.preventDefault();
@@ -35702,6 +36187,7 @@ on(window, 'keydown', e => {
     }
     if(e.key === 'Delete' || e.key === 'Backspace') {
         if(!canvas) return;
+        if(brushTextInline && document.activeElement?.closest?.('.brush-text-transform')) return;
         if(hoveredConnectionId && !isEditableTarget(document.activeElement)){
             e.preventDefault();
             deleteConnection(hoveredConnectionId, e);
