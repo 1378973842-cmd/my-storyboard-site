@@ -232,6 +232,7 @@
         { "id": "AG220", "desc": "交互：展开生图网格后单击格子不再进灯箱（仍可选中/批量勾选；放大走右键菜单）", "status": "done", "priority": 254 },
         { "id": "AG221", "desc": "修：画笔文字工具——空框输入、IME 不误提交、拉伸后打字不弹回、预览与烙印一致、Esc/Delete 不误关/误删", "status": "done", "priority": 255 },
         { "id": "AG222", "desc": "交互：画笔文字 T 居中弹出、点空白完成、双击再编、框不超出图片、拉伸锚点跟手；序号按钮点按展开/收起", "status": "done", "priority": 256 },
+        { "id": "AG223", "desc": "后端：画布生成任务账本服务端持久化（canvasTaskLedger 从 sessionStorage 迁至 DB/文件；关标签/换设备可续查 RH·生图·视频 pending 并落板；含过期清理）", "status": "todo", "priority": 257 },
         { "id": "AG206c", "desc": "check：image-edit-viewport-focus", "status": "done", "priority": 240 },
         { "id": "AG199c", "desc": "check：rh-output-layout（含 RH skip stage / 去框）", "status": "done", "priority": 233 },
         { "id": "AG30", "desc": "图片组：子图自然尺寸落地后防抖重排扩容，避免默认框装不下", "status": "done", "priority": 51 },

@@ -3995,6 +3995,18 @@ function cullNodesOutsideViewport(){
 /** 与 infinite-canvas.css .port 定位一致：圆点中心在节点边缘外 var(--port-dot-outset) */
 const PORT_DOT_OUTSET = 34.5;
 
+/** 双层 shell 会把 --port-slide 放到父级，子级 transform 过渡不触发；拆回单层 */
+function unwrapPortDotShells(scope){
+    const root = scope instanceof Element ? scope : nodesEl;
+    if(!root?.querySelectorAll) return;
+    root.querySelectorAll('.port-dot-shell').forEach(shell => {
+        const port = shell.parentElement;
+        const dot = shell.querySelector('.port-dot');
+        if(port && dot) port.insertBefore(dot, shell);
+        shell.remove();
+    });
+}
+
 /** 端口圆点磁吸：靠近后圆点吸到十字光标中心，明确「可拉线」 */
 const PORT_MAGNET_ENTER = 55; // 屏幕像素，进入外侧半圆
 const PORT_MAGNET_LEAVE = 62; // 略大，避免在半圆边缘抖回箭头
@@ -4031,6 +4043,27 @@ function setPortMagnetCursor(on){
         else list.remove('canvas-port-magnetic');
     });
 }
+/** 磁吸中圆点跟在十字上，DOM 命中仍在节点边外半区；取当前吸附端口用来拉线 */
+function activeMagneticPort(){
+    if(!portMagnetActivePorts.size) return null;
+    if(portMagnetActivePorts.size === 1){
+        const only = portMagnetActivePorts.values().next().value;
+        return only || null;
+    }
+    const mouse = portMagnetMouse;
+    if(!mouse) return portMagnetActivePorts.values().next().value || null;
+    let best = null;
+    let bestDist = Infinity;
+    portMagnetActivePorts.forEach(port => {
+        const r = port.getBoundingClientRect();
+        const d = Math.hypot(mouse.x - (r.left + r.width / 2), mouse.y - (r.top + r.height / 2));
+        if(d < bestDist){
+            bestDist = d;
+            best = port;
+        }
+    });
+    return best;
+}
 function clearPortMagnetSnapTimer(port){
     const t = portMagnetSnapTimers.get(port);
     if(t){
@@ -4049,20 +4082,21 @@ function beginPortMagnetSnap(port){
 function resetPortMagnet(port){
     clearPortMagnetSnapTimer(port);
     port.classList.remove('is-magnetic-snap');
-    // 先恢复回弹 transition，再清位移，离开才丝滑
+    // 先恢复 transform 过渡，下一帧再清位移，回弹才跟得上 CSS
     port.classList.remove('is-magnetic');
     const dot = port.querySelector('.port-dot');
-    if(dot){
-        dot.style.removeProperty('--dot-x');
-        dot.style.removeProperty('--dot-y');
-    }
     const nodeEl = port.closest?.('.node');
     const id = nodeEl?.dataset?.id;
-    if(nodeEl && id && !selected.has(id) && !nodeEl.matches(':hover') && !nodeEl.querySelector('.port.is-magnetic')){
-        if(nodeEl.classList.contains('ports-open')){
-            nodeEl.classList.remove('ports-open');
+    requestAnimationFrame(() => {
+        if(port.classList.contains('is-magnetic')) return;
+        if(dot){
+            dot.style.removeProperty('--dot-x');
+            dot.style.removeProperty('--dot-y');
         }
-    }
+        if(nodeEl && id && !selected.has(id) && !nodeEl.matches(':hover') && !nodeEl.querySelector('.port.is-magnetic')){
+            if(nodeEl.classList.contains('ports-open')) nodeEl.classList.remove('ports-open');
+        }
+    });
 }
 function clearAllPortMagnet(){
     portMagnetMouse = null;
@@ -4092,7 +4126,7 @@ function runPortMagnetUpdate(){
         ? document.elementFromPoint(mouse.x, mouse.y)
         : null;
     nodes.forEach(n => {
-        const rect = estimatedNodeRect(n);
+        const rect = estimatedNodeRectForMagnet(n);
         if(world.x < rect.x - radiusWorld || world.x > rect.x + rect.w + radiusWorld ||
             world.y < rect.y - radiusWorld || world.y > rect.y + rect.h + radiusWorld) return;
         const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(n.id)}"]`);
@@ -4121,7 +4155,8 @@ function runPortMagnetUpdate(){
             const oy = dy / scale;
             if(!wasActive){
                 port.classList.add('is-magnetic');
-                el.classList.add('ports-open');
+                const nodeId = el?.dataset?.id;
+                if(el && nodeId && !selected.has(nodeId)) el.classList.add('ports-open');
                 beginPortMagnetSnap(port);
             } else {
                 port.classList.add('is-magnetic');
@@ -4169,6 +4204,13 @@ function nodeLayoutSize(n, el){
 function estimatedNodeRect(n){
     const el = nodesEl?.querySelector?.(`.node[data-id="${CSS.escape(n.id)}"]`);
     const { w, h } = nodeLayoutSize(n, el);
+    return { x: n.x || 0, y: n.y || 0, w, h };
+}
+/** 磁吸/粗碰撞：只用缓存尺寸，每帧禁读 offset 以免整板 layout+闪屏 */
+function estimatedNodeRectForMagnet(n){
+    const size = defaultNodeSize(n.type);
+    const w = Math.max(1, Number(n._layoutW) || Number(n.w) || size.w || 260);
+    const h = Math.max(1, Number(n._layoutH) || Number(n.h) || size.h || 160);
     return { x: n.x || 0, y: n.y || 0, w, h };
 }
 function currentWorldViewRect(){
@@ -4935,7 +4977,8 @@ function refreshGeometryAfterLayout(){
                 refreshGeometry();
                 step(remaining - 1, false);
             } else if(remaining === 1){
-                renderLinks();
+                if(linksGeometryStale()) renderLinks();
+                else updateLinksGeometry();
             }
         });
     };
@@ -14814,6 +14857,7 @@ function render(options = {}){
     });
     restoreMediaPlaybackStates(mediaStates);
     restoreOutputScrolls(outputScrolls);
+    unwrapPortDotShells(nodesEl);
     refreshIcons(nodesEl);
     refreshGeometry();
     refreshGeometryAfterLayout();
@@ -14859,6 +14903,7 @@ function refreshNodes(ids=[]){
         current.replaceWith(fresh);
     }
     restoreOutputScrolls(outputScrolls);
+    unwrapPortDotShells(nodesEl);
     refreshIcons(nodesEl);
     refreshGeometry();
     refreshGeometryAfterLayout();
@@ -26474,8 +26519,10 @@ function rhApplyFrameAspect(frameEl, mediaEl, opts={}){
         const nw = Number(mediaEl.naturalWidth || mediaEl.videoWidth || 0);
         const nh = Number(mediaEl.naturalHeight || mediaEl.videoHeight || 0);
         if(!nw || !nh) return;
-        frameEl.style.aspectRatio = `${nw} / ${nh}`;
-        if(opts.cssVar) frameEl.style.setProperty(opts.cssVar, `${nw} / ${nh}`);
+        const ar = `${nw} / ${nh}`;
+        frameEl.style.aspectRatio = ar;
+        frameEl.style.setProperty('--rh-media-ar', ar);
+        if(opts.cssVar) frameEl.style.setProperty(opts.cssVar, ar);
         if(typeof opts.onApplied === 'function') opts.onApplied(nw, nh);
     };
     if(mediaEl.tagName === 'VIDEO'){
@@ -26483,8 +26530,17 @@ function rhApplyFrameAspect(frameEl, mediaEl, opts={}){
         else mediaEl.addEventListener('loadedmetadata', apply, {once:true});
         return;
     }
-    if(mediaEl.complete && mediaEl.naturalWidth > 0) apply();
-    else mediaEl.addEventListener('load', apply, {once:true});
+    if(mediaEl.complete && mediaEl.naturalWidth > 0){
+        apply();
+        if(typeof mediaEl.decode === 'function'){
+            mediaEl.decode().then(apply).catch(() => {});
+        }
+        return;
+    }
+    mediaEl.addEventListener('load', apply, {once:true});
+    if(typeof mediaEl.decode === 'function'){
+        mediaEl.decode().then(apply).catch(() => {});
+    }
 }
 function rhSlotHasMedia(node, field, media=null){
     return Boolean(String(rhFieldValue(node, field, media) || '').trim());
@@ -27046,7 +27102,10 @@ function bindRhMediaTiles(list, node){
                 tile.classList.add('is-broken');
                 tile.classList.remove('has-media');
                 tile.classList.add('empty');
-                if(frameEl) frameEl.style.aspectRatio = '';
+                if(frameEl){
+                    frameEl.style.aspectRatio = '';
+                    frameEl.style.removeProperty('--rh-media-ar');
+                }
                 const mediaWrap = tile.querySelector('.rh-media-tile-media');
                 if(mediaWrap) mediaWrap.remove();
                 if(!tile.querySelector('.rh-media-tile-empty')){
@@ -27107,11 +27166,12 @@ function renderRhPromptFields(container, node, fields){
         </label>`;
     }).join('');
     bindRhParamControls(container, node);
-    // prompt 按内容长高，避免小框内出现滚动条
+    const RH_PROMPT_MAX_H = 132;
     container.querySelectorAll('textarea.rh-prompt-tile-input').forEach(ta => {
         const grow = () => {
             ta.style.height = 'auto';
-            ta.style.height = `${Math.max(72, ta.scrollHeight)}px`;
+            const next = Math.min(RH_PROMPT_MAX_H, Math.max(72, ta.scrollHeight));
+            ta.style.height = `${next}px`;
             scheduleFitRhNodeFrame(node);
         };
         ta.addEventListener('input', grow);
@@ -27418,75 +27478,43 @@ async function runRhNode(nodeId, opts={}){
         });
         const taskId = submit.taskId;
         if(!taskId) throw new Error(tr('canvas.rhNoTaskId'));
-        run.request = {task_id:taskId, webappId:node.webappId, workflowId:node.workflowId, backend:'runninghub', mode};
-        let result = null;
-        for(let i = 0; i < 720; i++){
-            if(!isPendingActive(host, pendingId)) return;
-            await sleep(2500);
-            if(!isPendingActive(host, pendingId)) return;
-            const q = new URLSearchParams({
-                taskId,
-                useWallet: keyFields.useWallet ? '1' : '0',
-                apiKeyId: keyFields.apiKeyId || '',
+        run.request = {
+            task_id:taskId,
+            webappId:node.webappId,
+            workflowId:node.workflowId,
+            backend:'runninghub',
+            mode,
+            apiKeyId: keyFields.apiKeyId || '',
+            useWallet: Boolean(keyFields.useWallet),
+        };
+        const pending = (host._pending || []).find(p => p.id === pendingId);
+        if(pending){
+            pending.canvasTaskId = String(taskId);
+            pending.canvasTaskType = 'runninghub';
+            registerCanvasTaskLedger(taskId, {
+                canvasId: canvas?.id || '',
+                hostNodeId: host.id || '',
+                genNodeId: node.id || '',
+                pendingId: pending.id || '',
+                run,
+                appendGenerated: true,
+                startedAt: Number(pending.startedAt || nowMs()),
+                canvasTaskType: 'runninghub',
             });
-            const data = await apiFetch(`/api/runninghub/query?${q}`).then(async r => {
-                const json = await r.json();
-                if(!r.ok || json.success === false) throw new Error(json.detail || json.error || tr('canvas.rhFailed'));
-                return json.data || json;
-            });
-            if(data.status === 'SUCCESS'){
-                result = data;
-                break;
-            }
-            if(data.status === 'FAILED') throw new Error(rhSummarizeTaskFail(data.failReason || data.errorMessage || data.raw));
-            if(data.status === 'RUNNING' || data.status === 'QUEUED') continue;
-            // UNKNOWN：以前会 silently 当「运行中」空转，表现为一直生成却无结果/无报错
-            const unknownMsg = rhSummarizeTaskFail(data.failReason || data.raw)
-                || (langIsEn()
-                    ? `RunningHub unexpected status ${data.status || 'UNKNOWN'} (code=${data.code ?? '?'})`
-                    : `RunningHub 状态异常 ${data.status || 'UNKNOWN'}（code=${data.code ?? '?'}）`);
-            throw new Error(unknownMsg);
         }
-        if(!result) throw new Error(tr('canvas.rhTimeout'));
-        if(!isPendingActive(host, pendingId)) return;
-        const meta = collectRunMeta(host, pendingId);
-        const runMs = Math.max(0, Number(meta.runMs || 0) || 0);
-        const typedOutputs = Array.isArray(result.outputs) ? result.outputs : [];
-        const outputs = (typedOutputs.length
-            ? typedOutputs.map(item => {
-                const url = outputUrlValue(item);
-                if(!url) return null;
-                const kind = String(item?.kind || item?.mediaKind || '').toLowerCase()
-                    || (isVideoUrl(url) ? 'video' : isAudioUrl(url) ? 'audio' : 'image');
-                return {url, kind, runMs};
-            }).filter(Boolean)
-            : (result.urls || []).map(url => {
-                const u = outputUrlValue(url);
-                if(!u) return null;
-                const kind = isVideoUrl(u) ? 'video' : isAudioUrl(u) ? 'audio' : 'image';
-                return {url:u, kind, runMs};
-            }).filter(Boolean));
-        if(!outputs.length) throw new Error(tr('canvas.rhOutputsEmpty'));
-        clearNodePending(host, [pendingId]);
-        // 追加历史，勿覆盖；预览指到本轮最新一张
-        commitMediaOutputs(host, node, outputs, media.refs[0], [meta], {
-            cascade:opts.cascade,
-            appendGenerated:true,
-        });
-        if((node.generatedOutputs || []).length > MAX_GEN_HISTORY){
-            node.generatedOutputs = node.generatedOutputs.slice(-MAX_GEN_HISTORY);
-        }
-        node.previewIndex = Math.max(0, (node.generatedOutputs || []).length - 1);
-        addGenerationLog({run, outputs:outputs.map(outputUrlValue).filter(Boolean), runMs});
-        void recordRhOutputsToHistoryLibrary(outputs, run, node, runMs);
-        syncAgentRunStatusAfterTask(node, {completed:agentPendingCount(node.id) === 0});
-        refreshRunNodes(node, host);
-        if(historyHubTab === 'logs' && logModal?.classList.contains('open')) renderCanvasLog();
-        setStatus(langIsEn()
-            ? `RunningHub done · ${formatRunDuration(runMs)}`
-            : `RunningHub 完成 · 用时 ${formatRunDuration(runMs)}`);
         scheduleSave();
+        const status = await pollRunningHubTask(taskId);
+        if(status === 'failed'){
+            const errMsg = node.runError || tr('canvas.rhFailed');
+            if(opts.cascade) throw new Error(errMsg);
+            softAlert(errMsg);
+        }
     } catch(err) {
+        const pending = (host._pending || []).find(p => p.id === pendingId);
+        if(pending?.canvasTaskId){
+            if(opts.cascade) throw err;
+            return;
+        }
         if(!isPendingActive(host, pendingId)){
             reconcileAgentRunStateFromPending(node.id);
             refreshRunNodes(node, host);
@@ -30730,10 +30758,10 @@ function syncAgentRunStatusAfterTask(gen, {completed=false, failed=false, error=
 }
 /** 重开画布 / 远端同步：JS 轮询已断，清掉不可恢复的 pending 与卡住的运行徽章 */
 function resetTransientNodeRunState(){
-    const resumable = new Set(['online-image', 'replica-agent', 'image-repair-agent', 'canvas-video']);
+    const resumable = new Set(['online-image', 'replica-agent', 'image-repair-agent', 'canvas-video', 'runninghub']);
     nodes.forEach(host => {
-        // 视频 / msgen / generator 等同构节点都会挂 _pending；只清 output+generator 会留下假「生成中」
-        if(host.type === 'output' || isGenConsoleNode(host)){
+        // 视频 / msgen / generator / RH 等同构节点都会挂 _pending；只清 output+generator 会留下假「生成中」
+        if(host.type === 'output' || isGenConsoleNode(host) || host.type === 'rh'){
             host._pending = (host._pending || []).filter(p =>
                 Boolean(p?.canvasTaskId) && resumable.has(String(p.canvasTaskType || ''))
             );
@@ -30953,6 +30981,14 @@ function flushParkedCanvasTaskResults(){
                     meta,
                     taskId
                 );
+            } else if(type === 'runninghub'){
+                const outputs = images.map(url => {
+                    const u = outputUrlValue(url);
+                    if(!u) return null;
+                    const kind = isVideoUrl(u) ? 'video' : isAudioUrl(u) ? 'audio' : 'image';
+                    return {url:u, kind, runMs:Number(meta.runMs || 0) || 0};
+                }).filter(Boolean);
+                applyCompletedRhOutputs(ctx, outputs, meta, taskId);
             } else {
                 applyCompletedCanvasImages(ctx, images, meta, taskId);
             }
@@ -31416,6 +31452,178 @@ async function pollCanvasVideoTask(taskId){
         activeCanvasTaskPolls.delete(taskId);
     }
 }
+function rhOutputsFromQueryData(data, runMs=0){
+    const typedOutputs = Array.isArray(data?.outputs) ? data.outputs : [];
+    if(typedOutputs.length){
+        return typedOutputs.map(item => {
+            const url = outputUrlValue(item);
+            if(!url) return null;
+            const kind = String(item?.kind || item?.mediaKind || '').toLowerCase()
+                || (isVideoUrl(url) ? 'video' : isAudioUrl(url) ? 'audio' : 'image');
+            return {url, kind, runMs};
+        }).filter(Boolean);
+    }
+    return (data?.urls || []).map(url => {
+        const u = outputUrlValue(url);
+        if(!u) return null;
+        const kind = isVideoUrl(u) ? 'video' : isAudioUrl(u) ? 'audio' : 'image';
+        return {url:u, kind, runMs};
+    }).filter(Boolean);
+}
+function applyCompletedRhOutputs(ctx, outputs, meta, taskId){
+    const {out, pending, recovered, gen: ctxGen} = ctx;
+    if(recovered) console.warn('[canvas] recovered RH task without pending', taskId, out?.id);
+    if(!pending._recovered){
+        out._pending = (out._pending || []).filter(p => p.id !== pending.id);
+    }
+    const rhNode = ctxGen?.type === 'rh'
+        ? ctxGen
+        : nodes.find(n => n.id === (meta.run?.node?.id || pending.run?.node?.id) && n.type === 'rh');
+    const runMs = Math.max(0, Number(meta.runMs || 0) || (nowMs() - Number(pending.startedAt || nowMs())));
+    const run = meta.run || pending.run || {};
+    if(!rhNode){
+        orphanImagesOntoCanvas(outputs.map(item => item.url), { ...meta, run, taskId, canvasId: canvas?.id });
+        unregisterCanvasTaskLedger(taskId);
+        scheduleSaveNow();
+        return;
+    }
+    commitMediaOutputs(out, rhNode, outputs, run?.refs?.[0], [{runMs}], {
+        appendGenerated: Boolean(pending.appendGenerated ?? true),
+    });
+    if((rhNode.generatedOutputs || []).length > MAX_GEN_HISTORY){
+        rhNode.generatedOutputs = rhNode.generatedOutputs.slice(-MAX_GEN_HISTORY);
+    }
+    rhNode.previewIndex = Math.max(0, (rhNode.generatedOutputs || []).length - 1);
+    addGenerationLog({run, outputs:outputs.map(item => item.url).filter(Boolean), runMs});
+    void recordRhOutputsToHistoryLibrary(outputs, run, rhNode, runMs);
+    syncAgentRunStatusAfterTask(rhNode, {completed:agentPendingCount(rhNode.id) === 0});
+    refreshRunNodes(rhNode, out);
+    if(historyHubTab === 'logs' && logModal?.classList.contains('open')) renderCanvasLog();
+    setStatus(langIsEn()
+        ? `RunningHub done · ${formatRunDuration(runMs)}`
+        : `RunningHub 完成 · 用时 ${formatRunDuration(runMs)}`);
+    unregisterCanvasTaskLedger(taskId);
+    scheduleSaveNow();
+}
+function completeRunningHubTask(taskId, data){
+    const raw = canvasTaskLedgerRaw(taskId);
+    const ctxEarly = resolveCanvasTaskContext(taskId);
+    const runMs = ctxEarly
+        ? Math.max(0, nowMs() - Number(ctxEarly.pending?.startedAt || nowMs()))
+        : 0;
+    const outputs = rhOutputsFromQueryData(data, runMs);
+    if(!outputs.length){
+        failRunningHubTask(taskId, tr('canvas.rhOutputsEmpty'));
+        return;
+    }
+    if(shouldParkTaskResult(raw?.canvasId, canvas?.id)){
+        parkCanvasTaskResult(taskId, outputs.map(item => item.url), {
+            canvasId: raw.canvasId,
+            run: raw?.run || { prompt: 'RunningHub' },
+            canvasTaskType: 'runninghub',
+            runMs,
+        });
+        return;
+    }
+    const ctx = ctxEarly || resolveCanvasTaskContext(taskId);
+    if(!ctx){
+        orphanImagesOntoCanvas(outputs.map(item => item.url), {
+            run: raw?.run || { prompt: 'RunningHub' },
+            taskId,
+            canvasId: raw?.canvasId || canvas?.id,
+            runMs,
+        });
+        if(!canvasTaskLedgerRaw(taskId)?.parkedResult) unregisterCanvasTaskLedger(taskId);
+        scheduleSaveNow();
+        return;
+    }
+    const {pending} = ctx;
+    const meta = {
+        runMs,
+        run: pending.run || raw?.run || {},
+        pendingId: pending.id || '',
+        startedAt: Number(pending.startedAt || nowMs()),
+    };
+    applyCompletedRhOutputs(ctx, outputs, meta, taskId);
+}
+function failRunningHubTask(taskId, message){
+    const raw = canvasTaskLedgerRaw(taskId);
+    if(shouldParkTaskResult(raw?.canvasId, canvas?.id)){
+        unregisterCanvasTaskLedger(taskId);
+        return;
+    }
+    const ctx = resolveCanvasTaskContext(taskId);
+    if(!ctx){
+        unregisterCanvasTaskLedger(taskId);
+        return;
+    }
+    const {out, pending, gen: ctxGen} = ctx;
+    const run = pending.run || raw?.run || {};
+    const runMs = Math.max(0, nowMs() - Number(pending.startedAt || nowMs()));
+    if(!pending._recovered){
+        out._pending = (out._pending || []).filter(p => p.id !== pending.id);
+    }
+    const rhNode = ctxGen?.type === 'rh'
+        ? ctxGen
+        : nodes.find(n => n.id === run?.node?.id && n.type === 'rh');
+    if(rhNode){
+        rhNode.runError = message || tr('canvas.rhFailed');
+        syncAgentRunStatusAfterTask(rhNode, {failed:agentPendingCount(rhNode.id) === 0, error:message || tr('canvas.rhFailed')});
+    }
+    addGenerationLog({run, outputs:[], runMs, error:message || tr('canvas.rhFailed')});
+    refreshRunNodes(rhNode, out.type === 'output' ? out : null);
+    unregisterCanvasTaskLedger(taskId);
+    scheduleSaveNow();
+}
+async function pollRunningHubTask(taskId){
+    if(!taskId) return 'failed';
+    if(activeCanvasTaskPolls.has(taskId)) return 'running';
+    activeCanvasTaskPolls.add(taskId);
+    try {
+        for(let i = 0; i < 720; i++){
+            const raw = canvasTaskLedgerRaw(taskId);
+            const req = raw?.run?.request || {};
+            const q = new URLSearchParams({
+                taskId,
+                useWallet: req.useWallet ? '1' : '0',
+                apiKeyId: req.apiKeyId || '',
+            });
+            const data = await apiFetch(`/api/runninghub/query?${q}`).then(async r => {
+                const json = await r.json();
+                if(!r.ok || json.success === false) throw new Error(json.detail || json.error || tr('canvas.rhFailed'));
+                return json.data || json;
+            });
+            if(data.status === 'SUCCESS'){
+                completeRunningHubTask(taskId, data);
+                return 'succeeded';
+            }
+            if(data.status === 'FAILED'){
+                failRunningHubTask(taskId, rhSummarizeTaskFail(data.failReason || data.errorMessage || data.raw));
+                return 'failed';
+            }
+            if(data.status === 'RUNNING' || data.status === 'QUEUED'){
+                const found = findPendingTask(taskId);
+                if(!found && !isCanvasTaskTracked(taskId)) return 'missing';
+                if(canvasTaskLedgerRaw(taskId)?.parkedResult) return 'parked';
+                await sleep(2500);
+                continue;
+            }
+            const unknownMsg = rhSummarizeTaskFail(data.failReason || data.raw)
+                || (langIsEn()
+                    ? `RunningHub unexpected status ${data.status || 'UNKNOWN'} (code=${data.code ?? '?'})`
+                    : `RunningHub 状态异常 ${data.status || 'UNKNOWN'}（code=${data.code ?? '?'}）`);
+            failRunningHubTask(taskId, unknownMsg);
+            return 'failed';
+        }
+        failRunningHubTask(taskId, tr('canvas.rhTimeout'));
+        return 'failed';
+    } catch(err) {
+        failRunningHubTask(taskId, err.message || String(err));
+        return 'failed';
+    } finally {
+        activeCanvasTaskPolls.delete(taskId);
+    }
+}
 /** 在「当前即归属画布」上把完成图写入宿主；调用前须已通过画布隔离检查 */
 function applyCompletedCanvasImages(ctx, images, meta, taskId){
     const {out, pending, recovered} = ctx;
@@ -31537,10 +31745,10 @@ function resumeCanvasImageTasks(){
             const gen = nodes.find(n => n.id === info.genNodeId)
                 || nodes.find(n => n.id === info.run?.node?.id)
                 || null;
-            if(!gen || !isGenConsoleNode(gen)) continue;
+            if(!gen || !(isGenConsoleNode(gen) || gen.type === 'rh')) continue;
             // 历史里已有该 pending 对应结果：勿再挂假 pending
             const pendingId = String(info.pendingId || '');
-            if(pendingId && generatorHistoryItems(gen).some(item => String(item.pendingId || '') === pendingId)){
+            if(gen.type !== 'rh' && pendingId && generatorHistoryItems(gen).some(item => String(item.pendingId || '') === pendingId)){
                 unregisterCanvasTaskLedger(taskId);
                 completedCanvasTaskIds.add(String(taskId));
                 continue;
@@ -31555,7 +31763,7 @@ function resumeCanvasImageTasks(){
                 aspect: info.aspect || '',
             });
             host._pending = [...(host._pending || []), pending];
-            if(!generatorPreviewUrls(gen).length || info.appendGenerated){
+            if(isGenConsoleNode(gen) && (!generatorPreviewUrls(gen).length || info.appendGenerated)){
                 reserveGeneratorPendingSlots(gen, [pending.id]);
             }
             syncAgentRunStatusAfterTask(gen, {});
@@ -31563,7 +31771,7 @@ function resumeCanvasImageTasks(){
         }
     }
     // 从节点 pending 重建 ledger，并恢复轮询
-    nodes.filter(n => n.type === 'output' || isGenConsoleNode(n)).forEach(host => {
+    nodes.filter(n => n.type === 'output' || isGenConsoleNode(n) || n.type === 'rh').forEach(host => {
         (host._pending || []).forEach(p => {
             if(!p.canvasTaskId) return;
             // 已停泊完成的任务：由 flush 处理，勿再轮询以免重复落板
@@ -31583,6 +31791,7 @@ function resumeCanvasImageTasks(){
             if(p.canvasTaskType === 'canvas-video') pollCanvasVideoTask(p.canvasTaskId);
             if(p.canvasTaskType === 'replica-agent') pollReplicaAgentTask(p.canvasTaskId);
             if(p.canvasTaskType === 'image-repair-agent') pollImageRepairAgentTask(p.canvasTaskId);
+            if(p.canvasTaskType === 'runninghub') pollRunningHubTask(p.canvasTaskId);
         });
     });
     // pending 已丢但 ledger 仍在：继续轮询，成功则恢复落板
@@ -31595,6 +31804,7 @@ function resumeCanvasImageTasks(){
             if(type === 'replica-agent') pollReplicaAgentTask(taskId);
             else if(type === 'image-repair-agent') pollImageRepairAgentTask(taskId);
             else if(type === 'canvas-video') pollCanvasVideoTask(taskId);
+            else if(type === 'runninghub') pollRunningHubTask(taskId);
             else pollCanvasImageTask(taskId);
         }
     }
@@ -35961,8 +36171,9 @@ if(canvasRoot){
         e.stopPropagation();
     }, true);
     on(canvasRoot, 'pointerdown', e => {
-        const port = e.target.closest?.('.port');
-        if(!port || !canvas || e.button !== 0 || e.shiftKey) return;
+        if(!canvas || e.button !== 0 || e.shiftKey) return;
+        const port = e.target.closest?.('.port') || activeMagneticPort();
+        if(!port || !nodesEl?.contains(port)) return;
         const nodeEl = port.closest('.node');
         const id = nodeEl?.dataset?.id;
         if(!id) return;
@@ -36013,6 +36224,8 @@ const onBoardPointerDown = e => {
 };
 board.onmousedown = e => {
     if(!canvas) return;
+    // 磁吸拉线已在 pointerdown 里 startLink；mousedown 仍会打到空白板，勿改开框选
+    if(tempLink) return;
     // 中键：主平移（可压在节点上拖）
     if(e.button === 1){
         e.preventDefault();

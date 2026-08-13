@@ -1395,8 +1395,11 @@
 .infinite-canvas-root.canvas-space-pan .board .node button,
 .infinite-canvas-root.canvas-space-pan .board .node .port,
 .infinite-canvas-root.canvas-space-pan .board .node .resize-handle { cursor:auto; }
+/* ponytail: 禁 .board.is-panning * —— 全树 cursor/user-select 会连带 img/video 重绘闪屏 */
 .infinite-canvas-root .board.is-panning,
-.infinite-canvas-root .board.is-panning * { cursor:grabbing !important; user-select:none !important; }
+.infinite-canvas-root .board.is-panning #world,
+.infinite-canvas-root .board.is-panning .links,
+.infinite-canvas-root .board.is-panning .node { cursor:grabbing !important; user-select:none !important; }
 .world { position:absolute; left:0; top:0; width:6000px; height:4000px; transform-origin:0 0; background-image:radial-gradient(circle, var(--grid) 1.4px, transparent 1.4px); background-size:28px 28px; }
 /* 连线永远在节点下方；命中走几何检测，删钮在 .link-controls；SVG 不拦端口点击 */
 .links { position:absolute; inset:0; width:6000px; height:4000px; overflow:visible; pointer-events:none; z-index:1; }
@@ -1578,6 +1581,17 @@
 .node::before { content:""; position:absolute; inset:0; border-radius:inherit; background:var(--card); pointer-events:none; z-index:-1; overflow:hidden; }
 .node.sized { display:flex; flex-direction:column; }
 .node:hover { z-index:3; box-shadow:0 20px 48px var(--shadow); }
+/* 纯图/生成/视频：悬停不抬叠层，端口扫过邻图时避免 z-index 重排闪屏 */
+.infinite-canvas-root .image-node:hover:not(.selected):not(.is-dragging),
+.infinite-canvas-root .generator-node:hover:not(.selected):not(.is-dragging),
+.infinite-canvas-root .msgen-node:hover:not(.selected):not(.is-dragging),
+.infinite-canvas-root .video-node:hover:not(.selected):not(.is-dragging),
+.infinite-canvas-root .node.group-member:hover:not(.selected):not(.is-dragging) {
+  z-index:2;
+}
+.infinite-canvas-root .node.group-member:hover:not(.selected):not(.is-dragging) {
+  z-index:3;
+}
 .infinite-canvas-root.theme-dark .node:hover:not(.selected) { outline-color:rgba(255,255,255,.14); background:rgba(42,42,46,.96); box-shadow:0 22px 52px -20px rgba(0,0,0,.55); }
 .node.selected { outline:2px solid var(--strong); outline-offset:2px; box-shadow:0 0 0 4px rgba(17,24,39,.12), 0 18px 42px var(--shadow); z-index:4; }
 .node.is-disabled { opacity:.58; filter:saturate(.32) brightness(.76); }
@@ -2164,8 +2178,10 @@
 .infinite-canvas-root.canvas-node-resize .node select,
 .infinite-canvas-root.canvas-node-resize .node .node-body,
 .infinite-canvas-root.canvas-node-resize .node .llm-chat-log { pointer-events:none !important; }
-.infinite-canvas-root.canvas-selecting,
-.infinite-canvas-root.canvas-selecting * { user-select:none !important; }
+.infinite-canvas-root.canvas-selecting .board,
+.infinite-canvas-root.canvas-selecting #world,
+.infinite-canvas-root.canvas-selecting .links,
+.infinite-canvas-root.canvas-selecting .node { user-select:none !important; }
 .infinite-canvas-root.canvas-selecting .node textarea,
 .infinite-canvas-root.canvas-selecting .node input,
 .infinite-canvas-root.canvas-selecting .node select,
@@ -2211,13 +2227,9 @@
 .video-node:active { cursor:grabbing; }
 /* 图片/生成节点：左键按住即抓取，拖动全程保持（不因指针移出节点而复原） */
 .infinite-canvas-root.canvas-node-drag .image-node,
-.infinite-canvas-root.canvas-node-drag .image-node *,
 .infinite-canvas-root.canvas-node-drag .generator-node,
-.infinite-canvas-root.canvas-node-drag .generator-node *,
 .infinite-canvas-root.canvas-node-drag .msgen-node,
-.infinite-canvas-root.canvas-node-drag .msgen-node *,
-.infinite-canvas-root.canvas-node-drag .video-node,
-.infinite-canvas-root.canvas-node-drag .video-node * { cursor:grabbing !important; }
+.infinite-canvas-root.canvas-node-drag .video-node { cursor:grabbing !important; }
 .infinite-canvas-root.canvas-node-drag .image-node > .port,
 .infinite-canvas-root.canvas-node-drag .generator-node > .port,
 .infinite-canvas-root.canvas-node-drag .msgen-node > .port,
@@ -5995,6 +6007,8 @@ html.canvas-text-expand-open { overflow:hidden; }
   padding:4px 6px 6px 4px !important;
   height:auto !important;
   min-height:72px;
+  max-height:132px !important;
+  overflow-y:auto !important;
   border-radius:0 !important;
 }
 .infinite-canvas-root.theme-dark .rh-node .rh-media-tile.empty,
@@ -6239,18 +6253,34 @@ html.canvas-text-expand-open { overflow:hidden; }
 }
 /* RH：上行三栏顶对齐；下行提示词右缘对齐参数列，运行钮在输出列下 */
 .rh-tri.rh-tri-io {
-  grid-template-rows:minmax(0, 1fr) auto;
+  /* min-content：壳高不够时禁止把第一行压矮，否则空图槽溢出盖住提示词 */
+  grid-template-rows:min-content min-content;
   grid-template-areas:
     "in params out"
     "prompt prompt actions";
-  align-items:stretch;
+  align-items:start;
+  align-content:start;
+}
+.rh-node.sized.rh-content-scroll .rh-tri.rh-tri-io,
+.rh-node.rh-content-scroll .rh-tri.rh-tri-io {
+  grid-template-rows:min-content min-content;
+  min-height:0;
+  overflow-x:hidden;
+  overflow-y:auto;
 }
 .rh-tri.rh-tri-io:not(:has(.rh-prompt-tile)) {
   grid-template-areas:
     "in params out"
     ". . actions";
 }
-.rh-tri.rh-tri-io > .rh-pane-in { grid-area:in; }
+.rh-tri.rh-tri-io > .rh-pane-in,
+.rh-tri.rh-tri-io > .rh-pane-params,
+.rh-tri.rh-tri-io > .rh-pane-out,
+.rh-tri.rh-tri-io > .rh-prompt-rail,
+.rh-tri.rh-tri-io > .rh-out-actions {
+  min-height:min-content;
+}
+.rh-tri.rh-tri-io > .rh-pane-in { grid-area:in; overflow:hidden; }
 .rh-tri.rh-tri-io > .rh-pane-params { grid-area:params; }
 .rh-tri.rh-tri-io > .rh-pane-out { grid-area:out; }
 .rh-tri.rh-tri-io > .rh-prompt-rail { grid-area:prompt; }
@@ -6258,9 +6288,14 @@ html.canvas-text-expand-open { overflow:hidden; }
 .rh-prompt-rail {
   min-width:0;
   min-height:0;
+  max-height:168px;
   display:flex;
   flex-direction:column;
   gap:8px;
+  overflow:hidden;
+  flex-shrink:0;
+  position:relative;
+  isolation:isolate;
 }
 .rh-prompt-rail:not(:has(.rh-prompt-tile)) {
   display:none;
@@ -6361,17 +6396,47 @@ html.canvas-text-expand-open { overflow:hidden; }
 .rh-tri-io > .rh-pane-in .rh-input-stack:has(.rh-media-tile.has-media) {
   padding:0;
 }
-/* 与输出井同高起步，上行输入/输出顶底对齐 */
-.rh-tri-io > .rh-pane-in .rh-input-stack,
+/* 与输出井同高起步；空槽固定高，有图时跟真实比例走 */
+.rh-tri-io > .rh-pane-in .rh-input-stack:not(:has(.rh-media-tile.has-media)),
 .rh-tri-io > .rh-pane-out .rh-well {
   flex:1 1 auto;
   min-height:200px;
 }
-.rh-node.sized .rh-tri-io > .rh-pane-in .rh-input-stack,
-.rh-node.rh-content-scroll .rh-tri-io > .rh-pane-in .rh-input-stack,
+.rh-tri-io > .rh-pane-in .rh-input-stack:not(:has(.rh-media-tile.has-media)) {
+  flex:0 0 auto;
+}
+.rh-tri-io > .rh-pane-in .rh-input-stack:has(.rh-media-tile.has-media) {
+  flex:0 0 auto;
+  min-height:0;
+  align-self:start;
+  overflow:visible;
+}
+.rh-node.sized.rh-content-scroll .rh-tri-io > .rh-pane-in,
+.rh-node.rh-content-scroll .rh-tri-io > .rh-pane-in {
+  min-height:0;
+  overflow:hidden;
+}
+.rh-node.sized.rh-content-scroll .rh-tri-io > .rh-pane-in .rh-input-stack:has(.rh-media-tile.has-media),
+.rh-node.rh-content-scroll .rh-tri-io > .rh-pane-in .rh-input-stack:has(.rh-media-tile.has-media) {
+  flex:1 1 auto;
+  min-height:0;
+  max-height:100%;
+  overflow-y:auto;
+  overflow-x:hidden;
+}
 .rh-node.sized .rh-tri-io > .rh-pane-out .rh-well,
 .rh-node.rh-content-scroll .rh-tri-io > .rh-pane-out .rh-well {
   min-height:140px;
+}
+/* 空图槽保持 200：勿把输入栈压到 140 而 tile 仍 200，溢出后会盖住下行提示词 */
+.rh-node.sized .rh-tri-io > .rh-pane-in .rh-input-stack:not(:has(.rh-media-tile.has-media)),
+.rh-node.rh-content-scroll .rh-tri-io > .rh-pane-in .rh-input-stack:not(:has(.rh-media-tile.has-media)) {
+  flex:0 0 auto;
+  min-height:200px;
+}
+.rh-node.sized .rh-tri-io > .rh-pane-in .rh-input-stack:has(.rh-media-tile.has-media),
+.rh-node.rh-content-scroll .rh-tri-io > .rh-pane-in .rh-input-stack:has(.rh-media-tile.has-media) {
+  min-height:0;
 }
 /* 有图时隐藏「拖入上传」提示，避免把输入列撑得比输出高 */
 .rh-media-grid:has(.rh-media-tile.has-media) .rh-media-grid-hint {
@@ -6798,14 +6863,14 @@ html.canvas-text-expand-open { overflow:hidden; }
 }
 .rh-media-grid.is-solo .rh-media-tile.empty,
 .rh-media-grid.is-solo .rh-media-tile.is-broken {
-  height:100%;
+  height:auto;
   min-height:200px;
   border-radius:12px;
   overflow:hidden;
 }
 .rh-media-grid.is-solo .rh-media-tile.empty .rh-media-tile-frame,
 .rh-media-grid.is-solo .rh-media-tile.is-broken .rh-media-tile-frame {
-  height:100%;
+  height:auto;
   min-height:200px;
   aspect-ratio:auto;
 }
@@ -6841,7 +6906,8 @@ html.canvas-text-expand-open { overflow:hidden; }
   outline:none;
   cursor:text;
   min-height:88px;
-  overflow:visible;
+  max-height:168px;
+  overflow:hidden;
 }
 .rh-prompt-tile-head {
   display:flex;
@@ -6860,10 +6926,10 @@ html.canvas-text-expand-open { overflow:hidden; }
 .rh-prompt-tile textarea.rh-prompt-tile-input {
   min-height:72px;
   height:auto !important;
-  max-height:none !important;
+  max-height:132px !important;
   resize:none;
-  overflow:hidden !important;
-  overflow-y:hidden !important;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
   border:none !important;
   outline:none !important;
   background:transparent !important;
@@ -6874,12 +6940,10 @@ html.canvas-text-expand-open { overflow:hidden; }
   line-height:1.45;
   width:100%;
   box-sizing:border-box;
-  scrollbar-width:none !important;
-  field-sizing:content;
+  scrollbar-width:thin;
 }
 .rh-prompt-tile-input::-webkit-scrollbar {
-  display:none !important;
-  width:0 !important;
+  width:4px !important;
   height:0 !important;
 }
 .rh-media-tile {
@@ -6910,11 +6974,14 @@ html.canvas-text-expand-open { overflow:hidden; }
   min-height:0;
 }
 .rh-media-tile.has-media .rh-media-tile-frame {
-  /* 有图：跟图真实高度走，勿 1:1/限高裁切 */
-  aspect-ratio:auto !important;
+  /* 有图：--rh-media-ar 由 JS 写入真实比例；壳内滚时勿溢出盖住提示词 */
+  aspect-ratio:var(--rh-media-ar, auto);
   height:auto;
+  max-height:var(--rh-input-media-max-h, 300px);
+  overflow:hidden;
+}
+.rh-node:not(.rh-content-scroll) .rh-media-tile.has-media .rh-media-tile-frame {
   max-height:none;
-  overflow:visible;
 }
 /* 有图：清掉叠在画面上的浮标/脚注（必选、图片N、已上传） */
 .rh-media-tile.has-media .rh-media-tile-badge,
@@ -7506,6 +7573,16 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 @keyframes outputWave2 { 0% { transform:translate3d(12%,-8%,0) rotate(5deg) scale(1.06); } 40% { transform:translate3d(-6%,6%,0) rotate(-4deg) scale(1.1); } 70% { transform:translate3d(-12%,-4%,0) rotate(2deg) scale(1.02); } 100% { transform:translate3d(12%,-8%,0) rotate(5deg) scale(1.06); } }
 @keyframes outputWave3 { 0% { transform:translate3d(4%,12%,0) rotate(0deg) scale(1.02); } 50% { transform:translate3d(-10%,-8%,0) rotate(-7deg) scale(1.12); } 100% { transform:translate3d(4%,12%,0) rotate(0deg) scale(1.02); } }
 @keyframes spin { to { transform:rotate(360deg); } }
+@property --port-slide {
+  syntax:"<length>";
+  inherits:true;
+  initial-value:0px;
+}
+@property --dot-scale {
+  syntax:"<number>";
+  inherits:true;
+  initial-value:.88;
+}
 /* 圆环+加号：直径 45px；空隙≈12px；线宽 4.5px；默认收入边线，hover/选中丝滑弹出 */
 .port { position:absolute; top:50%; border-radius:50%; cursor:crosshair; transform:translateY(-50%); z-index:14; pointer-events:auto; /* --canvas-port-hit 由 JS 按缩放反补偿，保证缩小时屏幕命中够大 */ --port-hit:var(--canvas-port-hit, 80px); --port-dot:45px; --port-dot-outset:34.5px; --port-plus:24px; --port-stroke:4.5px; --port-slide:0px; width:var(--port-hit); height:var(--port-hit); }
 .port-dot {
@@ -7520,13 +7597,14 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
   box-shadow:none;
   pointer-events:none;
   opacity:0;
-  /* 收起时滑向节点边；展开 --port-slide:0 */
+  /* 收起时滑向节点边；展开 --port-slide:0。变量必须写在本元素上，transition 才吃得到 */
   transform:translate(var(--dot-x, 0px), var(--dot-y, 0px)) translateX(var(--port-slide)) scale(var(--dot-scale, .88));
   transition:
     opacity .22s cubic-bezier(.22,.61,.36,1),
     transform .3s cubic-bezier(.22,.61,.36,1),
+    --port-slide .3s cubic-bezier(.22,.61,.36,1),
+    --dot-scale .3s cubic-bezier(.22,.61,.36,1),
     border-color .2s ease;
-  /* ponytail: 勿 will-change——悬停弹出时会抬合成层，连带图片生成节点闪一下 */
 }
 .port.in { --port-slide:var(--port-dot-outset); }
 .port.out { --port-slide:calc(-1 * var(--port-dot-outset)); }
@@ -7565,7 +7643,7 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
   pointer-events:none !important;
   transition:opacity .12s ease;
 }
-/* 跟随阶段：transform 必须零延迟，否则每帧改 --dot-x/y 会被长 transition 拖成「不跟手」 */
+/* 跟随阶段：关掉 transform / 自定义属性过渡，每帧改 --dot-x/y 才跟手 */
 .port.is-magnetic .port-dot {
   transition:border-color .2s ease, opacity .18s ease;
   --port-slide:0px;
@@ -7575,7 +7653,6 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
   background:transparent;
   box-shadow:none;
 }
-/* 保留 snap 类作时序标记；禁止再给 translate 加过渡 */
 .port.is-magnetic-snap .port-dot {
   transition:border-color .2s ease, opacity .18s ease;
 }
@@ -7598,17 +7675,25 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
   background:transparent;
   box-shadow:none;
 }
-/* 靠近端口磁吸：含空白 board（否则一出节点就被 cursor:default 盖成箭头） */
+/* 靠近端口磁吸：只改 board/节点/端口光标，禁止 .board * 全树 invalidation（会闪图） */
 .infinite-canvas-root.canvas-port-magnetic,
 .infinite-canvas-root.canvas-port-magnetic .board,
-.infinite-canvas-root.canvas-port-magnetic .board *,
+.infinite-canvas-root.canvas-port-magnetic #world,
+.infinite-canvas-root.canvas-port-magnetic .links,
 .infinite-canvas-root.canvas-port-magnetic .node,
-.infinite-canvas-root.canvas-port-magnetic .node * { cursor:crosshair !important; }
+.infinite-canvas-root.canvas-port-magnetic .port,
+.infinite-canvas-root.canvas-port-magnetic .port::before { cursor:crosshair !important; }
+.infinite-canvas-root.canvas-port-magnetic .image-node img,
+.infinite-canvas-root.canvas-port-magnetic .image-node video,
+.infinite-canvas-root.canvas-port-magnetic .gen-stage-hero,
+.infinite-canvas-root.canvas-port-magnetic .gen-stage-hero img,
+.infinite-canvas-root.canvas-port-magnetic .gen-stage-hero video { cursor:crosshair !important; }
 .infinite-canvas-root.canvas-node-drag.canvas-port-magnetic,
 .infinite-canvas-root.canvas-node-drag.canvas-port-magnetic .board,
-.infinite-canvas-root.canvas-node-drag.canvas-port-magnetic .board *,
+.infinite-canvas-root.canvas-node-drag.canvas-port-magnetic #world,
 .infinite-canvas-root.canvas-node-drag.canvas-port-magnetic .node,
-.infinite-canvas-root.canvas-node-drag.canvas-port-magnetic .node * { cursor:grabbing !important; }
+.infinite-canvas-root.canvas-node-drag.canvas-port-magnetic .port,
+.infinite-canvas-root.canvas-node-drag.canvas-port-magnetic .port::before { cursor:grabbing !important; }
 .port.in { left:calc(-1 * (var(--port-hit) / 2 + var(--port-dot-outset))); cursor:crosshair; }
 .port.out { right:calc(-1 * (var(--port-hit) / 2 + var(--port-dot-outset))); }
 /* 命中只吃朝外半区，避免内侧盖住图片抢拖拽；圆点不受裁切以便磁吸外移 */
@@ -7621,6 +7706,7 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
   pointer-events:auto;
 }
 .port { pointer-events:none; }
+.port.is-magnetic { pointer-events:auto; }
 .port.in::before { left:0; cursor:crosshair; }
 .port.out::before { right:0; cursor:crosshair; }
 .port-dot { pointer-events:none; }
@@ -7652,8 +7738,7 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
   cursor:grabbing !important;
 }
 .node.group-member,
-.node.group-member:hover,
-.node.group-member * {
+.node.group-member:hover {
   cursor:default !important;
 }
 .promptGroup-node:hover,.promptGroup-node.selected { z-index:1; }
