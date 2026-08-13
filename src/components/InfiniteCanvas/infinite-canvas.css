@@ -7688,6 +7688,27 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 .infinite-canvas-root.canvas-port-magnetic .gen-stage-hero,
 .infinite-canvas-root.canvas-port-magnetic .gen-stage-hero img,
 .infinite-canvas-root.canvas-port-magnetic .gen-stage-hero video { cursor:crosshair !important; }
+.infinite-canvas-root.canvas-port-magnetic :is(
+  .image-gen-dock-host,
+  .image-action-bar-host,
+  .selection-action-bar-host,
+  .frame-group-action-bar-host,
+  .image-batch-action-bar-host,
+  .text-format-bar-host,
+  .text-node-dock-host,
+  .gen-dock,
+  .gen-dock-size-panel,
+  .canvas-custom-select-panel,
+  .canvas-custom-select-menu,
+  .create-menu,
+  .minimap,
+  .bottombar,
+  .topbar,
+  .toolbar,
+  .canvas-pin-hub,
+  .video-trim-dock,
+  .link-delete
+) { cursor:auto !important; }
 .infinite-canvas-root.canvas-node-drag.canvas-port-magnetic,
 .infinite-canvas-root.canvas-node-drag.canvas-port-magnetic .board,
 .infinite-canvas-root.canvas-node-drag.canvas-port-magnetic #world,

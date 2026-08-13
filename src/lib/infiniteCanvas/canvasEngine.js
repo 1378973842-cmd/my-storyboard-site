@@ -4023,18 +4023,61 @@ function isOutsidePortSemicircle(kind, dx, dy, radius){
     return dx <= 0;
 }
 /**
- * 层级遮挡：磁吸按几何算半圆，但上层图片盖住端口时不应抢十字光标。
+ * 层级遮挡：磁吸按几何算半圆，但上层图片/浮动面板盖住端口时不应抢十字光标。
  * hit 是别的节点 / 别的端口 / 浮动 chrome → 视为挡住。
  */
+const PORT_MAGNET_CHROME_SEL = [
+    '.image-gen-dock-host',
+    '.image-action-bar-host',
+    '.selection-action-bar-host',
+    '.selection-group-type-menu',
+    '.frame-group-action-bar-host',
+    '.frame-group-bg-menu',
+    '.image-batch-action-bar-host',
+    '.image-batch-bg-rail',
+    '.canvas-bg-rail',
+    '.text-format-bar-host',
+    '.text-node-dock-host',
+    '.gen-dock',
+    '.gen-dock-size-panel',
+    '.gen-history-panel',
+    '.gen-batch-pick-bar',
+    '.canvas-custom-select-panel',
+    '.canvas-custom-select-menu',
+    '.create-menu',
+    '#createMenu',
+    '#linkCreateMenu',
+    '#nodeInputMenu',
+    '#nodeOutputMenu',
+    '#imageNodeMenu',
+    '#selectionMenu',
+    '.minimap',
+    '.bottombar',
+    '.topbar',
+    '.toolbar',
+    '.canvas-pin-hub',
+    '.link-delete',
+    '.link-controls',
+    '.video-trim-dock',
+    '.video-capture-menu',
+    '.image-edit-crop-dock',
+    '.image-edit-brush-dock',
+    '.image-edit-rotate-dock',
+    '.crop-aspect-menu',
+].join(',');
+function isPortMagnetChrome(el){
+    return Boolean(el?.closest?.(PORT_MAGNET_CHROME_SEL));
+}
 function isPortMagnetOccluded(port, portNodeEl, hitEl){
     if(!hitEl || !port || !portNodeEl) return false;
     const hitPort = hitEl.closest?.('.port');
     if(hitPort) return hitPort !== port;
+    if(isPortMagnetChrome(hitEl)) return true;
     const hitNode = hitEl.closest?.('.node');
     if(hitNode) return hitNode !== portNodeEl;
     // 空白板 / 世界 / 连线层：未挡住
     if(hitEl.closest?.('#board, .board, #world, .world, #nodes, #links, .links')) return false;
-    // dock / 顶栏等浮动层盖住时也不吸
+    // 顶栏等浮动层盖住时也不吸
     return true;
 }
 function setPortMagnetCursor(on){
@@ -36172,6 +36215,8 @@ if(canvasRoot){
     }, true);
     on(canvasRoot, 'pointerdown', e => {
         if(!canvas || e.button !== 0 || e.shiftKey) return;
+        // 控制台/动作条盖住端口半圆时勿把点击当成拉线
+        if(isPortMagnetChrome(e.target)) return;
         const port = e.target.closest?.('.port') || activeMagneticPort();
         if(!port || !nodesEl?.contains(port)) return;
         const nodeEl = port.closest('.node');
