@@ -7,7 +7,6 @@ import { History, Keyboard, Plus, Search } from 'lucide-react';
 const dockSpring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 import {
   applyImageEdit,
-  clearEditDrawing,
   closeImageEditor,
   readLastCanvasId,
   redoEditDrawing,
@@ -1101,10 +1100,10 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                           <button className="image-edit-btn secondary" type="button" data-brush-tool="text" onClick={(e) => { e.stopPropagation(); setBrushTool('text'); }} title="文字"><i data-lucide="type" className="w-4 h-4"></i></button>
                           <button className="image-edit-btn secondary" type="button" data-brush-tool="label" onClick={(e) => { e.stopPropagation(); setBrushTool('label'); }} title="标注序号"><i data-lucide="list-ordered" className="w-4 h-4"></i></button>
                           <label><span data-i18n="canvas.color">颜色</span> <input id="paintBrushColor" type="color" defaultValue="#ff2d55" /></label>
-                          <label><span data-i18n="canvas.brushSize">笔刷</span> <input id="paintBrushSize" type="range" min={1} max={80} step={1} defaultValue={14} /></label>
+                          <label><span data-i18n="canvas.brushSize">笔刷</span> <input id="paintBrushSize" type="range" min={1} max={80} step={1} defaultValue={48} /></label>
                           <button id="brushUndoBtn" className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); undoEditDrawing(); }} title="撤销"><i data-lucide="undo-2" className="w-4 h-4"></i></button>
                           <button id="brushRedoBtn" className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); redoEditDrawing(); }} title="恢复"><i data-lucide="redo-2" className="w-4 h-4"></i></button>
-                          <button className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); clearEditDrawing(); }}><i data-lucide="eraser" className="w-4 h-4"></i><span data-i18n="canvas.clear">清空</span></button>
+                          <button className="image-edit-btn secondary" type="button" data-brush-tool="eraser" onClick={(e) => { e.stopPropagation(); setBrushTool('eraser'); }} title="橡皮"><i data-lucide="eraser" className="w-4 h-4"></i><span data-i18n="canvas.eraser">橡皮</span></button>
                           <div id="annotationLabelPick" className="annotation-label-pick" style={{ display: "none" }} />
                           <button id="annotationRestoreBtn" className="image-edit-btn secondary" type="button" onClick={(e) => { e.stopPropagation(); restoreAnnotationBase(); }} title="恢复标注前的原图"><i data-lucide="rotate-ccw" className="w-4 h-4"></i><span>恢复原图</span></button>
                       </div>
@@ -1116,7 +1115,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                               <button type="button" className="image-edit-dock-tool active" data-brush-tool="free" onClick={() => setBrushTool('free')} title="自由画笔"><i data-lucide="paintbrush" className="w-4 h-4"></i></button>
                               <button type="button" className="image-edit-dock-tool" data-brush-tool="rect" onClick={() => setBrushTool('rect')} title="矩形"><i data-lucide="square" className="w-4 h-4"></i></button>
                               <button type="button" className="image-edit-dock-tool" data-brush-tool="ellipse" onClick={() => setBrushTool('ellipse')} title="椭圆"><i data-lucide="circle" className="w-4 h-4"></i></button>
-                              <button type="button" className="image-edit-dock-tool" onClick={() => clearEditDrawing()} title="橡皮/清空"><i data-lucide="eraser" className="w-4 h-4"></i></button>
+                              <button type="button" className="image-edit-dock-tool" data-brush-tool="eraser" onClick={() => setBrushTool('eraser')} title="橡皮"><i data-lucide="eraser" className="w-4 h-4"></i></button>
                               <button type="button" className="image-edit-dock-tool" data-brush-tool="text" onClick={() => setBrushTool('text')} title="文字"><i data-lucide="type" className="w-4 h-4"></i></button>
                               <button type="button" className="image-edit-dock-tool" data-brush-tool="label" onClick={() => setBrushTool('label')} title="标注序号"><i data-lucide="list-ordered" className="w-4 h-4"></i></button>
                               <div id="brushTextFieldWrap" className="brush-text-field-wrap" hidden>
@@ -1124,7 +1123,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                               </div>
                               <div id="annotationLabelPickInline" className="annotation-label-pick annotation-label-pick-inline" hidden />
                               <label className="image-edit-dock-color" title="颜色"><input id="paintBrushColorInline" type="color" defaultValue="#ff2d55" onChange={(e) => { const m = document.getElementById('paintBrushColor') as HTMLInputElement | null; if (m) { m.value = e.target.value; m.dispatchEvent(new Event('input', { bubbles: true })); } }} /></label>
-                              <label className="image-edit-dock-size" title="笔刷大小"><input id="paintBrushSizeInline" type="range" min={1} max={80} step={1} defaultValue={14} onChange={(e) => { const m = document.getElementById('paintBrushSize') as HTMLInputElement | null; if (m) { m.value = e.target.value; m.dispatchEvent(new Event('input', { bubbles: true })); } }} /></label>
+                              <label className="image-edit-dock-size" title="笔刷大小"><input id="paintBrushSizeInline" type="range" min={1} max={80} step={1} defaultValue={48} onChange={(e) => { const m = document.getElementById('paintBrushSize') as HTMLInputElement | null; if (m) { m.value = e.target.value; m.dispatchEvent(new Event('input', { bubbles: true })); } }} /></label>
                               <button type="button" className="image-edit-dock-tool" onClick={() => undoEditDrawing()} title="撤销"><i data-lucide="undo-2" className="w-4 h-4"></i></button>
                               <button type="button" className="image-edit-dock-tool" onClick={() => redoEditDrawing()} title="恢复"><i data-lucide="redo-2" className="w-4 h-4"></i></button>
                               <button id="annotationRestoreBtnInline" className="image-edit-dock-tool" type="button" onClick={() => restoreAnnotationBase()} title="恢复原图"><i data-lucide="rotate-ccw" className="w-4 h-4"></i></button>

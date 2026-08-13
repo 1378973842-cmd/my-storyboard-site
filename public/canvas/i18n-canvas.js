@@ -185,6 +185,7 @@
         "canvas.modeGrid": { zh: "宫格切分", en: "Grid Split" },
         "canvas.brushSize": { zh: "笔刷", en: "Brush" },
         "canvas.clear": { zh: "清空", en: "Clear" },
+        "canvas.eraser": { zh: "橡皮", en: "Eraser" },
         "canvas.color": { zh: "颜色", en: "Color" },
         "canvas.brushHint": { zh: "自由绘制或切换「数字标签」为角色打编号（复刻 Agent 用）", en: "Draw freely, or switch to number labels to mark characters for Replica Agent." },
         "canvas.brushEdit": { zh: "画笔编辑", en: "Brush Edit" },

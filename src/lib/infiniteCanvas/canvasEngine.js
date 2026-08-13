@@ -1577,6 +1577,7 @@ let imageEditFlipV = false;
 /** 旋转预览时需要改写宽高比的外壳（生图框 / 图片托盘） */
 let imageEditRotateShell = null;
 let editDrawState = null;
+let eraserCursorEl = null;
 let editDrawUndoStack = [];
 let editDrawRedoStack = [];
 /** 画笔层是否有未应用笔迹（避免对大图全量 getImageData） */
@@ -7450,6 +7451,7 @@ function ensureImageEditorUi(){
         beginEditDraw(event);
     }, true);
     on(document, 'pointermove', event => {
+        syncEraserCursor(event);
         if(!editDrawState && !gridCustomDrag) return;
         if(isImageEditOpen() || editDrawState || gridCustomDrag) moveEditDraw(event);
     });
@@ -12156,6 +12158,7 @@ function setImageEditMode(mode, userTouched=false){
     cropCanvasEls.forEach(el => {
         el.classList.toggle('brush-mode', imageEditMode === 'brush');
         el.classList.toggle('rotate-mode', imageEditMode === 'rotate');
+        el.classList.toggle('is-eraser', imageEditMode === 'brush' && brushTool === 'eraser');
     });
     syncInplaceEditOverlays(imageEditMode);
     const modal = domGet('imageEditModal');
@@ -12214,6 +12217,7 @@ function setImageEditMode(mode, userTouched=false){
     syncEditDrawingHistoryButtons();
     syncBrushToolButtons();
     refreshIcons();
+    if(imageEditMode !== 'brush' || brushTool !== 'eraser') hideEraserCursor();
 }
 function inferAnnotationBaseUrl(url){
     const raw = String(url || '').trim();
@@ -13054,7 +13058,7 @@ function markEditDrawDirty(){
     editDrawDirty = true;
 }
 function setBrushTool(tool){
-    const next = ['free','rect','ellipse','label','text'].includes(tool) ? tool : 'free';
+    const next = ['free','rect','ellipse','label','text','eraser'].includes(tool) ? tool : 'free';
     const prev = brushTool;
     if(brushTool === 'text' && next !== 'text') dismissBrushTextInline({ commit: true });
     if(next === 'label' && prev === 'label') brushLabelPickOpen = !brushLabelPickOpen;
@@ -13073,6 +13077,7 @@ function setBrushTool(tool){
     if(brushTool === 'text' && isImageEditOpen()){
         requestAnimationFrame(() => spawnBrushTextAtCenter());
     }
+    syncEraserCursorMode();
 }
 function syncBrushToolButtons(){
     domQueryAll('[data-brush-tool]').forEach(btn => {
@@ -13118,10 +13123,73 @@ function setGridCustomLinePos(index, point){
         ? Math.max(0.001, Math.min(0.999, point.y / Math.max(1, canvasEl.height)))
         : Math.max(0.001, Math.min(0.999, point.x / Math.max(1, canvasEl.width)));
 }
+function brushSliderToVisualPx(raw){
+    // 对数：左半段留给细笔，避免必须拖到最左边才变细
+    const min = 1;
+    const max = 80;
+    const t = Math.max(0, Math.min(1, (Number(raw) - min) / (max - min)));
+    return min * Math.pow(max / min, t);
+}
+function eraserCursorVisualPx(){
+    const raw = Number(domGet('paintBrushSizeInline')?.value || domGet('paintBrushSize')?.value || 48);
+    return brushSliderToVisualPx(Number.isFinite(raw) && raw > 0 ? raw : 48);
+}
+function ensureEraserCursorEl(){
+    if(eraserCursorEl?.isConnected) return eraserCursorEl;
+    const el = document.createElement('div');
+    el.id = 'brushEraserCursor';
+    el.className = 'brush-eraser-cursor';
+    el.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(el);
+    eraserCursorEl = el;
+    return el;
+}
+function hideEraserCursor(){
+    eraserCursorEl?.classList.remove('is-on');
+}
+function syncEraserCursorMode(){
+    const on = brushTool === 'eraser' && imageEditMode === 'brush' && isImageEditOpen();
+    imageEditInplaceHost?.classList.toggle('is-eraser', on);
+    domGet('cropCanvas')?.classList.toggle('is-eraser', on);
+    if(!on) hideEraserCursor();
+}
+function syncEraserCursor(event){
+    if(!event || brushTool !== 'eraser' || imageEditMode !== 'brush' || !isImageEditOpen()){
+        hideEraserCursor();
+        return;
+    }
+    const overChrome = event.target?.closest?.('.image-edit-brush-dock, .image-edit-crop-dock, .image-edit-rotate-dock, .image-edit-tools, .image-edit-head, .image-edit-actions');
+    if(overChrome && !editDrawState){
+        hideEraserCursor();
+        return;
+    }
+    const canvasEl = editDrawCanvas();
+    if(!canvasEl){
+        hideEraserCursor();
+        return;
+    }
+    const rect = canvasEl.getBoundingClientRect();
+    const inside = event.clientX >= rect.left && event.clientX <= rect.right
+        && event.clientY >= rect.top && event.clientY <= rect.bottom;
+    if(!inside && !editDrawState){
+        hideEraserCursor();
+        return;
+    }
+    const el = ensureEraserCursorEl();
+    const d = Math.max(2, eraserCursorVisualPx());
+    el.style.width = `${d}px`;
+    el.style.height = `${d}px`;
+    el.style.left = `${event.clientX}px`;
+    el.style.top = `${event.clientY}px`;
+    el.classList.add('is-on');
+}
+function isBrushFreeStroke(){
+    return brushTool === 'free' || brushTool === 'eraser';
+}
 function editBrushSize(){
     // 滑条按屏幕像素手感（min=1 ≈ 1px 细线）；画布缓冲是原图像素，按显示缩放换算
-    const raw = Number(domGet('paintBrushSizeInline')?.value || domGet('paintBrushSize')?.value || 14);
-    const visual = Number.isFinite(raw) && raw > 0 ? raw : 14;
+    const raw = Number(domGet('paintBrushSizeInline')?.value || domGet('paintBrushSize')?.value || 48);
+    const visual = brushSliderToVisualPx(Number.isFinite(raw) && raw > 0 ? raw : 48);
     const canvasEl = editDrawCanvas();
     const rect = canvasEl?.getBoundingClientRect?.();
     const displayW = rect?.width || 0;
@@ -13136,6 +13204,12 @@ function setupDrawStyle(ctx){
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.lineWidth = editBrushSize();
+    if(brushTool === 'eraser'){
+        ctx.strokeStyle = '#000';
+        ctx.fillStyle = '#000';
+        ctx.globalCompositeOperation = 'destination-out';
+        return;
+    }
     ctx.strokeStyle = brushColor();
     ctx.fillStyle = brushColor();
     ctx.globalCompositeOperation = 'source-over';
@@ -13251,12 +13325,12 @@ function beginEditDraw(event){
         return;
     }
     pushEditDrawHistory();
-    editDrawState = {x:p.x, y:p.y, sx:p.x, sy:p.y, pointerId:event.pointerId, snapshot:(imageEditMode === 'brush' && brushTool !== 'free') ? editDrawSnapshot() : null};
+    editDrawState = {x:p.x, y:p.y, sx:p.x, sy:p.y, pointerId:event.pointerId, snapshot:(imageEditMode === 'brush' && !isBrushFreeStroke()) ? editDrawSnapshot() : null};
     setupDrawStyle(ctx);
     ctx.beginPath();
     ctx.moveTo(p.x, p.y);
     ctx.lineTo(p.x + 0.01, p.y + 0.01);
-    if(brushTool === 'free'){
+    if(isBrushFreeStroke()){
         ctx.stroke();
         markEditDrawDirty();
     }
@@ -13274,7 +13348,7 @@ function moveEditDraw(event){
     event.stopPropagation();
     const ctx = editDrawCanvas().getContext('2d');
     const p = editDrawPoint(event);
-    if(imageEditMode === 'brush' && brushTool !== 'free' && brushTool !== 'label' && brushTool !== 'text'){
+    if(imageEditMode === 'brush' && !isBrushFreeStroke() && brushTool !== 'label' && brushTool !== 'text'){
         restoreEditDrawSnapshot(editDrawState.snapshot);
         drawBrushShape(ctx, {x:editDrawState.sx, y:editDrawState.sy}, p, true);
         markEditDrawDirty();
@@ -14463,6 +14537,7 @@ function forceClearImageEditChrome(opts={}){
 }
 function closeImageEditor(){
     // 先停「放大编辑」动画，但保留 backup，最后再缩回
+    hideEraserCursor();
     cancelImageEditViewportAnim();
     setCropAspectMenuOpen(false);
     clearImageEditCropDockPosition();
@@ -23750,6 +23825,19 @@ function restoreImageGenDockAfterLink(){
         syncImageGenDock();
     });
 }
+function playCanvasChromeEnter(el, dir='up'){
+    if(!el) return;
+    if(typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    el.classList.remove('is-enter-up', 'is-enter-down');
+    void el.offsetWidth;
+    el.classList.add(dir === 'down' ? 'is-enter-down' : 'is-enter-up');
+    const done = ev => {
+        if(ev.target.parentElement !== el) return;
+        el.classList.remove('is-enter-up', 'is-enter-down');
+        el.removeEventListener('animationend', done);
+    };
+    el.addEventListener('animationend', done);
+}
 function removeImageGenDock(){
     if(imageGenDockEl?.__sizeOutsideClose){
         document.removeEventListener('pointerdown', imageGenDockEl.__sizeOutsideClose, true);
@@ -24084,6 +24172,7 @@ function bindImageGenDockControls(wrap, node){
 }
 function remountImageGenDock(node){
     // 仅同节点 remount 时保留光标/选区；切到别的生成节点绝不能把旧提示词写进新节点
+    const shouldEnter = !(imageGenDockNodeId === node?.id && imageGenDockEl?.isConnected && !imageGenDockEl.hidden);
     const prevDockId = imageGenDockNodeId;
     const keepPrompt = (() => {
         if(!node?.id || prevDockId !== node.id) return null;
@@ -24137,6 +24226,7 @@ function remountImageGenDock(node){
     imageGenDockEl = host;
     imageGenDockNodeId = node.id;
     scheduleImageGenDockFollow(node);
+    if(shouldEnter) playCanvasChromeEnter(host, 'down');
     refreshIcons(host);
     if(keepPrompt){
         const ta = host.querySelector?.('.gen-dock-prompt');
@@ -24224,6 +24314,7 @@ function syncImageGenDock(){
             // 从禁用展开：只定位；常态/点 xx 都 softRefresh；孤儿宿主且未打字才 remount
             if(wasHidden){
                 positionImageGenDock(only);
+                playCanvasChromeEnter(imageGenDockEl, 'down');
             } else if(orphanCount > 1 && !textEditingHere){
                 remountImageGenDock(only);
             } else {
@@ -24709,6 +24800,7 @@ function imageActionBarHtmlForTarget(target){
         </div>`;
 }
 function remountImageActionBar(node){
+    const shouldEnter = !(imageActionBarNodeId === node?.id && imageActionBarEl?.isConnected && !imageActionBarEl.hidden);
     removeImageActionBar();
     const target = resolveImageActionBarTarget(node);
     if(!target || !board) return;
@@ -24726,6 +24818,7 @@ function remountImageActionBar(node){
     imageActionBarNodeId = node.id;
     imageActionBarUrl = target.url;
     positionImageActionBar(node);
+    if(shouldEnter) playCanvasChromeEnter(host, 'up');
     requestAnimationFrame(() => positionImageActionBar(node));
     refreshIcons(host);
 }
@@ -24764,10 +24857,12 @@ function syncImageActionBar(){
         ? canvasRoot.querySelectorAll('.image-action-bar-host').length
         : (board?.querySelectorAll('.image-action-bar-host').length || 0);
     if(imageActionBarNodeId === only.id && imageActionBarEl?.isConnected && imageActionBarUrl === target.url){
+        const wasHidden = Boolean(imageActionBarEl.hidden);
         imageActionBarEl.hidden = false;
         imageActionBarEl.removeAttribute('aria-hidden');
         imageActionBarEl.style.pointerEvents = 'auto';
         positionImageActionBar(only);
+        if(wasHidden) playCanvasChromeEnter(imageActionBarEl, 'up');
         return;
     }
     if(
@@ -25249,6 +25344,7 @@ function runTextFormatCommand(node, cmd, value=''){
     refreshGeneratorInputViews();
 }
 function remountTextFormatBar(node){
+    const shouldEnter = !(textFormatBarNodeId === node?.id && textFormatBarEl?.isConnected && !textFormatBarEl.hidden);
     removeTextFormatBar();
     if(!node || !board || !isTextConsoleNode(node) || isNodeDisabled(node)) return;
     ensureTextNodeDefaults(node);
@@ -25309,10 +25405,12 @@ function remountTextFormatBar(node){
     textFormatBarEl = host;
     textFormatBarNodeId = node.id;
     positionTextFormatBar(node);
+    if(shouldEnter) playCanvasChromeEnter(host, 'up');
     requestAnimationFrame(() => positionTextFormatBar(node));
     refreshIcons(host);
 }
 function remountTextNodeDock(node){
+    const shouldEnter = !(textNodeDockNodeId === node?.id && textNodeDockEl?.isConnected && !textNodeDockEl.hidden);
     removeTextNodeDock();
     if(!node || !board || !isTextConsoleNode(node) || isNodeDisabled(node)) return;
     ensureTextNodeDefaults(node);
@@ -25401,6 +25499,7 @@ function remountTextNodeDock(node){
     textNodeDockNodeId = node.id;
     mountCanvasCustomSelects(host);
     positionTextNodeDock(node);
+    if(shouldEnter) playCanvasChromeEnter(host, 'down');
     requestAnimationFrame(() => positionTextNodeDock(node));
     refreshIcons(host);
 }
@@ -25429,16 +25528,20 @@ function syncTextNodeChrome(){
         return;
     }
     if(textFormatBarNodeId === only.id && textFormatBarEl?.isConnected){
+        const wasHidden = Boolean(textFormatBarEl.hidden);
         textFormatBarEl.hidden = false;
         positionTextFormatBar(only);
+        if(wasHidden) playCanvasChromeEnter(textFormatBarEl, 'up');
     } else {
         remountTextFormatBar(only);
     }
     const typingHere = Boolean(textNodeDockEl?.contains?.(document.activeElement) && isEditableTarget(document.activeElement));
     if(textNodeDockNodeId === only.id && textNodeDockEl?.isConnected){
+        const wasHidden = Boolean(textNodeDockEl.hidden);
         textNodeDockEl.hidden = false;
         textNodeDockEl.style.pointerEvents = 'auto';
         if(!typingHere) positionTextNodeDock(only);
+        if(wasHidden) playCanvasChromeEnter(textNodeDockEl, 'down');
     } else if(!typingHere){
         remountTextNodeDock(only);
     }
@@ -33213,6 +33316,7 @@ function positionFrameGroupActionBar(group){
     frameGroupActionBarEl.style.pointerEvents = 'auto';
 }
 function remountFrameGroupActionBar(group){
+    const shouldEnter = !(frameGroupActionBarNodeId === group?.id && frameGroupActionBarEl?.isConnected);
     removeFrameGroupActionBar();
     if(!board || !group || group.type !== 'group' || isImageEditOpen()) return;
     const en = langIsEn();
@@ -33260,6 +33364,7 @@ function remountFrameGroupActionBar(group){
     frameGroupActionBarEl = host;
     frameGroupActionBarNodeId = group.id;
     positionFrameGroupActionBar(group);
+    if(shouldEnter) playCanvasChromeEnter(host, 'up');
     requestAnimationFrame(() => positionFrameGroupActionBar(group));
     refreshIcons(host);
 }
@@ -33337,6 +33442,7 @@ function positionImageBatchActionBar(batch){
     imageBatchActionBarEl.style.pointerEvents = 'auto';
 }
 function remountImageBatchActionBar(batch){
+    const shouldEnter = !(imageBatchActionBarNodeId === batch?.id && imageBatchActionBarEl?.isConnected);
     removeImageBatchActionBar();
     if(!board || !batch || batch.type !== 'imageBatch' || isImageEditOpen()) return;
     const en = langIsEn();
@@ -33379,6 +33485,7 @@ function remountImageBatchActionBar(batch){
     imageBatchActionBarEl = host;
     imageBatchActionBarNodeId = batch.id;
     positionImageBatchActionBar(batch);
+    if(shouldEnter) playCanvasChromeEnter(host, 'up');
     requestAnimationFrame(() => positionImageBatchActionBar(batch));
     refreshIcons(host);
 }
@@ -34049,6 +34156,7 @@ async function downloadSelectedMedia(){
     setStatus(en ? `Downloaded ${items.length}` : `已下载 ${items.length} 张`);
 }
 function remountSelectionActionBar(){
+    const shouldEnter = !selectionActionBarEl?.isConnected;
     removeSelectionActionBar();
     if(!board || selected.size < 2 || selectDrag || isImageEditOpen()) return;
     const en = langIsEn();
@@ -34086,6 +34194,7 @@ function remountSelectionActionBar(){
     board.appendChild(host);
     selectionActionBarEl = host;
     positionSelectionActionBar();
+    if(shouldEnter) playCanvasChromeEnter(host, 'up');
     requestAnimationFrame(() => positionSelectionActionBar());
     refreshIcons(host);
 }
