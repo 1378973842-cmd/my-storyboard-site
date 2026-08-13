@@ -9291,13 +9291,41 @@ html.canvas-node-drag .selection-box.is-selection-hull {
   pointer-events:auto;
   touch-action:none;
 }
+.brush-text-transform-move-plate {
+  position:absolute;
+  inset:10px;
+  z-index:3;
+  pointer-events:none;
+  cursor:grab;
+  touch-action:none;
+  border-radius:2px;
+}
+.brush-text-transform.is-selected:not(.is-editing) .brush-text-transform-move-plate {
+  pointer-events:auto;
+  cursor:grab;
+}
+.brush-text-transform.is-editing .brush-text-transform-move-plate {
+  pointer-events:none;
+}
+.brush-text-transform.is-selected:not(.is-editing) .brush-text-transform-editor {
+  pointer-events:none;
+  cursor:grab;
+}
+.crop-canvas.brush-mode .brush-text-transform.is-selected:not(.is-editing) .brush-text-transform-move-plate,
+.crop-canvas.brush-mode .brush-text-transform.is-selected:not(.is-editing) .brush-text-transform-editor {
+  cursor:grab !important;
+}
+.infinite-canvas-root.canvas-brush-text-drag .brush-text-transform-move-plate,
+.infinite-canvas-root.canvas-brush-text-drag .brush-text-transform.is-selected:not(.is-editing) .brush-text-transform-editor {
+  cursor:grabbing !important;
+}
 .brush-text-transform-frame {
   position:absolute;
   inset:-4px;
   border-radius:1px;
   outline:none;
   background:transparent;
-  pointer-events:auto;
+  pointer-events:none;
   cursor:move;
   z-index:1;
 }
@@ -9312,7 +9340,7 @@ html.canvas-node-drag .selection-box.is-selection-hull {
   background:transparent;
   outline:none;
   resize:none;
-  overflow:visible;
+  overflow:hidden;
   text-align:center;
   font-family:"Inter", "Noto Sans SC", sans-serif;
   font-weight:700;
@@ -9320,10 +9348,14 @@ html.canvas-node-drag .selection-box.is-selection-hull {
   white-space:nowrap;
   caret-color:currentColor;
   cursor:text;
-  z-index:2;
+  z-index:4;
   pointer-events:auto;
   user-select:text;
   -webkit-user-select:text;
+}
+.brush-text-transform:not(.is-editing) .brush-text-transform-editor {
+  pointer-events:none;
+  cursor:grab;
 }
 .brush-text-transform-editor:empty::before {
   content:attr(data-placeholder);
@@ -9339,25 +9371,25 @@ html.canvas-node-drag .selection-box.is-selection-hull {
 }
 .brush-text-transform-handle {
   position:absolute;
-  width:8px;
-  height:8px;
+  width:10px;
+  height:10px;
   border:0;
   padding:0;
   border-radius:1px;
   background:#f3f1f0;
   box-shadow:0 0 0 1px rgba(14,14,14,.5);
-  z-index:4;
+  z-index:8;
   pointer-events:auto;
   touch-action:none;
 }
-.brush-text-transform-handle.is-nw { left:-4px; top:-4px; cursor:nwse-resize; }
-.brush-text-transform-handle.is-n  { left:50%; top:-4px; transform:translateX(-50%); cursor:ns-resize; z-index:4; }
-.brush-text-transform-handle.is-ne { right:-4px; top:-4px; cursor:nesw-resize; }
-.brush-text-transform-handle.is-e  { right:-4px; top:50%; transform:translateY(-50%); cursor:ew-resize; }
-.brush-text-transform-handle.is-se { right:-4px; bottom:-4px; cursor:nwse-resize; }
-.brush-text-transform-handle.is-s  { left:50%; bottom:-4px; transform:translateX(-50%); cursor:ns-resize; }
-.brush-text-transform-handle.is-sw { left:-4px; bottom:-4px; cursor:nesw-resize; }
-.brush-text-transform-handle.is-w  { left:-4px; top:50%; transform:translateY(-50%); cursor:ew-resize; }
+.brush-text-transform-handle.is-nw { left:-5px; top:-5px; cursor:nwse-resize; }
+.brush-text-transform-handle.is-n  { left:50%; top:-5px; transform:translateX(-50%); cursor:ns-resize; }
+.brush-text-transform-handle.is-ne { right:-5px; top:-5px; cursor:nesw-resize; }
+.brush-text-transform-handle.is-e  { right:-5px; top:50%; transform:translateY(-50%); cursor:ew-resize; }
+.brush-text-transform-handle.is-se { right:-5px; bottom:-5px; cursor:nwse-resize; }
+.brush-text-transform-handle.is-s  { left:50%; bottom:-5px; transform:translateX(-50%); cursor:ns-resize; }
+.brush-text-transform-handle.is-sw { left:-5px; bottom:-5px; cursor:nesw-resize; }
+.brush-text-transform-handle.is-w  { left:-5px; top:50%; transform:translateY(-50%); cursor:ew-resize; }
 .brush-text-transform-handle.is-rotate {
   position:absolute;
   left:50%;
@@ -9365,15 +9397,25 @@ html.canvas-node-drag .selection-box.is-selection-hull {
   right:auto;
   bottom:auto;
   transform:translate(-50%, -50%);
-  width:10px;
-  height:10px;
-  border-radius:999px;
-  background:#f3f1f0;
-  cursor:grab;
-  z-index:7;
+  width:18px;
+  height:18px;
+  border-radius:0;
+  background:transparent;
+  box-shadow:none;
+  cursor:crosshair;
+  z-index:9;
+  display:flex;
+  align-items:center;
+  justify-content:center;
 }
-.brush-text-transform-handle.is-rotate:active { cursor:grabbing; }
-.infinite-canvas-root.canvas-brush-text-drag .brush-text-transform-frame { cursor:move; }
+.brush-text-rotate-icon {
+  width:14px;
+  height:14px;
+  color:#f3f1f0;
+  filter:drop-shadow(0 0 1px rgba(14,14,14,.72));
+  pointer-events:none;
+}
+.brush-text-transform-handle.is-rotate:active { cursor:crosshair; }
 .annotation-label-pick-inline {
   align-items:center;
   gap:6px;

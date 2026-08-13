@@ -1596,6 +1596,7 @@ const EDIT_DRAW_HISTORY_MAX = 40;
 let brushTool = 'free';
 let brushLabelCounter = 1;
 let brushLabelPick = 1;
+let brushLabelPickOpen = false;
 let gridCustomMode = false;
 let gridCustomLines = []; // [{type:'h'|'v', pos:0-1}] 相对图片尺寸的分数位置
 let gridCustomOrientation = 'h'; // 当前点击放置方向
@@ -7338,6 +7339,10 @@ function ensureImageEditorUi(){
     on(document, 'pointercancel', () => { cropDrag = null; clearCropDragCursor(); });
     on(document, 'pointerdown', event => {
         if(!isImageEditOpen() || imageEditMode !== 'brush') return;
+        if(brushTool === 'text' && brushTextInline?.root?.classList?.contains('is-editing') && !event.target.closest('.brush-text-transform')){
+            confirmBrushTextInline();
+            setBrushTextSelection(null, false);
+        }
         if(event.target.closest('.brush-text-transform, .image-edit-head, .image-edit-tools, .image-edit-actions, .image-edit-mode, .image-edit-crop-dock, .image-edit-brush-dock, .crop-aspect-menu, #cropBox, #cropHandle')) return;
         if(!event.target.closest('.crop-canvas, #cropCanvas, #editDrawCanvas')) return;
         beginEditDraw(event);
@@ -12149,7 +12154,7 @@ function setAnnotationLabelPick(n){
 function syncAnnotationLabelPickUI(){
     const wraps = [domGet('annotationLabelPick'), domGet('annotationLabelPickInline')].filter(Boolean);
     if(!wraps.length) return;
-    const show = imageEditMode === 'brush' && brushTool === 'label';
+    const show = imageEditMode === 'brush' && brushTool === 'label' && brushLabelPickOpen;
     wraps.forEach(wrap => {
         wrap.hidden = !show;
         wrap.style.display = show ? 'flex' : 'none';
@@ -12199,6 +12204,144 @@ function brushTextCornerSign(handle){
     if(handle === 'sw') return [-1, 1];
     return [0, 0];
 }
+function editDrawCanvasSize(){
+    const canvasEl = editDrawCanvas();
+    return { w: Math.max(1, canvasEl?.width || 1), h: Math.max(1, canvasEl?.height || 1) };
+}
+function brushTextCanvasCenter(){
+    const { w, h } = editDrawCanvasSize();
+    return { x: w / 2, y: h / 2 };
+}
+function brushTextItemAabb(st){
+    const corners = brushTextItemCorners(st);
+    return {
+        minX: Math.min(...corners.map(c => c.x)),
+        maxX: Math.max(...corners.map(c => c.x)),
+        minY: Math.min(...corners.map(c => c.y)),
+        maxY: Math.max(...corners.map(c => c.y)),
+    };
+}
+function brushTextItemCorners(st){
+    const rad = st.rot * Math.PI / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const hw = st.w / 2;
+    const hh = st.h / 2;
+    return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([lx, ly]) => ({
+        x: st.cx + lx * cos - ly * sin,
+        y: st.cy + lx * sin + ly * cos,
+    }));
+}
+function brushTextWorldFromAnchorLocal(lx, ly, anchorX, anchorY, rotDeg){
+    const rad = rotDeg * Math.PI / 180;
+    return {
+        x: anchorX + lx * Math.cos(rad) - ly * Math.sin(rad),
+        y: anchorY + lx * Math.sin(rad) + ly * Math.cos(rad),
+    };
+}
+function brushTextCenterOffsetFromAnchor(handle, w, h){
+    if(handle === 'se') return [w / 2, h / 2];
+    if(handle === 'nw') return [-w / 2, -h / 2];
+    if(handle === 'ne') return [w / 2, -h / 2];
+    if(handle === 'sw') return [-w / 2, h / 2];
+    return [0, 0];
+}
+function brushTextAabbInside(st, cw, ch){
+    const bb = brushTextItemAabb(st);
+    return bb.minX >= 0 && bb.maxX <= cw && bb.minY >= 0 && bb.maxY <= ch;
+}
+function brushTextSetCornerFromScale(st, handle, anchor, rot, startW, startH, scale){
+    st.w = Math.max(BRUSH_TEXT_MIN_W, startW * scale);
+    st.h = Math.max(BRUSH_TEXT_MIN_H, startH * scale);
+    const [lcx, lcy] = brushTextCenterOffsetFromAnchor(handle, st.w, st.h);
+    const nc = brushTextWorldFromAnchorLocal(lcx, lcy, anchor.x, anchor.y, rot);
+    st.cx = nc.x;
+    st.cy = nc.y;
+}
+function brushTextClampCornerScale(st, handle, anchor, rot, startW, startH, wantScale){
+    const { w: cw, h: ch } = editDrawCanvasSize();
+    const minScale = Math.max(BRUSH_TEXT_MIN_W / Math.max(1, startW), BRUSH_TEXT_MIN_H / Math.max(1, startH));
+    wantScale = Math.max(minScale, wantScale);
+    brushTextSetCornerFromScale(st, handle, anchor, rot, startW, startH, wantScale);
+    if(brushTextAabbInside(st, cw, ch)) return;
+    let lo = minScale;
+    let hi = wantScale;
+    for(let i = 0; i < 24; i++){
+        const mid = (lo + hi) / 2;
+        brushTextSetCornerFromScale(st, handle, anchor, rot, startW, startH, mid);
+        if(brushTextAabbInside(st, cw, ch)) lo = mid;
+        else hi = mid;
+    }
+    brushTextSetCornerFromScale(st, handle, anchor, rot, startW, startH, lo);
+}
+function brushTextSetEdgeWidth(st, mode, edge, rot, newW){
+    st.w = Math.max(BRUSH_TEXT_MIN_W, newW);
+    const nc = brushTextWorldFromLocal((mode === 'e' ? 1 : -1) * st.w / 2, 0, edge.x, edge.y, rot);
+    st.cx = nc.x;
+    st.cy = nc.y;
+}
+function brushTextClampEdgeWidth(st, mode, edge, rot, wantW){
+    const { w: cw, h: ch } = editDrawCanvasSize();
+    let lo = BRUSH_TEXT_MIN_W;
+    let hi = Math.max(BRUSH_TEXT_MIN_W, wantW);
+    brushTextSetEdgeWidth(st, mode, edge, rot, hi);
+    if(brushTextAabbInside(st, cw, ch)) return;
+    for(let i = 0; i < 24; i++){
+        const mid = (lo + hi) / 2;
+        brushTextSetEdgeWidth(st, mode, edge, rot, mid);
+        if(brushTextAabbInside(st, cw, ch)) lo = mid;
+        else hi = mid;
+    }
+    brushTextSetEdgeWidth(st, mode, edge, rot, lo);
+}
+function brushTextSetEdgeHeight(st, mode, edge, rot, newH){
+    st.h = Math.max(BRUSH_TEXT_MIN_H, newH);
+    const nc = brushTextWorldFromLocal(0, (mode === 's' ? 1 : -1) * st.h / 2, edge.x, edge.y, rot);
+    st.cx = nc.x;
+    st.cy = nc.y;
+}
+function brushTextClampEdgeHeight(st, mode, edge, rot, wantH){
+    const { w: cw, h: ch } = editDrawCanvasSize();
+    let lo = BRUSH_TEXT_MIN_H;
+    let hi = Math.max(BRUSH_TEXT_MIN_H, wantH);
+    brushTextSetEdgeHeight(st, mode, edge, rot, hi);
+    if(brushTextAabbInside(st, cw, ch)) return;
+    for(let i = 0; i < 24; i++){
+        const mid = (lo + hi) / 2;
+        brushTextSetEdgeHeight(st, mode, edge, rot, mid);
+        if(brushTextAabbInside(st, cw, ch)) lo = mid;
+        else hi = mid;
+    }
+    brushTextSetEdgeHeight(st, mode, edge, rot, lo);
+}
+function brushTextClampMoveOrRotate(st){
+    const { w: cw, h: ch } = editDrawCanvasSize();
+    for(let pass = 0; pass < 8; pass++){
+        if(brushTextAabbInside(st, cw, ch)) return;
+        const bb = brushTextItemAabb(st);
+        let dx = 0;
+        let dy = 0;
+        if(bb.minX < 0) dx = -bb.minX;
+        else if(bb.maxX > cw) dx = cw - bb.maxX;
+        if(bb.minY < 0) dy = -bb.minY;
+        else if(bb.maxY > ch) dy = ch - bb.maxY;
+        if(dx || dy){
+            st.cx += dx;
+            st.cy += dy;
+            continue;
+        }
+        const bw = Math.max(1, bb.maxX - bb.minX);
+        const bh = Math.max(1, bb.maxY - bb.minY);
+        const s = Math.min(cw / bw, ch / bh, 1);
+        if(s >= 0.999) return;
+        st.w = Math.max(BRUSH_TEXT_MIN_W, st.w * s);
+        st.h = Math.max(BRUSH_TEXT_MIN_H, st.h * s);
+    }
+}
+function clampBrushTextItem(st){
+    if(!st) return;
+    brushTextClampMoveOrRotate(st);
+}
 function brushTextPlaceholder(){
     return langIsEn() ? 'Type here' : '输入文字';
 }
@@ -12239,17 +12382,18 @@ function measureBrushTextBox(text, fontSize){
 }
 function fitBrushTextItemBox(st, { force = false } = {}){
     if(!st) return;
+    const { w: cw, h: ch } = editDrawCanvasSize();
     const text = brushTextItemPlain(st);
     const fontSize = st.userScaled && !force
         ? Math.max(8, st.h / BRUSH_TEXT_LINE)
         : brushTextFontSize();
     const box = measureBrushTextBox(text, fontSize);
     if(st.userScaled && !force){
-        st.w = Math.max(st.w, box.w);
-        st.h = Math.max(st.h, box.h);
+        st.w = Math.min(cw, Math.max(st.w, box.w));
+        st.h = Math.min(ch, Math.max(st.h, box.h));
     } else {
-        st.w = box.w;
-        st.h = box.h;
+        st.w = Math.min(cw, box.w);
+        st.h = Math.min(ch, box.h);
     }
 }
 function syncBrushTextBoxFromEditor(){
@@ -12258,8 +12402,25 @@ function syncBrushTextBoxFromEditor(){
     fitBrushTextItemBox(st);
     syncBrushTextItemBox(st);
 }
+function brushTextEditorFontPx(st, rect){
+    const canvasEl = editDrawCanvas();
+    const ch = Math.max(1, canvasEl?.height || 1);
+    const cw = Math.max(1, canvasEl?.width || 1);
+    const cssH = (st.h / ch) * (rect?.height || 1);
+    const cssW = (st.w / cw) * (rect?.width || 1);
+    const fromH = Math.max(8, cssH / BRUSH_TEXT_LINE);
+    const text = brushTextItemPlain(st) || brushTextPlaceholder();
+    const ctx = canvasEl?.getContext?.('2d');
+    if(!ctx || !text) return fromH;
+    ctx.font = `700 ${fromH}px "Inter", "Noto Sans SC", sans-serif`;
+    const tw = Math.max(1, ctx.measureText(text).width);
+    const availW = Math.max(8, cssW - BRUSH_TEXT_PAD_X);
+    if(tw <= availW) return fromH;
+    return Math.max(8, fromH * (availW / tw));
+}
 function syncBrushTextItemBox(st){
     if(!st?.root) return;
+    if(!brushTextTransformDrag) clampBrushTextItem(st);
     const canvasEl = editDrawCanvas();
     const cw = Math.max(1, canvasEl?.width || 1);
     const ch = Math.max(1, canvasEl?.height || 1);
@@ -12270,8 +12431,7 @@ function syncBrushTextItemBox(st){
     st.root.style.height = `${(st.h / ch) * 100}%`;
     st.root.style.transform = `rotate(${st.rot}deg)`;
     if(st.editor && rect?.height){
-        const cssH = (st.h / ch) * rect.height;
-        st.editor.style.fontSize = `${Math.max(12, cssH / BRUSH_TEXT_LINE)}px`;
+        st.editor.style.fontSize = `${brushTextEditorFontPx(st, rect)}px`;
         st.editor.style.color = st.color || brushColor();
     }
 }
@@ -12281,6 +12441,7 @@ function syncBrushTextTransformBox(){
 function endBrushTextTransformDrag(event){
     if(!brushTextTransformDrag) return;
     const cap = brushTextTransformDrag.captureEl;
+    const st = brushTextInline;
     if(cap && event?.pointerId != null){
         try { cap.releasePointerCapture(event.pointerId); } catch(_){ /* already released */ }
     }
@@ -12289,6 +12450,7 @@ function endBrushTextTransformDrag(event){
     window.removeEventListener('pointermove', moveBrushTextTransformDrag);
     window.removeEventListener('pointerup', endBrushTextTransformDrag);
     window.removeEventListener('pointercancel', endBrushTextTransformDrag);
+    if(st) syncBrushTextItemBox(st);
 }
 function applyBrushTextTransformDrag(p){
     const drag = brushTextTransformDrag;
@@ -12300,6 +12462,7 @@ function applyBrushTextTransformDrag(p){
     if(mode === 'move'){
         st.cx = start.cx + (p.x - drag.startPointer.x);
         st.cy = start.cy + (p.y - drag.startPointer.y);
+        brushTextClampMoveOrRotate(st);
         syncBrushTextTransformBox();
         return;
     }
@@ -12307,48 +12470,40 @@ function applyBrushTextTransformDrag(p){
         const a0 = Math.atan2(drag.startPointer.y - start.cy, drag.startPointer.x - start.cx);
         const a1 = Math.atan2(p.y - start.cy, p.x - start.cx);
         st.rot = start.rot + (a1 - a0) * 180 / Math.PI;
+        brushTextClampMoveOrRotate(st);
         syncBrushTextTransformBox();
         return;
     }
-    const rad = start.rot * Math.PI / 180;
-    const cos = Math.cos(rad);
-    const sin = Math.sin(rad);
     const anchorCorner = mode.length === 2 ? mode : '';
     if(anchorCorner){
         const [ox, oy] = brushTextCornerSign(anchorCorner === 'nw' ? 'se' : anchorCorner === 'ne' ? 'sw' : anchorCorner === 'se' ? 'nw' : 'ne');
-        const anchor = brushTextWorldFromLocal(ox * start.w / 2, oy * start.h / 2, start.cx, start.cy, start.rot);
+        const anchor = drag.anchorWorld || brushTextWorldFromLocal(ox * start.w / 2, oy * start.h / 2, start.cx, start.cy, start.rot);
         const local = brushTextLocalFromWorld(p.x, p.y, anchor.x, anchor.y, start.rot);
-        const rawW = Math.max(BRUSH_TEXT_MIN_W, Math.abs(local.x));
-        const rawH = Math.max(BRUSH_TEXT_MIN_H, Math.abs(local.y));
-        const scale = Math.max(rawW / Math.max(1, start.w), rawH / Math.max(1, start.h));
-        st.w = Math.max(BRUSH_TEXT_MIN_W, start.w * scale);
-        st.h = Math.max(BRUSH_TEXT_MIN_H, start.h * scale);
-        st.cx = anchor.x + (-ox * st.w / 2) * cos - (-oy * st.h / 2) * sin;
-        st.cy = anchor.y + (-ox * st.w / 2) * sin + (-oy * st.h / 2) * cos;
+        const minScale = Math.max(BRUSH_TEXT_MIN_W / Math.max(1, start.w), BRUSH_TEXT_MIN_H / Math.max(1, start.h));
+        const wantScale = Math.max(
+            minScale,
+            Math.abs(local.x) / Math.max(1, start.w),
+            Math.abs(local.y) / Math.max(1, start.h),
+        );
+        brushTextClampCornerScale(st, anchorCorner, anchor, start.rot, start.w, start.h, wantScale);
         st.rot = start.rot;
         syncBrushTextTransformBox();
         return;
     }
     if(mode === 'e' || mode === 'w'){
-        const edge = brushTextWorldFromLocal((mode === 'e' ? -1 : 1) * start.w / 2, 0, start.cx, start.cy, start.rot);
+        const edge = drag.anchorWorld || brushTextWorldFromLocal((mode === 'e' ? -1 : 1) * start.w / 2, 0, start.cx, start.cy, start.rot);
         const local = brushTextLocalFromWorld(p.x, p.y, edge.x, edge.y, start.rot);
-        const newW = Math.max(BRUSH_TEXT_MIN_W, mode === 'e' ? local.x : -local.x);
-        const nc = brushTextWorldFromLocal((mode === 'e' ? 1 : -1) * newW / 2, 0, edge.x, edge.y, start.rot);
-        st.w = newW;
-        st.cx = nc.x;
-        st.cy = nc.y;
+        const wantW = Math.max(BRUSH_TEXT_MIN_W, mode === 'e' ? local.x : -local.x);
+        brushTextClampEdgeWidth(st, mode, edge, start.rot, wantW);
         st.rot = start.rot;
         syncBrushTextTransformBox();
         return;
     }
     if(mode === 'n' || mode === 's'){
-        const edge = brushTextWorldFromLocal(0, (mode === 's' ? -1 : 1) * start.h / 2, start.cx, start.cy, start.rot);
+        const edge = drag.anchorWorld || brushTextWorldFromLocal(0, (mode === 's' ? -1 : 1) * start.h / 2, start.cx, start.cy, start.rot);
         const local = brushTextLocalFromWorld(p.x, p.y, edge.x, edge.y, start.rot);
-        const newH = Math.max(BRUSH_TEXT_MIN_H, mode === 's' ? local.y : -local.y);
-        const nc = brushTextWorldFromLocal(0, (mode === 's' ? 1 : -1) * newH / 2, edge.x, edge.y, start.rot);
-        st.h = newH;
-        st.cx = nc.x;
-        st.cy = nc.y;
+        const wantH = Math.max(BRUSH_TEXT_MIN_H, mode === 's' ? local.y : -local.y);
+        brushTextClampEdgeHeight(st, mode, edge, start.rot, wantH);
         st.rot = start.rot;
         syncBrushTextTransformBox();
     }
@@ -12368,43 +12523,51 @@ function beginBrushTextTransformDrag(event, mode){
     const dragTarget = event.currentTarget;
     dragTarget?.setPointerCapture?.(event.pointerId);
     pushEditDrawHistory();
+    const start = {
+        cx: brushTextInline.cx,
+        cy: brushTextInline.cy,
+        w: brushTextInline.w,
+        h: brushTextInline.h,
+        rot: brushTextInline.rot,
+    };
+    let anchorWorld = null;
+    if(mode.length === 2){
+        const [ox, oy] = brushTextCornerSign(mode === 'nw' ? 'se' : mode === 'ne' ? 'sw' : mode === 'se' ? 'nw' : 'ne');
+        anchorWorld = brushTextWorldFromLocal(ox * start.w / 2, oy * start.h / 2, start.cx, start.cy, start.rot);
+    } else if(mode === 'e' || mode === 'w'){
+        anchorWorld = brushTextWorldFromLocal((mode === 'e' ? -1 : 1) * start.w / 2, 0, start.cx, start.cy, start.rot);
+    } else if(mode === 'n' || mode === 's'){
+        anchorWorld = brushTextWorldFromLocal(0, (mode === 's' ? -1 : 1) * start.h / 2, start.cx, start.cy, start.rot);
+    }
     brushTextTransformDrag = {
         mode,
         pointerId: event.pointerId,
         captureEl: dragTarget,
         startPointer: editDrawPoint(event),
-        start: {
-            cx: brushTextInline.cx,
-            cy: brushTextInline.cy,
-            w: brushTextInline.w,
-            h: brushTextInline.h,
-            rot: brushTextInline.rot,
-        },
+        anchorWorld,
+        start,
     };
     window.addEventListener('pointermove', moveBrushTextTransformDrag);
     window.addEventListener('pointerup', endBrushTextTransformDrag);
     window.addEventListener('pointercancel', endBrushTextTransformDrag);
 }
-function drawFreeTextTransform({ cx, cy, w, h, rot, text, color, userScaled }){
+function drawFreeTextTransform({ cx, cy, w, h, rot, text, color }){
     const canvasEl = editDrawCanvas();
     const ctx = canvasEl?.getContext?.('2d');
     const plain = String(text || '').trim();
     if(!ctx || !plain) return false;
-    const fontSize = Math.max(8, h / BRUSH_TEXT_LINE);
+    const fromH = Math.max(8, h / BRUSH_TEXT_LINE);
     setupDrawStyle(ctx);
     ctx.save();
-    ctx.font = `700 ${fontSize}px "Inter", "Noto Sans SC", sans-serif`;
+    ctx.font = `700 ${fromH}px "Inter", "Noto Sans SC", sans-serif`;
     const tw = Math.max(1, ctx.measureText(plain).width);
     const availW = Math.max(BRUSH_TEXT_MIN_W, w) - BRUSH_TEXT_PAD_X;
-    const scaleX = userScaled ? Math.min(1, Math.max(0.01, availW / tw)) : 1;
+    const fontSize = tw <= availW ? fromH : Math.max(8, fromH * (availW / tw));
+    ctx.font = `700 ${fontSize}px "Inter", "Noto Sans SC", sans-serif`;
     ctx.translate(cx, cy);
     ctx.rotate(rot * Math.PI / 180);
-    ctx.scale(scaleX, 1);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.lineWidth = Math.max(2, fontSize / 10);
-    ctx.strokeStyle = 'rgba(10,10,10,0.72)';
-    ctx.strokeText(plain, 0, 0);
     ctx.fillStyle = color || brushColor();
     ctx.fillText(plain, 0, 0);
     ctx.restore();
@@ -12520,9 +12683,12 @@ function buildBrushTextTransformHtml(){
     const handles = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
     return `
         <div class="brush-text-transform-rotate-arm" aria-hidden="true">
-            <button type="button" class="brush-text-transform-handle is-rotate" data-handle="rotate" title="${escapeAttr(langIsEn() ? 'Rotate' : '旋转')}"></button>
+            <button type="button" class="brush-text-transform-handle is-rotate" data-handle="rotate" title="${escapeAttr(langIsEn() ? 'Rotate' : '旋转')}" aria-label="${escapeAttr(langIsEn() ? 'Rotate' : '旋转')}">
+                <i data-lucide="rotate-cw" class="brush-text-rotate-icon" aria-hidden="true"></i>
+            </button>
         </div>
         <div class="brush-text-transform-body">
+            <div class="brush-text-transform-move-plate" aria-hidden="true"></div>
             <div class="brush-text-transform-editor" contenteditable="true" spellcheck="false" data-placeholder="${escapeAttr(langIsEn() ? 'Type here' : '输入文字')}"></div>
             <div class="brush-text-transform-frame" aria-hidden="true"></div>
             ${handles.map(h => `<button type="button" class="brush-text-transform-handle is-${h}" data-handle="${h}"></button>`).join('')}
@@ -12531,6 +12697,12 @@ function buildBrushTextTransformHtml(){
 function bindBrushTextTransform(root, st){
     root.querySelectorAll('.brush-text-transform-handle').forEach(btn => {
         btn.addEventListener('pointerdown', ev => beginBrushTextTransformDrag(ev, btn.dataset.handle || 'move'));
+    });
+    const movePlate = root.querySelector('.brush-text-transform-move-plate');
+    movePlate?.addEventListener('pointerdown', ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        beginBrushTextTransformDrag(ev, 'move');
     });
     const frame = root.querySelector('.brush-text-transform-frame');
     frame?.addEventListener('pointerdown', ev => {
@@ -12565,7 +12737,7 @@ function bindBrushTextTransform(root, st){
     editor.addEventListener('keydown', ev => {
         ev.stopPropagation();
         if(ev.isComposing || ev.keyCode === 229) return;
-        if(ev.key === 'Enter' && !ev.shiftKey){ ev.preventDefault(); confirmBrushTextInline(); }
+        if(ev.key === 'Enter' && !ev.shiftKey){ ev.preventDefault(); }
         if(ev.key === 'Escape'){ ev.preventDefault(); discardBrushTextEdit(); }
     });
     editor.addEventListener('mousedown', ev => ev.stopPropagation());
@@ -12614,6 +12786,7 @@ function mountBrushTextItem(data, { editing = true, select = true } = {}){
         editor.contentEditable = 'false';
     }
     syncBrushTextItemBox(st);
+    refreshIcons();
     return st;
 }
 function openBrushTextInline(point, seedText = ''){
@@ -12632,10 +12805,16 @@ function openBrushTextInline(point, seedText = ''){
         userScaled: false,
     }, { editing: true, select: true });
     if(!st) return;
+    clampBrushTextItem(st);
+    syncBrushTextItemBox(st);
     requestAnimationFrame(() => {
         focusBrushTextEditor(st, Boolean(initialText));
         if(document.activeElement !== st.editor) requestAnimationFrame(() => focusBrushTextEditor(st, Boolean(initialText)));
     });
+}
+function spawnBrushTextAtCenter(){
+    if(!isImageEditOpen() || imageEditMode !== 'brush') return;
+    openBrushTextInline(brushTextCanvasCenter());
 }
 function syncAnnotationRestoreButton(){
     const btns = [domGet('annotationRestoreBtn'), domGet('annotationRestoreBtnInline')].filter(Boolean);
@@ -12773,7 +12952,11 @@ function markEditDrawDirty(){
 }
 function setBrushTool(tool){
     const next = ['free','rect','ellipse','label','text'].includes(tool) ? tool : 'free';
+    const prev = brushTool;
     if(brushTool === 'text' && next !== 'text') dismissBrushTextInline({ commit: true });
+    if(next === 'label' && prev === 'label') brushLabelPickOpen = !brushLabelPickOpen;
+    else if(next === 'label') brushLabelPickOpen = true;
+    else brushLabelPickOpen = false;
     brushTool = next;
     if(brushTool === 'text' && isImageEditOpen() && imageEditMode !== 'brush'){
         setImageEditMode('brush', true);
@@ -12784,6 +12967,9 @@ function setBrushTool(tool){
     syncBrushTextFieldUI();
     syncAnnotationRestoreButton();
     refreshIcons();
+    if(brushTool === 'text' && isImageEditOpen()){
+        requestAnimationFrame(() => spawnBrushTextAtCenter());
+    }
 }
 function syncBrushToolButtons(){
     domQueryAll('[data-brush-tool]').forEach(btn => {
@@ -12933,12 +13119,18 @@ function beginEditDraw(event){
         const hit = pickBrushTextItemAt(p);
         if(hit){
             event.stopPropagation();
-            activateBrushTextItem(hit, { editing: true, selectAll: false });
+            if(brushTextInline && brushTextInline !== hit) confirmBrushTextInline();
+            if(hit.confirmed){
+                setBrushTextSelection(hit, false);
+            } else {
+                activateBrushTextItem(hit, { editing: true, selectAll: false });
+            }
             editDrawState = null;
             return;
         }
         event.stopPropagation();
-        openBrushTextInline(p);
+        confirmBrushTextInline();
+        setBrushTextSelection(null, false);
         editDrawState = null;
         return;
     }
@@ -13945,6 +14137,7 @@ async function openImageEditorCore({nodeId, url, name, saveTarget, mode='crop'})
     resetImageEditRotateState();
     brushTool = 'free';
     brushLabelPick = 1;
+    brushLabelPickOpen = false;
     brushLabelCounter = 1;
     _updateZoomLabel();
     const modal = domGet('imageEditModal');
