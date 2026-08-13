@@ -7380,11 +7380,27 @@ function attachInplaceEditSurface(host, img, mode){
     host.classList.add('crop-canvas', 'is-canvas-inplace');
     host.classList.toggle('brush-mode', mode === 'brush');
     host.classList.toggle('rotate-mode', mode === 'rotate');
+    syncInplaceEditOverlays(mode);
+    return true;
+}
+/** 旋转不挂裁剪框/画笔层；裁剪/画笔按需挂回节点 */
+function syncInplaceEditOverlays(mode = imageEditMode){
+    const host = imageEditInplaceHost;
+    const home = domGet('cropCanvas');
     const draw = domGet('editDrawCanvas');
     const box = domGet('cropBox');
+    if(!host) return;
+    if(mode === 'rotate'){
+        if(draw && home && draw.parentElement !== home) home.appendChild(draw);
+        if(box && home && box.parentElement !== home) home.appendChild(box);
+        return;
+    }
     if(draw) host.appendChild(draw);
-    if(box) host.appendChild(box);
-    return true;
+    if(mode === 'crop'){
+        if(box) host.appendChild(box);
+    } else if(box && home && box.parentElement !== home){
+        home.appendChild(box);
+    }
 }
 function detachInplaceEditSurface(){
     clearRotatePreviewLayout();
@@ -12141,6 +12157,7 @@ function setImageEditMode(mode, userTouched=false){
         el.classList.toggle('brush-mode', imageEditMode === 'brush');
         el.classList.toggle('rotate-mode', imageEditMode === 'rotate');
     });
+    syncInplaceEditOverlays(imageEditMode);
     const modal = domGet('imageEditModal');
     modal?.classList.toggle('is-crop-mode', imageEditMode === 'crop');
     modal?.classList.toggle('is-brush-mode', imageEditMode === 'brush');
@@ -13877,8 +13894,16 @@ function getRotateLayoutShell(){
         || (host.classList.contains('image-preview-wrap') ? host : host.closest('.image-preview-wrap'))
         || host;
 }
+function getRotateNodeEl(){
+    return imageEditInplaceHost?.closest?.('.node') || null;
+}
+function getRotatePreviewNode(){
+    return cropState?.nodeId ? nodes.find(n => n.id === cropState.nodeId) : null;
+}
 function ensureRotatePreviewBaseSize(){
     const shell = getRotateLayoutShell();
+    const nodeEl = getRotateNodeEl();
+    const node = getRotatePreviewNode();
     const img = editDisplayImage();
     if(!shell) return;
     imageEditRotateShell = shell;
@@ -13890,14 +13915,85 @@ function ensureRotatePreviewBaseSize(){
     if(w < 8 || h < 8) return;
     shell.dataset.rotateBaseW = String(w);
     shell.dataset.rotateBaseH = String(h);
+    if(nodeEl){
+        const nx = Number(node?.x ?? (parseFloat(nodeEl.style.left) || 0));
+        const ny = Number(node?.y ?? (parseFloat(nodeEl.style.top) || 0));
+        const nw = Math.round(nodeEl.offsetWidth);
+        const nh = Math.round(nodeEl.offsetHeight);
+        const sl = shell.offsetLeft || 0;
+        const st = shell.offsetTop || 0;
+        shell.dataset.rotateNodeX = String(nx);
+        shell.dataset.rotateNodeY = String(ny);
+        shell.dataset.rotateNodeW = String(nw);
+        shell.dataset.rotateNodeH = String(nh);
+        shell.dataset.rotateShellL = String(sl);
+        shell.dataset.rotateShellT = String(st);
+        shell.dataset.rotateAnchorCx = String(nx + sl + w / 2);
+        shell.dataset.rotateAnchorCy = String(ny + st + h / 2);
+        if(node && node.w != null) shell.dataset.rotatePrevW = String(node.w);
+        if(node && node.h != null) shell.dataset.rotatePrevH = String(node.h);
+    }
     if(shell.style.aspectRatio && !shell.dataset.rotatePrevAr){
         shell.dataset.rotatePrevAr = shell.style.aspectRatio;
     }
     if(deg !== 0) shell.dataset.rotateLocked = '1';
 }
+function restoreRotatePreviewNodeBox(shell, nodeEl, node){
+    if(!nodeEl || !shell?.dataset?.rotateNodeW) return;
+    nodeEl.style.width = `${shell.dataset.rotateNodeW}px`;
+    nodeEl.style.height = `${shell.dataset.rotateNodeH}px`;
+    if(shell.dataset.rotateNodeX == null) return;
+    const x = Number(shell.dataset.rotateNodeX);
+    const y = Number(shell.dataset.rotateNodeY);
+    if(node){
+        node.x = x;
+        node.y = y;
+        node.w = Number(shell.dataset.rotatePrevW ?? shell.dataset.rotateNodeW);
+        if(shell.dataset.rotatePrevH != null) node.h = Number(shell.dataset.rotatePrevH);
+        else delete node.h;
+        node._layoutW = Number(shell.dataset.rotateNodeW);
+        node._layoutH = Number(shell.dataset.rotateNodeH);
+    }
+    nodeEl.style.left = `${x}px`;
+    nodeEl.style.top = `${y}px`;
+}
+function applyRotatePreviewCenteredBox(shell, nodeEl, node, outW, outH){
+    if(!shell || !nodeEl || !(outW > 0) || !(outH > 0)) return;
+    const baseW = Number(shell.dataset.rotateBaseW || 0);
+    const baseH = Number(shell.dataset.rotateBaseH || 0);
+    const origW = Number(shell.dataset.rotateNodeW || outW);
+    const origH = Number(shell.dataset.rotateNodeH || outH);
+    const sl = Number(shell.dataset.rotateShellL || 0);
+    const st = Number(shell.dataset.rotateShellT || 0);
+    const acx = Number(shell.dataset.rotateAnchorCx);
+    const acy = Number(shell.dataset.rotateAnchorCy);
+    const extraW = Math.max(0, origW - baseW);
+    const extraH = Math.max(0, origH - baseH);
+    const boxW = Math.round(outW + extraW);
+    const boxH = Math.round(outH + extraH);
+    const cx = Number.isFinite(acx) ? acx : Number(shell.dataset.rotateNodeX || 0) + origW / 2;
+    const cy = Number.isFinite(acy) ? acy : Number(shell.dataset.rotateNodeY || 0) + origH / 2;
+    const nx = cx - sl - outW / 2;
+    const ny = cy - st - outH / 2;
+    nodeEl.style.width = `${boxW}px`;
+    nodeEl.style.height = `${boxH}px`;
+    nodeEl.style.left = `${nx}px`;
+    nodeEl.style.top = `${ny}px`;
+    if(node){
+        node.x = nx;
+        node.y = ny;
+        node.w = boxW;
+        node.h = boxH;
+        node._layoutW = boxW;
+        node._layoutH = boxH;
+    }
+}
 function clearRotatePreviewLayout(){
     const shell = imageEditRotateShell || getRotateLayoutShell();
+    const nodeEl = getRotateNodeEl();
+    const node = getRotatePreviewNode();
     const imgs = [...new Set([editDisplayImage(), editExportImage(), imageEditInplaceImg].filter(Boolean))];
+    restoreRotatePreviewNodeBox(shell, nodeEl, node);
     if(shell){
         shell.style.width = '';
         shell.style.height = '';
@@ -13908,6 +14004,16 @@ function clearRotatePreviewLayout(){
         delete shell.dataset.rotateBaseH;
         delete shell.dataset.rotatePrevAr;
         delete shell.dataset.rotateLocked;
+        delete shell.dataset.rotateNodeW;
+        delete shell.dataset.rotateNodeH;
+        delete shell.dataset.rotateNodeX;
+        delete shell.dataset.rotateNodeY;
+        delete shell.dataset.rotateShellL;
+        delete shell.dataset.rotateShellT;
+        delete shell.dataset.rotateAnchorCx;
+        delete shell.dataset.rotateAnchorCy;
+        delete shell.dataset.rotatePrevW;
+        delete shell.dataset.rotatePrevH;
     }
     imageEditRotateShell = null;
     imgs.forEach(img => {
@@ -13940,26 +14046,35 @@ function syncImageEditRotatePreview(){
     }
     ensureRotatePreviewBaseSize();
     const shell = imageEditRotateShell || getRotateLayoutShell();
+    const nodeEl = getRotateNodeEl();
+    const node = getRotatePreviewNode();
     const baseW = Number(shell?.dataset.rotateBaseW || 0);
     const baseH = Number(shell?.dataset.rotateBaseH || 0);
     const swap = deg === 90 || deg === 270;
     const sx = imageEditFlipH ? -1 : 1;
     const sy = imageEditFlipV ? -1 : 1;
-    // 90/270：外框对调宽高，图片保持原布局盒再 rotate，视觉铺满（保存时 canvas 也会 swap）
     if(shell && baseW && baseH){
         const outW = swap ? baseH : baseW;
         const outH = swap ? baseW : baseH;
-        shell.style.aspectRatio = `${outW} / ${outH}`;
-        if(
-            shell.classList.contains('image-preview-wrap')
-            || shell.classList.contains('output-img-wrap')
-        ){
+        const frame = shell.classList.contains('gen-stage-frame') ? shell : shell.closest?.('.gen-stage-frame');
+        shell.style.overflow = 'hidden';
+        if(frame){
+            frame.style.overflow = 'hidden';
+            frame.style.width = `${outW}px`;
+            frame.style.height = `${outH}px`;
+            frame.style.maxWidth = 'none';
+            frame.style.aspectRatio = `${outW} / ${outH}`;
+        } else if(shell.classList.contains('image-preview-wrap')){
+            shell.style.width = '100%';
+            shell.style.height = '100%';
+        } else {
             shell.style.width = `${outW}px`;
             shell.style.height = `${outH}px`;
         }
-        shell.style.overflow = 'hidden';
+        applyRotatePreviewCenteredBox(shell, nodeEl, node, outW, outH);
     }
     imgs.forEach(img => {
+        if(img === editExportImage() && img !== editDisplayImage()) return;
         img.style.transition = 'transform .22s cubic-bezier(.22,.61,.36,1)';
         img.style.transformOrigin = 'center center';
         if(swap && baseW && baseH){
@@ -13984,6 +14099,7 @@ function syncImageEditRotatePreview(){
             img.style.transform = `rotate(${deg}deg) scale(${sx}, ${sy})`;
         }
     });
+    if(nodeEl) scheduleLinkGeometryRefresh(new Set([nodeEl.dataset.id].filter(Boolean)));
 }
 function rotateImageEditBy90(){
     if(!cropState || imageEditMode !== 'rotate') return;
@@ -14189,8 +14305,10 @@ function finishImageEditorLayout(){
     resizeEditDrawCanvas();
     resetEditDrawingHistory();
     clearEditDrawing(true);
-    resetCropBox();
-    syncCropAspectUI();
+    if(imageEditMode === 'crop'){
+        resetCropBox();
+        syncCropAspectUI();
+    }
     setImageEditMode(imageEditModeTouched ? imageEditMode : (imageEditMode || 'crop'), imageEditModeTouched);
     syncImageEditOverflow();
     refreshIcons();
@@ -14273,16 +14391,20 @@ async function openImageEditorCore({nodeId, url, name, saveTarget, mode='crop'})
     ]);
     if(!cropState) return;
     resizeEditDrawCanvas();
-    resetCropBox();
-    renderCropBox();
-    positionImageEditCropDock();
+    if(editMode === 'crop'){
+        resetCropBox();
+        renderCropBox();
+        positionImageEditCropDock();
+    }
     if(editMode === 'rotate') syncImageEditRotatePreview();
     requestAnimationFrame(() => {
         if(!cropState) return;
         resizeEditDrawCanvas();
-        resetCropBox();
-        renderCropBox();
-        positionImageEditCropDock();
+        if(imageEditMode === 'crop'){
+            resetCropBox();
+            renderCropBox();
+            positionImageEditCropDock();
+        }
         if(imageEditMode === 'rotate') syncImageEditRotatePreview();
     });
 }

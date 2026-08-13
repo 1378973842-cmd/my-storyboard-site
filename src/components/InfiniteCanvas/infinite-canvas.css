@@ -9279,6 +9279,9 @@ html.canvas-node-drag .selection-box.is-selection-hull {
 .crop-canvas.rotate-mode img {
   will-change: transform;
 }
+.crop-canvas.rotate-mode {
+  overflow:hidden !important;
+}
 #imageEditRotateSaveBtn.image-edit-dock-save {
   background:#f2f2f2;
   color:#111;
@@ -9665,6 +9668,9 @@ html.canvas-node-drag .selection-box.is-selection-hull {
 .crop-canvas.brush-mode { cursor:crosshair; }
 .crop-canvas.brush-mode .edit-draw-canvas { pointer-events:auto; }
 .crop-canvas.brush-mode .crop-box { display:none; }
+.crop-canvas.rotate-mode .crop-box,
+.crop-canvas.rotate-mode .crop-handle,
+.crop-canvas.rotate-mode .edit-draw-canvas { display:none !important; pointer-events:none !important; }
 .crop-box { position:absolute; left:10%; top:10%; width:80%; height:80%; border:2px solid #f8fafc; box-shadow:0 0 0 9999px rgba(15,23,42,.48), 0 12px 30px rgba(15,23,42,.2); border-radius:10px; cursor:move; z-index:3; }
 .crop-handle { position:absolute; right:-7px; bottom:-7px; width:18px; height:18px; border-radius:999px; background:#fff; border:2px solid #111827; cursor:nwse-resize; }
 .crop-aspect-btn { height:28px; padding:0 9px; border-radius:999px; border:none; outline:0.5px solid rgba(203,213,225,.5); outline-offset:-0.5px; background:#fff; color:#64748b; font-size:11px; font-weight:850; }
