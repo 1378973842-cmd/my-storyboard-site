@@ -108,6 +108,11 @@ async function main() {
   await sftpUploadDir(sftp, path.join(ROOT, 'dist', 'canvas'), `${REMOTE}/dist/canvas`);
   console.log('>>> 上传 dist/index.html …');
   await sftpUploadFile(sftp, path.join(ROOT, 'dist', 'index.html'), `${REMOTE}/dist/index.html`);
+  const versionJson = path.join(ROOT, 'dist', 'version.json');
+  if (existsSync(versionJson)) {
+    console.log('>>> 上传 dist/version.json …');
+    await sftpUploadFile(sftp, versionJson, `${REMOTE}/dist/version.json`);
+  }
 
   for (const name of readdirSync(path.join(ROOT, 'dist'))) {
     if (/\.(png|glb)$/i.test(name)) {

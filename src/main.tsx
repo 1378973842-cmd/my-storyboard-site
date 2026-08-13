@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { LoginGate } from './components/LoginGate.tsx';
+import { AppUpdateBanner } from './components/AppUpdateBanner.tsx';
 import { ShellNavigationProvider } from './shell/ShellNavigation.tsx';
 import App from './App.tsx';
 import './store/useStudioBackgroundStore.ts';
@@ -19,6 +20,7 @@ createRoot(document.getElementById('root')!).render(
     <LoginGate>
       <ShellNavigationProvider>
         <App />
+        <AppUpdateBanner />
       </ShellNavigationProvider>
     </LoginGate>
   </StrictMode>,

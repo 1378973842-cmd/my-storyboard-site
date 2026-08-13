@@ -35557,11 +35557,6 @@ function clearConnectionHoverState(){
     setHoveredConnection('');
 }
 function scheduleConnectionHoverUpdate(e){
-    // 生成能量流动中：完全跳过删线悬停，避免 mousemove 与能量 rAF 抢主线程
-    if(hasFlowingLinkEnergy()){
-        if(hoveredConnectionId || connHoverArmedId) clearConnectionHoverState();
-        return;
-    }
     connHoverPendingEvent = e;
     if(connHoverRAF) return;
     connHoverRAF = requestAnimationFrame(() => {
@@ -35569,17 +35564,15 @@ function scheduleConnectionHoverUpdate(e){
         const event = connHoverPendingEvent;
         connHoverPendingEvent = null;
         if(!event) return;
-        if(hasFlowingLinkEnergy()){
-            if(hoveredConnectionId || connHoverArmedId) clearConnectionHoverState();
-            return;
-        }
         // 已悬停：每帧跟手，不节流；全量扫描仍节流
         if(hoveredConnectionId){
             updateConnectionHoverFromMouse(event);
             return;
         }
         const now = Date.now();
-        if(CONN_HOVER_MIN_MS > 0 && now - connHoverLastAt < CONN_HOVER_MIN_MS){
+        // ponytail: 生成能量流动时略降扫描频率，但不全局禁删线（其它节点连线仍应可删）
+        const hoverMinMs = hasFlowingLinkEnergy() ? Math.max(CONN_HOVER_MIN_MS, 48) : CONN_HOVER_MIN_MS;
+        if(hoverMinMs > 0 && now - connHoverLastAt < hoverMinMs){
             scheduleConnectionHoverUpdate(event);
             return;
         }
@@ -35589,10 +35582,6 @@ function scheduleConnectionHoverUpdate(e){
 }
 function updateConnectionHoverFromMouse(e){
     if(!canvas || tempLink || dragNode || dragBoard || resizeNode || knifeActive){
-        clearConnectionHoverState();
-        return;
-    }
-    if(hasFlowingLinkEnergy()){
         clearConnectionHoverState();
         return;
     }

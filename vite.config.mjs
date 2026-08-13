@@ -1,17 +1,41 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import { execSync } from 'child_process';
+import { writeFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { defineConfig, loadEnv } from 'vite';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+function resolveBuildVersion() {
+  try {
+    return execSync('git rev-parse --short HEAD', { encoding: 'utf8', cwd: __dirname }).trim();
+  } catch {
+    return String(Date.now());
+  }
+}
+
+function emitVersionJsonPlugin() {
+  return {
+    name: 'emit-version-json',
+    writeBundle(options) {
+      const outDir = options.dir || path.join(__dirname, 'dist');
+      const payload = {
+        version: resolveBuildVersion(),
+        builtAt: new Date().toISOString(),
+      };
+      writeFileSync(path.join(outDir, 'version.json'), `${JSON.stringify(payload)}\n`, 'utf8');
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   loadEnv(mode, '.', '');
   /** 与 Express（server.ts）的 process.env.PORT 一致，便于 middleware 模式下 HMR/资源 URL 指向当前页端口 */
   const devHttpPort = Number(process.env.PORT) || 3005;
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), emitVersionJsonPlugin()],
     define: {},
     resolve: {
       alias: {
