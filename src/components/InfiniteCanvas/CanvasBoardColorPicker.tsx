@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LayoutTemplate, Map, Maximize2, X } from 'lucide-react';
+import { LayoutTemplate, MapPinned, Maximize2, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import {
   fitCanvasViewportAll,
@@ -398,7 +398,7 @@ export const CanvasLeftDock = memo(function CanvasLeftDock({
           pressed={minimapOn}
           onClick={() => setMinimapOn(toggleCanvasMinimapVisible())}
         >
-          <Map className={DOCK_ICON} strokeWidth={1.25} />
+          <MapPinned className={DOCK_ICON} strokeWidth={1.25} />
         </DockIconButton>
       </div>
     </div>
