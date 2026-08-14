@@ -17,7 +17,7 @@ const PASS = process.env.DEPLOY_SSH_PASS || '';
 const REMOTE = process.env.DEPLOY_REMOTE_DIR || '/var/www/my-storyboard-site';
 const KEY_PATH = process.env.DEPLOY_SSH_KEY || path.join(homedir(), '.ssh', 'id_ed25519');
 const BACKUP_REMOTE_DIR = process.env.BACKUP_REMOTE_DIR || '/root/studio-backups';
-const BACKUP_KEEP = Number(process.env.BACKUP_KEEP || 14);
+const BACKUP_KEEP = Number(process.env.BACKUP_KEEP || 3);
 const PULL =
   process.argv.includes('--pull') ||
   process.env.BACKUP_PULL === '1' ||

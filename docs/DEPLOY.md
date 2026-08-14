@@ -392,7 +392,7 @@ npm run deploy:safe
 | `public/uploads/` | 上传与 AI 落盘 |
 | `.env` | 线上密钥（勿提交 Git） |
 
-远端保留最近 **14** 份（`/root/studio-backups/studio-YYYYMMDD-HHMMSS.tar.gz`），更旧自动删。
+远端保留最近 **3** 份（`/root/studio-backups/studio-YYYYMMDD-HHMMSS.tar.gz`），更旧自动删。40G 云盘上每份约 4–5G，不宜再留 14 份。更长历史请 `--pull` 到本机。
 
 可选环境变量：`BACKUP_LOCAL_DIR`、`BACKUP_KEEP`、`BACKUP_PULL=1`。
 
