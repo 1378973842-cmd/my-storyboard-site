@@ -314,8 +314,13 @@ export function canAccessUploadPath(
   if (!p) return false;
   if (!userId) return false;
 
-  // 团队成员头像 / 个人空间封面：任一已登录用户可读
-  if (p.startsWith("/uploads/avatars/") || p.startsWith("/uploads/covers/")) return true;
+  // 头像 / 封面 / 发声贴图：任一已登录用户可读
+  if (
+    p.startsWith("/uploads/avatars/") ||
+    p.startsWith("/uploads/covers/") ||
+    p.startsWith("/uploads/voice/")
+  )
+    return true;
 
   const owner = db
     .prepare("SELECT user_id FROM file_ownership WHERE relative_path = ?")

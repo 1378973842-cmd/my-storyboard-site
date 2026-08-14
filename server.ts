@@ -48,6 +48,10 @@ import {
   registerHomeCarouselRoutes,
 } from "./src/services/homeCarousel.js";
 import {
+  initStudioVoiceBoardSchema,
+  registerStudioVoiceBoardRoutes,
+} from "./src/services/studioVoiceBoard.js";
+import {
   initCanvasGenerationsSchema,
   registerCanvasGenerationsRoutes,
   createPersistImageHandler,
@@ -647,6 +651,7 @@ async function startServer() {
   initUserAuthSchema(db);
   initStudioAnnouncementsSchema(db);
   initHomeCarouselSchema(db);
+  initStudioVoiceBoardSchema(db);
   bootstrapAdminUser(db);
   const adminBootstrap = db.prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY created_at ASC LIMIT 1").get() as
     | { id: string }
@@ -695,6 +700,7 @@ async function startServer() {
 
   registerUserAuthRoutes(app, db, projectRoot);
   registerStudioAnnouncementRoutes(app, db, requireAuth, requireAdmin);
+  registerStudioVoiceBoardRoutes(app, db, requireAuth, requireAdmin, projectRoot);
   registerHomeCarouselRoutes(app, db, requireAdmin, projectRoot);
   registerCanvasGenerationsRoutes(app, db, projectRoot);
   registerGalleryWorksRoutes(app, db, projectRoot);

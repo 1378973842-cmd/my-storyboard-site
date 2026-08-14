@@ -91,7 +91,6 @@ const NODE_FLYOUT_GROUPS: FlyoutGroup[] = [
       { icon: 'align-left', label: '文本', desc: '可编辑文本，LLM 写入图台，可作生图/生视频提示词', action: () => canvasWin['addPromptNode']?.() },
       { icon: 'circle-play', label: '视频生成', desc: '文生视频 / 图生视频', action: () => canvasWin['addVideoNode']?.() },
       { icon: 'repeat-2', label: '循环', desc: '批量循环执行', action: () => canvasWin['addLoopNode']?.() },
-      { icon: 'message-square-text', label: 'LLM', desc: '文本推理与改写', action: () => canvasWin['addLLMNode']?.() },
     ],
   },
   {
@@ -107,7 +106,6 @@ const NODE_FLYOUT_GROUPS: FlyoutGroup[] = [
     items: [
       { icon: 'images', label: '图片组', desc: '多图集合整理', action: () => canvasWin['createImageBatchFromSelection']?.() },
       { icon: 'layers', label: '提示词组', desc: '多提示词成组', action: () => canvasWin['createPromptGroupFromSelection']?.() },
-      { icon: 'circle-dot', label: 'Output', desc: '结果输出节点', action: () => canvasWin['addOutputNode']?.() },
       { icon: 'file-output', label: '文本输出', desc: '长文本阅读输出', action: () => canvasWin['addTextOutputNode']?.() },
     ],
   },
@@ -741,13 +739,6 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                               <span className="menu-btn-desc">批量循环执行</span>
                           </span>
                       </button>
-                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('llm')}>
-                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="message-square-text" className="w-4 h-4"></i></span>
-                          <span className="menu-btn-copy">
-                              <span className="menu-btn-title" data-i18n="canvas.llmNode">LLM 节点</span>
-                              <span className="menu-btn-desc">文本推理与改写</span>
-                          </span>
-                      </button>
                       <div className="menu-section-title">生成</div>
                       <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('generator')}>
                           <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="wand-sparkles" className="w-4 h-4"></i></span>
@@ -842,13 +833,6 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                           </span>
                       </button>
                       <div className="menu-section-title">输出</div>
-                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('output')}>
-                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="circle-dot" className="w-4 h-4"></i></span>
-                          <span className="menu-btn-copy">
-                              <span className="menu-btn-title">Output</span>
-                              <span className="menu-btn-desc">结果输出节点</span>
-                          </span>
-                      </button>
                       <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('textOutput')}>
                           <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="file-output" className="w-4 h-4"></i></span>
                           <span className="menu-btn-copy">

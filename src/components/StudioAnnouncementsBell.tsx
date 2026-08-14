@@ -7,6 +7,7 @@ import {
   Heart,
   Megaphone,
   MessageCircle,
+  MessageSquarePlus,
   UserPlus,
   X,
 } from 'lucide-react';
@@ -22,10 +23,11 @@ import {
   markAnnouncementRead,
   type StudioAnnouncement,
 } from '../lib/studioAnnouncementsApi';
+import { StudioVoiceBoard } from './StudioVoiceBoard';
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
-type TabId = 'official' | 'replies' | 'likes' | 'follows';
+type TabId = 'official' | 'voice' | 'replies' | 'likes' | 'follows';
 type ListFilter = 'all' | 'unread';
 
 const TABS: Array<{
@@ -35,10 +37,25 @@ const TABS: Array<{
   ready: boolean;
 }> = [
   { id: 'official', label: '官方通知', icon: Megaphone, ready: true },
+  { id: 'voice', label: '我要发声', icon: MessageSquarePlus, ready: true },
   { id: 'replies', label: '回复我的', icon: MessageCircle, ready: false },
   { id: 'likes', label: '收到的赞', icon: Heart, ready: false },
   { id: 'follows', label: '关注我的', icon: UserPlus, ready: false },
 ];
+
+function PanelCloseButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#2a2a2a] text-[#e5e2e1] hover:bg-[#333]"
+      style={{ outline: '0.5px solid rgba(229,226,225,0.35)', outlineOffset: '-0.5px' }}
+      aria-label="关闭"
+    >
+      <X className="h-4 w-4" strokeWidth={2} />
+    </button>
+  );
+}
 
 type StudioAnnouncementsBellProps = {
   /** @deprecated 发布已迁至头像菜单；保留以免调用方报错 */
@@ -183,16 +200,6 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
                     style={{ outline: '0.5px solid rgba(255,255,255,0.1)', outlineOffset: '-0.5px' }}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <button
-                      type="button"
-                      onClick={() => setOpen(false)}
-                      className="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-[#2a2a2a] text-[#e5e2e1] hover:bg-[#333]"
-                      style={{ outline: '0.5px solid rgba(229,226,225,0.35)', outlineOffset: '-0.5px' }}
-                      aria-label="关闭"
-                    >
-                      <X className="h-4 w-4" strokeWidth={2} />
-                    </button>
-
                     {/* 左侧分类 */}
                     <aside className="flex w-[220px] shrink-0 flex-col bg-[#1a1919] md:w-[240px]">
                       <div className="px-5 pb-3 pt-5">
@@ -247,7 +254,8 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
 
                     {/* 右侧列表 */}
                     <section className="flex min-w-0 flex-1 flex-col bg-[#121212]">
-                      <div className="flex items-center justify-end px-5 pb-2 pt-5 pr-14">
+                      {tab !== 'voice' ? (
+                      <div className="flex items-center justify-end gap-2 px-5 pb-2 pt-5">
                         <div className="relative">
                           <button
                             type="button"
@@ -289,10 +297,21 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
                             </div>
                           ) : null}
                         </div>
+                        <PanelCloseButton onClick={() => setOpen(false)} />
                       </div>
+                      ) : null}
 
-                      <div className="shell-slim-scrollbar min-h-0 flex-1 overflow-y-auto px-4 pb-5 md:px-5">
-                        {!activeTab.ready ? (
+                      <div
+                        className={cn(
+                          'min-h-0 flex-1 px-4 pb-5 md:px-5',
+                          tab === 'voice' ? 'overflow-hidden' : 'shell-slim-scrollbar overflow-y-auto',
+                        )}
+                      >
+                        {tab === 'voice' ? (
+                          <StudioVoiceBoard
+                            toolbarEnd={<PanelCloseButton onClick={() => setOpen(false)} />}
+                          />
+                        ) : !activeTab.ready ? (
                           <div className="flex min-h-[280px] flex-col items-center justify-center gap-2 text-center">
                             <p className="text-[14px] font-medium text-[#e5e2e1]/55">
                               {activeTab.label}即将开放

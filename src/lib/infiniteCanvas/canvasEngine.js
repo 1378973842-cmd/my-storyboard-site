@@ -1512,7 +1512,7 @@ let runningHubWorkflowCache = {};
 let managedProviderId = 'runninghub';
 let localImageModels = [];
 let localChatModels = [];
-const HIDDEN_CANVAS_NODE_TYPES = new Set(['comfy', 'ltxDirector', 'msgen']);
+const HIDDEN_CANVAS_NODE_TYPES = new Set(['comfy', 'ltxDirector', 'msgen', 'output', 'llm']);
 function filterCanvasNodeOptions(options){
     return (options || []).filter(opt => !HIDDEN_CANVAS_NODE_TYPES.has(opt.type));
 }
@@ -9776,13 +9776,13 @@ function linkCreateOptions(state){
         return [];
     }
     if(CANVAS_GENERATOR_TYPES.includes(node.type) || node.type === 'llm'){
-        return [
+        return filterCanvasNodeOptions([
             {type:'imageBatch', label:tr('canvas.imageBatchNode'), icon:'images'},
             {type:'prompt', label:tr('canvas.prompt'), icon:'text-cursor-input'},
             {type:'loop', label:tr('canvas.loopNode'), icon:'repeat-2'},
             {type:'group', label:tr('canvas.group'), icon:'group'},
             {type:'llm', label:'LLM', icon:'message-square-text'}
-        ];
+        ]);
     }
     return [];
 }
@@ -9812,13 +9812,13 @@ function openGeneratorNodeMenu(nodeId, clientX, clientY){
     const rect = el?.getBoundingClientRect();
     const point = screenToWorld(clientX, clientY);
     const inputOptions = linkCreateOptions({originId:nodeId, originKind:'in', point});
-    const outputOptions = [
-        ...(CANVAS_IMAGE_OUTPUT_TYPES.includes(node.type) && node.type !== 'replicaAgent' && node.type !== 'imageRepairAgent' ? filterCanvasNodeOptions([
+    const outputOptions = filterCanvasNodeOptions([
+        ...(CANVAS_IMAGE_OUTPUT_TYPES.includes(node.type) && node.type !== 'replicaAgent' && node.type !== 'imageRepairAgent' ? [
             {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
             {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'}
-        ]) : []),
+        ] : []),
         {type:'output', label:'Output', icon:'circle-dot'},
-    ];
+    ]);
     const buttonsHtml = (options, kind) => `<div class="node-port-menu-grid">${options.map(opt => `<button class="menu-btn" data-link-create="${escapeAttr(opt.type)}" data-link-kind="${kind}" title="${escapeAttr(opt.label)}"><i data-lucide="${escapeAttr(opt.icon)}"></i><span>${escapeHtml(opt.label.replace('生成', ''))}</span></button>`).join('')}</div>`;
     linkCreateState = {originId:nodeId, originKind:'in', point};
     createMenu.classList.remove('open');
@@ -9834,8 +9834,8 @@ function openGeneratorNodeMenu(nodeId, clientX, clientY){
     nodeInputMenu.style.top = `${menuTop}px`;
     nodeOutputMenu.style.left = `${outputLeft}px`;
     nodeOutputMenu.style.top = `${menuTop}px`;
-    nodeInputMenu.classList.add('open');
-    nodeOutputMenu.classList.add('open');
+    nodeInputMenu.classList.toggle('open', inputOptions.length > 0);
+    nodeOutputMenu.classList.toggle('open', outputOptions.length > 0);
     [nodeInputMenu, nodeOutputMenu].forEach(menu => menu.querySelectorAll('[data-link-create]').forEach(btn => {
         btn.onclick = e => {
             e.stopPropagation();
