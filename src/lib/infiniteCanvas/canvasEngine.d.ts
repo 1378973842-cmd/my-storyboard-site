@@ -12,6 +12,8 @@ export function consumeQueuedCanvasFavoriteNavigation(): Promise<{
 }>;
 
 export function getCanvasBoardBackground(): string;
+export function getCanvasThemeMode(): 'dark' | 'light';
+export function setCanvasThemeMode(mode: 'dark' | 'light'): 'dark' | 'light';
 export function getCanvasViewportScale(): number;
 export function subscribeCanvasViewportScale(listener: (scale: number) => void): () => void;
 export function resetCanvasViewportZoom(): void;

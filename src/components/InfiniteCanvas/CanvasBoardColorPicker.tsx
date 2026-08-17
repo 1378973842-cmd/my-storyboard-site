@@ -1,30 +1,25 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LayoutTemplate, MapPinned, Maximize2, X } from 'lucide-react';
+import { Check, LayoutTemplate, MapPinned, Maximize2, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import {
   fitCanvasViewportAll,
-  getCanvasBoardBackground,
+  getCanvasThemeMode,
   isCanvasMinimapVisible,
   isInfiniteCanvasEditorOpen,
   resetCanvasViewportZoom,
-  setCanvasBoardBackground,
+  setCanvasThemeMode,
   subscribeCanvasViewportScale,
   toggleCanvasMinimapVisible,
 } from '../../lib/infiniteCanvas/canvasEngine.js';
-import {
-  BOARD_BG_PRESETS,
-  boardDockRingColor,
-  hexToHsv,
-  hsvToHex,
-  hueColor,
-  isDarkBoardHex,
-  normalizeHex,
-  type Hsv,
-} from './canvasBoardColor';
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 const DOCK_ICON = 'h-[15px] w-[15px]';
+const THEME_OPTIONS = [
+  { id: 'dark' as const, label: '夜间', desc: '炭黑 · 琥珀光', bg: '#12100E' },
+  { id: 'light' as const, label: '日间', desc: '米白 · 深色字', bg: '#F8FAFC' },
+];
+const THEME_HEX: Record<'dark' | 'light', string> = { dark: '#12100E', light: '#F8FAFC' };
 
 const canvasWin = window as unknown as {
   openWorkflowTemplateModal?: () => void;
@@ -98,103 +93,6 @@ function useCanvasEditorVisible(active: boolean) {
   return visible;
 }
 
-function ColorField({
-  hsv,
-  onChange,
-}: {
-  hsv: Hsv;
-  onChange: (next: Hsv) => void;
-}) {
-  const fieldRef = useRef<HTMLDivElement>(null);
-
-  const pickAt = useCallback(
-    (clientX: number, clientY: number) => {
-      const el = fieldRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const s = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      const v = Math.max(0, Math.min(1, 1 - (clientY - rect.top) / rect.height));
-      onChange({ ...hsv, s, v });
-    },
-    [hsv, onChange],
-  );
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    pickAt(e.clientX, e.clientY);
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-    pickAt(e.clientX, e.clientY);
-  };
-
-  return (
-    <div
-      ref={fieldRef}
-      className="relative h-[112px] w-full overflow-hidden rounded-[12px] touch-none cursor-crosshair"
-      style={{ backgroundColor: hueColor(hsv.h) }}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-    >
-      <div className="absolute inset-0 bg-gradient-to-r from-white to-transparent" />
-      <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent" />
-      <div
-        className="pointer-events-none absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
-        style={{ left: `${hsv.s * 100}%`, top: `${(1 - hsv.v) * 100}%` }}
-      />
-    </div>
-  );
-}
-
-function HueSlider({ h, onChange }: { h: number; onChange: (h: number) => void }) {
-  const trackRef = useRef<HTMLDivElement>(null);
-
-  const pickAt = useCallback(
-    (clientX: number) => {
-      const el = trackRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const t = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      onChange(t * 360);
-    },
-    [onChange],
-  );
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    pickAt(e.clientX);
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-    pickAt(e.clientX);
-  };
-
-  return (
-    <div
-      ref={trackRef}
-      className="relative mt-2.5 h-2.5 w-full rounded-full touch-none cursor-pointer"
-      style={{
-        background:
-          'linear-gradient(90deg,#f00 0%,#ff0 17%,#0f0 33%,#0ff 50%,#00f 67%,#f0f 83%,#f00 100%)',
-      }}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-    >
-      <div
-        className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-[1.5px] border-white shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
-        style={{
-          left: `${(h / 360) * 100}%`,
-          backgroundColor: hueColor(h),
-        }}
-      />
-    </div>
-  );
-}
-
 export const CanvasLeftDock = memo(function CanvasLeftDock({
   active = false,
 }: {
@@ -204,42 +102,22 @@ export const CanvasLeftDock = memo(function CanvasLeftDock({
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const [hex, setHex] = useState('#12100E');
-  const [hsv, setHsv] = useState<Hsv>(() => hexToHsv('#12100E'));
-  const [hexDraft, setHexDraft] = useState('12100E');
+  const [themeMode, setThemeMode] = useState<'dark' | 'light'>(() => getCanvasThemeMode());
   const [zoomPct, setZoomPct] = useState(100);
   const [minimapOn, setMinimapOn] = useState(() => isCanvasMinimapVisible());
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const boardDark = isDarkBoardHex(hex);
+  const boardDark = themeMode === 'dark';
+  const themeHex = THEME_HEX[themeMode];
 
-  const commitColor = useCallback((nextHex: string, { save }: { save: boolean }) => {
-    const normalized = normalizeHex(nextHex);
-    if (!normalized) return;
-    setHex(normalized);
-    setHsv(hexToHsv(normalized));
-    setHexDraft(normalized.slice(1));
-    if (save) setCanvasBoardBackground(normalized);
+  const chooseTheme = useCallback((mode: 'dark' | 'light') => {
+    setThemeMode(setCanvasThemeMode(mode));
   }, []);
-
-  const scheduleSave = useCallback(
-    (next: Hsv) => {
-      const nextHex = hsvToHex(next.h, next.s, next.v);
-      setHex(nextHex);
-      setHexDraft(nextHex.slice(1));
-      setHsv(next);
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => setCanvasBoardBackground(nextHex), 100);
-    },
-    [],
-  );
 
   useEffect(() => {
     if (!editorVisible) return;
-    const current = getCanvasBoardBackground();
-    commitColor(current, { save: false });
-    const onExternal = (e: Event) => {
-      const detail = (e as CustomEvent<{ color?: string }>).detail;
-      if (detail?.color) commitColor(detail.color, { save: false });
+    setThemeMode(getCanvasThemeMode());
+    const onThemeChange = (e: Event) => {
+      const detail = (e as CustomEvent<{ mode?: string }>).detail;
+      if (detail?.mode === 'light' || detail?.mode === 'dark') setThemeMode(detail.mode);
     };
     const unsubViewport = subscribeCanvasViewportScale((scale) => {
       setZoomPct(Math.round(scale * 100));
@@ -250,15 +128,14 @@ export const CanvasLeftDock = memo(function CanvasLeftDock({
       else setMinimapOn(isCanvasMinimapVisible());
     };
     setMinimapOn(isCanvasMinimapVisible());
-    window.addEventListener('canvas-board-bg-change', onExternal);
+    window.addEventListener('canvas-theme-change', onThemeChange);
     window.addEventListener('canvas-minimap-visibility', onMinimapVis);
     return () => {
       unsubViewport();
-      window.removeEventListener('canvas-board-bg-change', onExternal);
+      window.removeEventListener('canvas-theme-change', onThemeChange);
       window.removeEventListener('canvas-minimap-visibility', onMinimapVis);
-      if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [editorVisible, commitColor]);
+  }, [editorVisible]);
 
   useEffect(() => {
     if (!open) return;
@@ -288,71 +165,58 @@ export const CanvasLeftDock = memo(function CanvasLeftDock({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 8, scale: 0.96 }}
                 transition={spring}
-                className="absolute bottom-[calc(100%+10px)] left-0 w-[220px] overflow-hidden rounded-[16px] bg-[#1c1b1b]/78 text-[#e5e2e1] shadow-[0_20px_48px_-24px_rgba(0,0,0,0.62)] backdrop-blur-[32px] outline outline-[0.5px] outline-white/10"
+                className={cn(
+                  'absolute bottom-[calc(100%+10px)] left-0 w-[220px] overflow-hidden rounded-[16px] backdrop-blur-[32px] outline outline-[0.5px]',
+                  boardDark
+                    ? 'bg-[#1c1b1b]/78 text-[#e5e2e1] shadow-[0_20px_48px_-24px_rgba(0,0,0,0.62)] outline-white/10'
+                    : 'bg-white/90 text-[#111827] shadow-[0_20px_48px_-28px_rgba(15,23,42,0.30)] outline-black/10',
+                )}
               >
-              <div className="flex items-center justify-between gap-2 px-3.5 py-2.5">
-                <span className="text-[12px] font-medium tracking-[0.03em] text-[#e5e2e1]/88">画布背景</span>
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  className="flex h-6 w-6 items-center justify-center rounded-full text-[#e5e2e1]/45 transition-colors hover:bg-white/[0.06] hover:text-[#e5e2e1] cursor-pointer"
-                  aria-label="关闭"
-                >
-                  <X className="h-3.5 w-3.5" strokeWidth={1.75} />
-                </button>
-              </div>
+                <div className="flex items-center justify-between gap-2 px-3.5 py-2.5">
+                  <span className={cn('text-[12px] font-medium tracking-[0.03em]', boardDark ? 'text-[#e5e2e1]/88' : 'text-[#111827]/80')}>画布主题</span>
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    className={cn('flex h-6 w-6 items-center justify-center rounded-full transition-colors cursor-pointer', boardDark ? 'text-[#e5e2e1]/45 hover:bg-white/[0.06] hover:text-[#e5e2e1]' : 'text-[#111827]/45 hover:bg-black/[0.06] hover:text-[#111827]')}
+                    aria-label="关闭"
+                  >
+                    <X className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  </button>
+                </div>
 
-              <div className="h-px bg-white/[0.06]" />
+                <div className={boardDark ? 'h-px bg-white/[0.06]' : 'h-px bg-black/[0.06]'} />
 
-              <div className="space-y-2.5 px-3.5 py-3">
-                <ColorField hsv={hsv} onChange={scheduleSave} />
-                <HueSlider h={hsv.h} onChange={(h) => scheduleSave({ ...hsv, h })} />
-
-                <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                  {BOARD_BG_PRESETS.map((preset) => {
-                    const selected = hex === preset;
+                <div className="space-y-1.5 px-2.5 py-2.5">
+                  {THEME_OPTIONS.map((t) => {
+                    const selected = themeMode === t.id;
                     return (
                       <button
-                        key={preset}
+                        key={t.id}
                         type="button"
-                        title={preset}
-                        onClick={() => commitColor(preset, { save: true })}
+                        onClick={() => chooseTheme(t.id)}
+                        aria-pressed={selected}
                         className={cn(
-                          'h-5 w-5 rounded-full cursor-pointer transition-transform',
+                          'flex w-full items-center gap-3 rounded-[12px] px-2.5 py-2 text-left transition-colors cursor-pointer',
                           selected
-                            ? 'outline outline-[1.5px] outline-[#ffb866] outline-offset-[2px] scale-105'
-                            : 'outline outline-[0.5px] outline-white/12 hover:scale-105',
+                            ? (boardDark ? 'bg-white/[0.08]' : 'bg-black/[0.05]')
+                            : (boardDark ? 'hover:bg-white/[0.05]' : 'hover:bg-black/[0.04]'),
+                          selected && (boardDark ? 'outline outline-[0.5px] outline-[#ffb866]/40' : 'outline outline-[0.5px] outline-[#b77100]/40'),
                         )}
-                        style={{ backgroundColor: preset }}
-                        aria-label={`预设 ${preset}`}
-                      />
+                      >
+                        <span
+                          className={cn('h-5 w-5 shrink-0 rounded-full', boardDark ? 'outline outline-[0.5px] outline-white/20' : 'outline outline-[0.5px] outline-black/15')}
+                          style={{ backgroundColor: t.bg }}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[12.5px] font-medium leading-tight">{t.label}</span>
+                          <span className={cn('block text-[10.5px] leading-tight', boardDark ? 'text-[#e5e2e1]/40' : 'text-[#111827]/45')}>{t.desc}</span>
+                        </span>
+                        {selected && <Check className={cn('h-3.5 w-3.5 shrink-0', boardDark ? 'text-[#ffb866]' : 'text-[#b77100]')} strokeWidth={2} />}
+                      </button>
                     );
                   })}
                 </div>
-
-                <div className="flex items-center gap-1.5 rounded-[10px] bg-[#131313]/72 px-2.5 py-1.5 outline outline-[0.5px] outline-white/8">
-                  <span className="text-[11px] font-medium text-[#e5e2e1]/38">#</span>
-                  <input
-                    value={hexDraft}
-                    onChange={(e) => setHexDraft(e.target.value.replace(/[^0-9a-fA-F]/g, '').slice(0, 6))}
-                    onBlur={() => {
-                      const normalized = normalizeHex(hexDraft);
-                      if (normalized) commitColor(normalized, { save: true });
-                      else setHexDraft(hex.slice(1));
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key !== 'Enter') return;
-                      const normalized = normalizeHex(hexDraft);
-                      if (normalized) commitColor(normalized, { save: true });
-                      else setHexDraft(hex.slice(1));
-                    }}
-                    className="min-w-0 flex-1 bg-transparent text-[11px] font-medium tracking-[0.08em] text-[#e5e2e1] outline-none uppercase"
-                    aria-label="十六进制颜色"
-                    spellCheck={false}
-                  />
-                </div>
-              </div>
-            </motion.div>
+              </motion.div>
           )}
         </AnimatePresence>
 
@@ -364,13 +228,13 @@ export const CanvasLeftDock = memo(function CanvasLeftDock({
           onClick={() => setOpen((v) => !v)}
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
-          aria-label="调整画布背景"
+          aria-label="画布主题（夜间/日间）"
           aria-expanded={open}
           className="canvas-left-dock-color"
-          style={{ borderColor: boardDockRingColor(hex, hex) }}
+          style={{ backgroundColor: themeHex }}
         />
 
-        <DockTooltip label="调整画布背景" show={hovered && !open} />
+        <DockTooltip label="画布主题" show={hovered && !open} />
         </div>
 
         <DockIconButton label="工作流模板" onClick={() => canvasWin.openWorkflowTemplateModal?.()}>

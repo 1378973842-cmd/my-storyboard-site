@@ -1683,16 +1683,38 @@ function applyHailuoVideoDefaults(node){
 }
 
 function uid(prefix='n'){ return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`; }
-function applyTheme(_theme){
-    // ponytail: 画布固定暗房，不跟全站浅色切换；升级路径见 STUDIO_RULES §三（方案 B 暖浅 token）
-    const dark = true;
+let canvasThemeMode = 'dark';
+function readCanvasThemeMode(){
+    try {
+        const v = localStorage.getItem(CANVAS_THEME_KEY);
+        if(v === 'light' || v === 'dark') return v;
+    } catch(_) { /* ignore */ }
+    return 'dark';
+}
+function applyCanvasThemeClasses(dark){
     if(canvasRoot){
         canvasRoot.classList.add('infinite-canvas-root');
         canvasRoot.classList.toggle('studio-theme-dark', dark);
         canvasRoot.classList.toggle('theme-dark', dark);
     }
     if(shell) shell.classList.toggle('theme-dark', dark);
-    if(canvas?.settings?.boardBg) applyBoardBackground(canvas.settings.boardBg, { save: false });
+    if(typeof document !== 'undefined'){
+        document.body.dataset.canvasTheme = dark ? 'dark' : 'light';
+    }
+}
+function applyCanvasTheme(mode){
+    const dark = mode !== 'light';
+    canvasThemeMode = dark ? 'dark' : 'light';
+    applyCanvasThemeClasses(dark);
+    applyBoardColors(dark ? BOARD_BG_DEFAULT.dark : BOARD_BG_DEFAULT.light);
+    // 通知 React 壳（InfiniteCanvasShell）同步 className，避免引擎命令式改类被 React 旧 state 覆盖
+    if(typeof window !== 'undefined'){
+        window.dispatchEvent(new CustomEvent('canvas-theme-change', { detail: { mode: canvasThemeMode } }));
+    }
+}
+function applyTheme(_theme){
+    // 全局夜间/日间主题：日间摘掉 theme-dark 回到预埋浅色；canvas_theme 记忆
+    applyCanvasTheme(readCanvasThemeMode());
 }
 const BOARD_BG_DEFAULT = { light: '#F8FAFC', dark: '#12100E' };
 let boardBackgroundColor = '';
@@ -1722,8 +1744,7 @@ function deriveBoardGridColor(hex){
     if(canvasRoot?.classList.contains('theme-dark')) return 'rgba(255,184,102,.08)';
     return `rgba(255,255,255,${(0.06 + (1 - lum) * 0.14).toFixed(3)})`;
 }
-function applyBoardBackground(color, { save = true } = {}){
-    const hex = normalizeBoardHex(color) || defaultBoardBackground();
+function applyBoardColors(hex){
     boardBackgroundColor = hex;
     const grid = deriveBoardGridColor(hex);
     if(canvasRoot){
@@ -1731,16 +1752,30 @@ function applyBoardBackground(color, { save = true } = {}){
         canvasRoot.style.setProperty('--grid', grid);
     }
     if(board) board.style.backgroundColor = hex;
-    if(canvas){
-        canvas.settings = {...(canvas.settings || {}), boardBg: hex};
-    }
     if(typeof window !== 'undefined'){
         window.dispatchEvent(new CustomEvent('canvas-board-bg-change', { detail: { color: hex } }));
+    }
+}
+function applyBoardBackground(color, { save = true } = {}){
+    const hex = normalizeBoardHex(color) || defaultBoardBackground();
+    applyBoardColors(hex);
+    if(canvas){
+        canvas.settings = {...(canvas.settings || {}), boardBg: hex};
     }
     if(save && canvas) scheduleNodeDragSave();
 }
 export function getCanvasBoardBackground(){
     return boardBackgroundColor || canvas?.settings?.boardBg || defaultBoardBackground();
+}
+export function getCanvasThemeMode(){
+    return canvasThemeMode || readCanvasThemeMode();
+}
+export function setCanvasThemeMode(mode){
+    const next = mode === 'light' ? 'light' : 'dark';
+    canvasThemeMode = next;
+    try { localStorage.setItem(CANVAS_THEME_KEY, next); } catch(_) { /* ignore */ }
+    applyCanvasTheme(next);
+    return next;
 }
 export function getCanvasViewportScale(){
     return viewport?.scale ?? 1;
@@ -6913,7 +6948,7 @@ async function openCanvas(id, options = {}){
         nodes.filter(n => n.type === 'replicaAgent').forEach(syncReplicaAgentRoles);
         pruneMissingComfyWorkflows();
         // 先画再查缺失资源/收藏：避免大板首屏被网络检查卡住
-        applyBoardBackground(canvas.settings?.boardBg, { save: false });
+        applyCanvasTheme(canvasThemeMode);
         selected.clear();
         setCanvasMode(true);
         writeLastCanvasId(canvas.id);
@@ -7001,7 +7036,7 @@ function applyRemoteCanvasData(remote, opts = {}){
         const localViewport = keepLocalViewport ? {...viewport} : null;
         const viewportOnly = remoteCanvasContentEquals(remote);
         const remoteUpdatedAt = Number(remote.updated_at || Date.now());
-        applyBoardBackground(remote.settings?.boardBg ?? canvas.settings?.boardBg, { save: false });
+        applyCanvasTheme(canvasThemeMode);
         if(viewportOnly){
             lastCanvasUpdatedAt = remoteUpdatedAt;
             canvas.updated_at = remoteUpdatedAt;
@@ -11690,6 +11725,7 @@ function syncHistoryHubUi(tab = historyHubTab){
         btn.classList.toggle('is-active', active);
         btn.setAttribute('aria-selected', active ? 'true' : 'false');
     });
+    logModal?.querySelector('.history-kind-seg')?.toggleAttribute('hidden', isLogs);
     // 壳层标题固定，只换内容区
     const titleEl = historyHubTitleText || historyHubTitle;
     if(titleEl) titleEl.textContent = langIsEn() ? 'Generation history' : '生成历史';

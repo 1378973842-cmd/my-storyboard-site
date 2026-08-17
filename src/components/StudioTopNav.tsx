@@ -195,6 +195,9 @@ function CanvasHeaderCluster({
   const [listLoading, setListLoading] = useState(false);
   const [listQuery, setListQuery] = useState('');
   const [switchBusy, setSwitchBusy] = useState(false);
+  const [themeMode, setThemeMode] = useState<'dark' | 'light'>(() => {
+    try { return localStorage.getItem('canvas_theme') === 'light' ? 'light' : 'dark'; } catch { return 'dark'; }
+  });
   const clusterRef = useRef<HTMLDivElement | null>(null);
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const titleBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -258,9 +261,15 @@ function CanvasHeaderCluster({
       });
     }
     window.addEventListener('canvas-board-bg-change', syncMeta);
+    const onTheme = (e: Event) => {
+      const mode = (e as CustomEvent<{ mode?: string }>).detail?.mode;
+      if (mode === 'light' || mode === 'dark') setThemeMode(mode);
+    };
+    window.addEventListener('canvas-theme-change', onTheme);
     return () => {
       obs.disconnect();
       window.removeEventListener('canvas-board-bg-change', syncMeta);
+      window.removeEventListener('canvas-theme-change', onTheme);
     };
   }, [syncMeta]);
 
@@ -423,7 +432,11 @@ function CanvasHeaderCluster({
   const statusTitle = meta?.status || '';
 
   return (
-    <div ref={clusterRef} className={cn('studio-canvas-header-cluster', className)}>
+    <div
+      ref={clusterRef}
+      className={cn('studio-canvas-header-cluster', className)}
+      data-board-tone={themeMode === 'dark' ? 'dark' : 'light'}
+    >
       <div className={cn('studio-canvas-header-pill', meta && 'has-meta')}>
         <button
           ref={btnRef}

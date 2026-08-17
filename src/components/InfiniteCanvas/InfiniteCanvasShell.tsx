@@ -457,6 +457,17 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
   onMaterialLibraryOpenChange,
 }: Props) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [themeMode, setThemeMode] = useState<'dark' | 'light'>(() => {
+    try { return localStorage.getItem('canvas_theme') === 'light' ? 'light' : 'dark'; } catch { return 'dark'; }
+  });
+  useEffect(() => {
+    const onTheme = (e: Event) => {
+      const mode = (e as CustomEvent<{ mode?: string }>).detail?.mode;
+      if (mode === 'light' || mode === 'dark') setThemeMode(mode);
+    };
+    window.addEventListener('canvas-theme-change', onTheme);
+    return () => window.removeEventListener('canvas-theme-change', onTheme);
+  }, []);
   const mergedRef = useCallback(
     (node: HTMLDivElement | null) => {
       assignRootRef(rootRef, node);
@@ -466,7 +477,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
   );
 
   return (
-    <div ref={mergedRef} className={`infinite-canvas-root theme-dark${materialLibraryOpen ? ' material-library-open' : ''}`}>
+    <div ref={mergedRef} className={`infinite-canvas-root${themeMode === 'dark' ? ' theme-dark' : ''}${materialLibraryOpen ? ' material-library-open' : ''}`}>
       {/* #shell 禁止写 className，由 canvasEngine 独占 no-canvas / theme-dark */}
       <div id="shell">
               <div className="topbar editor-only">
@@ -999,11 +1010,11 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                               </button>
                           </div>
                       </div>
-                      <div className="canvas-history-tabs in-log-modal" role="tablist" aria-label="历史切换">
-                          <button type="button" className="canvas-history-tab is-active" data-history-tab="library" role="tab" aria-selected="true">成片库</button>
-                          <button type="button" className="canvas-history-tab" data-history-tab="logs" role="tab" aria-selected="false">本板日志</button>
-                      </div>
                       <div className="history-hub-chrome">
+                          <div className="canvas-history-tabs in-log-modal" role="tablist" aria-label="历史切换">
+                              <button type="button" className="canvas-history-tab is-active" data-history-tab="library" role="tab" aria-selected="true">成片库</button>
+                              <button type="button" className="canvas-history-tab" data-history-tab="logs" role="tab" aria-selected="false">本板日志</button>
+                          </div>
                           <div className="history-kind-seg" role="tablist" aria-label="生成历史分类">
                               <button type="button" className="history-kind-seg-btn is-active" data-history-kind="image" role="tab" aria-selected="true">图片</button>
                               <button type="button" className="history-kind-seg-btn" data-history-kind="video" role="tab" aria-selected="false">视频</button>

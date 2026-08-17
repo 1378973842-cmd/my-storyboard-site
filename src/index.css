@@ -1245,6 +1245,84 @@ html[data-theme="light"] body {
     background: rgba(255, 255, 255, 0.06);
   }
 
+  /* 日间：左上 logo / 项目名胶囊（挂在画布根外，需跟 canvas_theme） */
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-header-pill {
+    background: rgba(255, 255, 255, 0.78);
+    outline-color: rgba(15, 23, 42, 0.08);
+    box-shadow:
+      0 18px 48px -24px rgba(15, 23, 42, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-pill-seg,
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-pill-title-text {
+    color: #111827;
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-pill-seg:hover {
+    background: rgba(15, 23, 42, 0.06);
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-pill-chevron {
+    color: rgba(17, 24, 39, 0.45);
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-pill-chevron.is-open {
+    color: #b77100;
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-pill-sep {
+    background: rgba(15, 23, 42, 0.12);
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-pill-status {
+    color: rgba(17, 24, 39, 0.5);
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-pill-status.is-saving {
+    color: #b77100;
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-brand-mark-logo {
+    box-shadow:
+      0 0 0 0.5px rgba(15, 23, 42, 0.1),
+      0 8px 20px -12px rgba(15, 23, 42, 0.28);
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-brand-menu,
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-switcher {
+    background: rgba(255, 255, 255, 0.96);
+    outline-color: rgba(15, 23, 42, 0.08);
+    box-shadow: 0 22px 56px -22px rgba(15, 23, 42, 0.28);
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-brand-menu-item,
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-switcher-item,
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-switcher-new {
+    color: #111827;
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-brand-menu-item:hover,
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-switcher-item:hover,
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-switcher-item.is-active,
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-switcher-new:hover {
+    background: rgba(15, 23, 42, 0.06);
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-switcher-search-input {
+    background: rgba(15, 23, 42, 0.05);
+    color: #111827;
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-switcher-search-input::placeholder {
+    color: rgba(100, 116, 139, 0.5);
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-switcher-search-icon,
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-switcher-date,
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-switcher-empty {
+    color: rgba(100, 116, 139, 0.66);
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-switcher-thumb {
+    background: rgba(15, 23, 42, 0.05);
+    color: rgba(100, 116, 139, 0.66);
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-switcher-check {
+    color: #b77100;
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-switcher-foot {
+    box-shadow: inset 0 0.5px 0 rgba(15, 23, 42, 0.08);
+  }
+  .studio-canvas-header-cluster[data-board-tone="light"] .studio-canvas-meta-input {
+    color: #b77100;
+  }
+
   .cover-nav-text-link {
     position: relative;
     display: inline-flex;
