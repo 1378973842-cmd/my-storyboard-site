@@ -51,7 +51,8 @@
         { "id": "HOME12", "desc": "消息铃铛改为通知中心（左分类+右列表+一键已读）；发布公告迁至头像菜单", "status": "done", "priority": 139 },
         { "id": "HOME13", "desc": "个人空间更换背景：上传前固定横幅比例裁切（拖动/缩放选区）", "status": "done", "priority": 140 },
         { "id": "HOME14", "desc": "管理员公告管理：列表/发布/编辑/删除（头像菜单入口）", "status": "done", "priority": 141 },
-        { "id": "HOME15", "desc": "通知中心「我要发声」：Bug/建议论坛、截图标注、评论点赞、匿名", "status": "done", "priority": 142 }
+        { "id": "HOME15", "desc": "通知中心「我要发声」：Bug/建议论坛、截图标注、评论点赞、匿名", "status": "done", "priority": 142 },
+        { "id": "HOME16", "desc": "管理员用户管理：在线/离开/离线状态、在线人数、15s 轮询、登录历史（无设备信息）+ 全局 60s presence 心跳", "status": "done", "priority": 143 }
       ]
     },
     {
@@ -244,6 +245,8 @@
         { "id": "AG231", "desc": "修：日间图/生图/视频/文本选中环画在图台上（3px 琥珀 outline + 内描边），外壳阴影对无框节点无效", "status": "done", "priority": 265 },
         { "id": "AG232", "desc": "UI：选中连线改细芯（1.7）+ 琥珀软光晕，去掉加粗描边", "status": "done", "priority": 266 },
         { "id": "AG233", "desc": "UI：选中环外发光——日间琥珀 soft glow；夜间白芯+琥珀晕；图台 wrap 外阴影", "status": "done", "priority": 267 },
+        { "id": "AG234", "desc": "交互：图片/生图动作条扩图——外框拖拽 + gpt-image-2 edits（空提示词保真延展，原图回贴，结果连出新节点）", "status": "done", "priority": 268 },
+        { "id": "AG235", "desc": "UI：扩图开场视口弹簧（同画笔）+ 外框可平移 + 分辨率/质量改下拉 + 发送钮对齐 gen-dock + 去掉 GPT Image2 左侧图标", "status": "done", "priority": 269 },
         { "id": "AG206c", "desc": "check：image-edit-viewport-focus", "status": "done", "priority": 240 },
         { "id": "AG199c", "desc": "check：rh-output-layout（含 RH skip stage / 去框）", "status": "done", "priority": 233 },
         { "id": "AG30", "desc": "图片组：子图自然尺寸落地后防抖重排扩容，避免默认框装不下", "status": "done", "priority": 51 },

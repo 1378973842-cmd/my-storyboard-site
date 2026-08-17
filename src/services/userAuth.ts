@@ -78,6 +78,28 @@ const SESSION_TTL_MS = Math.max(
 
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 
+/** 在线：2 分钟内心跳且标签可见；离开：15 分钟内；否则离线 */
+const PRESENCE_ONLINE_MS = 2 * 60 * 1000;
+const PRESENCE_AWAY_MS = 15 * 60 * 1000;
+const PRESENCE_STALE_MS = 20 * 60 * 1000;
+const LOGIN_EVENTS_DEFAULT_LIMIT = 20;
+
+export type PresenceStatus = "online" | "away" | "offline";
+
+type PresenceRow = {
+  session_key: string;
+  user_id: string;
+  last_seen_at: number;
+  page_path: string | null;
+  is_visible: number;
+};
+
+type LoginEventRow = {
+  id: string;
+  user_id: string;
+  created_at: number;
+};
+
 declare global {
   namespace Express {
     interface Request {
@@ -326,6 +348,149 @@ export function initUserAuthSchema(db: InstanceType<typeof Database>): void {
   } catch {
     /* column exists */
   }
+  try {
+    db.prepare("ALTER TABLE users ADD COLUMN last_login_at INTEGER").run();
+  } catch {
+    /* column exists */
+  }
+  try {
+    db.prepare("ALTER TABLE users ADD COLUMN last_seen_at INTEGER").run();
+  } catch {
+    /* column exists */
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_presence (
+      session_key TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      last_seen_at INTEGER NOT NULL,
+      page_path TEXT,
+      is_visible INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_presence_user ON user_presence(user_id);
+    CREATE INDEX IF NOT EXISTS idx_presence_seen ON user_presence(last_seen_at);
+    CREATE TABLE IF NOT EXISTS login_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_login_events_user ON login_events(user_id, created_at DESC);
+  `);
+}
+
+function cleanupStalePresence(db: InstanceType<typeof Database>): void {
+  const cutoff = Date.now() - PRESENCE_STALE_MS;
+  db.prepare("DELETE FROM user_presence WHERE last_seen_at < ?").run(cutoff);
+}
+
+function recordUserLogin(db: InstanceType<typeof Database>, userId: string): void {
+  const now = Date.now();
+  db.prepare("UPDATE users SET last_login_at = ?, last_seen_at = ? WHERE id = ?").run(now, now, userId);
+  db.prepare("INSERT INTO login_events (id, user_id, created_at) VALUES (?, ?, ?)").run(
+    uuidv4(),
+    userId,
+    now
+  );
+}
+
+function sanitizePresencePage(raw: unknown): string | null {
+  const page = String(raw ?? "")
+    .trim()
+    .slice(0, 120);
+  return page || null;
+}
+
+function upsertUserPresence(
+  db: InstanceType<typeof Database>,
+  userId: string,
+  sessionKey: string,
+  pagePath: string | null,
+  isVisible: boolean
+): void {
+  cleanupStalePresence(db);
+  const now = Date.now();
+  const existing = db
+    .prepare("SELECT session_key FROM user_presence WHERE session_key = ?")
+    .get(sessionKey) as { session_key: string } | undefined;
+
+  if (existing) {
+    db.prepare(
+      `UPDATE user_presence SET user_id = ?, last_seen_at = ?, page_path = ?, is_visible = ? WHERE session_key = ?`
+    ).run(userId, now, pagePath, isVisible ? 1 : 0, sessionKey);
+  } else {
+    db.prepare(
+      `INSERT INTO user_presence (session_key, user_id, last_seen_at, page_path, is_visible, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(sessionKey, userId, now, pagePath, isVisible ? 1 : 0, now);
+  }
+  db.prepare("UPDATE users SET last_seen_at = ? WHERE id = ?").run(now, userId);
+}
+
+function clearPresenceSession(db: InstanceType<typeof Database>, sessionKey: string): void {
+  if (!sessionKey) return;
+  db.prepare("DELETE FROM user_presence WHERE session_key = ?").run(sessionKey);
+}
+
+function derivePresenceStatus(
+  rows: PresenceRow[],
+  now: number,
+  disabled: boolean
+): { status: PresenceStatus; current_page: string | null; last_seen_at: number | null } {
+  if (disabled || rows.length === 0) {
+    return { status: "offline", current_page: null, last_seen_at: null };
+  }
+
+  const recent = rows.filter((r) => now - r.last_seen_at <= PRESENCE_AWAY_MS);
+  if (recent.length === 0) {
+    const maxSeen = Math.max(...rows.map((r) => r.last_seen_at));
+    return { status: "offline", current_page: null, last_seen_at: maxSeen };
+  }
+
+  const onlineCandidates = recent.filter(
+    (r) => r.is_visible === 1 && now - r.last_seen_at <= PRESENCE_ONLINE_MS
+  );
+  const best = (onlineCandidates.length ? onlineCandidates : recent).reduce((a, b) =>
+    a.last_seen_at >= b.last_seen_at ? a : b
+  );
+
+  const status: PresenceStatus =
+    onlineCandidates.length > 0 ? "online" : "away";
+
+  return {
+    status,
+    current_page: best.page_path,
+    last_seen_at: best.last_seen_at,
+  };
+}
+
+function listPresenceByUserIds(
+  db: InstanceType<typeof Database>,
+  userIds: string[],
+  now: number
+): Map<string, PresenceRow[]> {
+  const map = new Map<string, PresenceRow[]>();
+  if (userIds.length === 0) return map;
+
+  const cutoff = now - PRESENCE_AWAY_MS;
+  const placeholders = userIds.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `SELECT session_key, user_id, last_seen_at, page_path, is_visible
+       FROM user_presence WHERE user_id IN (${placeholders}) AND last_seen_at >= ?`
+    )
+    .all(...userIds, cutoff) as PresenceRow[];
+
+  for (const row of rows) {
+    const list = map.get(row.user_id) ?? [];
+    list.push(row);
+    map.set(row.user_id, list);
+  }
+  return map;
+}
+
+function msToIso(ms: number | null | undefined): string | null {
+  if (ms == null || !Number.isFinite(ms) || ms <= 0) return null;
+  return new Date(ms).toISOString();
 }
 
 export function bootstrapAdminUser(db: InstanceType<typeof Database>): void {
@@ -406,6 +571,9 @@ export function registerUserAuthRoutes(
   db: InstanceType<typeof Database>,
   projectRoot: string
 ): void {
+  const requireAuth = createRequireAuth(db);
+  const requireAdmin = createRequireAdmin(db);
+
   app.get("/api/auth/status", (req, res) => {
     const user = attachAuthUser(db, req);
     if (!user) {
@@ -429,17 +597,29 @@ export function registerUserAuthRoutes(
     }
 
     clearLoginRateLimit(req);
+    recordUserLogin(db, row.id);
     const token = createSessionToken(row.id);
     res.setHeader("Set-Cookie", buildSessionCookie(token, req));
     return res.json({ ok: true, user: rowToAuthUser(row) });
   });
 
   app.post("/api/auth/logout", (req, res) => {
+    const sessionKey = String(req.body?.session_key ?? req.body?.sessionKey ?? "").trim();
+    if (sessionKey) clearPresenceSession(db, sessionKey);
     res.setHeader("Set-Cookie", buildClearSessionCookie(req));
     return res.json({ ok: true });
   });
 
-  const requireAuth = createRequireAuth(db);
+  app.post("/api/auth/presence", requireAuth, (req, res) => {
+    const sessionKey = String(req.body?.session_key ?? req.body?.sessionKey ?? "").trim();
+    if (!sessionKey || sessionKey.length > 64) {
+      return res.status(400).json({ error: "无效的 session_key" });
+    }
+    const pagePath = sanitizePresencePage(req.body?.page ?? req.body?.page_path);
+    const isVisible = req.body?.visible !== false && req.body?.is_visible !== 0;
+    upsertUserPresence(db, req.authUser!.id, sessionKey, pagePath, isVisible);
+    return res.json({ ok: true });
+  });
 
   app.patch("/api/auth/profile", requireAuth, (req, res) => {
     const displayName = String(req.body?.display_name ?? req.body?.displayName ?? "").trim();
@@ -522,16 +702,87 @@ export function registerUserAuthRoutes(
     });
   });
 
-  const requireAdmin = createRequireAdmin(db);
-
   app.get("/api/admin/users", requireAdmin, (_req, res) => {
+    cleanupStalePresence(db);
+    const now = Date.now();
+    type AdminUserRow = {
+      id: string;
+      email: string;
+      display_name: string;
+      role: UserRole;
+      disabled: number;
+      created_at: string;
+      last_login_at: number | null;
+      last_seen_at: number | null;
+    };
     const rows = db
       .prepare(
-        `SELECT id, email, display_name, role, disabled, created_at
+        `SELECT id, email, display_name, role, disabled, created_at, last_login_at, last_seen_at
          FROM users ORDER BY created_at ASC`
       )
-      .all();
-    res.json({ users: rows });
+      .all() as AdminUserRow[];
+
+    const userIds = rows.map((r) => r.id);
+    const presenceMap = listPresenceByUserIds(db, userIds, now);
+
+    let onlineCount = 0;
+    let awayCount = 0;
+
+    const users = rows.map((row) => {
+      const presenceRows = presenceMap.get(row.id) ?? [];
+      const derived = derivePresenceStatus(presenceRows, now, row.disabled === 1);
+      if (row.disabled !== 1) {
+        if (derived.status === "online") onlineCount += 1;
+        else if (derived.status === "away") awayCount += 1;
+      }
+      const lastSeenMs = derived.last_seen_at ?? row.last_seen_at ?? null;
+      return {
+        id: row.id,
+        email: row.email,
+        display_name: row.display_name,
+        role: row.role,
+        disabled: row.disabled,
+        created_at: row.created_at,
+        last_login_at: msToIso(row.last_login_at),
+        last_seen_at: msToIso(lastSeenMs),
+        status: derived.status,
+        current_page: derived.current_page,
+      };
+    });
+
+    res.json({
+      users,
+      summary: {
+        online: onlineCount,
+        away: awayCount,
+        total: rows.length,
+      },
+    });
+  });
+
+  app.get("/api/admin/users/:id/login-events", requireAdmin, (req, res) => {
+    const targetId = String(req.params.id || "").trim();
+    const row = db.prepare("SELECT id FROM users WHERE id = ?").get(targetId);
+    if (!row) return res.status(404).json({ error: "用户不存在" });
+
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw)
+      ? Math.min(Math.max(1, Math.floor(limitRaw)), 50)
+      : LOGIN_EVENTS_DEFAULT_LIMIT;
+
+    const events = db
+      .prepare(
+        `SELECT id, user_id, created_at FROM login_events
+         WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`
+      )
+      .all(targetId, limit) as LoginEventRow[];
+
+    res.json({
+      events: events.map((e) => ({
+        id: e.id,
+        created_at: msToIso(e.created_at),
+      })),
+    });
   });
 
   app.post("/api/admin/users", requireAdmin, (req, res) => {
@@ -582,6 +833,9 @@ export function registerUserAuthRoutes(
         }
       }
       db.prepare("UPDATE users SET disabled = ? WHERE id = ?").run(disabled ? 1 : 0, targetId);
+      if (disabled) {
+        db.prepare("DELETE FROM user_presence WHERE user_id = ?").run(targetId);
+      }
     }
 
     if (displayName) {

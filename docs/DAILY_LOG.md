@@ -464,3 +464,11 @@
 - AG231：日间图类节点选中环改画在图台上（3px 琥珀），node init.mjs 通过
 - AG232：选中连线改细芯+琥珀软光晕，node init.mjs 通过
 - AG233：选中环外发光，node init.mjs 通过
+- deploy:safe 上线 3d9faaf（日间/夜间主题+选中光晕）；备份 studio-20260817-122749.tar.gz；PM2 online HTTP 200
+- AG234：日间选中环/连线改钴蓝 #2563eb，node init.mjs 通过
+- AG234：日间选中改钢蓝 #4578a8（降饱和），node init.mjs 通过
+- AG234：日间选中改赛博电青 #00a8ff，node init.mjs 通过
+- AG234：日间选中改靛灰蓝 #5e74a8（与琥珀互补），node init.mjs 通过
+- AG234：日间选中改为墨色细环+琥珀外光，node init.mjs 通过
+- AG234：图片/生图动作条扩图（外框+gpt-image-2），node init.mjs 通过
+- AG235 扩图：开场视口弹簧、外框可平移、分辨率/质量下拉、圆形发送、去掉 GPT Image2 左侧图标

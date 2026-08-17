@@ -10,6 +10,7 @@ import {
   isStoredAuthenticated,
 } from '../lib/authSession';
 import { useAuthStore } from '../stores/authStore';
+import { PresenceHeartbeat } from './PresenceHeartbeat';
 
 export { AUTH_LS_KEY as GATE_LS_KEY };
 
@@ -256,6 +257,7 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
 
   return (
     <>
+      <PresenceHeartbeat />
       {children}
       {gateOverlay}
     </>

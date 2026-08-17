@@ -1,4 +1,6 @@
 import type { Express, Request, Response, RequestHandler } from "express";
+import { existsSync, readFileSync } from "fs";
+import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { augmentImagePromptWithReferenceCostumeLock } from "../lib/nineGrid/nineGridCore.js";
 import {
@@ -54,6 +56,8 @@ export type CanvasOnlineImagePayload = {
   };
   /** 九宫格 Agent 生图任务：gpt-image-2 走官方渠道 */
   nine_grid_agent?: boolean;
+  /** 扩图：灰边拼图按原尺寸走 /images/edits，绕过 RunningHub 丢布局 */
+  expand_outpaint?: boolean;
   /** 写入成片库 / 归属用 */
   canvas_id?: string;
   node_id?: string;
@@ -80,8 +84,57 @@ const CANVAS_RATIO_TO_ASPECT: Record<string, string> = {
   wide: "16:9",
 };
 
+function listenPortFromReq(req: Request): number {
+  const host = req.get("host") || "";
+  const portMatch = /:(\d+)\s*$/.exec(host);
+  if (portMatch) return Number(portMatch[1]);
+  return Number(process.env.PORT) || 3000;
+}
+
 function listenPort(): number {
   return Number(process.env.PORT) || 3000;
+}
+
+function uploadWebPathFromUrl(url: string): string {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("/uploads/")) return raw;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.pathname.startsWith("/uploads/")) return parsed.pathname;
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+function readLocalUploadAsDataUrl(projectRoot: string, webPath: string): string {
+  const rel = webPath.replace(/^\/uploads\//, "").replace(/\\/g, "/");
+  if (!rel || rel.includes("..")) throw new Error("非法图片路径");
+  const uploadsRoot = path.join(projectRoot, "public", "uploads");
+  const abs = path.join(uploadsRoot, rel);
+  if (!abs.startsWith(uploadsRoot) || !existsSync(abs)) {
+    throw new Error(`找不到上传文件 ${webPath}`);
+  }
+  const buf = readFileSync(abs);
+  const ext = path.extname(abs).toLowerCase();
+  const mime =
+    ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : ext === ".webp" ? "image/webp" : "image/png";
+  return `data:${mime};base64,${buf.toString("base64")}`;
+}
+
+/** 扩图：把 composite/mask 读成 data URL，避免 loopback fetch /uploads 卡住 edit-image */
+function inlineExpandOutpaintRefs(
+  projectRoot: string,
+  payload: CanvasOnlineImagePayload
+): CanvasOnlineImagePayload {
+  const refs = (payload.reference_images || []).map((r) => {
+    const url = String(r?.url || "").trim();
+    const webPath = uploadWebPathFromUrl(url);
+    if (!webPath) return { ...r, url };
+    return { ...r, url: readLocalUploadAsDataUrl(projectRoot, webPath) };
+  });
+  return { ...payload, reference_images: refs };
 }
 
 function absoluteUrl(req: Request, url: string): string {
@@ -222,16 +275,21 @@ export function mapCanvasToEditorRequest(
     .map((r) => ({
       url: String(r?.url || "").trim(),
       name: String(r?.name || "").trim(),
+      role: String(r?.role || "").trim(),
     }))
     .filter((r) => r.url);
-  const prompt = refItems.length
+  const maskItem =
+    refItems.find((r) => r.role === "mask" || /mask/i.test(r.name)) || null;
+  const sourceItems = maskItem ? refItems.filter((r) => r !== maskItem) : refItems;
+  const prompt = sourceItems.length
     ? augmentImagePromptWithReferenceCostumeLock(
         String(payload.prompt || "").trim() || "Edit the reference images.",
-        refItems
+        sourceItems
       )
     : String(payload.prompt || "").trim() || "Edit the reference images.";
   const model = String(payload.model || "").trim();
-  const images = refItems.map((r) => absoluteUrl(req, r.url)).filter(Boolean);
+  const images = sourceItems.map((r) => absoluteUrl(req, r.url)).filter(Boolean);
+  const mask = maskItem ? absoluteUrl(req, maskItem.url) : "";
   const aspect_ratio = isGptImage2(model)
     ? gpt2AspectRatioFromPayload(payload)
     : canvasRatioToAspectRatio(payload);
@@ -245,9 +303,11 @@ export function mapCanvasToEditorRequest(
       body: {
         prompt,
         images,
+        ...(mask ? { mask } : {}),
         model: "gpt-image-2",
         image_size,
         aspect_ratio,
+        expand_outpaint: Boolean(payload.expand_outpaint),
       },
     };
   }
@@ -257,8 +317,11 @@ export function mapCanvasToEditorRequest(
     body: {
       prompt,
       images,
+      ...(mask ? { mask } : {}),
+      ...(model ? { model } : {}),
       image_size,
       aspect_ratio,
+      expand_outpaint: Boolean(payload.expand_outpaint),
     },
   };
 }
@@ -283,23 +346,34 @@ async function callSiteEditImage(
   req: Request,
   body: Record<string, unknown>
 ): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
-  const port = listenPort();
+  const port = listenPortFromReq(req);
   const cookie = req.headers.cookie;
-  const res = await fetch(`http://127.0.0.1:${port}/api/edit-image`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(cookie ? { Cookie: String(cookie) } : {}),
-    },
-    body: JSON.stringify(body),
-  });
+  const timeoutMs = Number(process.env.IMAGE_API_TIMEOUT_MS || 60000);
+  const hasDataUrl = JSON.stringify(body).includes("data:image/");
+  const waitMs = Math.max(timeoutMs, hasDataUrl ? 300000 : 240000);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new Error(`EDIT_IMAGE_LOOPBACK_TIMEOUT_${waitMs}ms`)), waitMs);
+  let fetchRes: globalThis.Response;
+  try {
+    fetchRes = await fetch(`http://127.0.0.1:${port}/api/edit-image`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(cookie ? { Cookie: String(cookie) } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   let data: Record<string, unknown> = {};
   try {
-    data = (await res.json()) as Record<string, unknown>;
+    data = (await fetchRes.json()) as Record<string, unknown>;
   } catch {
-    data = { error: await res.text().catch(() => `HTTP ${res.status}`) };
+    data = { error: await fetchRes.text().catch(() => `HTTP ${fetchRes.status}`) };
   }
-  return { ok: res.ok, status: res.status, data };
+  return { ok: fetchRes.ok, status: fetchRes.status, data };
 }
 
 /**
@@ -414,6 +488,32 @@ async function executeCanvasGeneration(
   }
 
   if (imageUrls.length > 0) {
+    const hasExpandMask =
+      Boolean(payload.expand_outpaint) &&
+      (payload.reference_images || []).some((r) => {
+        const role = String(r?.role || "").trim();
+        const name = String(r?.name || "").trim();
+        return role === "mask" || /mask/i.test(name);
+      });
+    if (hasExpandMask) {
+      console.log("[canvas-image/expand-outpaint]", {
+        model,
+        refs: imageUrls.length,
+        size: payload.size,
+      });
+      const inlined = inlineExpandOutpaintRefs(deps.projectRoot, payload);
+      const { body } = mapCanvasToEditorRequest(req, inlined);
+      const upstream = await callSiteEditImage(req, body);
+      if (!upstream.ok) {
+        throw new Error(
+          typeof upstream.data.error === "string" ? upstream.data.error : `扩图编辑失败 (${upstream.status})`
+        );
+      }
+      const upstreamUrl = typeof upstream.data.url === "string" ? upstream.data.url : "";
+      if (!upstreamUrl) throw new Error("接口未返回图片 URL");
+      const localUrl = await deps.persistImage(upstreamUrl, persistMeta);
+      return { images: [localUrl], url: localUrl };
+    }
     let upstreamUrl: string;
     if (rhEnv) {
       if (isGptImage2(model)) {

@@ -453,7 +453,10 @@ function guessExtFromMime(mime: string): string {
   return "png";
 }
 
-async function imageInputToBlob(input: string): Promise<{ blob: globalThis.Blob; filename: string }> {
+async function imageInputToBlob(
+  input: string,
+  projectRoot?: string
+): Promise<{ blob: globalThis.Blob; filename: string }> {
   const trimmed = input.trim();
   const dataUrlMatch = /^data:(image\/[^;]+);base64,(.+)$/is.exec(trimmed);
   if (dataUrlMatch) {
@@ -462,6 +465,22 @@ async function imageInputToBlob(input: string): Promise<{ blob: globalThis.Blob;
     const buf = Buffer.from(b64, "base64");
     const blob = new Blob([buf], { type: mime });
     return { blob, filename: `upload.${guessExtFromMime(mime)}` };
+  }
+
+  if (trimmed.startsWith("/uploads/") && projectRoot) {
+    const rel = trimmed.slice("/uploads/".length).replace(/\\/g, "/");
+    if (!rel || rel.includes("..")) throw new Error("非法图片路径");
+    const uploadsRoot = path.join(projectRoot, "public", "uploads");
+    const abs = path.join(uploadsRoot, rel);
+    if (!abs.startsWith(uploadsRoot) || !existsSync(abs)) {
+      throw new Error(`找不到上传文件 ${trimmed}`);
+    }
+    const buf = readFileSync(abs);
+    const ext = path.extname(abs).toLowerCase();
+    const mime =
+      ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : ext === ".webp" ? "image/webp" : "image/png";
+    const blob = new Blob([buf], { type: mime });
+    return { blob, filename: path.basename(abs) || `local.${guessExtFromMime(mime)}` };
   }
 
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
@@ -527,7 +546,7 @@ function normalizeGptImage2ResolutionTier(imageSize: unknown): "1k" | "2k" | "4k
   return "2k";
 }
 
-function resolveGptImage2Size(imageSize: unknown, aspectRatio: unknown): GptImage2Size {
+function resolveGptImage2Size(imageSize: unknown, aspectRatio: unknown, opts?: { preferExact?: boolean }): GptImage2Size {
   const rawSize = String(imageSize ?? "").trim();
   const upper = rawSize.toUpperCase();
   if (upper === "1024X1024") return "1024x1024";
@@ -557,6 +576,9 @@ function resolveGptImage2Size(imageSize: unknown, aspectRatio: unknown): GptImag
       if (normalizedUpper === "1536X1024") return "1536x1024";
       if (normalizedUpper === "1024X1024") return "1024x1024";
       if (normalizedUpper === "2048X2048") return "2048x2048";
+      if (opts?.preferExact && w >= 256 && h >= 256 && w <= 4096 && h <= 4096) {
+        return normalized as GptImage2Size;
+      }
       const g = gcdInt(w, h);
       const aspect = `${Math.round(w / g)}:${Math.round(h / g)}`;
       const tier = Math.max(w, h) >= 3000 ? "4k" : Math.max(w, h) >= 1800 ? "2k" : "1k";
@@ -1690,7 +1712,7 @@ ${pixarInstruction}
 
       // 网关 /images/edits：multipart/form-data；image_size 与模型名中的 2K/4K 对齐
       const gridImageSize = /4k/i.test(modelName) ? "4K" : /2k/i.test(modelName) ? "2K" : "4K";
-      const blobs = await Promise.all(refUrls.map(imageInputToBlob));
+      const blobs = await Promise.all(refUrls.map((u) => imageInputToBlob(u, projectRoot)));
       const { apiBase: imageApiBaseRaw, apiKey: imageApiKey } = useGptImage2 ? getGptEditEnv() : getGridEnv();
       if (!imageApiBaseRaw || !imageApiKey) {
         return res.status(400).json({
@@ -1819,12 +1841,14 @@ ${pixarInstruction}
 
   // Step 2.1: Edit Image (Third-party API)
   app.post("/api/edit-image", requireAuth, async (req, res) => {
-    const { prompt, target_image, references, images, image_size, aspect_ratio, model, response_format } = req.body;
+    const { prompt, target_image, references, images, image_size, aspect_ratio, model, response_format, mask, expand_outpaint } = req.body;
     console.log("Received image edit request:", {
       prompt_preview: typeof prompt === "string" ? prompt.slice(0, 80) : "",
       has_target: typeof target_image === "string" && target_image.length > 0,
       references_count: Array.isArray(references) ? references.length : 0,
       images_count: Array.isArray(images) ? images.length : 0,
+      has_mask: typeof mask === "string" && mask.trim().length > 0,
+      expand_outpaint: Boolean(expand_outpaint),
       image_size,
       aspect_ratio,
       model,
@@ -1876,7 +1900,9 @@ ${pixarInstruction}
     }
 
     const rhEnv = getStoryboardImageEnv();
-    if (rhEnv) {
+    const skipRhForOutpaint =
+      Boolean(expand_outpaint) && typeof mask === "string" && mask.trim().length > 0;
+    if (rhEnv && !skipRhForOutpaint) {
       try {
         const userPrompt = String(prompt).trim();
         const url = gptRequested
@@ -1932,7 +1958,9 @@ ${pixarInstruction}
 
       console.log("[edit-image] modelCandidates:", modelCandidates, "timeoutMs:", timeoutMs, "imageCount:", orderedImageUrls.length);
 
-      const imageBlobs = await Promise.all(orderedImageUrls.map((u) => imageInputToBlob(u)));
+      const imageBlobs = await Promise.all(orderedImageUrls.map((u) => imageInputToBlob(u, projectRoot)));
+      const maskUrl = typeof mask === "string" ? mask.trim() : "";
+      const maskBlobPack = maskUrl ? await imageInputToBlob(maskUrl, projectRoot) : null;
 
       const userPrompt = String(prompt).trim();
 
@@ -1964,7 +1992,7 @@ ${pixarInstruction}
       const buildForm = (
         modelName: string,
         blobs: Array<{ blob: globalThis.Blob; filename: string }>,
-        options?: { responseFormatOverride?: string; gptPlainPrompt?: boolean }
+        options?: { responseFormatOverride?: string; gptPlainPrompt?: boolean; mask?: { blob: globalThis.Blob; filename: string } | null }
       ) => {
         const isGptImage2 = /^gpt-image-2$/i.test(modelName.trim());
         const requestResponseFormat = typeof response_format === "string" ? response_format.trim() : "";
@@ -1984,7 +2012,10 @@ ${pixarInstruction}
         form.set("prompt", promptForForm);
         form.set("response_format", responseFormat);
         if (isGptImage2) {
-          form.set("size", resolveGptImage2Size(image_size, aspect_ratio));
+          form.set(
+            "size",
+            resolveGptImage2Size(image_size, aspect_ratio, { preferExact: Boolean(expand_outpaint) })
+          );
           form.set("n", "1");
         } else {
           if (aspect_ratio) form.set("aspect_ratio", String(aspect_ratio));
@@ -1992,6 +2023,9 @@ ${pixarInstruction}
         }
         for (const b of blobs) {
           form.append("image", b.blob, b.filename);
+        }
+        if (options?.mask) {
+          form.append("mask", options.mask.blob, options.mask.filename);
         }
         return form;
       };
@@ -2003,19 +2037,24 @@ ${pixarInstruction}
       for (const modelName of modelCandidates) {
         const isGpt2Model = /^gpt-image-2$/i.test(modelName.trim());
         const blobVariants: Array<{ label: string; blobs: Array<{ blob: globalThis.Blob; filename: string }> }> = isGpt2Model
-          ? [
-              { label: "all_images", blobs: imageBlobs },
-              ...(imageBlobs.length > 2 ? [{ label: "first_2_images", blobs: imageBlobs.slice(0, 2) }] : []),
-              ...(imageBlobs.length > 1 ? [{ label: "first_1_image", blobs: imageBlobs.slice(0, 1) }] : []),
-            ]
+          ? maskBlobPack
+            ? [{ label: "image+mask", blobs: imageBlobs.slice(0, 1) }]
+            : [
+                { label: "all_images", blobs: imageBlobs },
+                ...(imageBlobs.length > 2 ? [{ label: "first_2_images", blobs: imageBlobs.slice(0, 2) }] : []),
+                ...(imageBlobs.length > 1 ? [{ label: "first_1_image", blobs: imageBlobs.slice(0, 1) }] : []),
+              ]
           : [{ label: "default", blobs: imageBlobs }];
 
         for (const endpoint of endpoints) {
           const isGpt2 = /^gpt-image-2$/i.test(modelName.trim());
-          const attemptConfigs: Array<{ label: string; formOpts?: { responseFormatOverride?: string } }> = [
-            { label: "primary" },
+          const attemptConfigs: Array<{
+            label: string;
+            formOpts?: { responseFormatOverride?: string; mask?: { blob: globalThis.Blob; filename: string } | null };
+          }> = [
+            { label: "primary", formOpts: { mask: maskBlobPack } },
             ...(isGpt2
-              ? ([{ label: "retry_url_format", formOpts: { responseFormatOverride: "url" } }] as const)
+              ? ([{ label: "retry_url_format", formOpts: { responseFormatOverride: "url", mask: maskBlobPack } }] as const)
               : []),
           ];
 

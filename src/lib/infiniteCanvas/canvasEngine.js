@@ -77,7 +77,7 @@ function writeLastCanvasId(id){
 }
 function isCanvasInteracting(){
     // 裁剪/画笔/旋转聚焦中也算交互：禁止远程同步把视口打回旧比例
-    return Boolean(dragBoard || dragNode || pendingNodeDrag || resizeNode || minimapDrag || tempLink || selectDrag || isImageEditOpen() || imageEditViewportAnimActive);
+    return Boolean(dragBoard || dragNode || pendingNodeDrag || resizeNode || minimapDrag || tempLink || selectDrag || isImageEditOpen() || isImageExpandOpen() || imageEditViewportAnimActive);
 }
 /** 焦点在画布可编辑控件内时的上下文（节点表单 / gen-dock） */
 function editingFocusContext(){
@@ -225,7 +225,7 @@ function startTempLinkEnergyLoop(){
     const prefersReduce = typeof matchMedia === 'function'
         && matchMedia('(prefers-reduced-motion: reduce)').matches;
     tempLinkEnergyPaths = linksEl
-        ? Array.from(linksEl.querySelectorAll('path[data-temp-link="bloom"], path[data-temp-link="energy"], path[data-temp-link="core"]'))
+        ? Array.from(linksEl.querySelectorAll('path[data-temp-link^="bloom"], path[data-temp-link^="energy"], path[data-temp-link^="core"]'))
         : [];
     const tick = () => {
         tempLinkEnergyRAF = 0;
@@ -243,33 +243,60 @@ function startTempLinkEnergyLoop(){
     };
     tempLinkEnergyRAF = requestAnimationFrame(tick);
 }
+function tempLinkSegments(){
+    if(!tempLink) return [];
+    if(tempLink.multi && tempLink.origins?.length){
+        return tempLink.origins.map(o => ({
+            key: o.id,
+            x1: o.x1,
+            y1: o.y1,
+            x2: tempLink.x2,
+            y2: tempLink.y2,
+        }));
+    }
+    return [{ key:'single', x1: tempLink.x1, y1: tempLink.y1, x2: tempLink.x2, y2: tempLink.y2 }];
+}
 function syncTempLinkDom(){
     ensureLiveCanvasDom();
     if(!linksEl || !tempLink) return;
     setTempLinkLayerActive(true);
-    const d = linkPathD(tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2);
+    const segments = tempLinkSegments();
+    const activeKeys = new Set();
     let energyPath = null;
-    for(const layer of TEMP_LINK_LAYERS){
-        let p = linksEl.querySelector(`path[data-temp-link="${layer.key}"]`);
-        if(!p){
-            p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            p.setAttribute('class', layer.cls);
-            p.dataset.tempLink = layer.key;
-            linksEl.appendChild(p);
+    let approxTotal = 0;
+    for(const seg of segments){
+        const d = linkPathD(seg.x1, seg.y1, seg.x2, seg.y2);
+        approxTotal += approxCubicLinkLength(seg.x1, seg.y1, seg.x2, seg.y2);
+        for(const layer of TEMP_LINK_LAYERS){
+            const dataKey = `${layer.key}-${seg.key}`;
+            activeKeys.add(dataKey);
+            let p = linksEl.querySelector(`path[data-temp-link="${CSS.escape(dataKey)}"]`);
+            if(!p){
+                p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                p.setAttribute('class', layer.cls);
+                p.dataset.tempLink = dataKey;
+                linksEl.appendChild(p);
+            }
+            if(p.getAttribute('d') !== d) p.setAttribute('d', d);
+            if(layer.key === 'energy' && !energyPath) energyPath = p;
+            if(layer.key !== 'base') applyLinkEnergyPathMetrics(p);
         }
-        if(p.getAttribute('d') !== d) p.setAttribute('d', d);
-        if(layer.key === 'energy') energyPath = p;
-        if(layer.key !== 'base') applyLinkEnergyPathMetrics(p);
     }
+    linksEl.querySelectorAll('path[data-temp-link]').forEach(p => {
+        if(!activeKeys.has(p.dataset.tempLink)) p.remove();
+    });
     const approxLen = measureLinkPathLength(
         energyPath,
-        approxCubicLinkLength(tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2),
+        approxTotal / Math.max(1, segments.length),
     );
     const dashArrays = linkEnergyDashArrays(approxLen);
-    for(const layer of TEMP_LINK_LAYERS){
-        if(layer.key === 'base') continue;
-        const p = linksEl.querySelector(`path[data-temp-link="${layer.key}"]`);
-        applyLinkEnergyDashStyle(p, layer.key, dashArrays);
+    for(const seg of segments){
+        for(const layer of TEMP_LINK_LAYERS){
+            if(layer.key === 'base') continue;
+            const dataKey = `${layer.key}-${seg.key}`;
+            const p = linksEl.querySelector(`path[data-temp-link="${CSS.escape(dataKey)}"]`);
+            applyLinkEnergyDashStyle(p, layer.key, dashArrays);
+        }
     }
     startTempLinkEnergyLoop();
 }
@@ -280,6 +307,7 @@ function cancelTempLink(){
         clearTempLinkDom();
         setTempLinkLayerActive(false);
         withCanvasRootClass(list => list.remove('canvas-linking'));
+        restoreSelectionHullPortAnchor();
         return;
     }
     tempLink = null;
@@ -287,6 +315,7 @@ function cancelTempLink(){
     clearTempLinkDom();
     setTempLinkLayerActive(false);
     withCanvasRootClass(list => list.remove('canvas-linking'));
+    restoreSelectionHullPortAnchor();
 }
 function setTempLinkLayerActive(active){
     if(linksEl) linksEl.classList.toggle('is-dragging-link', Boolean(active));
@@ -911,6 +940,9 @@ let selectBoxRaf = 0;
 let selectDragCleanup = null;
 let selectionActionBarEl = null;
 let selectionGroupTypeMenuEl = null;
+/** 聚合端口：仅空白框选松手后出现，Ctrl+多选不显示 */
+let selectionHullPortFromMarquee = false;
+let selectionHullPortEl = null;
 let frameGroupActionBarEl = null;
 let frameGroupActionBarNodeId = null;
 let frameGroupBgMenuEl = null; // legacy alias → canvasBgRailEl
@@ -1570,6 +1602,13 @@ let cropDrag = null;
 let cropAspectLock = 'original';
 let imageEditMode = 'crop';
 let imageEditModeTouched = false;
+/** 扩图：原图外框（pad 为原图像素） */
+/** ponytail: 临时关闭扩图；恢复时改 true */
+const IMAGE_EXPAND_ENABLED = false;
+let imageExpandState = null;
+let imageExpandEl = null;
+let imageExpandDrag = null;
+let imageExpandUiWired = false;
 /** 旋转/镜像：角度 0/90/180/270；翻转相对当前角度 */
 let imageEditRotateDeg = 0;
 let imageEditFlipH = false;
@@ -3958,6 +3997,7 @@ function applyViewport(){
     if(!world) return;
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
     syncPortHitForScale();
+    if(selectionHullPortFromMarquee && selected.size >= 2) syncSelectionHullPort();
     if(minimapState) updateMinimapViewport();
     else scheduleMinimapRender();
     notifyViewportScaleChange();
@@ -3980,6 +4020,7 @@ function applyViewport(){
         if(tDock) positionTextNodeDock(tDock);
     }
     if(cropState && imageEditMode === 'crop') positionImageEditCropDock();
+    if(imageExpandState) positionImageExpandOverlay();
     if(videoTrimState?.nodeId) positionVideoTrimDock();
     if(genBatchPick?.nodeId){
         const pickNode = nodes.find(n => n.id === genBatchPick.nodeId);
@@ -4100,6 +4141,7 @@ const PORT_MAGNET_CHROME_SEL = [
     '.image-edit-brush-dock',
     '.image-edit-rotate-dock',
     '.crop-aspect-menu',
+    '.image-expand-host',
 ].join(',');
 function isPortMagnetChrome(el){
     return Boolean(el?.closest?.(PORT_MAGNET_CHROME_SEL));
@@ -7623,7 +7665,7 @@ function canStartBoardPanFromTarget(target){
     if(!board || !target) return false;
     if(isEditableTarget(target)) return false;
     if(target.closest?.(
-        '.node, .selection-box, #selectionBox, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .canvas-pin-hub, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
+        '.node, .selection-box, #selectionBox, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .image-gen-dock-host, .image-action-bar-host, .image-expand-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .canvas-pin-hub, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
     )) return false;
     return board.contains(target);
 }
@@ -7632,7 +7674,7 @@ function canStartForcedPanFromTarget(target){
     if(!board || !target) return false;
     if(isEditableTarget(target)) return false;
     if(target.closest?.(
-        'button, select, textarea, input, .port, .resize-handle, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .canvas-custom-select, .image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .canvas-pin-hub, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
+        'button, select, textarea, input, .port, .resize-handle, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .canvas-custom-select, .image-gen-dock-host, .image-action-bar-host, .image-expand-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .canvas-pin-hub, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
     )) return false;
     return board.contains(target);
 }
@@ -9821,8 +9863,9 @@ function linkCreateOptions(state){
     }
     return [];
 }
-function openLinkCreateMenu(originId, originKind, clientX, clientY){
+function openLinkCreateMenu(originId, originKind, clientX, clientY, multiFromIds=null){
     const state = {originId, originKind, point:screenToWorld(clientX, clientY)};
+    if(Array.isArray(multiFromIds) && multiFromIds.length > 1) state.multiFromIds = multiFromIds;
     const options = linkCreateOptions(state);
     if(!options.length) return false;
     linkCreateState = state;
@@ -10169,6 +10212,9 @@ function createLinkedNode(type){
     const state = linkCreateState;
     closeLinkCreateMenu();
     if(!state) return;
+    const multiFromIds = Array.isArray(state.multiFromIds) && state.multiFromIds.length > 1
+        ? state.multiFromIds
+        : null;
     const origin = nodes.find(n => n.id === state.originId);
     if(!origin) return;
     pushUndo();
@@ -10182,12 +10228,35 @@ function createLinkedNode(type){
         videoFromImage ? {aspectRatio:'adaptive'} : undefined
     ));
     if(!created) return;
+    const refreshIds = [];
+    if(multiFromIds && state.originKind === 'out'){
+        let linked = 0;
+        for(const fromId of multiFromIds){
+            const fromNode = nodes.find(n => n.id === fromId);
+            if(fromNode && created) ensureLoopAcceptsConnection(fromNode, created);
+            if(!canConnect(fromId, created.id)) continue;
+            if(connections.some(c => c.from === fromId && c.to === created.id)) continue;
+            connections.push({id:uid('c'), from:fromId, to:created.id});
+            if(created.type === 'loop') syncLoopImageBatchSize(created);
+            if(isGeneratorLikeNode(fromNode)) refreshIds.push(fromId);
+            linked++;
+        }
+        if(linked){
+            syncGeneratorInputs();
+            if(isGeneratorLikeNode(created)) refreshIds.push(created.id);
+        }
+        commitStructureDomPatch({ addedIds: [created.id], refreshIds });
+        scheduleSave();
+        const freshEl = nodesEl?.querySelector(`.node[data-id="${CSS.escape(created.id)}"]`);
+        if(freshEl) freshEl.classList.add('node-just-added');
+        resyncGenFrameAfterLinkChange(created.id);
+        return;
+    }
     const fromId = state.originKind === 'out' ? origin.id : created.id;
     const toId = state.originKind === 'out' ? created.id : origin.id;
     const fromNode = nodes.find(n => n.id === fromId);
     const toNode = nodes.find(n => n.id === toId);
     if(fromNode && toNode) ensureLoopAcceptsConnection(fromNode, toNode);
-    const refreshIds = [];
     if(canConnect(fromId, toId) && !connections.some(c => c.from === fromId && c.to === toId)){
         connections.push({id:uid('c'), from:fromId, to:toId});
         if(toNode?.type === 'loop') syncLoopImageBatchSize(toNode);
@@ -12095,14 +12164,36 @@ function viewportTargetForNodeFocus(node, opts = {}){
     const w = Math.max(48, Number(nodeEl?.offsetWidth || node.w || 260));
     const h = Math.max(48, Number(nodeEl?.offsetHeight || node.h || 300));
     const boardRect = board.getBoundingClientRect();
-    const mode = opts.mode === 'brush' ? 'brush' : 'crop';
-    const marginTop = mode === 'brush' ? 96 : 56;
-    const marginBottom = mode === 'crop' ? 110 : 56;
-    const marginX = 72;
+    const mode = opts.mode === 'brush' ? 'brush' : opts.mode === 'expand' ? 'expand' : 'crop';
+    let marginTop = mode === 'brush' ? 96 : 56;
+    let marginBottom = mode === 'crop' ? 110 : 56;
+    let marginX = 72;
+    let focusW = w;
+    let focusH = h;
+    let fill = 0.92;
+    if(mode === 'expand'){
+        marginTop = 72;
+        marginBottom = 24;
+        marginX = 80;
+        fill = 0.78;
+        const st = imageExpandState;
+        if(st?.srcW && st?.srcH){
+            const padX = (Number(st.padL || 0) + Number(st.padR || 0)) / Math.max(1, st.srcW);
+            const padY = (Number(st.padT || 0) + Number(st.padB || 0)) / Math.max(1, st.srcH);
+            focusW = w * (1 + padX);
+            focusH = h * (1 + padY);
+        } else {
+            focusW = w * 1.36;
+            focusH = h * 1.36;
+        }
+        // 底栏在 stage 下方：预留 dock + gap，避免开场放大后工具栏出屏
+        focusH += 76;
+    } else if(mode === 'brush'){
+        marginTop = 96;
+    }
     const availW = Math.max(120, boardRect.width - marginX * 2);
     const availH = Math.max(120, boardRect.height - marginTop - marginBottom);
-    // 占满可用高度约 92%，等同滚轮放大到上下铺满
-    const scale = Math.min(availW / w, availH / h) * 0.92;
+    const scale = Math.min(availW / focusW, availH / focusH) * fill;
     const clamped = Math.max(0.12, Math.min(5, scale));
     const cx = Number(node.x || 0) + w / 2;
     const cy = Number(node.y || 0) + h / 2;
@@ -13730,7 +13821,7 @@ function addGeneratedImageNode(file, sourceNode, suffix, offsetY=0, extra={}){
     return next;
 }
 function normalizeImageEditOrigin(kind){
-    if(kind === 'brush' || kind === 'rotate' || kind === 'crop') return kind;
+    if(kind === 'brush' || kind === 'rotate' || kind === 'crop' || kind === 'expand') return kind;
     return '';
 }
 function imageEditOriginLabel(kind){
@@ -13738,6 +13829,7 @@ function imageEditOriginLabel(kind){
     if(k === 'brush') return langIsEn() ? 'Brush' : '画笔';
     if(k === 'rotate') return langIsEn() ? 'Rotate & mirror' : '旋转与镜像';
     if(k === 'crop') return langIsEn() ? 'Crop' : '裁剪';
+    if(k === 'expand') return langIsEn() ? 'Expand' : '扩图';
     return '';
 }
 /** 用户双击浮标改过的显示名（优先于默认「图片节点 N」等） */
@@ -14427,6 +14519,7 @@ function finishImageEditorLayout(){
 }
 async function openImageEditorCore({nodeId, url, name, saveTarget, mode='crop'}){
     if(!url || isMissingAssetUrl(url)) return;
+    closeImageExpand({ restoreViewport: false, syncBar: false });
     ensureImageEditorUi();
     const focusId = nodeId || saveTarget?.ownerNodeId || saveTarget?.nodeId || '';
     const editMode = mode === 'brush' ? 'brush' : mode === 'rotate' ? 'rotate' : 'crop';
@@ -15352,7 +15445,7 @@ function isNodeControl(target){
     // 图台/轻量结果台主媒体：允许拖节点与 Alt 复制（含 video 结果）
     if(target?.closest?.('.gen-stage-hero, .gen-stage-frame, .agent-result-hero, .agent-result-frame')) return false;
     // 注意：.gen-stage / 图台主图不计入控件，单击需选中节点以唤出下方控制台
-    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .image-action-bar-host, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs, .gen-stage-tile, .gen-stage-tile-actions, .gen-stage-grid, .gen-stage-stack-expand, .gen-stage-grid-collapse, .gen-stage-stack, .float-title-label, .float-title-input, .canvas-float-title.is-renaming');
+    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .image-action-bar-host, .image-expand-host, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs, .gen-stage-tile, .gen-stage-tile-actions, .gen-stage-grid, .gen-stage-stack-expand, .gen-stage-grid-collapse, .gen-stage-stack, .float-title-label, .float-title-input, .canvas-float-title.is-renaming');
 }
 function destroyLTXEditor(node){
     if(!node?._ltxEditor) return;
@@ -15459,7 +15552,20 @@ function renderNode(node){
     const body = document.createElement('div');
     body.className = 'node-body';
     if(node.type === 'image') {
-        if(node.url) {
+        const pendingOnly = !node.url && (node._pending || []).length;
+        if(pendingOnly) {
+            const pendingHtml = (node._pending || []).map(p => outputPendingHtml(p)).join('');
+            const floatBadge = imageEditOriginBadgeHtml(node) || imageMediaFloatTitleHtml(node);
+            if(floatBadge) el.classList.add('has-edit-origin');
+            body.innerHTML = `${floatBadge}<div class="image-preview-wrap image-expand-pending">${pendingHtml}</div>`;
+            body.querySelectorAll('.output-img-wrap').forEach(wrap => bindOutputWrap(wrap, node));
+            body.onmousedown = e => {
+                if(isImageEditOpen()) return;
+                if(e.target.closest('.output-del')) return;
+                startNodeDrag(e, node);
+            };
+            refreshOutputTimer();
+        } else if(node.url) {
             const missing = isMissingAssetUrl(node.url);
             const mediaKind = mediaKindForNode(node);
             const isEditableImage = mediaKind === 'image' && !missing;
@@ -20952,7 +21058,11 @@ function runReplicaAgentFromButton(nodeId, event){
 window.runReplicaAgentFromButton = runReplicaAgentFromButton;
 function outputPendingHtml(p){
     const label = p.stageLabel || formatRunDuration(nowMs() - Number(p.startedAt || nowMs()));
-    return `<div class="output-img-wrap loading-wrap" data-pending-id="${escapeAttr(p.id)}"><div class="output-pending-waves" aria-hidden="true"><span></span><span></span><span></span></div><span class="output-time-pill running">${escapeHtml(label)}</span><button class="output-del" title="${tr('common.delete')}">×</button></div>`;
+    const failed = Boolean(p.failed);
+    const pillClass = failed ? 'output-time-pill failed' : 'output-time-pill running';
+    const wrapClass = failed ? 'output-img-wrap loading-wrap is-failed' : 'output-img-wrap loading-wrap';
+    const waves = failed ? '' : '<div class="output-pending-waves" aria-hidden="true"><span></span><span></span><span></span></div>';
+    return `<div class="${wrapClass}" data-pending-id="${escapeAttr(p.id)}">${waves}<span class="${pillClass}">${escapeHtml(label)}</span><button class="output-del" title="${tr('common.delete')}">×</button></div>`;
 }
 function canvasLocalUploadPath(url){
     const raw = String(url || '').trim();
@@ -24783,6 +24893,14 @@ function bindImageActionBar(host, target){
         e.stopPropagation();
         openEdit('rotate');
     });
+    host.querySelector('[data-action="expand"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        if(!IMAGE_EXPAND_ENABLED){
+            softAlert(langIsEn() ? 'Expand is temporarily disabled.' : '扩图功能暂时关闭');
+            return;
+        }
+        void openImageExpand(target);
+    });
     host.querySelector('[data-action="edit"]')?.addEventListener('click', e => {
         e.stopPropagation();
         openVideoTrimDock(node);
@@ -24826,6 +24944,7 @@ function imageActionBarHtmlForTarget(target){
     return `
         <div class="image-action-bar" role="toolbar" aria-label="${escapeAttr(en ? 'Image actions' : '图片操作')}">
             <button type="button" class="image-action-bar-btn" data-action="crop" title="${escapeAttr(en ? 'Crop' : '裁剪')}" aria-label="crop"><i data-lucide="crop"></i></button>
+            ${IMAGE_EXPAND_ENABLED ? `<button type="button" class="image-action-bar-btn" data-action="expand" title="${escapeAttr(en ? 'Expand / outpaint' : '扩图')}" aria-label="expand"><i data-lucide="expand"></i></button>` : ''}
             <button type="button" class="image-action-bar-btn" data-action="brush" title="${escapeAttr(en ? 'Brush' : '画笔')}" aria-label="brush"><i data-lucide="paintbrush"></i></button>
             <button type="button" class="image-action-bar-btn" data-action="rotate" title="${escapeAttr(en ? 'Rotate & mirror' : '旋转与镜像')}" aria-label="rotate"><i data-lucide="rotate-3d"></i></button>
             <span class="image-action-bar-sep" aria-hidden="true"></span>
@@ -24858,7 +24977,924 @@ function remountImageActionBar(node){
     requestAnimationFrame(() => positionImageActionBar(node));
     refreshIcons(host);
 }
+function isImageExpandOpen(){
+    return Boolean(imageExpandState && imageExpandEl?.isConnected);
+}
+function expandCanvasSize(st){
+    const w = Math.max(1, (st.srcW || 1) + (st.padL || 0) + (st.padR || 0));
+    const h = Math.max(1, (st.srcH || 1) + (st.padT || 0) + (st.padB || 0));
+    return {w, h};
+}
+function expandNearestG2Ratio(w, h){
+    const t = Number(w) / Math.max(1, Number(h));
+    let best = '1:1';
+    let bestScore = Infinity;
+    for(const key of GENERATOR_G2_RATIO_KEYS){
+        const [a, b] = String(key).split(':').map(Number);
+        if(!a || !b) continue;
+        const score = Math.abs(Math.log(t / (a / b)));
+        if(score < bestScore){
+            bestScore = score;
+            best = key;
+        }
+    }
+    return best;
+}
+function expandRatioValue(lock, srcW, srcH){
+    if(lock === 'free') return 0;
+    if(lock === 'original' || !lock) return Number(srcW) / Math.max(1, Number(srcH));
+    const [a, b] = String(lock).split(':').map(Number);
+    if(a > 0 && b > 0) return a / b;
+    return Number(srcW) / Math.max(1, Number(srcH));
+}
+function clampExpandPads(st){
+    st.padL = Math.max(0, Math.round(st.padL || 0));
+    st.padT = Math.max(0, Math.round(st.padT || 0));
+    st.padR = Math.max(0, Math.round(st.padR || 0));
+    st.padB = Math.max(0, Math.round(st.padB || 0));
+}
+function applyExpandAspect(st, prefer='auto'){
+    const ratio = expandRatioValue(st.aspect, st.srcW, st.srcH);
+    if(!(ratio > 0)) return;
+    const {w, h} = expandCanvasSize(st);
+    const cur = w / h;
+    if(Math.abs(Math.log(cur / ratio)) < 0.004) return;
+    if(prefer === 'w' || (prefer === 'auto' && cur > ratio)){
+        const nextH = Math.max(st.srcH, Math.round(w / ratio));
+        const extra = Math.max(0, nextH - st.srcH);
+        const t = st.padT + st.padB;
+        const tShare = t > 0 ? st.padT / t : 0.5;
+        st.padT = Math.round(extra * tShare);
+        st.padB = extra - st.padT;
+    } else {
+        const nextW = Math.max(st.srcW, Math.round(h * ratio));
+        const extra = Math.max(0, nextW - st.srcW);
+        const s = st.padL + st.padR;
+        const lShare = s > 0 ? st.padL / s : 0.5;
+        st.padL = Math.round(extra * lShare);
+        st.padR = extra - st.padL;
+    }
+}
+function closeImageExpand(opts={}){
+    endImageExpandDrag();
+    clearImageExpandDockPosition();
+    imageExpandEl?.remove();
+    imageExpandEl = null;
+    imageExpandState = null;
+    nodesEl?.querySelectorAll?.('.is-image-expand-source')?.forEach(el => el.classList.remove('is-image-expand-source'));
+    if(opts.restoreViewport !== false) restoreImageEditCanvasFocus();
+    if(opts.syncBar !== false) syncImageActionBar();
+}
+function endImageExpandDrag(){
+    imageExpandDrag = null;
+    imageExpandEl?.classList.remove('is-moving');
+    withCanvasRootClass(list => list.remove('canvas-crop-move', 'canvas-crop-resize'));
+}
+function wireImageExpandUi(){
+    if(imageExpandUiWired) return;
+    imageExpandUiWired = true;
+    on(document, 'pointerdown', event => {
+        if(!isImageExpandOpen()) return;
+        if(event.target.closest('.image-expand-menu, .image-expand-drop-btn')) return;
+        closeImageExpandMenus();
+    }, true);
+    on(document, 'mousedown', event => {
+        if(!isImageExpandOpen() || imageExpandState?.running) return;
+        const handle = event.target.closest?.('[data-expand-handle]');
+        if(handle){
+            beginImageExpandDrag(event, handle.getAttribute('data-expand-handle') || 'se');
+            return;
+        }
+        if(event.target.closest?.('.image-expand-dock, .image-expand-menu')) return;
+        if(event.target.closest?.('.image-expand-stage, .image-expand-frame, .image-expand-keep')){
+            beginImageExpandDrag(event, 'move');
+        }
+    }, true);
+    on(document, 'pointermove', event => {
+        if(!imageExpandDrag || !imageExpandState) return;
+        if(event.buttons === 0){
+            endImageExpandDrag();
+            return;
+        }
+        moveImageExpandDrag(event);
+    });
+    on(window, 'mousemove', event => {
+        if(!imageExpandDrag || !imageExpandState) return;
+        moveImageExpandDrag(event);
+    });
+    on(document, 'pointerup', () => { endImageExpandDrag(); });
+    on(document, 'pointercancel', () => { endImageExpandDrag(); });
+    on(window, 'mouseup', () => { endImageExpandDrag(); });
+    on(document, 'keydown', event => {
+        if(!isImageExpandOpen()) return;
+        if(event.key === 'Escape'){
+            event.preventDefault();
+            closeImageExpand();
+        }
+    });
+}
+function expandKeepRect(st){
+    return {
+        x: st.padL,
+        y: st.padT,
+        w: st.srcW,
+        h: st.srcH,
+        canvasW: st.srcW + st.padL + st.padR,
+        canvasH: st.srcH + st.padT + st.padB,
+    };
+}
+function expandTargetPixels(st){
+    const {w: canvasW, h: canvasH} = expandCanvasSize(st);
+    const tier = st.size === '2k' ? '2k' : '1k';
+    const maxSide = tier === '2k' ? 2048 : 1536;
+    const minSide = 512;
+    const ratio = st.aspect === 'free'
+        ? expandNearestG2Ratio(canvasW, canvasH)
+        : (st.aspect === 'original' ? expandNearestG2Ratio(canvasW, canvasH) : st.aspect);
+    // ponytail: 输出尺寸必须跟用户框 canvasW×canvasH 同比例，否则移动框后的 padL/padR 会在合成里被拉歪
+    const aspect = canvasW / canvasH;
+    let outW;
+    let outH;
+    if(aspect >= 1){
+        outW = maxSide;
+        outH = Math.max(64, Math.round(maxSide / aspect));
+    } else {
+        outH = maxSide;
+        outW = Math.max(64, Math.round(maxSide * aspect));
+    }
+    if(Math.min(outW, outH) < minSide){
+        if(aspect >= 1){
+            outH = minSide;
+            outW = Math.max(64, Math.round(minSide * aspect));
+        } else {
+            outW = minSide;
+            outH = Math.max(64, Math.round(minSide / aspect));
+        }
+    }
+    return { w: outW, h: outH, ratio, tier, canvasW, canvasH };
+}
+function scaleExpandCanvas(src, w, h){
+    if(!src || src.width === w && src.height === h) return src;
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    out.getContext('2d').drawImage(src, 0, 0, w, h);
+    return out;
+}
+/** 扩图：灰底拼图 + edits 遮罩（透明=待生成灰区，白=保留原图）→ 等比缩放到 API 尺寸 */
+function buildExpandGrayComposite(st, orig){
+    const keep = expandKeepRect(st);
+    const target = expandTargetPixels(st);
+    const native = document.createElement('canvas');
+    native.width = keep.canvasW;
+    native.height = keep.canvasH;
+    const nctx = native.getContext('2d');
+    nctx.fillStyle = '#808080';
+    nctx.fillRect(0, 0, keep.canvasW, keep.canvasH);
+    nctx.drawImage(orig, keep.x, keep.y, keep.w, keep.h);
+    const maskNative = document.createElement('canvas');
+    maskNative.width = keep.canvasW;
+    maskNative.height = keep.canvasH;
+    const mctx = maskNative.getContext('2d');
+    mctx.clearRect(0, 0, keep.canvasW, keep.canvasH);
+    mctx.fillStyle = '#ffffff';
+    mctx.fillRect(keep.x, keep.y, keep.w, keep.h);
+    return {
+        composite: scaleExpandCanvas(native, target.w, target.h),
+        mask: scaleExpandCanvas(maskNative, target.w, target.h),
+        target,
+    };
+}
+function invalidateImageExpandRangeConfirm(){
+    const st = imageExpandState;
+    if(!st?.rangeConfirmed) return;
+    st.rangeConfirmed = false;
+    st.confirmedCompositeUrl = '';
+    st.confirmedMaskUrl = '';
+    st.confirmedTarget = null;
+    applyImageExpandRangeConfirmedUi(false);
+}
+function applyImageExpandRangeConfirmedUi(confirmed){
+    const host = imageExpandEl;
+    const st = imageExpandState;
+    if(!host || !st) return;
+    const en = langIsEn();
+    host.classList.toggle('is-range-confirmed', Boolean(confirmed));
+    const stage = host.querySelector('.image-expand-stage');
+    const keep = host.querySelector('.image-expand-keep');
+    const frame = host.querySelector('.image-expand-frame');
+    let preview = host.querySelector('.image-expand-preview');
+    const runBtn = host.querySelector('[data-expand-act="run"]');
+    const confirmBtn = host.querySelector('[data-expand-act="confirm-range"]');
+    const hint = host.querySelector('[data-expand-range-hint]');
+    if(confirmed && st.confirmedCompositeUrl){
+        if(!preview && stage){
+            preview = document.createElement('img');
+            preview.className = 'image-expand-preview';
+            preview.alt = '';
+            preview.draggable = false;
+            if(shouldUseCrossOriginImage(st.confirmedCompositeUrl)) preview.crossOrigin = 'anonymous';
+            stage.appendChild(preview);
+        }
+        if(preview){
+            preview.src = st.confirmedCompositeUrl;
+            preview.hidden = false;
+        }
+        if(keep) keep.hidden = true;
+        if(frame) frame.hidden = true;
+        if(confirmBtn) confirmBtn.disabled = true;
+        if(runBtn) runBtn.disabled = false;
+        if(hint) hint.textContent = en
+            ? 'Gray area locked — click Generate to send this image to GPT'
+            : '灰边已锁定，点右侧生成把这张图交给 GPT';
+    } else {
+        preview?.remove();
+        if(keep) keep.hidden = false;
+        if(frame) frame.hidden = false;
+        if(confirmBtn) confirmBtn.disabled = false;
+        if(runBtn) runBtn.disabled = true;
+        if(hint) hint.textContent = en
+            ? 'Adjust the frame, then confirm the gray expand area'
+            : '拖框调整范围，点「确定扩图范围」后外围变灰';
+    }
+    refreshIcons(host);
+}
+async function confirmImageExpandRange(){
+    const st = imageExpandState;
+    if(!st || st.running) return;
+    const {w: canvasW, h: canvasH} = expandCanvasSize(st);
+    if(canvasW <= st.srcW && canvasH <= st.srcH){
+        softAlert(langIsEn() ? 'Drag the frame larger than the original.' : '请先把外框拖得比原图大');
+        return;
+    }
+    const confirmBtn = imageExpandEl?.querySelector('[data-expand-act="confirm-range"]');
+    if(confirmBtn) confirmBtn.disabled = true;
+    setStatus(langIsEn() ? 'Compositing expand preview…' : '正在合成扩图预览…');
+    try {
+        const orig = await loadImageBitmapForExport(st.url);
+        const { composite, mask, target } = buildExpandGrayComposite(st, orig);
+        const [uploaded, maskUploaded] = await Promise.all([
+            uploadCroppedBlob(await canvasToPngBlob(composite), 'expand-draft.png'),
+            uploadCroppedBlob(await canvasToPngBlob(mask), 'expand-mask.png'),
+        ]);
+        if(!uploaded?.url || !maskUploaded?.url) throw new Error(langIsEn() ? 'Upload failed' : '上传失败');
+        st.rangeConfirmed = true;
+        st.confirmedCompositeUrl = uploaded.url;
+        st.confirmedMaskUrl = maskUploaded.url;
+        st.confirmedTarget = { w: target.w, h: target.h, ratio: target.ratio, tier: target.tier };
+        applyImageExpandRangeConfirmedUi(true);
+        setStatus(langIsEn() ? 'Expand area confirmed' : '扩图范围已确定');
+    } catch(err){
+        invalidateImageExpandRangeConfirm();
+        softAlert(err?.message || (langIsEn() ? 'Could not confirm expand area' : '无法确定扩图范围'));
+        setStatus('');
+    }
+}
+function buildImageExpandHtml(st){
+    const en = langIsEn();
+    const aspectItems = [
+        ['original', en ? 'Original' : '原图比例'],
+        ['1:1', '1 : 1'],
+        ['4:3', '4 : 3'],
+        ['3:4', '3 : 4'],
+        ['16:9', '16 : 9'],
+        ['9:16', '9 : 16'],
+        ['free', en ? 'Free' : '自由'],
+    ].map(([key, label]) => `<button type="button" class="image-expand-menu-item${st.aspect === key ? ' is-active' : ''}" data-expand-aspect="${escapeAttr(key)}">${escapeHtml(label)}</button>`).join('');
+    const sizeItems = [
+        ['1k', '1K'],
+        ['2k', '2K'],
+    ].map(([key, label]) => `<button type="button" class="image-expand-menu-item${st.size === key ? ' is-active' : ''}" data-expand-size="${escapeAttr(key)}">${escapeHtml(label)}</button>`).join('');
+    const qualityItems = [
+        ['low', en ? 'Low' : '低'],
+        ['medium', en ? 'Medium' : '中'],
+        ['high', en ? 'High' : '高'],
+    ].map(([key, label]) => `<button type="button" class="image-expand-menu-item${st.quality === key ? ' is-active' : ''}" data-expand-quality="${escapeAttr(key)}">${escapeHtml(label)}</button>`).join('');
+    const sizeLabel = st.size === '2k' ? '2K' : '1K';
+    const qualityLabel = st.quality === 'low' ? (en ? 'Low' : '低') : st.quality === 'high' ? (en ? 'High' : '高') : (en ? 'Medium' : '中');
+    const modelItems = [
+        ['gpt-image-2', 'GPT Image2'],
+        ['nano-banana-pro', 'Nano Banana Pro'],
+    ].map(([key, label]) => `<button type="button" class="image-expand-menu-item${st.model === key ? ' is-active' : ''}" data-expand-model="${escapeAttr(key)}">${escapeHtml(label)}</button>`).join('');
+    const modelLabel = st.model === 'nano-banana-pro' ? 'Nano Banana Pro' : 'GPT Image2';
+    const handles = ['n','s','e','w','nw','ne','sw','se'].map(k => `<span class="image-expand-handle ${k}" data-expand-handle="${k}"></span>`).join('');
+    const rangeHint = en
+        ? 'Adjust the frame, then confirm the gray expand area'
+        : '拖框调整范围，点「确定扩图范围」后外围变灰';
+    return `
+        <div class="image-expand-range-bar">
+            <button type="button" class="image-expand-confirm-range" data-expand-act="confirm-range">${escapeHtml(en ? 'Confirm expand area' : '确定扩图范围')}</button>
+            <span class="image-expand-range-hint" data-expand-range-hint>${escapeHtml(rangeHint)}</span>
+        </div>
+        <div class="image-expand-stage">
+            <img class="image-expand-keep" alt="" draggable="false" />
+            <div class="image-expand-frame">${handles}</div>
+        </div>
+        <div class="image-expand-dock" role="toolbar">
+            <button type="button" class="image-expand-icon" data-expand-act="close" title="${escapeAttr(en ? 'Close' : '关闭')}" aria-label="close"><i data-lucide="x"></i></button>
+            <div class="image-expand-drop">
+                <button type="button" class="image-expand-drop-btn" data-expand-menu="aspect" aria-expanded="false">
+                    <span>${escapeHtml(en ? 'Aspect' : '宽高比')}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-expand-panel="aspect" hidden>${aspectItems}</div>
+            </div>
+            <span class="image-expand-hint">${escapeHtml(en ? 'Drag the black frame to move' : '拖黑框移动，拉边角拉伸')}</span>
+            <input class="image-expand-prompt" type="text" maxlength="400" placeholder="${escapeAttr(en ? 'Optional: what appears outside' : '可选：描述画面外要延伸的内容')}" value="${escapeAttr(st.prompt || '')}" />
+            <div class="image-expand-drop">
+                <button type="button" class="image-expand-drop-btn" data-expand-menu="size" aria-expanded="false">
+                    <span data-expand-size-label>${escapeHtml(sizeLabel)}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-expand-panel="size" hidden>${sizeItems}</div>
+            </div>
+            <div class="image-expand-drop" data-expand-quality-wrap${isGptImage2Model(st.model) ? '' : ' hidden'}>
+                <button type="button" class="image-expand-drop-btn" data-expand-menu="quality" aria-expanded="false">
+                    <span data-expand-quality-label>${escapeHtml(qualityLabel)}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-expand-panel="quality" hidden>${qualityItems}</div>
+            </div>
+            <div class="image-expand-drop">
+                <button type="button" class="image-expand-drop-btn" data-expand-menu="model" aria-expanded="false">
+                    <span data-expand-model-label>${escapeHtml(modelLabel)}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-expand-panel="model" hidden>${modelItems}</div>
+            </div>
+            <button type="button" class="gen-btn gen-dock-send" data-expand-act="run" disabled title="${escapeAttr(en ? 'Generate' : '开始扩图')}" aria-label="run">
+                <i data-lucide="arrow-up" class="w-4 h-4"></i>
+            </button>
+        </div>`;
+}
+function closeImageExpandMenus(except){
+    imageExpandEl?.querySelectorAll('.image-expand-menu').forEach(menu => {
+        if(menu !== except) menu.hidden = true;
+    });
+    imageExpandEl?.querySelectorAll('[data-expand-menu]').forEach(btn => {
+        const key = btn.getAttribute('data-expand-menu');
+        const menu = imageExpandEl?.querySelector(`[data-expand-panel="${key}"]`);
+        btn.setAttribute('aria-expanded', menu && !menu.hidden ? 'true' : 'false');
+        btn.classList.toggle('is-open', Boolean(menu && !menu.hidden));
+    });
+}
+function bindImageExpandChrome(host){
+    host.onpointerdown = e => e.stopPropagation();
+    host.onmousedown = e => e.stopPropagation();
+    host.onclick = e => e.stopPropagation();
+    host.querySelector('[data-expand-act="close"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        closeImageExpand();
+    });
+    host.querySelectorAll('[data-expand-menu]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            const key = btn.getAttribute('data-expand-menu');
+            const menu = host.querySelector(`[data-expand-panel="${key}"]`);
+            if(!menu) return;
+            const next = menu.hidden;
+            closeImageExpandMenus(menu);
+            menu.hidden = !next;
+            btn.setAttribute('aria-expanded', next ? 'true' : 'false');
+            btn.classList.toggle('is-open', next);
+        });
+    });
+    host.querySelectorAll('[data-expand-aspect]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            if(!imageExpandState) return;
+            invalidateImageExpandRangeConfirm();
+            imageExpandState.aspect = btn.getAttribute('data-expand-aspect') || 'original';
+            applyExpandAspect(imageExpandState, 'auto');
+            host.querySelectorAll('[data-expand-aspect]').forEach(b => b.classList.toggle('is-active', b === btn));
+            closeImageExpandMenus();
+            positionImageExpandOverlay();
+        });
+    });
+    host.querySelectorAll('[data-expand-size]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            if(!imageExpandState) return;
+            invalidateImageExpandRangeConfirm();
+            imageExpandState.size = btn.getAttribute('data-expand-size') === '2k' ? '2k' : '1k';
+            host.querySelectorAll('[data-expand-size]').forEach(b => b.classList.toggle('is-active', b === btn));
+            const label = host.querySelector('[data-expand-size-label]');
+            if(label) label.textContent = imageExpandState.size === '2k' ? '2K' : '1K';
+            closeImageExpandMenus();
+        });
+    });
+    host.querySelectorAll('[data-expand-quality]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            if(!imageExpandState) return;
+            imageExpandState.quality = btn.getAttribute('data-expand-quality') || 'medium';
+            host.querySelectorAll('[data-expand-quality]').forEach(b => b.classList.toggle('is-active', b === btn));
+            const en = langIsEn();
+            const label = host.querySelector('[data-expand-quality-label]');
+            if(label){
+                label.textContent = imageExpandState.quality === 'low' ? (en ? 'Low' : '低')
+                    : imageExpandState.quality === 'high' ? (en ? 'High' : '高')
+                    : (en ? 'Medium' : '中');
+            }
+            closeImageExpandMenus();
+        });
+    });
+    host.querySelectorAll('[data-expand-model]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            if(!imageExpandState) return;
+            invalidateImageExpandRangeConfirm();
+            const next = btn.getAttribute('data-expand-model') || 'gpt-image-2';
+            imageExpandState.model = next === 'nano-banana-pro' ? 'nano-banana-pro' : 'gpt-image-2';
+            host.querySelectorAll('[data-expand-model]').forEach(b => b.classList.toggle('is-active', b === btn));
+            const label = host.querySelector('[data-expand-model-label]');
+            if(label){
+                label.textContent = imageExpandState.model === 'nano-banana-pro' ? 'Nano Banana Pro' : 'GPT Image2';
+            }
+            closeImageExpandMenus();
+            syncExpandModelChrome();
+        });
+    });
+    const prompt = host.querySelector('.image-expand-prompt');
+    prompt?.addEventListener('input', () => {
+        if(imageExpandState) imageExpandState.prompt = String(prompt.value || '');
+    });
+    host.querySelector('[data-expand-act="confirm-range"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void confirmImageExpandRange();
+    });
+    host.querySelector('[data-expand-act="run"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void runImageExpand();
+    });
+}
+function expandViewScale(){
+    const st = imageExpandState;
+    if(!st) return { scaleX: 1, scaleY: 1 };
+    const keep = imageExpandEl?.querySelector('.image-expand-keep');
+    const keepRect = keep?.getBoundingClientRect?.();
+    if(keepRect && keepRect.width > 2 && keepRect.height > 2){
+        return {
+            scaleX: keepRect.width / Math.max(1, st.srcW),
+            scaleY: keepRect.height / Math.max(1, st.srcH),
+        };
+    }
+    const imgRect = findImageEditHost(st.nodeId, st.url)?.img?.getBoundingClientRect?.();
+    if(imgRect && imgRect.width > 2 && imgRect.height > 2){
+        return {
+            scaleX: imgRect.width / Math.max(1, st.srcW),
+            scaleY: imgRect.height / Math.max(1, st.srcH),
+        };
+    }
+    return { scaleX: 1, scaleY: 1 };
+}
+function beginImageExpandDrag(event, mode){
+    if(!imageExpandState || imageExpandState.running) return;
+    if(imageExpandState.rangeConfirmed) return;
+    if(event.type === 'mousedown' && event.cancelable) event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+    const { scaleX, scaleY } = expandViewScale();
+    imageExpandDrag = {
+        mode,
+        sx: event.clientX,
+        sy: event.clientY,
+        start:{ padL:imageExpandState.padL, padT:imageExpandState.padT, padR:imageExpandState.padR, padB:imageExpandState.padB },
+        scaleX, scaleY,
+    };
+    imageExpandEl?.classList.toggle('is-moving', mode === 'move');
+    withCanvasRootClass(list => {
+        list.remove('canvas-crop-move', 'canvas-crop-resize');
+        if(mode === 'move') list.add('canvas-crop-move');
+        else list.add('canvas-crop-resize');
+    });
+}
+function moveImageExpandDrag(event){
+    const st = imageExpandState;
+    const drag = imageExpandDrag;
+    if(!st || !drag) return;
+    const dx = (event.clientX - drag.sx) / Math.max(0.0001, drag.scaleX);
+    const dy = (event.clientY - drag.sy) / Math.max(0.0001, drag.scaleY);
+    const m = drag.mode;
+    if(m === 'move'){
+        invalidateImageExpandRangeConfirm();
+        const sumX = drag.start.padL + drag.start.padR;
+        const sumY = drag.start.padT + drag.start.padB;
+        let padL = drag.start.padL - dx;
+        let padR = drag.start.padR + dx;
+        let padT = drag.start.padT - dy;
+        let padB = drag.start.padB + dy;
+        if(padL < 0){ padL = 0; padR = sumX; }
+        if(padR < 0){ padR = 0; padL = sumX; }
+        if(padT < 0){ padT = 0; padB = sumY; }
+        if(padB < 0){ padB = 0; padT = sumY; }
+        st.padL = padL;
+        st.padR = padR;
+        st.padT = padT;
+        st.padB = padB;
+        clampExpandPads(st);
+        positionImageExpandOverlay();
+        return;
+    }
+    invalidateImageExpandRangeConfirm();
+    st.padL = drag.start.padL;
+    st.padT = drag.start.padT;
+    st.padR = drag.start.padR;
+    st.padB = drag.start.padB;
+    if(m.includes('w')) st.padL = Math.max(0, drag.start.padL - dx);
+    if(m.includes('e')) st.padR = Math.max(0, drag.start.padR + dx);
+    if(m.includes('n')) st.padT = Math.max(0, drag.start.padT - dy);
+    if(m.includes('s')) st.padB = Math.max(0, drag.start.padB + dy);
+    if(m.length === 1){
+        if(m === 'n' || m === 's') applyExpandAspect(st, 'h');
+        else applyExpandAspect(st, 'w');
+    } else {
+        applyExpandAspect(st, 'auto');
+    }
+    clampExpandPads(st);
+    positionImageExpandOverlay();
+}
+function clearImageExpandDockPosition(){
+    const dock = imageExpandEl?.querySelector('.image-expand-dock');
+    if(!dock) return;
+    dock.style.position = '';
+    dock.style.left = '';
+    dock.style.top = '';
+    dock.style.transform = '';
+    dock.style.translate = '';
+    dock.style.zIndex = '';
+    dock.style.width = '';
+}
+/** 扩图底栏：锚 stage 下缘居中（fixed，随框移动/缩放重贴） */
+function positionImageExpandDock(stage){
+    const dock = imageExpandEl?.querySelector('.image-expand-dock');
+    if(!dock || !stage?.isConnected) return;
+    const rect = stage.getBoundingClientRect();
+    if(rect.width < 8 || rect.height < 8) return;
+    dock.style.position = 'fixed';
+    dock.style.left = `${rect.left + rect.width / 2}px`;
+    dock.style.top = `${rect.bottom + 14}px`;
+    dock.style.transform = 'translateX(-50%)';
+    dock.style.translate = 'none';
+    dock.style.zIndex = '87';
+    dock.style.width = 'max-content';
+}
+function positionImageExpandOverlay(){
+    const st = imageExpandState;
+    if(!st || !imageExpandEl || !board) return;
+    const hostInfo = findImageEditHost(st.nodeId, st.url);
+    const img = hostInfo?.img;
+    if(!img) return;
+    const imgRect = img.getBoundingClientRect();
+    const boardRect = board.getBoundingClientRect();
+    const scaleX = imgRect.width / Math.max(1, st.srcW);
+    const scaleY = imgRect.height / Math.max(1, st.srcH);
+    const left = (imgRect.left - boardRect.left) - st.padL * scaleX;
+    const top = (imgRect.top - boardRect.top) - st.padT * scaleY;
+    const width = (st.srcW + st.padL + st.padR) * scaleX;
+    const height = (st.srcH + st.padT + st.padB) * scaleY;
+    imageExpandEl.style.left = `${left}px`;
+    imageExpandEl.style.top = `${top}px`;
+    imageExpandEl.style.width = `${Math.max(48, width)}px`;
+    imageExpandEl.style.height = `${Math.max(48, height)}px`;
+    const stage = imageExpandEl.querySelector('.image-expand-stage');
+    if(stage){
+        stage.style.width = `${Math.max(48, width)}px`;
+        stage.style.height = `${Math.max(48, height)}px`;
+    }
+    const keep = imageExpandEl.querySelector('.image-expand-keep');
+    if(keep){
+        keep.style.left = `${st.padL * scaleX}px`;
+        keep.style.top = `${st.padT * scaleY}px`;
+        keep.style.width = `${imgRect.width}px`;
+        keep.style.height = `${imgRect.height}px`;
+    }
+    if(stage) positionImageExpandDock(stage);
+}
+function beginImageExpandOpenFade(host, sourceNodeEl){
+    if(!host) return;
+    // 双 rAF：先让 frame/dock 落到 opacity:0，再开 transition，避免整层闪一下
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            sourceNodeEl?.classList?.add('is-image-expand-source');
+            host.classList.add('is-open');
+        });
+    });
+}
+function finishImageExpandOpenFade(host){
+    if(!host) return;
+    host.classList.remove('is-opening', 'is-open');
+}
+async function openImageExpand(target){
+    if(!IMAGE_EXPAND_ENABLED){
+        softAlert(langIsEn() ? 'Expand is temporarily disabled.' : '扩图功能暂时关闭');
+        return;
+    }
+    if(!target?.node || !target.url || !board) return;
+    if(isImageEditOpen()) closeImageEditor();
+    closeImageExpand({ restoreViewport: false, syncBar: false });
+    wireImageExpandUi();
+    let srcW = 0;
+    let srcH = 0;
+    try {
+        const im = await loadImageBitmapForExport(target.url);
+        srcW = im.naturalWidth || im.width || 0;
+        srcH = im.naturalHeight || im.height || 0;
+    } catch(_){ /* fall through */ }
+    const hostInfo = findImageEditHost(target.node.id, target.url);
+    if((!srcW || !srcH) && hostInfo?.img){
+        srcW = hostInfo.img.naturalWidth || 0;
+        srcH = hostInfo.img.naturalHeight || 0;
+    }
+    if(!srcW || !srcH){
+        softAlert(langIsEn() ? 'Image not loaded yet.' : '图片尚未加载完成');
+        return;
+    }
+    const pad = Math.max(48, Math.round(Math.min(srcW, srcH) * 0.18));
+    imageExpandState = {
+        nodeId: target.node.id,
+        url: target.url,
+        name: target.histItem?.name || target.node.name || outputImageName(target.url),
+        srcW, srcH,
+        padL: pad, padT: pad, padR: pad, padB: pad,
+        aspect: 'original',
+        size: '1k',
+        quality: 'medium',
+        model: models.gpt || 'gpt-image-2',
+        prompt: '',
+        running: false,
+        rangeConfirmed: false,
+        confirmedCompositeUrl: '',
+        confirmedMaskUrl: '',
+        confirmedTarget: null,
+    };
+    applyExpandAspect(imageExpandState, 'auto');
+    const host = document.createElement('div');
+    host.className = 'image-expand-host is-opening';
+    host.innerHTML = buildImageExpandHtml(imageExpandState);
+    const keep = host.querySelector('.image-expand-keep');
+    if(keep){
+        if(shouldUseCrossOriginImage(target.url)) keep.crossOrigin = 'anonymous';
+        keep.src = target.url;
+    }
+    bindImageExpandChrome(host);
+    syncExpandModelChrome();
+    removeImageActionBar();
+    board.appendChild(host);
+    imageExpandEl = host;
+    const sourceNodeEl = hostInfo?.host?.closest?.('.node');
+    const keepReady = (!keep || (keep.complete && keep.naturalWidth))
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            keep.onload = () => resolve();
+            keep.onerror = () => resolve();
+        });
+    positionImageExpandOverlay();
+    await keepReady;
+    beginImageExpandOpenFade(host, sourceNodeEl);
+    await prepareImageEditCanvasFocus(target.node.id, 'expand');
+    if(!imageExpandState || imageExpandState.nodeId !== target.node.id) return;
+    if(!board || !imageExpandEl) return;
+    positionImageExpandOverlay();
+    finishImageExpandOpenFade(host);
+    refreshIcons(host);
+}
+function expandPromptText(userText){
+    const base = langIsEn()
+        ? 'Outpaint edit. Pixels colored exactly #808080 are the ONLY areas to generate. The existing photograph pixels must stay unchanged in place—do not move, recenter, rescale, or crop the original content (same composition position, colors, lighting, perspective). Seamlessly extend the scene only into the gray regions. No watermarks, frames, or captions.'
+        : '扩图编辑：图中 #808080 中性灰像素才是需要生成的扩展区；已有照片像素必须原位置完全保留，禁止移动、重新居中、缩放或裁切原图（构图位置、色彩、光线、透视均不可改）。只在灰色区域无缝延伸现有场景。不要水印、边框或文字。';
+    const extra = String(userText || '').trim();
+    if(!extra){
+        return langIsEn()
+            ? `${base} Extend naturally into the gray areas only. Do not invent unrelated new subjects.`
+            : `${base} 只在灰色区域按原画面自然延伸，不要编造无关新主体。`;
+    }
+    return langIsEn()
+        ? `${base} In the gray expand areas: ${extra}`
+        : `${base} 灰色扩展区域内容：${extra}`;
+}
+function syncExpandModelChrome(){
+    const host = imageExpandEl;
+    const st = imageExpandState;
+    if(!host || !st) return;
+    const gpt = isGptImage2Model(st.model);
+    host.querySelectorAll('[data-expand-quality-wrap]').forEach(el => {
+        el.hidden = !gpt;
+    });
+}
+function spawnExpandPendingImageNode(sourceNode, st){
+    if(!sourceNode || !st) return null;
+    const siblings = connections
+        .filter(c => c.from === sourceNode.id)
+        .map(c => nodes.find(n => n.id === c.to))
+        .filter(n => n?.type === 'image')
+        .sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    let offsetY = 0;
+    siblings.forEach(sib => {
+        offsetY += nodeEditSpawnLayoutSize(sib).h + 36;
+    });
+    const baseName = String(st.name || 'image').replace(/\.[^.]+$/, '');
+    const next = addGeneratedImageNode({ url: '', name: `${baseName}_expand` }, sourceNode, '_expand', offsetY);
+    next.editOrigin = 'expand';
+    const src = nodeEditSpawnLayoutSize(sourceNode);
+    if(src.w > 0){
+        next.w = src.w;
+        next.h = src.h;
+        next._displayW = src.w;
+        next._displayH = src.h;
+    }
+    if(canConnect(sourceNode.id, next.id) && !connections.some(c => c.from === sourceNode.id && c.to === next.id)){
+        connections.push({id:uid('c'), from:sourceNode.id, to:next.id});
+    }
+    pendingImageEditRefreshIds.add(sourceNode.id);
+    pendingImageEditRefreshIds.add(next.id);
+    return next;
+}
+function removeExpandFailedNode(nodeId){
+    if(!nodeId || !nodes.some(n => n.id === nodeId)) return;
+    const neighborIds = consumerNeighborIdsAfterDelete([nodeId]);
+    nodes = nodes.filter(n => n.id !== nodeId);
+    connections = connections.filter(c => c.from !== nodeId && c.to !== nodeId);
+    selected.delete(nodeId);
+    commitStructureDomPatch({ removedIds: [nodeId], refreshIds: neighborIds.filter(nid => nodes.some(n => n.id === nid)) });
+}
+function markExpandPendingFailed(node, pendingId, message){
+    if(!node || node.type !== 'image') return;
+    const msg = String(message || '').trim().slice(0, 160)
+        || (langIsEn() ? 'Expand failed' : '扩图失败');
+    const pending = (node._pending || []).find(p => p.id === pendingId);
+    if(pending){
+        pending.failed = true;
+        pending.stageLabel = msg;
+    }
+    refreshNodes([node.id]);
+}
+function clearImageEditViewportSession(){
+    imageEditFocusNodeId = '';
+    imageEditViewportBackup = null;
+}
+async function focusExpandResultNode(nodeId){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || !board) return;
+    touchBoardInteraction();
+    const target = viewportTargetForNodeFocus(node);
+    if(target) await animateViewportTo(target, { stiffness: 260, damping: 32, maxMs: 820 });
+}
+/** 扩图 pending 必须挂在图片节点本身，勿走 outputForNode 自动建 Output */
+function pushExpandImagePending(node, pending){
+    if(!node || node.type !== 'image' || !pending) return node;
+    node._pending = [...(node._pending || []), pending];
+    if(pending.canvasTaskId){
+        registerCanvasTaskLedger(pending.canvasTaskId, {
+            canvasId: canvas?.id || '',
+            hostNodeId: node.id || '',
+            genNodeId: node.id || '',
+            pendingId: pending.id || '',
+            run: pending.run || null,
+            appendGenerated: false,
+            startedAt: Number(pending.startedAt || nowMs()),
+            canvasTaskType: String(pending.canvasTaskType || 'online-image'),
+        });
+    }
+    return node;
+}
+async function runImageExpandJob(st, targetNode, source, pendingId){
+    if(!IMAGE_EXPAND_ENABLED){
+        throw new Error(langIsEn() ? 'Expand is temporarily disabled.' : '扩图功能暂时关闭');
+    }
+    const node = () => nodes.find(n => n.id === targetNode?.id);
+    const promptText = expandPromptText(st.prompt);
+    const run = { node: { id: source.id }, prompt: promptText, taskLabel: langIsEn() ? 'Expand' : '扩图' };
+    try {
+        if(!st.confirmedCompositeUrl || !st.confirmedMaskUrl || !st.confirmedTarget){
+            throw new Error(langIsEn() ? 'Confirm expand area first' : '请先确定扩图范围');
+        }
+        const target = st.confirmedTarget;
+        const model = String(st.model || 'gpt-image-2').trim() || 'gpt-image-2';
+        if(!node()) throw new Error(langIsEn() ? 'Expand node missing' : '扩图节点已丢失');
+        const payload = {
+            prompt: promptText,
+            provider_id: resolveImageProviderId('runninghub') || resolveImageProviderId('comfly'),
+            model,
+            size: `${target.w}x${target.h}`,
+            canvas_resolution: target.tier,
+            canvas_ratio: target.ratio,
+            expand_outpaint: true,
+            reference_images: [
+                { url: st.confirmedCompositeUrl, name: 'expand-source.png', role: 'source' },
+                { url: st.confirmedMaskUrl, name: 'expand-mask.png', role: 'mask' },
+            ],
+            canvas_id: canvas?.id || '',
+            node_id: targetNode.id || '',
+            quality: isGptImage2Model(model) ? (normalizedImageQuality(st.quality) || 'medium') : undefined,
+        };
+        const task = await createCanvasImageTask(payload);
+        const cur = node();
+        if(!cur) throw new Error(langIsEn() ? 'Expand node missing' : '扩图节点已丢失');
+        const pending = (cur._pending || []).find(p => p.id === pendingId);
+        if(pending){
+            pending.canvasTaskId = String(task.task_id || '');
+            pending.canvasTaskType = 'online-image';
+            pending.run = run;
+            registerCanvasTaskLedger(task.task_id, {
+                canvasId: canvas?.id || '',
+                hostNodeId: targetNode.id || '',
+                genNodeId: targetNode.id || '',
+                pendingId,
+                run,
+                appendGenerated: false,
+                startedAt: Number(pending.startedAt || nowMs()),
+                canvasTaskType: 'online-image',
+            });
+        } else {
+            pushExpandImagePending(cur, makePending(pendingId, run, {
+                canvasTaskId: task.task_id,
+                canvasTaskType: 'online-image',
+                stageLabel: langIsEn() ? 'Expanding…' : '扩图中…',
+            }));
+        }
+        refreshNodes([targetNode.id, source.id]);
+        scheduleSaveNow();
+        void pollCanvasImageTask(task.task_id);
+    } catch(err){
+        console.warn('[runImageExpandJob]', err);
+        const cur = node();
+        if(cur){
+            markExpandPendingFailed(cur, pendingId, err?.message);
+        }
+        softAlert(err?.message || (langIsEn() ? 'Expand failed' : '扩图失败'));
+        setStatus('');
+        scheduleSaveNow();
+    }
+}
+async function runImageExpand(){
+    const st = imageExpandState;
+    if(!st || st.running) return;
+    if(!st.rangeConfirmed || !st.confirmedCompositeUrl || !st.confirmedMaskUrl){
+        softAlert(langIsEn() ? 'Confirm the expand area first (gray preview).' : '请先点「确定扩图范围」，确认灰边预览后再生成');
+        return;
+    }
+    const source = nodes.find(n => n.id === st.nodeId);
+    if(!source) return;
+    const {w: canvasW, h: canvasH} = expandCanvasSize(st);
+    if(canvasW <= st.srcW && canvasH <= st.srcH){
+        softAlert(langIsEn() ? 'Drag the frame larger than the original.' : '请先把外框拖得比原图大');
+        return;
+    }
+    const job = {
+        url: st.url,
+        name: st.name,
+        srcW: st.srcW,
+        srcH: st.srcH,
+        padL: st.padL,
+        padT: st.padT,
+        padR: st.padR,
+        padB: st.padB,
+        aspect: st.aspect,
+        size: st.size,
+        quality: st.quality,
+        model: st.model,
+        prompt: st.prompt,
+        confirmedCompositeUrl: st.confirmedCompositeUrl,
+        confirmedMaskUrl: st.confirmedMaskUrl,
+        confirmedTarget: st.confirmedTarget,
+    };
+    pushUndo();
+    const spawned = spawnExpandPendingImageNode(source, job);
+    if(!spawned){
+        softAlert(langIsEn() ? 'Could not create image node.' : '未能创建图片节点');
+        return;
+    }
+    const pendingId = uid('p');
+    const run = {
+        node: { id: source.id },
+        prompt: expandPromptText(st.prompt),
+        taskLabel: langIsEn() ? 'Expand' : '扩图',
+    };
+    pushExpandImagePending(spawned, makePending(pendingId, run, {
+        stageLabel: langIsEn() ? 'Expanding…' : '扩图中…',
+    }));
+    closeImageExpand({ restoreViewport: false });
+    clearImageEditViewportSession();
+    selected.clear();
+    selected.add(spawned.id);
+    commitStructureDomPatch({ addedIds: [spawned.id], refreshIds: [source.id, spawned.id] });
+    void focusExpandResultNode(spawned.id);
+    scheduleSaveNow();
+    setStatus(langIsEn() ? 'Expand queued on new node' : '扩图已开始，新节点生成中');
+    void runImageExpandJob(job, spawned, source, pendingId);
+}
 function syncImageActionBar(){
+    if(isImageExpandOpen()){
+        const onlyId = selected.size === 1 ? [...selected][0] : null;
+        if(onlyId !== imageExpandState.nodeId){
+            closeImageExpand();
+            return;
+        }
+        removeImageActionBar();
+        positionImageExpandOverlay();
+        return;
+    }
     if(isImageEditOpen()){
         removeImageActionBar();
         return;
@@ -31935,6 +32971,21 @@ function applyCompletedCanvasImages(ctx, images, meta, taskId){
     if(!pending._recovered){
         out._pending = (out._pending || []).filter(p => p.id !== pending.id);
     }
+    if(out.type === 'image'){
+        const url = outputUrlValue(images[0]);
+        if(url){
+            out.url = url;
+            if(!nodeFloatTitleCustom(out)){
+                out.name = outputImageName(url) || String(out.name || 'expand').replace(/_expand$/, '') || 'expand';
+            }
+        }
+        addGenerationLog({run:meta.run, outputs:images, runMs:meta.runMs || 0});
+        refreshNodes([out.id]);
+        if(meta.run?.node?.id) refreshNodes([meta.run.node.id]);
+        unregisterCanvasTaskLedger(taskId);
+        scheduleSaveNow();
+        return;
+    }
     if(out.type === 'output'){
         appendOutputImages(out, images, meta.run?.refs?.[0], [meta]);
     }
@@ -32018,6 +33069,24 @@ function failCanvasImageTask(taskId, message){
     const {out, pending} = ctx;
     const run = pending.run || {};
     const runMs = nowMs() - Number(pending.startedAt || nowMs());
+    if(out.type === 'image'){
+        if(!out.url && out.editOrigin === 'expand'){
+            markExpandPendingFailed(out, pending.id, message);
+            softAlert(message || tr('canvas.generationFailed'));
+            addGenerationLog({run, outputs:[], runMs, error:message || tr('canvas.generationFailed')});
+            unregisterCanvasTaskLedger(taskId);
+            scheduleSaveNow();
+            return;
+        }
+        if(!pending._recovered){
+            out._pending = (out._pending || []).filter(p => p.id !== pending.id);
+        }
+        softAlert(message || tr('canvas.generationFailed'));
+        addGenerationLog({run, outputs:[], runMs, error:message || tr('canvas.generationFailed')});
+        unregisterCanvasTaskLedger(taskId);
+        scheduleSaveNow();
+        return;
+    }
     if(!pending._recovered){
         out._pending = (out._pending || []).filter(p => p.id !== pending.id);
     }
@@ -32075,7 +33144,10 @@ function resumeCanvasImageTasks(){
         }
     }
     // 从节点 pending 重建 ledger，并恢复轮询
-    nodes.filter(n => n.type === 'output' || isGenConsoleNode(n) || n.type === 'rh').forEach(host => {
+    nodes.filter(n =>
+        n.type === 'output' || isGenConsoleNode(n) || n.type === 'rh'
+        || (n.type === 'image' && (n._pending || []).some(p => p.canvasTaskId))
+    ).forEach(host => {
         (host._pending || []).forEach(p => {
             if(!p.canvasTaskId) return;
             // 已停泊完成的任务：由 flush 处理，勿再轮询以免重复落板
@@ -34123,26 +35195,111 @@ function applySelectionBoxRect(left, top, w, h){
     selectionBox.style.width = `${Math.max(0, w)}px`;
     selectionBox.style.height = `${Math.max(0, h)}px`;
     selectionBox.style.transform = `translate(${left}px, ${top}px)`;
+    if(selectDrag) hideSelectionHullPort();
+}
+function hideSelectionHullPort(){
+    if(selectionHullPortEl){
+        selectionHullPortEl.style.display = 'none';
+        selectionHullPortEl.hidden = true;
+    }
+    selectionBox?.classList.remove('has-hull-port');
+    selectionBox?.querySelector('.selection-hull-port')?.remove();
 }
 function setSelectionBoxHullInteractive(on){
     selectionBox?.classList.toggle('is-selection-hull', Boolean(on));
 }
+function isSelectionHullActive(){
+    return selectionHullPortFromMarquee && selected.size >= 2 && !selectDrag;
+}
+function selectedNodesWithOutputPort(){
+    const out = [];
+    selected.forEach(id => {
+        const n = nodes.find(x => x.id === id);
+        if(!n) return;
+        const el = nodesEl?.querySelector?.(`.node[data-id="${CSS.escape(id)}"]`);
+        if(el?.querySelector?.('.port.out')) out.push(n);
+    });
+    return out;
+}
+function selectionHullPortClientPoint(){
+    const b = selectedNodesClientBounds();
+    if(!b) return null;
+    const pad = 10;
+    return { x: b.right + pad, y: (b.top + b.bottom) / 2 };
+}
+function ensureSelectionHullPort(){
+    selectionBox?.querySelector('.selection-hull-port')?.remove();
+    if(selectionHullPortEl?.isConnected) return selectionHullPortEl;
+    if(!board) return null;
+    const port = document.createElement('div');
+    port.className = 'selection-hull-port port out';
+    port.title = langIsEn() ? 'Drag to connect all' : '拖动连接全部选中节点';
+    port.innerHTML = '<span class="port-dot"></span>';
+    port.style.display = 'none';
+    port.hidden = true;
+    port.addEventListener('pointerdown', onSelectionHullPortPointerDown, true);
+    port.addEventListener('mousedown', onSelectionHullPortPointerDown, true);
+    board.appendChild(port);
+    selectionHullPortEl = port;
+    return port;
+}
+function positionSelectionHullPort(){
+    const port = selectionHullPortEl;
+    const pt = selectionHullPortClientPoint();
+    if(!port || !pt) return;
+    port.style.left = '0';
+    port.style.top = '0';
+    port.style.transform = `translate(${pt.x}px, ${pt.y}px) translate(0, -50%)`;
+}
+function positionSelectionHullPortAtClient(clientX, clientY){
+    const port = selectionHullPortEl;
+    if(!port) return;
+    port.style.left = '0';
+    port.style.top = '0';
+    port.style.transform = `translate(${clientX}px, ${clientY}px) translate(-50%, -50%)`;
+}
+function restoreSelectionHullPortAnchor(){
+    const port = selectionHullPortEl;
+    if(!port) return;
+    port.classList.remove('is-hull-link-drag');
+    if(!port.hidden && port.style.display !== 'none') positionSelectionHullPort();
+}
+function syncSelectionHullPort(){
+    const port = ensureSelectionHullPort();
+    if(!port) return;
+    const show = !selectDrag
+        && selectionHullPortFromMarquee
+        && selected.size >= 2
+        && selectedNodesWithOutputPort().length > 0;
+    if(!show){
+        hideSelectionHullPort();
+        return;
+    }
+    positionSelectionHullPort();
+    port.style.display = '';
+    port.hidden = false;
+    selectionBox?.classList.toggle('has-hull-port', true);
+}
 function updateSelectionHullFromSelection(){
     if(!selectionBox || selectDrag) return;
     if(selected.size < 2){
+        selectionHullPortFromMarquee = false;
         selectionBox.style.display = 'none';
         setSelectionBoxHullInteractive(false);
+        selectionBox.classList.remove('has-hull-port');
         return;
     }
     const b = selectedNodesClientBounds();
     if(!b){
         selectionBox.style.display = 'none';
         setSelectionBoxHullInteractive(false);
+        selectionBox.classList.remove('has-hull-port');
         return;
     }
     const pad = 10;
     applySelectionBoxRect(b.left - pad, b.top - pad, b.width + pad * 2, b.height + pad * 2);
     setSelectionBoxHullInteractive(true);
+    syncSelectionHullPort();
 }
 function positionSelectionActionBar(){
     if(!selectionActionBarEl || !board || selected.size < 2) return;
@@ -34237,6 +35394,7 @@ function remountSelectionActionBar(){
 function syncSelectionActionBar(){
     if(selectDrag || isImageEditOpen() || selected.size < 2){
         removeSelectionActionBar();
+        if(selectDrag) hideSelectionHullPort();
         if(selectionBox && !selectDrag){
             selectionBox.style.display = 'none';
             setSelectionBoxHullInteractive(false);
@@ -34265,6 +35423,8 @@ function startSelection(e){
     removeFrameGroupActionBar();
     removeImageBatchActionBar();
     clearSelectDragListeners();
+    selectionHullPortFromMarquee = false;
+    hideSelectionHullPort();
     if(selectionBox) selectionBox.style.display = 'none';
     setSelectionBoxHullInteractive(false);
     selectDrag = {sx:e.clientX, sy:e.clientY, x:e.clientX, y:e.clientY};
@@ -34321,6 +35481,7 @@ function finishSelection(e){
     withCanvasRootClass(list => list.remove('canvas-selecting'));
     clearSelectDragListeners();
     selectDrag = null;
+    selectionHullPortFromMarquee = false;
     if(!moved){
         if(selected.size){
             selected.clear();
@@ -34336,8 +35497,117 @@ function finishSelection(e){
         const overlaps = r.left < rect.right && r.right > rect.left && r.top < rect.bottom && r.bottom > rect.top;
         if(overlaps) selected.add(el.dataset.id);
     });
+    if(selected.size >= 2) selectionHullPortFromMarquee = true;
     // 只刷选中态，禁止整板 render——否则后续节点 DOM 重建会闪一下
     refreshSelectionVisuals();
+}
+function startSelectionHullLink(e){
+    const fromNodes = selectedNodesWithOutputPort();
+    if(!fromNodes.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    cancelTempLink();
+    ensureLiveCanvasDom();
+    const hullPt = selectionHullPortClientPoint();
+    const dropWorld = hullPt ? screenToWorld(hullPt.x, hullPt.y) : portPoint(fromNodes[0].id, 'out');
+    const origins = fromNodes.map(n => {
+        const pt = portPoint(n.id, 'out');
+        return { id: n.id, x1: pt.x, y1: pt.y };
+    });
+    tempLink = {
+        multi: true,
+        from: 'selection:hull',
+        originKind: 'out',
+        fromIds: origins.map(o => o.id),
+        origins,
+        x1: dropWorld.x,
+        y1: dropWorld.y,
+        x2: dropWorld.x,
+        y2: dropWorld.y,
+    };
+    clearAllPortMagnet();
+    collapseImageGenDockForLink();
+    try { document.activeElement?.blur?.(); } catch(_){ /* ignore */ }
+    selectionHullPortEl?.classList.add('is-hull-link-drag');
+    positionSelectionHullPortAtClient(e.clientX, e.clientY);
+    refreshTempLinkDom();
+    const pointerId = e.pointerId ?? null;
+    let finished = false;
+    const onMove = e2 => {
+        if(!tempLink) return;
+        if(pointerId != null && e2.pointerId != null && e2.pointerId !== pointerId) return;
+        positionSelectionHullPortAtClient(e2.clientX, e2.clientY);
+        const p = screenToWorld(e2.clientX, e2.clientY);
+        tempLink.x2 = p.x;
+        tempLink.y2 = p.y;
+        refreshTempLinkDom();
+    };
+    const onFinish = e2 => {
+        if(finished || !tempLink) return;
+        if(pointerId != null && e2.pointerId != null && e2.pointerId !== pointerId) return;
+        if(e2.type === 'mouseup' && e2.button !== 0) return;
+        if(e2.type === 'pointerup' && e2.button !== 0) return;
+        finished = true;
+        finishTempLink(e2);
+        restoreSelectionHullPortAnchor();
+        if(!tempLink?.pendingMenu) restoreImageGenDockAfterLink();
+    };
+    const onCancel = () => {
+        cancelTempLink();
+        restoreImageGenDockAfterLink();
+    };
+    document.addEventListener('pointermove', onMove, true);
+    document.addEventListener('mousemove', onMove, true);
+    document.addEventListener('pointerup', onFinish, true);
+    document.addEventListener('mouseup', onFinish, true);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('blur', onCancel);
+    linkDragCleanup = () => {
+        document.removeEventListener('pointermove', onMove, true);
+        document.removeEventListener('mousemove', onMove, true);
+        document.removeEventListener('pointerup', onFinish, true);
+        document.removeEventListener('mouseup', onFinish, true);
+        window.removeEventListener('pointercancel', onCancel);
+        window.removeEventListener('blur', onCancel);
+    };
+}
+function onSelectionHullPortPointerDown(e){
+    if(!canvas || e.button !== 0 || e.shiftKey) return;
+    if(selectDrag || !selectionHullPortFromMarquee || selected.size < 2) return;
+    if(isPortMagnetChrome(e.target)) return;
+    startSelectionHullLink(e);
+}
+function connectMultiFromIdsToTarget(fromIds, toId){
+    if(!fromIds?.length || !toId) return false;
+    const pending = [];
+    for(const fromId of fromIds){
+        if(!canConnect(fromId, toId)) continue;
+        if(connections.some(c => c.from === fromId && c.to === toId)) continue;
+        pending.push(fromId);
+    }
+    if(!pending.length) return false;
+    try { pushUndo(); } catch(err) { console.warn('[infinite-canvas] undo snapshot failed', err); }
+    let any = false;
+    const refreshIds = [];
+    for(const fromId of pending){
+        const fromNode = nodes.find(n => n.id === fromId);
+        const toNode = nodes.find(n => n.id === toId);
+        if(fromNode && toNode) ensureLoopAcceptsConnection(fromNode, toNode);
+        connections.push({id:uid('c'), from:fromId, to:toId});
+        if(fromNode?.type === 'promptGroup' && toNode?.type === 'loop') syncLoopCountFromPromptGroup(toNode, fromNode);
+        if(fromNode?.type === 'imageBatch' && toNode?.type === 'loop') syncLoopCountFromImageBatch(toNode, fromNode);
+        if(toNode?.type === 'loop') syncLoopImageBatchSize(toNode);
+        if(isGeneratorLikeNode(fromNode)) refreshIds.push(fromId);
+        if(isGeneratorLikeNode(toNode)) refreshIds.push(toId);
+        any = true;
+    }
+    if(!any) return false;
+    syncGeneratorInputs();
+    refreshGeneratorInputViews();
+    scheduleSave();
+    commitStructureDomPatch({ refreshIds: [...new Set([...pending, toId, ...refreshIds])] });
+    resyncGenFrameAfterLinkChange(toId);
+    return true;
 }
 function startSelectionLink(e, kind){
     e.preventDefault();
@@ -34765,13 +36035,6 @@ function startSelectionHullDrag(e){
     dragNode = null;
     wireNodeDragWindowListeners();
 }
-function onSelectionBoxMouseDown(e){
-    if(!canvas || !selectionBox || e.button !== 0) return;
-    if(selectDrag || selected.size < 2 || !selectionBox.classList.contains('is-selection-hull')) return;
-    if(spacePanArmed || isImageEditOpen()) return;
-    // 外框盖在节点上：空白垫边 / 已选节点区域都整组拖，且不折叠多选
-    startSelectionHullDrag(e);
-}
 function onNodeDrag(e){
     if(!dragNode) return;
     lastBoardInteractionAt = Date.now();
@@ -34807,6 +36070,7 @@ function onNodeDrag(e){
         const barNode = nodes.find(n => n.id === imageActionBarNodeId);
         if(barNode) positionImageActionBar(barNode);
     }
+    if(imageExpandState && movingIds.has(imageExpandState.nodeId)) positionImageExpandOverlay();
     if(textFormatBarNodeId && movingIds.has(textFormatBarNodeId) && textFormatBarEl){
         const tBar = nodes.find(n => n.id === textFormatBarNodeId);
         if(tBar) positionTextFormatBar(tBar);
@@ -34920,6 +36184,7 @@ function finishTempLink(e){
     if(e?.type === 'mouseup' && e.button !== 0) return;
     if(e?.type === 'pointerup' && e.button !== 0) return;
     const {from: originId, originKind} = tempLink;
+    const multiFromIds = tempLink.multi && tempLink.fromIds?.length ? tempLink.fromIds : null;
     const clientX = e?.clientX ?? 0;
     const clientY = e?.clientY ?? 0;
     const drop = screenToWorld(clientX, clientY);
@@ -34935,28 +36200,33 @@ function finishTempLink(e){
     if(target){
         cancelTempLink();
         const targetId = target.dataset.id;
-        const fromId = originKind === 'out' ? originId : targetId;
-        const toId = originKind === 'out' ? targetId : originId;
-        const fromNode = nodes.find(n => n.id === fromId);
-        const toNode = nodes.find(n => n.id === toId);
-        if(fromNode && toNode) ensureLoopAcceptsConnection(fromNode, toNode);
-        if(canConnect(fromId, toId)){
-            if(!connections.some(c => c.from === fromId && c.to === toId)){
-                try { pushUndo(); } catch(err) { console.warn('[infinite-canvas] undo snapshot failed', err); }
-                connections.push({id:uid('c'), from:fromId, to:toId});
-                if(fromNode?.type === 'promptGroup' && toNode?.type === 'loop') syncLoopCountFromPromptGroup(toNode, fromNode);
-                if(fromNode?.type === 'imageBatch' && toNode?.type === 'loop') syncLoopCountFromImageBatch(toNode, fromNode);
-                if(toNode?.type === 'loop') syncLoopImageBatchSize(toNode);
-                resyncGenFrameAfterLinkChange(toId);
+        if(multiFromIds){
+            needsRender = connectMultiFromIdsToTarget(multiFromIds, targetId);
+        } else {
+            const fromId = originKind === 'out' ? originId : targetId;
+            const toId = originKind === 'out' ? targetId : originId;
+            const fromNode = nodes.find(n => n.id === fromId);
+            const toNode = nodes.find(n => n.id === toId);
+            if(fromNode && toNode) ensureLoopAcceptsConnection(fromNode, toNode);
+            if(canConnect(fromId, toId)){
+                if(!connections.some(c => c.from === fromId && c.to === toId)){
+                    try { pushUndo(); } catch(err) { console.warn('[infinite-canvas] undo snapshot failed', err); }
+                    connections.push({id:uid('c'), from:fromId, to:toId});
+                    if(fromNode?.type === 'promptGroup' && toNode?.type === 'loop') syncLoopCountFromPromptGroup(toNode, fromNode);
+                    if(fromNode?.type === 'imageBatch' && toNode?.type === 'loop') syncLoopCountFromImageBatch(toNode, fromNode);
+                    if(toNode?.type === 'loop') syncLoopImageBatchSize(toNode);
+                    resyncGenFrameAfterLinkChange(toId);
+                }
+                syncGeneratorInputs();
+                refreshGeneratorInputViews();
+                scheduleSave();
+                needsRender = true;
             }
-            syncGeneratorInputs();
-            refreshGeneratorInputViews();
-            scheduleSave();
-            needsRender = true;
         }
     } else if(originKind === 'out' || originKind === 'in'){
         tempLink.pendingMenu = true;
-        const opened = openLinkCreateMenu(originId, originKind, clientX, clientY);
+        const menuOriginId = multiFromIds ? multiFromIds[0] : originId;
+        const opened = openLinkCreateMenu(menuOriginId, originKind, clientX, clientY, multiFromIds);
         if(!opened){
             cancelTempLink();
         } else {
@@ -34966,11 +36236,13 @@ function finishTempLink(e){
         cancelTempLink();
     }
     if(needsRender){
-        const fromId = originKind === 'out' ? originId : target?.dataset?.id;
-        const toId = originKind === 'out' ? target?.dataset?.id : originId;
-        commitStructureDomPatch({
-            refreshIds: [fromId, toId].filter(Boolean),
-        });
+        if(!multiFromIds){
+            const fromId = originKind === 'out' ? originId : target?.dataset?.id;
+            const toId = originKind === 'out' ? target?.dataset?.id : originId;
+            commitStructureDomPatch({
+                refreshIds: [fromId, toId].filter(Boolean),
+            });
+        }
     } else if(tempLink){
         refreshTempLinkDom();
     } else {
@@ -35529,8 +36801,9 @@ function updateGroupMembership(movedNodes){
 
 /** 端口是否展开（悬停/选中/磁吸）：展开时连线锚在圆环中心，否则贴节点边（图1） */
 function nodePortsExpanded(nodeId, el){
+    if(isSelectionHullActive() && nodeId && selected.has(nodeId)) return false;
     if(nodeId && selected.has(nodeId)) return true;
-    if(el?.classList?.contains('ports-open') || el?.classList?.contains('selected')) return true;
+    if(el?.classList?.contains('ports-open')) return true;
     if(el?.querySelector?.('.port.is-magnetic')) return true;
     return false;
 }
@@ -36199,12 +37472,17 @@ function updateMinimapSelection(){
 }
 function refreshSelectionVisuals(){
     const touch = new Set();
+    const hullActive = isSelectionHullActive();
     nodesEl?.querySelectorAll?.('.node').forEach(el => {
         const id = el.dataset.id;
         const should = selected.has(id);
         if(el.classList.contains('selected') !== should) el.classList.toggle('selected', should);
+        if(el.classList.contains('selection-hull-member') !== (should && hullActive)){
+            el.classList.toggle('selection-hull-member', should && hullActive);
+        }
         if(should){
-            el.classList.add('ports-open');
+            if(!hullActive) el.classList.add('ports-open');
+            else if(el.classList.contains('ports-open')) el.classList.remove('ports-open');
             if(id) touch.add(id);
         } else if(!el.matches(':hover') && !el.querySelector('.port.is-magnetic')){
             if(el.classList.contains('ports-open')){
@@ -36243,8 +37521,10 @@ function applyNodeSelection(nodeId, e){
     if(genBatchPick && genBatchPick.nodeId !== nodeId && !(e?.ctrlKey || e?.metaKey)){
         clearGenBatchPick({refresh:true});
     }
-    if(changed) refreshSelectionVisuals();
-    else syncImageGenDock(); // 已选中时仍确保控制台/动作条在位（点图台唤出）
+    if(changed){
+        selectionHullPortFromMarquee = false;
+        refreshSelectionVisuals();
+    } else syncImageGenDock(); // 已选中时仍确保控制台/动作条在位（点图台唤出）
     return changed;
 }
 function pathEl(x1,y1,x2,y2,cls, connectionId=null){
@@ -36564,6 +37844,12 @@ board.onmousedown = e => {
         closeImageEditor();
         return;
     }
+    if(isImageExpandOpen()){
+        if(Date.now() - imageEditOpenedAt < 480) return;
+        if(e.target.closest?.('.image-expand-host')) return;
+        closeImageExpand();
+        return;
+    }
     // 空白左键拖拽框选（单击空白=清选中，在 finishSelection 里判断位移）
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     closeCreateMenu();
@@ -36579,8 +37865,7 @@ board.onmousedown = e => {
     startSelection(e);
 };
 on(board, 'pointerdown', onBoardPointerDown);
-// 必须用 mousedown（勿用 pointerdown+preventDefault，否则 mouseup 被压制，外框黏鼠标）
-if(selectionBox) on(selectionBox, 'mousedown', onSelectionBoxMouseDown);
+// 选框本身 pointer-events:none；聚合端口在 capture 阶段单独接 pointerdown
 const trackBoardPointer = e => {
     if(!canvas || !board) return;
     lastMouseBoard = screenToWorld(e.clientX, e.clientY);
@@ -37268,6 +38553,7 @@ export function disposeInfiniteCanvasEngine({ preserveEditor = false } = {}) {
     }
     imageEditFocusNodeId = '';
     forceClearImageEditChrome();
+    try { closeImageExpand(); } catch(_) {}
     try { closeTextNodeExpand(); } catch(_) {}
   } catch(_) {}
   try { flushLiveCanvasDraftPersist(); } catch(_) {}
