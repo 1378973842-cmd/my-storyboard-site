@@ -8514,7 +8514,7 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
   --port-hit:32px;
   --port-dot:19px;
   --port-plus:10px;
-  --port-stroke:4.5px;
+  --port-stroke:1.9px;
   --port-dot-outset:0px;
   --port-slide:0px;
   width:var(--port-hit);

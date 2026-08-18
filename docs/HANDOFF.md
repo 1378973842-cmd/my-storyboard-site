@@ -1,10 +1,8 @@
 # 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  1. **线上**：`deploy` @ `c1ce39f`（AG237 切板中止旧图解码）。
-  2. **本机未提交**：
-     - **AG238**：收藏一张图卡顿。成功后只改同 URL 星标 class，不再 `lucide.createIcons()` 整页重建。
-     - **扩图暂关**：`IMAGE_EXPAND_ENABLED = false`（恢复改 true）。
+  1. **即将推送**：`deploy` AG239 — 框选聚合端口 `--port-stroke` 从 4.5px 改为 1.9px（按 19/45 与普通端口同比例），十字外包圆圈可读。
+  2. **扩图暂关**：`IMAGE_EXPAND_ENABLED = false`（恢复改 true）。
   3. 远端备份：`/root/studio-backups/studio-20260817-122749.tar.gz`（约 5.0G）；策略留 3 份。
 - **验证状态**：`node init.mjs` ✅（tsc + lint + vite build 通过，2026-08-18）。
 - **本地网站**：`http://localhost:3005`。
@@ -21,7 +19,7 @@
 
 ```
 继续 gemini-deploy。先读 docs/HANDOFF.md。
-线上 deploy @ c1ce39f。本机未提交 AG238：收藏星标不再整页重绘图标。
+线上 deploy 含 AG239：框选聚合端口线宽按比例缩小。
 扩图入口仍关；gate 选择页仍是深色。
 按导演下一条继续。
 ```
