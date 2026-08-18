@@ -1105,6 +1105,10 @@ let saveCanvasAgain = false;
 let applyingRemoteCanvas = false;
 /** openCanvas 拉详情期间禁止保存，避免用空/半截内存覆盖磁盘 */
 let openingCanvas = false;
+/** 切板世代：过期 onload / 几何刷新全部作废 */
+let canvasMediaEpoch = 0;
+let imageFitFlushRaf = 0;
+let imageFitDirty = false;
 let remoteSyncTimer = null;
 let remoteSyncInterval = null;
 let remoteSyncBusy = false;
@@ -6925,6 +6929,53 @@ async function setCanvasTitle(id, title){
         console.error(e);
     }
 }
+function abortCanvasMediaLoads(){
+    canvasMediaEpoch += 1;
+    imageFitDirty = false;
+    if(imageFitFlushRaf && typeof cancelAnimationFrame === 'function'){
+        cancelAnimationFrame(imageFitFlushRaf);
+        imageFitFlushRaf = 0;
+    }
+    layoutLinkRefreshToken += 1;
+    linkGeomQueued = false;
+    linkGeomFilter = null;
+    if(nodeLayoutRefreshTimer){
+        clearTimeout(nodeLayoutRefreshTimer);
+        nodeLayoutRefreshTimer = null;
+    }
+    if(typeof _imageBatchRelayoutTimers !== 'undefined'){
+        _imageBatchRelayoutTimers.forEach(timer => clearTimeout(timer));
+        _imageBatchRelayoutTimers.clear();
+    }
+    try { nodeLayoutObserver?.disconnect(); } catch(_){ /* ignore */ }
+    const root = nodesEl || canvasRoot;
+    if(!root) return;
+    root.querySelectorAll('img, video, audio').forEach(el => {
+        try {
+            el.onload = null;
+            el.onerror = null;
+            if(el.tagName === 'VIDEO' || el.tagName === 'AUDIO'){
+                el.pause?.();
+                el.removeAttribute('src');
+                el.querySelectorAll('source').forEach(src => src.removeAttribute('src'));
+                el.load?.();
+            } else {
+                el.removeAttribute('src');
+                el.src = '';
+            }
+        } catch(_){ /* ignore */ }
+    });
+}
+function scheduleImageFitGeometry(){
+    imageFitDirty = true;
+    if(imageFitFlushRaf) return;
+    imageFitFlushRaf = requestAnimationFrame(() => {
+        imageFitFlushRaf = 0;
+        if(!imageFitDirty) return;
+        imageFitDirty = false;
+        scheduleLinkGeometryRefresh();
+    });
+}
 async function openCanvas(id, options = {}){
     const fromCollectionBrowse = Boolean(options.fromCollectionBrowse);
     if(canvas?.id === id){
@@ -6936,23 +6987,17 @@ async function openCanvas(id, options = {}){
         return;
     }
     if (!fromCollectionBrowse) clearGateReturnCollection();
+    // 先停旧板解码/onload，切板才不会被出图队列堵住
+    abortCanvasMediaLoads();
     clearTimeout(saveTimer);
     saveTimer = null;
     clearTimeout(viewportSaveTimer);
     viewportSaveTimer = null;
-    // 切板前先落盘旧板（含进行中的 pending），避免未保存 pending 丢失后结果落到新板
+    // 旧板落盘后台继续（saveCanvas 已钉 savedId）；切板不再空等 stringify/网络
     if(canvas?.id && (localCanvasDirty || saveCanvasAgain || savingCanvasNow)){
         saveCanvasAgain = true;
-        try {
-            let guard = 0;
-            while((savingCanvasNow || saveCanvasAgain || localCanvasDirty) && guard < 40){
-                if(!savingCanvasNow) await saveCanvas();
-                else await sleep(50);
-                guard += 1;
-            }
-        } catch(_){ /* ignore */ }
+        if(!savingCanvasNow) void saveCanvas().catch(() => {});
     }
-    saveCanvasAgain = false;
     localCanvasDirty = false;
     const liveShell = resolveLiveShell();
     if(liveShell?.classList.contains('no-canvas')) liveShell.classList.remove('no-canvas');
@@ -7276,11 +7321,15 @@ function handleCanvasUpdatedMessage(data){
     if(!isCanvasInteracting() && !isCanvasTextEditing()) setStatus(localCanvasDirty || saveTimer ? 'Saving...' : 'Syncing...');
 }
 async function returnToCanvasManager(){
+    abortCanvasMediaLoads();
     clearTimeout(saveTimer);
     saveTimer = null;
     clearTimeout(viewportSaveTimer);
     viewportSaveTimer = null;
-    if(canvas && localCanvasDirty) await saveCanvas();
+    if(canvas && (localCanvasDirty || saveCanvasAgain || savingCanvasNow)){
+        saveCanvasAgain = true;
+        if(!savingCanvasNow) void saveCanvas().catch(() => {});
+    }
     writeLastCanvasId('');
     stopCanvasRemotePolling();
     canvas = null;
@@ -15652,11 +15701,13 @@ function renderNode(node){
             if(isEditableImage) body.addEventListener('dblclick', openPreview);
             if(loadedImg && loadedImg.complete && loadedImg.naturalHeight > 0){
                 fitImageNodeToNaturalAspect(node, el, loadedImg);
-                requestAnimationFrame(refreshGeometry);
+                scheduleImageFitGeometry();
             } else if(loadedImg) {
+                const fitEpoch = canvasMediaEpoch;
                 loadedImg.onload = () => {
+                    if(fitEpoch !== canvasMediaEpoch) return;
                     fitImageNodeToNaturalAspect(node, el, loadedImg);
-                    refreshGeometryAfterLayout();
+                    scheduleImageFitGeometry();
                 };
             }
         } else {
