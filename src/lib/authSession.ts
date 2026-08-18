@@ -87,6 +87,7 @@ export function presencePageFromLocation(): string {
   const hash = window.location.hash.toLowerCase();
   if (path.includes('canvas') || hash.includes('canvas')) return '画布';
   if (path.includes('director')) return '导演台';
+  if (hash.includes('admin-platform-errors')) return '报错日志';
   if (hash.includes('admin-users')) return '用户管理';
   if (hash.includes('admin')) return '管理后台';
   if (hash.includes('profile') || hash.includes('space')) return '个人空间';

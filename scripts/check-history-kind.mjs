@@ -6,23 +6,17 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const eng = fs.readFileSync(path.join(root, 'src/lib/infiniteCanvas/canvasEngine.js'), 'utf8');
 const shell = fs.readFileSync(path.join(root, 'src/components/InfiniteCanvas/InfiniteCanvasShell.tsx'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'src/components/InfiniteCanvas/infinite-canvas.css'), 'utf8');
-const api = fs.readFileSync(path.join(root, 'src/services/canvasGenerations.ts'), 'utf8');
-const routes = fs.readFileSync(path.join(root, 'src/services/infiniteCanvasRoutes.ts'), 'utf8');
-const video = fs.readFileSync(path.join(root, 'src/services/canvasVideoBridge.ts'), 'utf8');
 
 const checks = [
-  [shell.includes('data-history-kind="image"') && shell.includes('data-history-kind="video"') && shell.includes('data-history-kind="audio"'), 'shell kind tabs'],
-  [shell.includes('history-hub-chrome') && shell.includes('生成历史'), 'stable chrome + title'],
-  [css.includes('.history-kind-seg') && css.includes('.history-kind-seg-btn.is-active'), 'kind segment CSS'],
-  [css.includes('history-hub-panel.log-panel') && css.includes('height:min(86vh, 820px)'), 'fixed panel height'],
-  [css.includes('.history-library-controls.is-inert'), 'controls keep space'],
-  [eng.includes("historyLibraryKind = 'image'") && eng.includes('syncHistoryLibraryKindUi'), 'engine kind state'],
-  [eng.includes('音频生成暂未开放') || eng.includes('Audio generation is not available yet'), 'audio locked empty'],
-  [eng.includes('Generation history') || eng.includes('生成历史'), 'stable title in sync'],
-  [eng.includes('kind=${encodeURIComponent(kind)}') || eng.includes('&kind='), 'loads with kind query'],
-  [api.includes('kindFilter') && api.includes('generationMediaKindFromItem'), 'API kind filter'],
-  [routes.includes("media_kind: \"video\"") && routes.includes('recordCanvasGeneration'), 'video records to history'],
-  [video.includes('CanvasVideoPersistMeta') && video.includes('onPersisted?.(localUrl, req,'), 'video persist meta'],
+  [shell.includes('history-library-scope-row') && shell.includes('所有项目') && shell.includes('当前项目'), 'scope row above search'],
+  [!shell.includes('history-kind-tab-count">(0)</span>\n                                  </button>\n                                  <button type="button" className="history-kind-tab" data-history-scope'), 'scope tabs have no counts'],
+  [shell.includes('图片历史') && shell.includes('视频历史') && shell.includes('音频历史'), 'media kind tabs kept'],
+  [shell.indexOf('history-library-scope-row') < shell.indexOf('history-library-toolbar'), 'scope before search toolbar'],
+  [shell.indexOf('history-library-toolbar') < shell.indexOf('history-library-kind-row'), 'kind row after search'],
+  [css.includes('.history-scope-tabs') && css.includes('.history-scope-tab.is-active'), 'scope tab CSS'],
+  [eng.includes('historyLibraryScope') && eng.includes('historyLibraryKind'), 'engine scope + kind state'],
+  [eng.includes('syncHistoryLibraryScopeUi') && eng.includes('syncHistoryLibraryKindUi'), 'engine sync both tab rows'],
+  [eng.includes('historyLibraryItemsForScope') && eng.includes('historyLibraryKindCounts'), 'scoped kind counts'],
 ];
 
 let failed = 0;

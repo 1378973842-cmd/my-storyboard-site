@@ -550,7 +550,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                   <button
                     type="button"
                     className="tool-btn tool-btn-ghost tool-btn-icon-only"
-                    title="历史（成片库 / 本板日志）"
+                    title="生成历史（成片库）"
                     aria-label="历史"
                     onClick={() => canvasWin["openCanvasHistoryHub"]?.()}
                   >
@@ -992,7 +992,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                                   <i data-lucide="images" className="history-hub-title-icon" aria-hidden />
                                   <span id="historyHubTitleText">生成历史</span>
                               </div>
-                              <div id="logModalCount" className="studio-modal-sub">跨画布成片与本板记录</div>
+                              <div id="logModalCount" className="studio-modal-sub">跨画布与当前项目的成片记录</div>
                           </div>
                           <div className="history-hub-head-actions">
                               <div id="historyLibraryControls" className="history-library-controls" data-history-controls="library">
@@ -1010,49 +1010,35 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                               </button>
                           </div>
                       </div>
-                      <div className="history-hub-chrome">
-                          <div className="canvas-history-tabs in-log-modal" role="tablist" aria-label="历史切换">
-                              <button type="button" className="canvas-history-tab is-active" data-history-tab="library" role="tab" aria-selected="true">成片库</button>
-                              <button type="button" className="canvas-history-tab" data-history-tab="logs" role="tab" aria-selected="false">本板日志</button>
-                          </div>
-                          <div className="history-kind-seg" role="tablist" aria-label="生成历史分类">
-                              <button type="button" className="history-kind-seg-btn is-active" data-history-kind="image" role="tab" aria-selected="true">图片</button>
-                              <button type="button" className="history-kind-seg-btn" data-history-kind="video" role="tab" aria-selected="false">视频</button>
-                              <button type="button" className="history-kind-seg-btn" data-history-kind="audio" role="tab" aria-selected="false" title="暂未开放">音频</button>
-                          </div>
-                      </div>
                       <div id="historyLibraryPane" className="history-hub-pane" data-history-pane="library">
+                          <div className="history-library-scope-row">
+                              <div className="history-scope-tabs" role="tablist" aria-label="成片库范围">
+                                  <button type="button" className="history-scope-tab is-active" data-history-scope="all" role="tab" aria-selected="true">所有项目</button>
+                                  <button type="button" className="history-scope-tab" data-history-scope="current" role="tab" aria-selected="false">当前项目</button>
+                              </div>
+                          </div>
                           <div className="studio-modal-toolbar history-library-toolbar">
                               <label className="studio-modal-search">
                                   <i data-lucide="search" className="w-3.5 h-3.5" aria-hidden />
                                   <input id="historyLibrarySearch" type="search" placeholder="搜索提示词 / 模型…" autoComplete="off" />
                               </label>
                           </div>
+                          <div className="history-library-kind-row">
+                              <div className="history-kind-tabs" role="tablist" aria-label="生成历史分类">
+                                  <button type="button" className="history-kind-tab is-active" data-history-kind="image" role="tab" aria-selected="true">
+                                      图片历史<span className="history-kind-tab-count">(0)</span>
+                                  </button>
+                                  <button type="button" className="history-kind-tab" data-history-kind="video" role="tab" aria-selected="false">
+                                      视频历史<span className="history-kind-tab-count">(0)</span>
+                                  </button>
+                                  <button type="button" className="history-kind-tab" data-history-kind="audio" role="tab" aria-selected="false" title="暂未开放">
+                                      音频历史<span className="history-kind-tab-count">(0)</span>
+                                  </button>
+                              </div>
+                          </div>
                           <div id="historyLibraryList" className="history-library-list">
                               <div className="history-library-empty">加载中…</div>
                           </div>
-                      </div>
-                      <div id="historyLogsPane" className="history-hub-pane" data-history-pane="logs" hidden>
-                          <div className="studio-modal-toolbar log-toolbar history-hub-toolbar">
-                              <label className="studio-modal-search">
-                                  <i data-lucide="search" className="w-3.5 h-3.5" aria-hidden />
-                                  <input id="logSearchInput" type="search" placeholder="搜索提示词、平台、任务 ID…" data-i18n-placeholder="canvas.logSearchPlaceholder" autoComplete="off" />
-                              </label>
-                              <div className="studio-modal-filters" role="group" aria-label="日志筛选">
-                                  <button type="button" className="studio-filter-chip is-active" data-log-filter="all" data-i18n="canvas.logFilterAll">全部</button>
-                                  <button type="button" className="studio-filter-chip" data-log-filter="ok" data-i18n="canvas.logFilterSuccess">成功</button>
-                                  <button type="button" className="studio-filter-chip" data-log-filter="failed" data-i18n="canvas.logFilterFailed">失败</button>
-                              </div>
-                              <button id="logClearBtn" type="button" className="studio-modal-ghost-btn" data-i18n="canvas.logClear">清空</button>
-                          </div>
-                          <div id="logClearBar" className="studio-modal-inline-confirm" hidden>
-                              <span className="studio-modal-inline-confirm-text" data-i18n="canvas.logClearConfirm">确定清空全部生成记录？此操作不可撤销。</span>
-                              <div className="studio-modal-inline-confirm-actions">
-                                  <button id="logClearCancel" type="button" className="studio-modal-ghost-btn" data-i18n="common.cancel">取消</button>
-                                  <button id="logClearConfirm" type="button" className="studio-modal-danger-btn" data-i18n="canvas.logClear">清空</button>
-                              </div>
-                          </div>
-                          <div id="logList" className="log-list"></div>
                       </div>
                   </div>
               </div>

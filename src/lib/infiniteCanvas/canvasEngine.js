@@ -613,9 +613,9 @@ let outputLightbox, outputPreview, outputLightboxImg, outputCompareContainer, ou
 let outputCompareOriginal, outputCompareOriginalWrap, outputCompareSlider, outputResolution;
 let outputDownloadBtn, outputFavoriteBtn, outputCompareBtn, outputLightboxVideo, outputPromptPanel, outputPromptText, outputCopyPromptBtn;
 let outputRerunBtn, logModal, logList, logSearchInput, logModalCount, logClearBar, logClearBtn, logClearCancel, logClearConfirm, errorModal, errorTitle, errorMessage;
-let historyLibraryPane, historyLogsPane, historyLibraryList, historyLibrarySearch, historyHubTitle;
+let historyLibraryPane, historyLibraryList, historyLibrarySearch, historyHubTitle;
 let historyHubTitleText, historyLibraryControls, historyLibraryZoom, historyLibrarySortBtn;
-let historyHubTab = 'library';
+let historyLibraryScope = 'all'; // all | current
 let historyLibraryKind = 'image'; // image | video | audio（音频暂未开放）
 let historyLibraryItems = [];
 let historyLibraryLoadTimer = 0;
@@ -828,7 +828,6 @@ function bindDomElements(root) {
   logClearCancel = g('logClearCancel');
   logClearConfirm = g('logClearConfirm');
   historyLibraryPane = g('historyLibraryPane');
-  historyLogsPane = g('historyLogsPane');
   historyLibraryList = g('historyLibraryList');
   historyLibrarySearch = g('historyLibrarySearch');
   historyHubTitle = g('historyHubTitle');
@@ -11668,14 +11667,43 @@ function historyItemMediaKind(item){
     if(isAudioUrl(url)) return 'audio';
     return 'image';
 }
+function historyLibraryItemsForScope(){
+    const canvasId = String(canvas?.id || '');
+    const scope = historyLibraryScope === 'current' ? 'current' : 'all';
+    return historyLibraryItems.filter(item => {
+        if(scope === 'current' && (!canvasId || String(item.canvas_id || '') !== canvasId)) return false;
+        return true;
+    });
+}
+function historyLibraryKindCounts(){
+    const counts = { image: 0, video: 0, audio: 0 };
+    historyLibraryItemsForScope().forEach(item => {
+        const k = historyItemMediaKind(item);
+        if(k in counts) counts[k] += 1;
+    });
+    return counts;
+}
+function syncHistoryLibraryScopeUi(){
+    const scope = historyLibraryScope === 'current' ? 'current' : 'all';
+    historyLibraryScope = scope;
+    logModal?.querySelectorAll('.history-scope-tabs [data-history-scope]').forEach(btn => {
+        const s = btn.getAttribute('data-history-scope') || 'all';
+        const active = s === scope;
+        btn.classList.toggle('is-active', active);
+        btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+}
 function syncHistoryLibraryKindUi(){
     const kind = historyLibraryKind === 'video' || historyLibraryKind === 'audio' ? historyLibraryKind : 'image';
     historyLibraryKind = kind;
-    logModal?.querySelectorAll('.history-kind-seg [data-history-kind]').forEach(btn => {
+    const counts = historyLibraryKindCounts();
+    logModal?.querySelectorAll('.history-kind-tabs [data-history-kind]').forEach(btn => {
         const k = btn.getAttribute('data-history-kind') || 'image';
         const active = k === kind;
         btn.classList.toggle('is-active', active);
         btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        const countEl = btn.querySelector('.history-kind-tab-count');
+        if(countEl) countEl.textContent = `(${counts[k] ?? 0})`;
         if(k === 'audio'){
             btn.classList.add('is-disabled');
             btn.setAttribute('aria-disabled', 'true');
@@ -11705,13 +11733,17 @@ function groupHistoryLibraryByDay(items){
 function renderHistoryLibrary(){
     if(!historyLibraryList) return;
     applyHistoryLibraryTileSize(historyLibraryTileSize);
+    syncHistoryLibraryScopeUi();
     syncHistoryLibraryKindUi();
     if(historyLibraryKind === 'audio'){
         historyLibraryList.innerHTML = `<div class="history-library-empty">${langIsEn() ? 'Audio generation is not available yet' : '音频生成暂未开放'}</div>`;
         return;
     }
     const q = String(historyLibrarySearch?.value || '').trim().toLowerCase();
+    const scope = historyLibraryScope === 'current' ? 'current' : 'all';
+    const canvasId = String(canvas?.id || '');
     const filtered = historyLibraryItems.filter(item => {
+        if(scope === 'current' && (!canvasId || String(item.canvas_id || '') !== canvasId)) return false;
         if(historyItemMediaKind(item) !== historyLibraryKind) return false;
         if(!q) return true;
         return `${item.prompt || ''} ${item.model || ''}`.toLowerCase().includes(q);
@@ -11719,7 +11751,9 @@ function renderHistoryLibrary(){
     if(!filtered.length){
         const empty = historyLibraryKind === 'video'
             ? (langIsEn() ? 'No video generations yet' : '暂无视频历史')
-            : (langIsEn() ? 'No generations found' : '没有匹配的历史生成');
+            : scope === 'current'
+                ? (langIsEn() ? 'No generations in this project yet' : '当前项目暂无成片')
+                : (langIsEn() ? 'No generations found' : '没有匹配的历史生成');
         historyLibraryList.innerHTML = `<div class="history-library-empty">${empty}</div>`;
         return;
     }
@@ -11763,6 +11797,7 @@ function renderHistoryLibrary(){
 }
 async function loadHistoryLibrary(){
     if(!historyLibraryList) return;
+    syncHistoryLibraryScopeUi();
     syncHistoryLibraryKindUi();
     if(historyLibraryKind === 'audio'){
         historyLibraryList.innerHTML = `<div class="history-library-empty">${langIsEn() ? 'Audio generation is not available yet' : '音频生成暂未开放'}</div>`;
@@ -11771,8 +11806,7 @@ async function loadHistoryLibrary(){
     historyLibraryList.innerHTML = `<div class="history-library-empty">${langIsEn() ? 'Loading…' : '加载中…'}</div>`;
     try {
         const q = encodeURIComponent(String(historyLibrarySearch?.value || '').trim());
-        const kind = historyLibraryKind === 'video' ? 'video' : 'image';
-        const res = await apiFetch(`/api/canvas-generations?limit=120&kind=${encodeURIComponent(kind)}${q ? `&q=${q}` : ''}`);
+        const res = await apiFetch(`/api/canvas-generations?limit=200${q ? `&q=${q}` : ''}`);
         if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Load failed' : '加载失败'));
         const data = await res.json();
         historyLibraryItems = Array.isArray(data.items) ? data.items : [];
@@ -11781,52 +11815,32 @@ async function loadHistoryLibrary(){
         historyLibraryList.innerHTML = `<div class="history-library-empty">${escapeHtml(err.message || (langIsEn() ? 'Load failed' : '加载失败'))}</div>`;
     }
 }
-function syncHistoryHubUi(tab = historyHubTab){
-    historyHubTab = tab === 'logs' ? 'logs' : 'library';
-    const isLogs = historyHubTab === 'logs';
-    if(historyLibraryPane) historyLibraryPane.hidden = isLogs;
-    if(historyLogsPane) historyLogsPane.hidden = !isLogs;
-    // 顶栏缩放/排序占位保留，避免切「本板日志」时面板壳抖动
-    historyLibraryControls?.classList.toggle('is-inert', isLogs);
+function syncHistoryHubUi(){
+    historyLibraryControls?.classList.remove('is-inert');
     historyLibraryControls?.removeAttribute('hidden');
-    logModal?.querySelectorAll('.canvas-history-tabs [data-history-tab]').forEach(btn => {
-        const active = btn.getAttribute('data-history-tab') === historyHubTab;
-        btn.classList.toggle('is-active', active);
-        btn.setAttribute('aria-selected', active ? 'true' : 'false');
-    });
-    logModal?.querySelector('.history-kind-seg')?.toggleAttribute('hidden', isLogs);
-    // 壳层标题固定，只换内容区
     const titleEl = historyHubTitleText || historyHubTitle;
     if(titleEl) titleEl.textContent = langIsEn() ? 'Generation history' : '生成历史';
     const titleIcon = historyHubTitle?.querySelector?.('[data-lucide]');
     if(titleIcon) titleIcon.setAttribute('data-lucide', 'images');
+    syncHistoryLibraryScopeUi();
     syncHistoryLibraryKindUi();
     if(logModalCount){
         logModalCount.textContent = langIsEn()
-            ? 'Library & board logs'
-            : '跨画布成片与本板记录';
+            ? 'Library across all projects & this project'
+            : '跨画布与当前项目的成片记录';
     }
 }
-function openCanvasHistoryHub(tab = 'library'){
+function openCanvasHistoryHub(){
     if(!ensureCanvas() || !isInfiniteCanvasEditorOpen()) return;
-    // 旧动态成片弹层若残留则清掉
     document.getElementById('canvasGenerationBrowser')?.remove();
-    logClearBar?.setAttribute('hidden', '');
-    syncHistoryHubUi(tab);
-    if(historyHubTab === 'logs'){
-        renderCanvasLog();
-        syncStudioFilterChips(logModal, 'data-log-filter', logStatusFilter);
-    } else {
-        void loadHistoryLibrary();
-    }
+    syncHistoryHubUi();
+    void loadHistoryLibrary();
     logModal?.classList.add('open');
     refreshIcons();
-    if(historyHubTab === 'library'){
-        requestAnimationFrame(() => historyLibrarySearch?.focus());
-    }
+    requestAnimationFrame(() => historyLibrarySearch?.focus());
 }
 async function openCanvasGenerationBrowser(){
-    openCanvasHistoryHub('library');
+    openCanvasHistoryHub();
 }
 async function createImageCardsFromLocalPaths(paths, point){
     if(!ensureCanvas()) return [];
@@ -28867,7 +28881,6 @@ async function runRhNode(nodeId, opts={}){
         clearNodePending(host, [pendingId]);
         syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:errMsg});
         refreshRunNodes(node, host);
-        if(historyHubTab === 'logs' && logModal?.classList.contains('open')) renderCanvasLog();
         if(!opts.cascade) softAlert(errMsg || tr('canvas.rhFailed'));
         if(opts.cascade) throw err;
     }
@@ -31675,24 +31688,26 @@ function logTaskLabel(log){
     }
     return log?.model || '-';
 }
-function addGenerationLog({run, outputs=[], runMs=0, error=''}) {
-    if(!canvas) return;
-    canvas.logs = canvas.logs || [];
-    const entry = {
-        id:uid('log'),
-        createdAt:Date.now(),
-        status:error ? 'failed' : 'success',
-        platform:runPlatformLabel(run),
-        nodeType:run?.nodeType || '',
-        model:run?.taskLabel || runTaskLabel(run),
-        request:run?.request || {},
-        prompt:run?.prompt || '',
-        outputs:(outputs || []).filter(Boolean),
-        refs:run?.refs || [],
-        runMs:Number(runMs || 0),
-        error:error ? String(error) : '',
-    };
-    canvas.logs = [entry, ...canvas.logs].slice(0, 500);
+function reportPlatformError({run, error, runMs=0}){
+    const message = String(error || '').trim();
+    if(!message) return;
+    void apiFetch('/api/platform-errors', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+            error: message,
+            canvas_id: canvas?.id || '',
+            platform: runPlatformLabel(run),
+            model: run?.taskLabel || runTaskLabel(run),
+            prompt: run?.prompt || '',
+            request: run?.request || {},
+            run_ms: Number(runMs || 0),
+        }),
+    }).catch(() => {});
+}
+function addGenerationLog({run, outputs=[], runMs=0, error=''}){
+    if(!error) return;
+    reportPlatformError({run, error, runMs});
 }
 function filteredCanvasLogs(){
     const logs = canvas?.logs || [];
@@ -31817,23 +31832,13 @@ function renderCanvasLog(){
     });
     refreshIcons();
 }
-function syncLogModalHistoryTabs(){
-    syncHistoryHubUi(historyHubTab);
-}
 function openCanvasLog(){
-    openCanvasHistoryHub('logs');
+    openCanvasHistoryHub();
 }
 function closeCanvasLog(){
     logModal?.classList.remove('open');
-    logClearBar?.setAttribute('hidden', '');
 }
 function bindStudioModalControls(){
-    if(logSearchInput){
-        on(logSearchInput, 'input', () => {
-            logSearchQuery = String(logSearchInput.value || '');
-            renderCanvasLog();
-        });
-    }
     if(historyLibrarySearch){
         on(historyLibrarySearch, 'input', () => {
             window.clearTimeout(historyLibraryLoadTimer);
@@ -31857,39 +31862,22 @@ function bindStudioModalControls(){
         );
         renderHistoryLibrary();
     });
-    logModal?.querySelectorAll('[data-log-filter]').forEach(btn => {
+    logModal?.querySelectorAll('.history-scope-tabs [data-history-scope]').forEach(btn => {
         bindClick(btn, () => {
-            logStatusFilter = btn.getAttribute('data-log-filter') || 'all';
-            syncStudioFilterChips(logModal, 'data-log-filter', logStatusFilter);
-            renderCanvasLog();
+            const next = btn.getAttribute('data-history-scope') === 'current' ? 'current' : 'all';
+            if(next === historyLibraryScope) return;
+            historyLibraryScope = next;
+            renderHistoryLibrary();
         });
     });
-    logModal?.querySelectorAll('.canvas-history-tabs [data-history-tab]').forEach(btn => {
-        bindClick(btn, () => {
-            const tab = btn.getAttribute('data-history-tab') || 'library';
-            openCanvasHistoryHub(tab);
-        });
-    });
-    logModal?.querySelectorAll('.history-kind-seg [data-history-kind]').forEach(btn => {
+    logModal?.querySelectorAll('.history-kind-tabs [data-history-kind]').forEach(btn => {
         bindClick(btn, () => {
             const kind = btn.getAttribute('data-history-kind') || 'image';
             const next = kind === 'video' || kind === 'audio' ? kind : 'image';
-            if(next === historyLibraryKind && historyHubTab === 'library') return;
+            if(next === historyLibraryKind) return;
             historyLibraryKind = next;
-            // 分类在公共壳层：点分类时回到成片库，面板尺寸/标题不变
-            openCanvasHistoryHub('library');
+            renderHistoryLibrary();
         });
-    });
-    bindClick(logClearBtn, () => {
-        if(!canvas?.logs?.length) return;
-        logClearBar?.removeAttribute('hidden');
-    });
-    bindClick(logClearCancel, () => logClearBar?.setAttribute('hidden', ''));
-    bindClick(logClearConfirm, () => {
-        if(canvas) canvas.logs = [];
-        logClearBar?.setAttribute('hidden', '');
-        renderCanvasLog();
-        setStatus(langIsEn() ? 'Generation logs cleared' : '已清空生成日志');
     });
 
     if(workflowTemplateSearchInput){
@@ -32838,7 +32826,6 @@ function applyCompletedRhOutputs(ctx, outputs, meta, taskId){
     void recordRhOutputsToHistoryLibrary(outputs, run, rhNode, runMs);
     syncAgentRunStatusAfterTask(rhNode, {completed:agentPendingCount(rhNode.id) === 0});
     refreshRunNodes(rhNode, out);
-    if(historyHubTab === 'logs' && logModal?.classList.contains('open')) renderCanvasLog();
     setStatus(langIsEn()
         ? `RunningHub done · ${formatRunDuration(runMs)}`
         : `RunningHub 完成 · 用时 ${formatRunDuration(runMs)}`);

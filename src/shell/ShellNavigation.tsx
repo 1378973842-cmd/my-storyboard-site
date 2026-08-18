@@ -23,7 +23,8 @@ export type ShellScreen =
   | 'admin-users'
   | 'admin-rh-workflows'
   | 'admin-home-carousel'
-  | 'admin-announcements';
+  | 'admin-announcements'
+  | 'admin-platform-errors';
 
 type SubScreen =
   | 'my-favorites'
@@ -32,7 +33,8 @@ type SubScreen =
   | 'admin-users'
   | 'admin-rh-workflows'
   | 'admin-home-carousel'
-  | 'admin-announcements';
+  | 'admin-announcements'
+  | 'admin-platform-errors';
 
 const SUB_SCREENS = new Set<ShellScreen>([
   'my-favorites',
@@ -42,6 +44,7 @@ const SUB_SCREENS = new Set<ShellScreen>([
   'admin-rh-workflows',
   'admin-home-carousel',
   'admin-announcements',
+  'admin-platform-errors',
 ]);
 
 function isSubScreen(screen: ShellScreen): screen is SubScreen {
@@ -71,6 +74,7 @@ const VALID_SCREENS = new Set<ShellScreen>([
   'admin-rh-workflows',
   'admin-home-carousel',
   'admin-announcements',
+  'admin-platform-errors',
 ]);
 
 function readSnap(): Snap | null {
@@ -132,6 +136,7 @@ type ShellNavigationValue = {
   openAdminRhWorkflows: () => void;
   openAdminHomeCarousel: () => void;
   openAdminAnnouncements: () => void;
+  openAdminPlatformErrors: () => void;
   goBack: () => void;
   warmInfiniteCanvas: () => void;
 };
@@ -250,6 +255,7 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
   const openAdminRhWorkflows = useCallback(() => openSubPage('admin-rh-workflows'), [openSubPage]);
   const openAdminHomeCarousel = useCallback(() => openSubPage('admin-home-carousel'), [openSubPage]);
   const openAdminAnnouncements = useCallback(() => openSubPage('admin-announcements'), [openSubPage]);
+  const openAdminPlatformErrors = useCallback(() => openSubPage('admin-platform-errors'), [openSubPage]);
   const goBack = useCallback(() => {
     setScreen(returnToRef.current);
   }, []);
@@ -280,6 +286,7 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
       openAdminRhWorkflows,
       openAdminHomeCarousel,
       openAdminAnnouncements,
+      openAdminPlatformErrors,
       goBack,
       warmInfiniteCanvas,
     }),
@@ -305,6 +312,7 @@ export function ShellNavigationProvider({ children }: { children: React.ReactNod
       openAdminRhWorkflows,
       openAdminHomeCarousel,
       openAdminAnnouncements,
+      openAdminPlatformErrors,
       goBack,
       warmInfiniteCanvas,
     ],

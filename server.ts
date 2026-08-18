@@ -63,6 +63,10 @@ import {
   registerGalleryWorksRoutes,
 } from "./src/services/galleryWorks.js";
 import {
+  initPlatformErrorsSchema,
+  registerPlatformErrorsRoutes,
+} from "./src/services/platformErrors.js";
+import {
   registerProtectedUploadRoutes,
   publicStaticExceptUploads,
 } from "./src/services/protectedUploads.js";
@@ -683,6 +687,7 @@ async function startServer() {
     if (n > 0) console.log(`[auth] 已为 ${n} 张历史 AI 图片登记文件归属（管理员）`);
   }
   initCanvasGenerationsSchema(db);
+  initPlatformErrorsSchema(db);
   initGalleryWorksSchema(db);
   const requireAuth = createRequireAuth(db);
   const requireAdmin = createRequireAdmin(db);
@@ -725,6 +730,7 @@ async function startServer() {
   registerStudioVoiceBoardRoutes(app, db, requireAuth, requireAdmin, projectRoot);
   registerHomeCarouselRoutes(app, db, requireAdmin, projectRoot);
   registerCanvasGenerationsRoutes(app, db, projectRoot);
+  registerPlatformErrorsRoutes(app, db);
   registerGalleryWorksRoutes(app, db, projectRoot);
 
   // Project Management Routes

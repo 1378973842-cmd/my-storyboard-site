@@ -137,7 +137,8 @@ type StudioTopNavProps = {
     | 'admin-users'
     | 'admin-rh-workflows'
     | 'admin-home-carousel'
-    | 'admin-announcements';
+    | 'admin-announcements'
+    | 'admin-platform-errors';
   /** 画布页：Logo 下拉导航 */
   showCanvasBrandMenu?: boolean;
 };
@@ -158,6 +159,7 @@ const SUB_PAGE_TITLES: Record<NonNullable<StudioTopNavProps['subPage']>, string>
   'admin-rh-workflows': 'RunningHub 工作流',
   'admin-home-carousel': '主页轮播',
   'admin-announcements': '公告管理',
+  'admin-platform-errors': '报错日志',
 };
 
 type CoverCenterNavId = 'home' | 'workspace' | 'personal' | 'gallery';
@@ -752,6 +754,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
     openAdminRhWorkflows,
     openAdminHomeCarousel,
     openAdminAnnouncements,
+    openAdminPlatformErrors,
     goBack,
   } = useShellNavigation();
   const user = useAuthStore((s) => s.user);
@@ -945,6 +948,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
                   onAdminRhWorkflows={openAdminRhWorkflows}
                   onAdminHomeCarousel={openAdminHomeCarousel}
                   onAdminAnnouncements={openAdminAnnouncements}
+                  onAdminPlatformErrors={openAdminPlatformErrors}
                 />
               </div>
             ) : null}
@@ -991,6 +995,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
                 onAdminRhWorkflows={openAdminRhWorkflows}
                 onAdminHomeCarousel={openAdminHomeCarousel}
                 onAdminAnnouncements={openAdminAnnouncements}
+                onAdminPlatformErrors={openAdminPlatformErrors}
               />
             </div>
           ) : null}

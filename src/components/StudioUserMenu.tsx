@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  AlertTriangle,
   Camera,
   Images,
   LogOut,
@@ -70,6 +71,7 @@ type StudioUserMenuProps = {
   onAdminRhWorkflows: () => void;
   onAdminHomeCarousel?: () => void;
   onAdminAnnouncements?: () => void;
+  onAdminPlatformErrors?: () => void;
 };
 
 export const StudioUserMenu: React.FC<StudioUserMenuProps> = ({
@@ -80,6 +82,7 @@ export const StudioUserMenu: React.FC<StudioUserMenuProps> = ({
   onAdminRhWorkflows,
   onAdminHomeCarousel,
   onAdminAnnouncements,
+  onAdminPlatformErrors,
 }) => {
   const setUser = useAuthStore((s) => s.setUser);
   const [open, setOpen] = useState(false);
@@ -379,6 +382,16 @@ export const StudioUserMenu: React.FC<StudioUserMenuProps> = ({
                     ) : null}
                     {isAdmin ? (
                       <>
+                        {onAdminPlatformErrors ? (
+                          <MenuRow
+                            icon={AlertTriangle}
+                            label="报错日志"
+                            onClick={() => {
+                              close();
+                              onAdminPlatformErrors();
+                            }}
+                          />
+                        ) : null}
                         {onAdminAnnouncements ? (
                           <MenuRow
                             icon={Megaphone}
