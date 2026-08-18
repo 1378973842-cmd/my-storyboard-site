@@ -16039,7 +16039,46 @@ function syncOutputFavoriteButtons(scope){
         const url = wrap.dataset.outputUrl || wrap.querySelector('img')?.dataset?.url || '';
         syncOutputFavoriteBtn(wrap.querySelector('.output-fav-btn'), url);
     });
-    refreshIcons(scope instanceof Element ? scope : undefined);
+    // 只重绘当前范围图标；无 scope 时禁止 lucide.createIcons() 整页重建
+    if(scope instanceof Element) refreshIcons(scope);
+}
+function favoriteUrlAliases(url){
+    const raw = String(url || '').trim();
+    const normalized = normalizeFavoritePath(raw);
+    return new Set([raw, normalized].filter(Boolean));
+}
+function favoriteElMatchesUrl(el, aliases){
+    if(!el || !aliases?.size) return false;
+    const u = el.dataset?.url
+        || el.closest?.('[data-output-url]')?.dataset?.outputUrl
+        || el.closest?.('[data-url]')?.dataset?.url
+        || '';
+    if(!u) return false;
+    if(aliases.has(u)) return true;
+    const normalized = normalizeFavoritePath(u);
+    return Boolean(normalized && aliases.has(normalized));
+}
+function syncFavoriteButtonsForUrl(url, clickedBtn=null){
+    const aliases = favoriteUrlAliases(url);
+    if(!aliases.size) return;
+    const patch = (el) => {
+        if(!el) return;
+        syncOutputFavoriteBtn(el, url);
+    };
+    patch(clickedBtn);
+    if(outputFavoriteBtn && currentOutputLightboxUrl){
+        const box = favoriteUrlAliases(currentOutputLightboxUrl);
+        if([...aliases].some(a => box.has(a))) patch(outputFavoriteBtn);
+    }
+    const scan = (root, selector) => {
+        if(!root) return;
+        root.querySelectorAll(selector).forEach(el => {
+            if(el === clickedBtn) return;
+            if(favoriteElMatchesUrl(el, aliases)) patch(el);
+        });
+    };
+    scan(nodesEl, '.output-fav-btn, .gen-stage-cover-fav[data-url], .gen-stage-tile [data-action="fav"][data-url]');
+    scan(genHistoryPanelEl, '.gen-history-action-fav[data-url], .output-fav-btn, [data-action="fav"][data-url]');
 }
 function outputFavoriteBtnHtml(url){
     if(!url || isMissingAssetUrl(url)) return '';
@@ -16077,31 +16116,7 @@ async function toggleFavoriteForUrl(url, meta={}, node=null, btn=null){
         if(!res.ok) throw new Error(data.error || (langIsEn() ? 'Favorite failed' : '收藏失败'));
         const canonical = normalizeFavoritePath(data.item?.thumbnail_path || url);
         rememberFavoritePath(canonical || url, !!data.favorited);
-        syncOutputFavoriteBtn(btn, url);
-        if(btn) refreshIcons(btn.parentElement || btn);
-        // 同步节点结果面板与 Output 卡上的星标
-        syncOutputFavoriteButtons();
-        if(outputFavoriteBtn && currentOutputLightboxUrl){
-            syncOutputFavoriteBtn(outputFavoriteBtn, currentOutputLightboxUrl);
-            refreshIcons(outputFavoriteBtn);
-        }
-        if(genHistoryPanelEl){
-            genHistoryPanelEl.querySelectorAll(`.gen-history-action-fav[data-url], .output-fav-btn`).forEach(el => {
-                const u = el.dataset.url || el.closest('[data-url]')?.dataset.url || '';
-                if(u && (normalizeFavoritePath(u) === canonical || u === url || normalizeFavoritePath(u) === normalizeFavoritePath(url))){
-                    syncOutputFavoriteBtn(el, url);
-                }
-            });
-            refreshIcons(genHistoryPanelEl);
-        }
-        if(nodesEl){
-            nodesEl.querySelectorAll('.gen-stage-cover-fav[data-url], .gen-stage-tile [data-action="fav"][data-url]').forEach(el => {
-                const u = el.dataset.url || '';
-                if(u && (normalizeFavoritePath(u) === canonical || u === url || normalizeFavoritePath(u) === normalizeFavoritePath(url))){
-                    syncOutputFavoriteBtn(el, url);
-                }
-            });
-        }
+        syncFavoriteButtonsForUrl(canonical || url, btn);
         setStatus(data.favorited ? (langIsEn() ? 'Added to favorites' : '已加入我的收藏') : (langIsEn() ? 'Removed from favorites' : '已取消收藏'));
     } catch(e) {
         setStatus(e instanceof Error ? e.message : (langIsEn() ? 'Favorite failed' : '收藏失败'));

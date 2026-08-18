@@ -251,6 +251,8 @@
         { "id": "AG236", "desc": "生成历史：去掉本板日志；成片库范围=所有项目/当前项目（圆角胶囊）+ 图片/视频/音频历史；失败上报管理员报错日志", "status": "done", "priority": 270 },
         { "id": "AG237", "desc": "修：大板出图中切项目卡住——切板先 abort 旧图解码；onload 改尺寸节流；切板不再空等整板保存", "status": "done", "priority": 271 },
         { "id": "AG237c", "desc": "check：canvas-switch-abort-media", "status": "done", "priority": 271 },
+        { "id": "AG238", "desc": "修：收藏一张图卡顿——只改同 URL 星标 class，禁止 lucide 整页 createIcons", "status": "done", "priority": 272 },
+        { "id": "AG238c", "desc": "check：favorite-star-sync", "status": "done", "priority": 272 },
         { "id": "AG206c", "desc": "check：image-edit-viewport-focus", "status": "done", "priority": 240 },
         { "id": "AG199c", "desc": "check：rh-output-layout（含 RH skip stage / 去框）", "status": "done", "priority": 233 },
         { "id": "AG30", "desc": "图片组：子图自然尺寸落地后防抖重排扩容，避免默认框装不下", "status": "done", "priority": 51 },
