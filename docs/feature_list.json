@@ -259,6 +259,7 @@
         { "id": "AG241", "desc": "性能：画布图片节点/生成图台走 WebP 缩略图（1024px，/uploads/gallery/*_thumb.webp）；AI 落盘与上传同步生成；放大/编辑/下载读原图；存量图已跑 scripts/build-upload-thumbnails.mjs 补齐", "status": "done", "priority": 275 },
         { "id": "AG242", "desc": "性能：服务端 gzip 压缩（compression）+ 静态资源缓存头（dist/assets 带 hash immutable 一年 / index.html no-cache / 其余 1 天）+ 部署脚本每次清旧 dist/assets（107M→3.7M）", "status": "done", "priority": 276 },
         { "id": "AG243", "desc": "修复：图片组子图即时挂载（右键加入图片组不再出空壳）；图台叠卡 peek/历史缩略卡走 WebP 缩略图；放大查看先缩略图占位再换原图 + 关闭复用解码位图", "status": "done", "priority": 277 },
+        { "id": "AG244", "desc": "部署版本号：v1.0.N（git 提交总数自动递增，vite 构建写 dist/version.json 含 revision/builtAt）；头像菜单底部显示版本号；部署报告带版本号；version.json no-cache 保证新版本检测即时", "status": "done", "priority": 278 },
         { "id": "AG206c", "desc": "check：image-edit-viewport-focus", "status": "done", "priority": 240 },
         { "id": "AG199c", "desc": "check：rh-output-layout（含 RH skip stage / 去框）", "status": "done", "priority": 233 },
         { "id": "AG30", "desc": "图片组：子图自然尺寸落地后防抖重排扩容，避免默认框装不下", "status": "done", "priority": 51 },
