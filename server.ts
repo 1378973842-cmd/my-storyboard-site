@@ -2257,6 +2257,9 @@ ${pixarInstruction}
           if (rel === "index.html") {
             // 入口必须每次重新验证，否则部署后拿到旧 hash 引用会 404
             res.setHeader("Cache-Control", "no-cache");
+          } else if (rel === "version.json") {
+            // 版本号每次部署都会变，必须 no-cache，否则客户端拿旧值导致新版本检测/显示失效
+            res.setHeader("Cache-Control", "no-cache");
           } else if (rel.startsWith("assets/")) {
             // Vite 产物文件名带 content hash，可永久缓存
             res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
