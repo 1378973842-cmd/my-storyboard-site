@@ -479,3 +479,4 @@
 - 性能优化已上线并验证：画布缩略图 2742 张生成(363M)、gzip/immutable 缓存生效、旧 dist/assets 107M→3.7M
 - 画布修复上线：图片组子图挂载、图台小图缩略图、放大查看先占位再换原图+复用缓存
 - 版本号功能上线 v1.0.91：git 提交总数自动递增 + 头像菜单展示 + version.json no-cache；注意先 commit 再 build 再 deploy 顺序
+- 拖入/粘贴图片 blob 占位秒现已上线 v1.0.95；deploy:safe 前置 build:prod 根治版本号偏小

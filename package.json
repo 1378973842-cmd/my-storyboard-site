@@ -20,7 +20,7 @@
     "check:mx-shell": "tsx scripts/check-mx-shell-prompt.ts",
     "recover:canvas-output": "node scripts/recover-canvas-output-from-logs.mjs",
     "backup:remote": "node scripts/backup-remote-once.mjs",
-    "deploy:safe": "node scripts/backup-remote-once.mjs && node scripts/deploy-remote-once.mjs"
+    "deploy:safe": "npm run build:prod && node scripts/backup-remote-once.mjs && node scripts/deploy-remote-once.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
