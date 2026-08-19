@@ -22770,7 +22770,7 @@ function genStageMediaHtml(url, className=''){
     if(isVideoUrl(url)){
         return `<video${cls} src="${escapeAttr(url)}" muted playsinline preload="metadata" draggable="false"></video>`;
     }
-    return `<img${cls} src="${escapeAttr(url)}" alt="" draggable="false" loading="lazy" decoding="async">`;
+    return `<img${cls} src="${escapeAttr(url)}" alt="" draggable="false" loading="eager" decoding="sync">`;
 }
 function formatGenStageVideoTime(sec){
     const n = Math.max(0, Number(sec) || 0);
@@ -22812,7 +22812,7 @@ function genStageThumbHtml(url){
     if(isVideoUrl(url)){
         return `<video src="${escapeAttr(url)}" muted playsinline preload="metadata" draggable="false"></video>`;
     }
-    return `<img src="${escapeAttr(url)}" alt="" loading="lazy" decoding="async">`;
+    return `<img src="${escapeAttr(url)}" alt="" loading="eager" decoding="sync">`;
 }
 function genStageTileAspectCss(node){
     const labeled = aspectLabelToCss(genStageAspectLabelFromNode(node));

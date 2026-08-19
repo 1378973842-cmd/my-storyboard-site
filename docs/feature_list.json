@@ -254,6 +254,8 @@
         { "id": "AG238", "desc": "修：收藏一张图卡顿——只改同 URL 星标 class，禁止 lucide 整页 createIcons", "status": "done", "priority": 272 },
         { "id": "AG238c", "desc": "check：favorite-star-sync", "status": "done", "priority": 272 },
         { "id": "AG239", "desc": "UI：框选聚合端口线宽按普通端口比例缩小（19px 圆 / 1.9px 线），十字不再糊成实心点", "status": "done", "priority": 273 },
+        { "id": "AG240", "desc": "修：生成节点结果图立即加载（eager/sync），禁止 lazy+async 在 CSS transform 画布上延迟出图", "status": "done", "priority": 274 },
+        { "id": "AG240c", "desc": "check：gen-stage-eager-image", "status": "done", "priority": 274 },
         { "id": "AG206c", "desc": "check：image-edit-viewport-focus", "status": "done", "priority": 240 },
         { "id": "AG199c", "desc": "check：rh-output-layout（含 RH skip stage / 去框）", "status": "done", "priority": 233 },
         { "id": "AG30", "desc": "图片组：子图自然尺寸落地后防抖重排扩容，避免默认框装不下", "status": "done", "priority": 51 },

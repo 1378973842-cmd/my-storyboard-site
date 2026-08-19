@@ -30,3 +30,4 @@
 3. 运行 `npm run log:daily`，将当天 Git 提交同步到 `docs/DAILY_LOG.md`；必要时追加：  
    `npm run log:daily -- --note "无法用 commit 概括的说明"`  
 4. 新环境首次可执行一次 `npm run hooks:install`，之后每次 `git commit` 会自动追加一行到 `docs/DAILY_LOG.md`。
+5. **生产部署成功后**：必须按 `.cursor/rules/deploy-update-report.mdc` 写一份 DreamGrid「系统消息」体例的更新报告（标题 + 正文，可供公告管理粘贴）。

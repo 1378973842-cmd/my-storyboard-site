@@ -1,11 +1,13 @@
 # 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  1. **即将推送**：`deploy` AG239 — 框选聚合端口 `--port-stroke` 从 4.5px 改为 1.9px（按 19/45 与普通端口同比例），十字外包圆圈可读。
-  2. **扩图暂关**：`IMAGE_EXPAND_ENABLED = false`（恢复改 true）。
-  3. 远端备份：`/root/studio-backups/studio-20260817-122749.tar.gz`（约 5.0G）；策略留 3 份。
-- **验证状态**：`node init.mjs` ✅（tsc + lint + vite build 通过，2026-08-18）。
+  1. **即将上线**：AG240 — 生成节点结果图 `loading="eager" decoding="sync"`，避免 CSS transform 画布上 lazy/async 延迟出图。列表封面/历史库/图钉仍 lazy。
+  2. **流程**：生产部署成功后写 DreamGrid「系统消息」体例更新报告（`.cursor/rules/deploy-update-report.mdc`）。
+  3. **扩图暂关**：`IMAGE_EXPAND_ENABLED = false`（恢复改 true）。
+  4. 远端备份：`/root/studio-backups/studio-20260819-100038.tar.gz`（约 5.9G）；策略留 3 份。
+- **验证状态**：`node init.mjs` ✅（tsc + lint + vite build 通过，2026-08-19）。
 - **本地网站**：`http://localhost:3005`。
+- **访问**：`http://8.163.127.198:3000`
 - **待办**：日间选中色是否改钴蓝待导演拍板。
 - **已知未覆盖（需导演决定是否继续）**：
   1. 画布「选择画布」入口页（`.canvas-gate`）仍是炭黑。
@@ -19,7 +21,7 @@
 
 ```
 继续 gemini-deploy。先读 docs/HANDOFF.md。
-线上 deploy 含 AG239：框选聚合端口线宽按比例缩小。
+即将上线 AG240：生成节点结果图立即加载。
 扩图入口仍关；gate 选择页仍是深色。
 按导演下一条继续。
 ```
