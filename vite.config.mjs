@@ -10,9 +10,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function resolveBuildVersion() {
   try {
+    const count = execSync('git rev-list --count HEAD', { encoding: 'utf8', cwd: __dirname }).trim();
+    return count ? `v1.0.${count}` : `v1.0.${Date.now()}`;
+  } catch {
+    return `v1.0.${Date.now()}`;
+  }
+}
+
+function resolveGitRevision() {
+  try {
     return execSync('git rev-parse --short HEAD', { encoding: 'utf8', cwd: __dirname }).trim();
   } catch {
-    return String(Date.now());
+    return '';
   }
 }
 
@@ -23,6 +32,7 @@ function emitVersionJsonPlugin() {
       const outDir = options.dir || path.join(__dirname, 'dist');
       const payload = {
         version: resolveBuildVersion(),
+        revision: resolveGitRevision(),
         builtAt: new Date().toISOString(),
       };
       writeFileSync(path.join(outDir, 'version.json'), `${JSON.stringify(payload)}\n`, 'utf8');
