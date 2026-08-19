@@ -188,7 +188,12 @@ export function resolveFullUploadPath(projectRoot: string, thumbnailPath: string
   return normalized;
 }
 
-async function ensureGalleryThumbnail(
+/**
+ * 生成 /uploads/gallery/{base}_thumb.webp 缩略图（画布节点渲染与画廊/成片库共用）。
+ * 尺寸取 1024：画布图片节点最短边 496、最长边约 882，1024 保证放大到画布尺寸仍清晰，
+ * 同时把 4K 原图压到 WebP，省带宽与解码成本。放大查看/编辑/下载仍走原图。
+ */
+export async function ensureGalleryThumbnail(
   projectRoot: string,
   sourcePath: string
 ): Promise<string> {
@@ -207,7 +212,7 @@ async function ensureGalleryThumbnail(
   try {
     await sharp(abs)
       .rotate()
-      .resize(640, 640, { fit: "inside", withoutEnlargement: true })
+      .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
       .webp({ quality: 82 })
       .toFile(thumbAbs);
     return thumbRel;

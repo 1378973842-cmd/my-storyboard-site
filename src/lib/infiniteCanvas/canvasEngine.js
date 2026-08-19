@@ -15642,7 +15642,7 @@ function renderNode(node){
             const floatBadge = imageMediaFloatTitleHtml(node);
             if(floatBadge) el.classList.add('has-edit-origin');
             // 说明/文件名在预览框上方，不叠在画面内角标上
-            body.innerHTML = `${floatBadge}<div class="image-preview-wrap">${missing ? missingAssetHtml(node.url) : `<img src="${escapeAttr(node.url)}" draggable="false" alt="" loading="lazy" decoding="async">`}${skipBadge}</div>${stillCaption}`;
+            body.innerHTML = `${floatBadge}<div class="image-preview-wrap">${missing ? missingAssetHtml(node.url) : `<img src="${escapeAttr(canvasThumbUrl(node.url))}" data-full-src="${escapeAttr(node.url)}" draggable="false" alt="" loading="lazy" decoding="async">`}${skipBadge}</div>${stillCaption}`;
             if(!missing && mediaKind !== 'image'){
                 const mediaHtml = mediaKind === 'video'
                     ? `<div class="media-card video-card"><div class="video-player-wrap"><video src="${escapeAttr(node.url)}" data-url="${escapeAttr(node.url)}" controls preload="auto" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video><button type="button" class="btn-capture-frame">${langIsEn() ? 'Capture frame' : '截取当前帧'}</button></div></div>`
@@ -22770,7 +22770,7 @@ function genStageMediaHtml(url, className=''){
     if(isVideoUrl(url)){
         return `<video${cls} src="${escapeAttr(url)}" muted playsinline preload="metadata" draggable="false"></video>`;
     }
-    return `<img${cls} src="${escapeAttr(url)}" alt="" draggable="false" loading="eager" decoding="sync">`;
+    return `<img${cls} src="${escapeAttr(canvasThumbUrl(url))}" data-full-src="${escapeAttr(url)}" alt="" draggable="false" loading="eager" decoding="sync">`;
 }
 function formatGenStageVideoTime(sec){
     const n = Math.max(0, Number(sec) || 0);
@@ -31565,6 +31565,27 @@ function isVideoUrl(url){
     const clean = (url || '').split('?')[0].toLowerCase();
     return /\.(mp4|webm|mov|m4v|mkv)$/.test(clean);
 }
+/** 画布展示层：把 /uploads/xxx.png 映射为 WebP 缩略图（/uploads/gallery/{name}_thumb.webp）。
+ *  视频/音频/头像/封面/发声/画廊已缩略的路径原样返回；放大查看/编辑/下载仍读原图（node.url / data-preview-url）。 */
+function canvasThumbUrl(url){
+    if(!url) return url;
+    const clean = String(url).split('?')[0];
+    if(!clean.startsWith('/uploads/')) return url;
+    if(isVideoUrl(clean) || isAudioUrl(clean)) return url;
+    if(clean.startsWith('/uploads/avatars/') || clean.startsWith('/uploads/covers/') || clean.startsWith('/uploads/voice/') || clean.startsWith('/uploads/gallery/')) return url;
+    if(!/\.[a-z0-9]+$/i.test(clean)) return url;
+    const name = clean.replace(/^\/uploads\//, '').replace(/\.[a-z0-9]+$/i, '').split('/').pop();
+    if(!name) return url;
+    return `/uploads/gallery/${name}_thumb.webp`;
+}
+// 缩略图缺失（历史图未生成 thumb）时回退原图；error 不冒泡，用捕获阶段统一兜底
+window.addEventListener('error', (e) => {
+    const t = e?.target;
+    if(!t || t.tagName !== 'IMG') return;
+    const full = t.getAttribute && t.getAttribute('data-full-src');
+    if(!full) return;
+    if(t.getAttribute('src') !== full) t.setAttribute('src', full);
+}, true);
 function mediaKindForOutputItem(item){
     const explicit = String(item?.kind || item?.mediaKind || '').toLowerCase();
     if(['image','video','audio','text','file'].includes(explicit)) return explicit;

@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { writeFile } from "fs/promises";
 import express from "express";
+import compression from "compression";
 import Database from "better-sqlite3";
 import { Agent, setGlobalDispatcher, FormData } from "undici";
 import { createServer as createViteServer } from "vite";
@@ -57,6 +58,7 @@ import {
   createPersistImageHandler,
   backfillLegacyGeneratedImageOwnership,
   recordFileOwnership,
+  ensureGalleryThumbnail,
 } from "./src/services/canvasGenerations.js";
 import {
   initGalleryWorksSchema,
@@ -436,6 +438,9 @@ async function persistAiImageToLocalStorage(
 
   await writeFile(absPath, buffer);
 
+  // 落盘后同步生成画布渲染用的 WebP 缩略图；失败静默回退原图
+  await ensureGalleryThumbnail(projectRoot, relativeWebPath);
+
   try {
     db.prepare(
       `INSERT INTO generated_images (id, relative_path, source_kind, bytes, mime) VALUES (?, ?, ?, ?, ?)`
@@ -708,6 +713,7 @@ async function startServer() {
     app.set("trust proxy", 1);
   }
 
+  app.use(compression());
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
   registerProtectedUploadRoutes(app, db, projectRoot, requireAuth);
@@ -2244,8 +2250,25 @@ ${pixarInstruction}
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(projectRoot, "dist");
-    app.use(express.static(distPath));
+    app.use(
+      express.static(distPath, {
+        setHeaders: (res, filePath) => {
+          const rel = path.relative(distPath, filePath).replace(/\\/g, "/");
+          if (rel === "index.html") {
+            // 入口必须每次重新验证，否则部署后拿到旧 hash 引用会 404
+            res.setHeader("Cache-Control", "no-cache");
+          } else if (rel.startsWith("assets/")) {
+            // Vite 产物文件名带 content hash，可永久缓存
+            res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+          } else {
+            // 无 hash 的静态资源（png/glb/canvas 等）给短缓存
+            res.setHeader("Cache-Control", "public, max-age=86400");
+          }
+        },
+      })
+    );
     app.get("*", (req, res) => {
+      res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

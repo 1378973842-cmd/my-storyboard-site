@@ -61,7 +61,7 @@ import {
   updateCanvasCollection,
 } from "./canvasCollectionsStore.js";
 import { requireSiteGate } from "./siteAccessGate.js";
-import { recordCanvasGeneration, recordFileOwnership } from "./canvasGenerations.js";
+import { ensureGalleryThumbnail, recordCanvasGeneration, recordFileOwnership } from "./canvasGenerations.js";
 import {
   listRunningHubApiKeysForClient,
   listRunningHubAppsForConfig,
@@ -556,7 +556,7 @@ export function registerInfiniteCanvasRoutes(
     res.json({ exists });
   });
 
-  app.post("/api/ai/upload", gate, upload.array("files"), (req, res) => {
+  app.post("/api/ai/upload", gate, upload.array("files"), async (req, res) => {
     const files = (req.files as Express.Multer.File[]) || [];
     const uploaded: { url: string; name: string; kind: string }[] = [];
     const userId = req.authUser?.id;
@@ -580,6 +580,7 @@ export function registerInfiniteCanvasRoutes(
       writeFileSync(abs, file.buffer);
       const url = `/uploads/canvas/${filename}`;
       if (userId && deps?.db) recordFileOwnership(deps.db, url, userId);
+      if (kind === "image") await ensureGalleryThumbnail(projectRoot, url);
       uploaded.push({
         url,
         name: displayName || filename,

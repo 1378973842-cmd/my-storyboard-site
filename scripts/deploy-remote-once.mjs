@@ -102,6 +102,9 @@ async function main() {
     conn.sftp((err, s) => (err ? reject(err) : resolve(s)));
   });
 
+  console.log('>>> 清理远端旧 dist/assets（hash 产物，删除后全量重传）…');
+  await sshExec(conn, `cd ${REMOTE} && rm -rf dist/assets`);
+
   console.log('>>> 上传 dist/assets …');
   await sftpUploadDir(sftp, path.join(ROOT, 'dist', 'assets'), `${REMOTE}/dist/assets`);
   console.log('>>> 上传 dist/canvas …');
