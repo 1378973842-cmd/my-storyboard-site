@@ -5464,6 +5464,8 @@ function serializableCanvasNode(node){
     delete copy._layoutH;
     delete copy._stageSlots;
     delete copy._lightboxFocusUrl;
+    // 上传中的占位节点 url 是本地 blob:，禁止落盘，否则刷新后成死链
+    if(copy.url && String(copy.url).startsWith('blob:')) delete copy.url;
     if(Array.isArray(copy.history)){
         copy.history = copy.history.map(slimHistoryEntryForSave);
     }
@@ -9625,21 +9627,46 @@ async function uploadImagesToImageBatch(batchId, files){
     if(!batch || batch.type !== 'imageBatch') return;
     const imgs = [...files].filter(file => mediaKindForUpload(file) === 'image');
     if(!imgs.length) return;
-    const form = new FormData();
-    imgs.forEach(file => form.append('files', file));
-    const res = await apiFetch('/api/ai/upload', {method:'POST', body:form});
-    if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Upload failed' : '上传失败'));
-    const data = await res.json();
-    const uploaded = (data.files || []).filter(file => file?.url);
-    if(!uploaded.length) throw new Error(langIsEn() ? 'Upload returned no image URL' : '上传未返回图片地址');
+    // 立即用本地 blob 占位建子图（先于上传显示），原图上传完再换真实 URL
     pushUndo();
     const base = imageBatchAllChildImages(batch).length;
-    uploaded.forEach((file, i) => createImageBatchChild(batch, file.url, file.name, base + i));
+    const placeholderIds = imgs.map((file, i) => {
+        const child = createImageBatchChild(batch, URL.createObjectURL(file), String(file?.name || '').trim() || outputImageName(''), base + i);
+        return child?.id;
+    }).filter(Boolean);
     layoutGroupChildren(batch, { resizeGroup: 'auto', layoutAllItems: true, updateDom: true });
     refreshNodes([batch.id]);
     scheduleImageBatchRelayout(batch.id, 'auto');
     scheduleLinkGeometryRefresh(new Set([batch.id, ...(batch.items || [])]));
-    scheduleSave();
+    const form = new FormData();
+    imgs.forEach(file => form.append('files', file));
+    try {
+        const res = await apiFetch('/api/ai/upload', {method:'POST', body:form});
+        if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Upload failed' : '上传失败'));
+        const data = await res.json();
+        const uploaded = (data.files || []).filter(file => file?.url);
+        if(!uploaded.length) throw new Error(langIsEn() ? 'Upload returned no image URL' : '上传未返回图片地址');
+        uploaded.forEach((file, i) => {
+            const node = nodes.find(n => n.id === placeholderIds[i]);
+            if(!node) return;
+            if(String(node.url).startsWith('blob:')) URL.revokeObjectURL(node.url);
+            node.url = file.url;
+            node.name = String(imgs[i]?.name || file.name || '').trim() || outputImageName(file.url);
+        });
+        refreshNodes([batch.id]);
+        scheduleImageBatchRelayout(batch.id, 'auto');
+        scheduleSave();
+    } catch(err) {
+        const ids = new Set(placeholderIds);
+        placeholderIds.forEach(id => {
+            const n = nodes.find(x => x.id === id);
+            if(n?.url && String(n.url).startsWith('blob:')) URL.revokeObjectURL(n.url);
+        });
+        nodes = nodes.filter(n => !ids.has(n.id));
+        batch.items = (batch.items || []).filter(id => !ids.has(id));
+        render({ force: true });
+        throw err;
+    }
 }
 function bindImageBatchUpload(body, batch){
     const btn = body.querySelector('.image-batch-upload-btn');
@@ -10617,42 +10644,55 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
         return onlyImages ? kind === 'image' : ['image','video','audio'].includes(kind);
     });
     if(!supported.length) return [];
-    const form = new FormData();
-    supported.forEach(file => form.append('files', file));
-    const data = await apiFetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
     // 未显式传点时落在最近鼠标画布坐标（粘贴/导入），勿默认视口中心
     const base = point || lastMouseBoard || screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
+    const imageFiles = supported.filter(f => mediaKindForUpload(f) === 'image');
+    const otherFiles = supported.filter(f => mediaKindForUpload(f) !== 'image');
     const created = [];
-    (data.files || []).forEach((file, i) => {
-        const kind = file.kind || mediaKindForUpload(supported[i]);
-        // 优先浏览器 File.name（UTF-8 正确）；服务端 originalname 在部分环境会 Latin-1 乱码
-        const displayName = String(supported[i]?.name || file.name || '').trim() || outputImageName(file.url);
+
+    // 图片：立即用本地 blob 占位建节点，松手即见，不再等原图上传
+    imageFiles.forEach((file, i) => {
         const at = {x:base.x + i * 36, y:base.y + i * 36};
-        if(kind === 'video' && file.url){
-            const node = buildUploadedVideoNode(file.url, at, displayName);
-            ensureNodeFloatIndex(node, 'video');
-            nodes.push(node);
-            created.push(node);
-            return;
-        }
-        const node = {
+        nodes.push({
             id:uid('img'),
             type:'image',
             x:at.x,
             y:at.y,
-            url:file.url,
-            name:displayName,
-            mediaKind:kind
-        };
-        nodes.push(node);
-        created.push(node);
+            url:URL.createObjectURL(file),
+            name:String(file?.name || '').trim() || outputImageName(''),
+            mediaKind:'image'
+        });
+        created.push(nodes[nodes.length - 1]);
     });
+
+    // 视频/音频：保持原「先上传完再建节点」逻辑（未报性能问题，勿动）
+    if(otherFiles.length){
+        const form = new FormData();
+        otherFiles.forEach(file => form.append('files', file));
+        const data = await apiFetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
+        (data.files || []).forEach((file, i) => {
+            const kind = file.kind || mediaKindForUpload(otherFiles[i]);
+            const displayName = String(otherFiles[i]?.name || file.name || '').trim() || outputImageName(file.url);
+            const at = {x:base.x + (imageFiles.length + i) * 36, y:base.y + (imageFiles.length + i) * 36};
+            if(kind === 'video' && file.url){
+                const node = buildUploadedVideoNode(file.url, at, displayName);
+                ensureNodeFloatIndex(node, 'video');
+                nodes.push(node);
+                created.push(node);
+                return;
+            }
+            const node = {id:uid('img'), type:'image', x:at.x, y:at.y, url:file.url, name:displayName, mediaKind:kind};
+            nodes.push(node);
+            created.push(node);
+        });
+    }
+
     // 多张静帧默认打成图片组（opts.group === false 时才散落）
     const imageNodes = created.filter(n => n?.type === 'image' && n?.url && mediaKindForNode(n) === 'image');
     if(imageNodes.length > 1 && opts.group !== false){
         created.batch = createImageBatchForUploadedNodes(created, base);
     }
-    render();
+    render({ force: true });
     if(created.batch?.id){
         relayoutGroupsWithMeasuredChrome([created.batch.id], 'auto');
         // 子图 onload 后还会再撑开；再排一次兜底首帧测量不准
@@ -10661,7 +10701,48 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
             scheduleImageBatchRelayout(created.batch.id, 'auto');
         });
     }
-    scheduleSave();
+
+    // 图片后台上传，完成后把占位 blob 换成真实 URL 再落盘
+    if(imageFiles.length){
+        const placeholderIds = imageFiles.map((_, i) => created[i]?.id).filter(Boolean);
+        const form = new FormData();
+        imageFiles.forEach(file => form.append('files', file));
+        void apiFetch('/api/ai/upload', {method:'POST', body:form})
+            .then(async r => {
+                if(!r.ok) throw new Error(await responseErrorMessage(r, langIsEn() ? 'Upload failed' : '上传失败'));
+                return r.json();
+            })
+            .then(data => {
+                (data.files || []).forEach((file, i) => {
+                    const node = nodes.find(n => n.id === placeholderIds[i]);
+                    if(!node || !file?.url) return;
+                    if(String(node.url).startsWith('blob:')) URL.revokeObjectURL(node.url);
+                    node.url = file.url;
+                    node.mediaKind = file.kind || 'image';
+                    node.name = String(imageFiles[i]?.name || file.name || '').trim() || outputImageName(file.url);
+                });
+                refreshNodes(placeholderIds);
+                scheduleSave();
+            })
+            .catch(err => {
+                const ids = new Set(placeholderIds);
+                placeholderIds.forEach(id => {
+                    const n = nodes.find(x => x.id === id);
+                    if(n?.url && String(n.url).startsWith('blob:')) URL.revokeObjectURL(n.url);
+                });
+                nodes = nodes.filter(n => !ids.has(n.id));
+                connections = connections.filter(c => !ids.has(c.from) && !ids.has(c.to));
+                if(created.batch?.id){
+                    const b = nodes.find(n => n.id === created.batch.id);
+                    if(b) b.items = (b.items || []).filter(id => !ids.has(id));
+                }
+                render({ force: true });
+                setStatus('Ready');
+                showErrorModal(err?.message || (langIsEn() ? 'Image import failed' : '导入图片失败'), langIsEn() ? 'Image import failed' : '导入图片失败');
+            });
+    } else {
+        scheduleSave();
+    }
     return created;
 }
 async function uploadImages(files, point){
@@ -12058,18 +12139,45 @@ async function fillImageNode(nodeId, files, opts={}){
         }
         return;
     }
-    const form = new FormData();
-    form.append('files', imgs[0]);
-    const data = await apiFetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
-    const file = data.files?.[0];
+    const file = imgs[0];
     const node = nodes.find(n => n.id === nodeId);
-    if(file && node){
-        node.url = file.url;
-        node.name = file.name;
-        node.mediaKind = file.kind || mediaKindForUpload(imgs[0]);
-        render();
-        scheduleSave();
-    }
+    if(!node || !file) return;
+    // 立即用本地 blob 占位显示，原图后台上传完再换真实 URL
+    const prevUrl = node.url || '';
+    node.url = URL.createObjectURL(file);
+    node.mediaKind = mediaKindForUpload(file);
+    node.name = String(file?.name || '').trim() || outputImageName('');
+    render({ force: true });
+    const form = new FormData();
+    form.append('files', file);
+    void apiFetch('/api/ai/upload', {method:'POST', body:form})
+        .then(async r => {
+            if(!r.ok) throw new Error(await responseErrorMessage(r, langIsEn() ? 'Upload failed' : '上传失败'));
+            return r.json();
+        })
+        .then(data => {
+            const up = data.files?.[0];
+            const cur = nodes.find(n => n.id === nodeId);
+            if(up && cur && String(cur.url).startsWith('blob:')){
+                URL.revokeObjectURL(cur.url);
+                cur.url = up.url;
+                cur.name = String(file?.name || up.name || '').trim() || outputImageName(up.url);
+                cur.mediaKind = up.kind || mediaKindForUpload(file);
+                refreshNodes([nodeId]);
+                scheduleSave();
+            }
+        })
+        .catch(err => {
+            const cur = nodes.find(n => n.id === nodeId);
+            if(cur && String(cur.url).startsWith('blob:')){
+                URL.revokeObjectURL(cur.url);
+                cur.url = prevUrl;
+                cur.mediaKind = prevUrl ? (isVideoUrl(prevUrl) ? 'video' : isAudioUrl(prevUrl) ? 'audio' : 'image') : 'image';
+                render({ force: true });
+            }
+            setStatus('Ready');
+            showErrorModal(err?.message || (langIsEn() ? 'Image import failed' : '导入图片失败'), langIsEn() ? 'Image import failed' : '导入图片失败');
+        });
 }
 function setImageNodeFromOutput(nodeId, url){
     const node = nodes.find(n => n.id === nodeId);
