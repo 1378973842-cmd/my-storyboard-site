@@ -9578,6 +9578,8 @@ function createImageBatchChild(batch, url, name, index){
     nodes.push(child);
     batch.items = batch.items || [];
     batch.items.push(child.id);
+    // 子图是独立 .node，只进数据不进 DOM 会让组显示成空壳；即时局部挂载（整板 render 会重建，幂等）
+    if(nodesEl) mountNodeDom(child);
     return child;
 }
 function addImageBatchNode(point){
@@ -22812,7 +22814,7 @@ function genStageThumbHtml(url){
     if(isVideoUrl(url)){
         return `<video src="${escapeAttr(url)}" muted playsinline preload="metadata" draggable="false"></video>`;
     }
-    return `<img src="${escapeAttr(url)}" alt="" loading="eager" decoding="sync">`;
+    return `<img src="${escapeAttr(canvasThumbUrl(url))}" data-full-src="${escapeAttr(url)}" alt="" loading="eager" decoding="sync">`;
 }
 function genStageTileAspectCss(node){
     const labeled = aspectLabelToCss(genStageAspectLabelFromNode(node));
@@ -34046,7 +34048,23 @@ function openOutputLightbox(url, out){
     outputLightboxImg.onload = () => {
         outputResolutionText(`${outputLightboxImg.naturalWidth} x ${outputLightboxImg.naturalHeight}`, meta);
     };
-    outputLightboxImg.src = url;
+    const urlPath = String(url).split('?')[0];
+    const thumbSrc = canvasThumbUrl(url);
+    const alreadyFull = String(outputLightboxImg.getAttribute('src') || '').split('?')[0] === urlPath;
+    if(alreadyFull){
+        // 关闭时保留了解码位图，且就是这张原图：零延迟复用，不重设 src
+        outputResolutionText(`${outputLightboxImg.naturalWidth} x ${outputLightboxImg.naturalHeight}`, meta);
+    } else {
+        // 先用画布已加载的缩略图占位（点开即见），原图后台加载完再无缝换高清
+        outputLightboxImg.src = thumbSrc;
+        if(thumbSrc !== url){
+            const fullImg = new Image();
+            fullImg.onload = () => {
+                if(currentOutputLightboxUrl === url) outputLightboxImg.src = url;
+            };
+            fullImg.src = url;
+        }
+    }
     outputCompareResult.src = url;
     outputCompareOriginal.src = currentOutputCompareUrl || '';
     outputPreview.ondblclick = e => {
@@ -34066,7 +34084,7 @@ function closeOutputLightbox(){
     outputLightbox.classList.remove('open');
     syncOutputLightboxPortal(false);
     setOutputCompareMode(false);
-    outputLightboxImg.src = '';
+    // ponytail: 保留已解码位图不置空，下次打开同一张原图零延迟（用少量内存换反复查看的流畅）
     outputLightboxVideo.pause();
     outputLightboxVideo.src = '';
     outputLightboxVideo.style.display = 'none';
