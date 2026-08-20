@@ -14170,57 +14170,6 @@ body[data-canvas-theme="light"] #canvas-topbar-slot .current-canvas-time { color
   overflow:visible;
   user-select:none;
 }
-.image-expand-range-bar {
-  position:absolute;
-  left:0;
-  right:0;
-  top:-46px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:12px;
-  pointer-events:auto;
-  z-index:4;
-}
-.image-expand-confirm-range {
-  border:0;
-  border-radius:999px;
-  padding:8px 16px;
-  font-size:12px;
-  font-weight:700;
-  letter-spacing:.02em;
-  color:#111;
-  background:linear-gradient(180deg, #ffcb7a, #ffb866);
-  box-shadow:0 10px 28px rgba(255,184,102,.24);
-  cursor:pointer;
-}
-.image-expand-confirm-range:disabled {
-  opacity:.42;
-  cursor:not-allowed;
-  box-shadow:none;
-}
-.image-expand-range-hint {
-  font-size:11px;
-  color:rgba(229,226,225,.62);
-  max-width:min(360px, 46vw);
-  line-height:1.35;
-}
-.image-expand-preview {
-  position:absolute;
-  inset:0;
-  width:100%;
-  height:100%;
-  display:block;
-  object-fit:fill;
-  pointer-events:none;
-  user-select:none;
-  border-radius:4px;
-}
-.image-expand-host.is-range-confirmed .image-expand-stage {
-  background:#808080;
-  cursor:default;
-  box-shadow:0 24px 64px -28px rgba(0,0,0,.55);
-}
 .image-expand-host.is-opening {
   pointer-events:none;
 }
@@ -14463,8 +14412,6 @@ body[data-canvas-theme="light"] #canvas-topbar-slot .current-canvas-time { color
 .node.is-image-expand-source .gen-stage-stack-hero,
 .node.is-image-expand-source .media-card { visibility:hidden; }
 .infinite-canvas-root:not(.theme-dark) .image-expand-stage { background:#111827; }
-.infinite-canvas-root:not(.theme-dark) .image-expand-host.is-range-confirmed .image-expand-stage { background:#808080; }
-.infinite-canvas-root:not(.theme-dark) .image-expand-range-hint { color:rgba(100,116,139,.86); }
 .infinite-canvas-root:not(.theme-dark) .image-expand-dock {
   background:rgba(255,255,255,.96);
   outline-color:rgba(15,23,42,.08);

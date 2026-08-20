@@ -1,6 +1,4 @@
 import type { Express, Request, Response, RequestHandler } from "express";
-import { existsSync, readFileSync } from "fs";
-import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { augmentImagePromptWithReferenceCostumeLock } from "../lib/nineGrid/nineGridCore.js";
 import {
@@ -56,7 +54,7 @@ export type CanvasOnlineImagePayload = {
   };
   /** 九宫格 Agent 生图任务：gpt-image-2 走官方渠道 */
   nine_grid_agent?: boolean;
-  /** 扩图：灰边拼图按原尺寸走 /images/edits，绕过 RunningHub 丢布局 */
+  /** 扩图：透明通道单图走 RunningHub gpt-image-2 i2i（透明区=待生成） */
   expand_outpaint?: boolean;
   /** 写入成片库 / 归属用 */
   canvas_id?: string;
@@ -93,48 +91,6 @@ function listenPortFromReq(req: Request): number {
 
 function listenPort(): number {
   return Number(process.env.PORT) || 3000;
-}
-
-function uploadWebPathFromUrl(url: string): string {
-  const raw = String(url || "").trim();
-  if (!raw) return "";
-  if (raw.startsWith("/uploads/")) return raw;
-  try {
-    const parsed = new URL(raw);
-    if (parsed.pathname.startsWith("/uploads/")) return parsed.pathname;
-  } catch {
-    /* ignore */
-  }
-  return "";
-}
-
-function readLocalUploadAsDataUrl(projectRoot: string, webPath: string): string {
-  const rel = webPath.replace(/^\/uploads\//, "").replace(/\\/g, "/");
-  if (!rel || rel.includes("..")) throw new Error("非法图片路径");
-  const uploadsRoot = path.join(projectRoot, "public", "uploads");
-  const abs = path.join(uploadsRoot, rel);
-  if (!abs.startsWith(uploadsRoot) || !existsSync(abs)) {
-    throw new Error(`找不到上传文件 ${webPath}`);
-  }
-  const buf = readFileSync(abs);
-  const ext = path.extname(abs).toLowerCase();
-  const mime =
-    ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : ext === ".webp" ? "image/webp" : "image/png";
-  return `data:${mime};base64,${buf.toString("base64")}`;
-}
-
-/** 扩图：把 composite/mask 读成 data URL，避免 loopback fetch /uploads 卡住 edit-image */
-function inlineExpandOutpaintRefs(
-  projectRoot: string,
-  payload: CanvasOnlineImagePayload
-): CanvasOnlineImagePayload {
-  const refs = (payload.reference_images || []).map((r) => {
-    const url = String(r?.url || "").trim();
-    const webPath = uploadWebPathFromUrl(url);
-    if (!webPath) return { ...r, url };
-    return { ...r, url: readLocalUploadAsDataUrl(projectRoot, webPath) };
-  });
-  return { ...payload, reference_images: refs };
 }
 
 function absoluteUrl(req: Request, url: string): string {
@@ -488,32 +444,6 @@ async function executeCanvasGeneration(
   }
 
   if (imageUrls.length > 0) {
-    const hasExpandMask =
-      Boolean(payload.expand_outpaint) &&
-      (payload.reference_images || []).some((r) => {
-        const role = String(r?.role || "").trim();
-        const name = String(r?.name || "").trim();
-        return role === "mask" || /mask/i.test(name);
-      });
-    if (hasExpandMask) {
-      console.log("[canvas-image/expand-outpaint]", {
-        model,
-        refs: imageUrls.length,
-        size: payload.size,
-      });
-      const inlined = inlineExpandOutpaintRefs(deps.projectRoot, payload);
-      const { body } = mapCanvasToEditorRequest(req, inlined);
-      const upstream = await callSiteEditImage(req, body);
-      if (!upstream.ok) {
-        throw new Error(
-          typeof upstream.data.error === "string" ? upstream.data.error : `扩图编辑失败 (${upstream.status})`
-        );
-      }
-      const upstreamUrl = typeof upstream.data.url === "string" ? upstream.data.url : "";
-      if (!upstreamUrl) throw new Error("接口未返回图片 URL");
-      const localUrl = await deps.persistImage(upstreamUrl, persistMeta);
-      return { images: [localUrl], url: localUrl };
-    }
     let upstreamUrl: string;
     if (rhEnv) {
       if (isGptImage2(model)) {

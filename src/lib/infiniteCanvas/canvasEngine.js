@@ -77,7 +77,7 @@ function writeLastCanvasId(id){
 }
 function isCanvasInteracting(){
     // 裁剪/画笔/旋转聚焦中也算交互：禁止远程同步把视口打回旧比例
-    return Boolean(dragBoard || dragNode || pendingNodeDrag || resizeNode || minimapDrag || tempLink || selectDrag || isImageEditOpen() || isImageExpandOpen() || imageEditViewportAnimActive);
+    return Boolean(dragBoard || dragNode || pendingNodeDrag || resizeNode || minimapDrag || tempLink || selectDrag || isImageEditOpen() || isImageExpandOpen() || isImageCutoutOpen() || imageEditViewportAnimActive);
 }
 /** 焦点在画布可编辑控件内时的上下文（节点表单 / gen-dock） */
 function editingFocusContext(){
@@ -1607,10 +1607,18 @@ let imageEditMode = 'crop';
 let imageEditModeTouched = false;
 /** 扩图：原图外框（pad 为原图像素） */
 const IMAGE_EXPAND_ENABLED = true;
+/** 抠图：RunningHub AI 应用（rembg 类透明底抠图工作流） */
+const RUNNINGHUB_CUTOUT_APP_ID = '1957864327736913921';
+const RUNNINGHUB_CUTOUT_IMAGE_FIELD = { nodeId: '122', fieldName: 'image' };
+const RUNNINGHUB_CUTOUT_TEXT_FIELD = { nodeId: '399', fieldName: 'text', fieldValue: '物体' };
 let imageExpandState = null;
 let imageExpandEl = null;
 let imageExpandDrag = null;
 let imageExpandUiWired = false;
+/** 抠图：RunningHub 去背景面板（复用扩图 dock 视觉，无外框拖拽） */
+let imageCutoutState = null;
+let imageCutoutEl = null;
+let imageCutoutUiWired = false;
 /** 旋转/镜像：角度 0/90/180/270；翻转相对当前角度 */
 let imageEditRotateDeg = 0;
 let imageEditFlipH = false;
@@ -4023,6 +4031,7 @@ function applyViewport(){
     }
     if(cropState && imageEditMode === 'crop') positionImageEditCropDock();
     if(imageExpandState) positionImageExpandOverlay();
+    if(imageCutoutState) positionImageCutoutOverlay();
     if(videoTrimState?.nodeId) positionVideoTrimDock();
     if(genBatchPick?.nodeId){
         const pickNode = nodes.find(n => n.id === genBatchPick.nodeId);
@@ -12345,13 +12354,21 @@ function viewportTargetForNodeFocus(node, opts = {}){
     const w = Math.max(48, Number(nodeEl?.offsetWidth || node.w || 260));
     const h = Math.max(48, Number(nodeEl?.offsetHeight || node.h || 300));
     const boardRect = board.getBoundingClientRect();
-    const mode = opts.mode === 'brush' ? 'brush' : opts.mode === 'expand' ? 'expand' : 'crop';
+    const mode = opts.mode === 'brush' ? 'brush' : opts.mode === 'expand' ? 'expand' : opts.mode === 'cutout' ? 'cutout' : 'crop';
     let marginTop = mode === 'brush' ? 96 : 56;
     let marginBottom = mode === 'crop' ? 110 : 56;
     let marginX = 72;
     let focusW = w;
     let focusH = h;
     let fill = 0.92;
+    if(mode === 'cutout'){
+        marginTop = 72;
+        marginBottom = 96;
+        marginX = 80;
+        fill = 0.82;
+        // 底栏在 stage 下方：预留 dock + gap，避免开场放大后工具栏出屏
+        focusH += 76;
+    }
     if(mode === 'expand'){
         marginTop = 72;
         marginBottom = 24;
@@ -13976,11 +13993,11 @@ function nodeEditSpawnLayoutSize(node){
     h = Math.max(48, h || Number(el?.offsetHeight) || Number(node.h) || w);
     return {w: Math.round(w), h: Math.round(h)};
 }
-function imageEditorOutputPoint(node, offsetY=0){
+function imageEditorOutputPoint(node, offsetX=0){
     const {w} = nodeEditSpawnLayoutSize(node);
     const gap = 56;
-    // 与源节点顶边平齐，落在展示宽度右侧（避免叠在生图台上）
-    return {x:(node.x || 0) + w + gap, y:(node.y || 0) + offsetY};
+    // 与源节点顶边平齐，落在展示宽度右侧；多张派生时横向右移错开（避免叠在生图台上）
+    return {x:(node.x || 0) + w + gap + offsetX, y:(node.y || 0)};
 }
 function imageEditorOutputNode(sourceNode){
     let out = connections.filter(c => c.from === sourceNode.id)
@@ -13993,8 +14010,8 @@ function imageEditorOutputNode(sourceNode){
     }
     return out;
 }
-function addGeneratedImageNode(file, sourceNode, suffix, offsetY=0, extra={}){
-    const p = imageEditorOutputPoint(sourceNode, offsetY);
+function addGeneratedImageNode(file, sourceNode, suffix, offsetX=0, extra={}){
+    const p = imageEditorOutputPoint(sourceNode, offsetX);
     const next = {id:uid('img'), type:'image', x:p.x, y:p.y, url:file.url, name:file.name || suffix, ...extra};
     nodes.push(next);
     selected.clear();
@@ -14002,7 +14019,7 @@ function addGeneratedImageNode(file, sourceNode, suffix, offsetY=0, extra={}){
     return next;
 }
 function normalizeImageEditOrigin(kind){
-    if(kind === 'brush' || kind === 'rotate' || kind === 'crop' || kind === 'expand') return kind;
+    if(kind === 'brush' || kind === 'rotate' || kind === 'crop' || kind === 'expand' || kind === 'cutout') return kind;
     return '';
 }
 function imageEditOriginLabel(kind){
@@ -14011,6 +14028,7 @@ function imageEditOriginLabel(kind){
     if(k === 'rotate') return langIsEn() ? 'Rotate & mirror' : '旋转与镜像';
     if(k === 'crop') return langIsEn() ? 'Crop' : '裁剪';
     if(k === 'expand') return langIsEn() ? 'Expand' : '扩图';
+    if(k === 'cutout') return langIsEn() ? 'Cutout' : '抠图';
     return '';
 }
 /** 用户双击浮标改过的显示名（优先于默认「图片节点 N」等） */
@@ -14238,13 +14256,13 @@ function spawnEditedImageNodeFromSource(file, sourceNode, opts={}){
         .filter(c => c.from === sourceNode.id)
         .map(c => nodes.find(n => n.id === c.to))
         .filter(n => n?.type === 'image')
-        .sort((a, b) => (a.y - b.y) || (a.x - b.x));
-    // 多张派生物纵向错开；首张与源顶边平齐
-    let offsetY = 0;
+        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
+    // 多张派生物横向右移错开；首张与源顶边平齐
+    let offsetX = 0;
     siblings.forEach(sib => {
-        offsetY += nodeEditSpawnLayoutSize(sib).h + 36;
+        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
     });
-    const next = addGeneratedImageNode(file, sourceNode, file.name || 'edit.png', offsetY);
+    const next = addGeneratedImageNode(file, sourceNode, file.name || 'edit.png', offsetX);
     // 初始尺寸贴近源展示高度，避免未解码前缩成小方块看起来「叠」在一起
     const src = nodeEditSpawnLayoutSize(sourceNode);
     if(src.w > 0){
@@ -14701,6 +14719,7 @@ function finishImageEditorLayout(){
 async function openImageEditorCore({nodeId, url, name, saveTarget, mode='crop'}){
     if(!url || isMissingAssetUrl(url)) return;
     closeImageExpand({ restoreViewport: false, syncBar: false });
+    closeImageCutout({ restoreViewport: false, syncBar: false });
     ensureImageEditorUi();
     const focusId = nodeId || saveTarget?.ownerNodeId || saveTarget?.nodeId || '';
     const editMode = mode === 'brush' ? 'brush' : mode === 'rotate' ? 'rotate' : 'crop';
@@ -25099,6 +25118,10 @@ function bindImageActionBar(host, target){
         }
         void openImageExpand(target);
     });
+    host.querySelector('[data-action="cutout"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void openImageCutout(target);
+    });
     host.querySelector('[data-action="edit"]')?.addEventListener('click', e => {
         e.stopPropagation();
         openVideoTrimDock(node);
@@ -25143,6 +25166,7 @@ function imageActionBarHtmlForTarget(target){
         <div class="image-action-bar" role="toolbar" aria-label="${escapeAttr(en ? 'Image actions' : '图片操作')}">
             <button type="button" class="image-action-bar-btn" data-action="crop" title="${escapeAttr(en ? 'Crop' : '裁剪')}" aria-label="crop"><i data-lucide="crop"></i></button>
             ${IMAGE_EXPAND_ENABLED ? `<button type="button" class="image-action-bar-btn" data-action="expand" title="${escapeAttr(en ? 'Expand / outpaint' : '扩图')}" aria-label="expand"><i data-lucide="expand"></i></button>` : ''}
+            <button type="button" class="image-action-bar-btn" data-action="cutout" title="${escapeAttr(en ? 'Cutout / remove background' : '抠图')}" aria-label="cutout"><i data-lucide="wand-2"></i></button>
             <button type="button" class="image-action-bar-btn" data-action="brush" title="${escapeAttr(en ? 'Brush' : '画笔')}" aria-label="brush"><i data-lucide="paintbrush"></i></button>
             <button type="button" class="image-action-bar-btn" data-action="rotate" title="${escapeAttr(en ? 'Rotate & mirror' : '旋转与镜像')}" aria-label="rotate"><i data-lucide="rotate-3d"></i></button>
             <span class="image-action-bar-sep" aria-hidden="true"></span>
@@ -25399,86 +25423,24 @@ function buildExpandOutpaint(st, orig){
 }
 function invalidateImageExpandRangeConfirm(){
     const st = imageExpandState;
-    if(!st?.rangeConfirmed) return;
+    if(!st || (!st.rangeConfirmed && !st.confirmedCompositeUrl && !st.confirmedTarget)) return;
     st.rangeConfirmed = false;
     st.confirmedCompositeUrl = '';
     st.confirmedPreviewUrl = '';
     st.confirmedTarget = null;
-    applyImageExpandRangeConfirmedUi(false);
 }
-function applyImageExpandRangeConfirmedUi(confirmed){
-    const host = imageExpandEl;
-    const st = imageExpandState;
-    if(!host || !st) return;
-    const en = langIsEn();
-    host.classList.toggle('is-range-confirmed', Boolean(confirmed));
-    const stage = host.querySelector('.image-expand-stage');
-    const keep = host.querySelector('.image-expand-keep');
-    const frame = host.querySelector('.image-expand-frame');
-    let preview = host.querySelector('.image-expand-preview');
-    const runBtn = host.querySelector('[data-expand-act="run"]');
-    const confirmBtn = host.querySelector('[data-expand-act="confirm-range"]');
-    const hint = host.querySelector('[data-expand-range-hint]');
-    if(confirmed && st.confirmedCompositeUrl){
-        if(!preview && stage){
-            preview = document.createElement('img');
-            preview.className = 'image-expand-preview';
-            preview.alt = '';
-            preview.draggable = false;
-            if(shouldUseCrossOriginImage(st.confirmedCompositeUrl)) preview.crossOrigin = 'anonymous';
-            stage.appendChild(preview);
-        }
-        if(preview){
-            preview.src = st.confirmedPreviewUrl || st.confirmedCompositeUrl;
-            preview.hidden = false;
-        }
-        if(keep) keep.hidden = true;
-        if(frame) frame.hidden = true;
-        if(confirmBtn) confirmBtn.disabled = true;
-        if(runBtn) runBtn.disabled = false;
-        if(hint) hint.textContent = en
-            ? 'Gray area locked — click Generate to send this image to GPT'
-            : '灰边已锁定，点右侧生成把这张图交给 GPT';
-    } else {
-        preview?.remove();
-        if(keep) keep.hidden = false;
-        if(frame) frame.hidden = false;
-        if(confirmBtn) confirmBtn.disabled = false;
-        if(runBtn) runBtn.disabled = true;
-        if(hint) hint.textContent = en
-            ? 'Adjust the frame, then confirm the gray expand area'
-            : '拖框调整范围，点「确定扩图范围」后外围变灰';
-    }
-    refreshIcons(host);
-}
-async function confirmImageExpandRange(){
-    const st = imageExpandState;
-    if(!st || st.running) return;
-    const {w: canvasW, h: canvasH} = expandCanvasSize(st);
-    if(canvasW <= st.srcW && canvasH <= st.srcH){
-        softAlert(langIsEn() ? 'Drag the frame larger than the original.' : '请先把外框拖得比原图大');
-        return;
-    }
-    const confirmBtn = imageExpandEl?.querySelector('[data-expand-act="confirm-range"]');
-    if(confirmBtn) confirmBtn.disabled = true;
-    setStatus(langIsEn() ? 'Compositing expand preview…' : '正在合成扩图预览…');
-    try {
-        snapExpandFrameToG2(st);
-        const orig = await loadImageBitmapForExport(st.url);
-        const { outpaint, preview, target } = buildExpandOutpaint(st, orig);
-        const uploaded = await uploadCroppedBlob(await canvasToPngBlob(outpaint), 'expand-outpaint.png');
-        if(!uploaded?.url) throw new Error(langIsEn() ? 'Upload failed' : '上传失败');
-        st.rangeConfirmed = true;
-        st.confirmedCompositeUrl = uploaded.url;
-        st.confirmedPreviewUrl = preview.toDataURL('image/png');
-        st.confirmedTarget = { w: target.w, h: target.h, ratio: target.ratio, tier: target.tier };
-        applyImageExpandRangeConfirmedUi(true);
-        setStatus(langIsEn() ? 'Expand area confirmed' : '扩图范围已确定');
-    } catch(err){
-        invalidateImageExpandRangeConfirm();
-        softAlert(err?.message || (langIsEn() ? 'Could not confirm expand area' : '无法确定扩图范围'));
-        setStatus('');
-    }
+/** 合成扩图输入图：原图 + 透明扩展区，上传后供 GPT 生成（点「生成」时自动执行，不再需要单独的「确定扩图范围」步骤） */
+async function composeExpandInput(st){
+    snapExpandFrameToG2(st);
+    const orig = await loadImageBitmapForExport(st.url);
+    const { outpaint, preview, target } = buildExpandOutpaint(st, orig);
+    const uploaded = await uploadCroppedBlob(await canvasToPngBlob(outpaint), 'expand-outpaint.png');
+    if(!uploaded?.url) throw new Error(langIsEn() ? 'Upload failed' : '上传失败');
+    st.rangeConfirmed = true;
+    st.confirmedCompositeUrl = uploaded.url;
+    st.confirmedPreviewUrl = preview.toDataURL('image/png');
+    st.confirmedTarget = { w: target.w, h: target.h, ratio: target.ratio, tier: target.tier };
+    return st;
 }
 function buildImageExpandHtml(st){
     const en = langIsEn();
@@ -25503,14 +25465,7 @@ function buildImageExpandHtml(st){
     const sizeLabel = st.size === '2k' ? '2K' : '1K';
     const qualityLabel = st.quality === 'low' ? (en ? 'Low' : '低') : st.quality === 'high' ? (en ? 'High' : '高') : (en ? 'Medium' : '中');
     const handles = ['n','s','e','w','nw','ne','sw','se'].map(k => `<span class="image-expand-handle ${k}" data-expand-handle="${k}"></span>`).join('');
-    const rangeHint = en
-        ? 'Adjust the frame, then confirm the gray expand area'
-        : '拖框调整范围，点「确定扩图范围」后外围变灰';
     return `
-        <div class="image-expand-range-bar">
-            <button type="button" class="image-expand-confirm-range" data-expand-act="confirm-range">${escapeHtml(en ? 'Confirm expand area' : '确定扩图范围')}</button>
-            <span class="image-expand-range-hint" data-expand-range-hint>${escapeHtml(rangeHint)}</span>
-        </div>
         <div class="image-expand-stage">
             <img class="image-expand-keep" alt="" draggable="false" />
             <div class="image-expand-frame">${handles}</div>
@@ -25540,7 +25495,7 @@ function buildImageExpandHtml(st){
                 </button>
                 <div class="image-expand-menu" data-expand-panel="quality" hidden>${qualityItems}</div>
             </div>
-            <button type="button" class="gen-btn gen-dock-send" data-expand-act="run" disabled title="${escapeAttr(en ? 'Generate' : '开始扩图')}" aria-label="run">
+            <button type="button" class="gen-btn gen-dock-send" data-expand-act="run" title="${escapeAttr(en ? 'Generate' : '开始扩图')}" aria-label="run">
                 <i data-lucide="arrow-up" class="w-4 h-4"></i>
             </button>
         </div>`;
@@ -25620,10 +25575,6 @@ function bindImageExpandChrome(host){
     const prompt = host.querySelector('.image-expand-prompt');
     prompt?.addEventListener('input', () => {
         if(imageExpandState) imageExpandState.prompt = String(prompt.value || '');
-    });
-    host.querySelector('[data-expand-act="confirm-range"]')?.addEventListener('click', e => {
-        e.stopPropagation();
-        void confirmImageExpandRange();
     });
     host.querySelector('[data-expand-act="run"]')?.addEventListener('click', e => {
         e.stopPropagation();
@@ -25716,8 +25667,8 @@ function moveImageExpandDrag(event){
     clampExpandPads(st);
     positionImageExpandOverlay();
 }
-function clearImageExpandDockPosition(){
-    const dock = imageExpandEl?.querySelector('.image-expand-dock');
+function clearImageExpandDockPosition(hostEl = imageExpandEl){
+    const dock = hostEl?.querySelector('.image-expand-dock');
     if(!dock) return;
     dock.style.position = '';
     dock.style.left = '';
@@ -25727,9 +25678,9 @@ function clearImageExpandDockPosition(){
     dock.style.zIndex = '';
     dock.style.width = '';
 }
-/** 扩图底栏：锚 stage 下缘居中（fixed，随框移动/缩放重贴） */
-function positionImageExpandDock(stage){
-    const dock = imageExpandEl?.querySelector('.image-expand-dock');
+/** 扩图/抠图底栏：锚 stage 下缘居中（fixed，随框移动/缩放重贴） */
+function positionImageExpandDock(stage, hostEl = imageExpandEl){
+    const dock = hostEl?.querySelector('.image-expand-dock');
     if(!dock || !stage?.isConnected) return;
     const rect = stage.getBoundingClientRect();
     if(rect.width < 8 || rect.height < 8) return;
@@ -25881,13 +25832,13 @@ function spawnExpandPendingImageNode(sourceNode, st){
         .filter(c => c.from === sourceNode.id)
         .map(c => nodes.find(n => n.id === c.to))
         .filter(n => n?.type === 'image')
-        .sort((a, b) => (a.y - b.y) || (a.x - b.x));
-    let offsetY = 0;
+        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
+    let offsetX = 0;
     siblings.forEach(sib => {
-        offsetY += nodeEditSpawnLayoutSize(sib).h + 36;
+        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
     });
     const baseName = String(st.name || 'image').replace(/\.[^.]+$/, '');
-    const next = addGeneratedImageNode({ url: '', name: `${baseName}_expand` }, sourceNode, '_expand', offsetY);
+    const next = addGeneratedImageNode({ url: '', name: `${baseName}_expand` }, sourceNode, '_expand', offsetX);
     next.editOrigin = 'expand';
     next._expandSourceUrl = String(st.confirmedCompositeUrl || '').trim();
     const src = nodeEditSpawnLayoutSize(sourceNode);
@@ -26023,16 +25974,23 @@ async function runImageExpandJob(st, targetNode, source, pendingId){
 async function runImageExpand(){
     const st = imageExpandState;
     if(!st || st.running) return;
-    if(!st.rangeConfirmed || !st.confirmedCompositeUrl){
-        softAlert(langIsEn() ? 'Confirm the expand area first (gray preview).' : '请先点「确定扩图范围」，确认灰边预览后再生成');
-        return;
-    }
     const source = nodes.find(n => n.id === st.nodeId);
     if(!source) return;
     const {w: canvasW, h: canvasH} = expandCanvasSize(st);
     if(canvasW <= st.srcW && canvasH <= st.srcH){
         softAlert(langIsEn() ? 'Drag the frame larger than the original.' : '请先把外框拖得比原图大');
         return;
+    }
+    if(!st.rangeConfirmed || !st.confirmedCompositeUrl || !st.confirmedTarget){
+        setStatus(langIsEn() ? 'Compositing expand input…' : '正在合成扩图输入…');
+        try {
+            await composeExpandInput(st);
+        } catch(err){
+            softAlert(err?.message || (langIsEn() ? 'Could not prepare expand input' : '无法准备扩图输入'));
+            setStatus('');
+            return;
+        }
+        setStatus('');
     }
     const job = {
         url: st.url,
@@ -26076,6 +26034,285 @@ async function runImageExpand(){
     setStatus(langIsEn() ? 'Expand queued on new node' : '扩图已开始，新节点生成中');
     void runImageExpandJob(job, spawned, source, pendingId);
 }
+/** 抠图：把选中图片上传到 RunningHub 抠图应用，结果生成一张透明底新图片节点（插在原图下方并自动连线） */
+function spawnCutoutPendingImageNode(sourceNode, job){
+    if(!sourceNode || !job) return null;
+    const siblings = connections
+        .filter(c => c.from === sourceNode.id)
+        .map(c => nodes.find(n => n.id === c.to))
+        .filter(n => n?.type === 'image')
+        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
+    let offsetX = 0;
+    siblings.forEach(sib => {
+        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
+    });
+    const baseName = String(job.name || 'image').replace(/\.[^.]+$/, '');
+    const next = addGeneratedImageNode({ url: '', name: `${baseName}_cutout` }, sourceNode, '_cutout', offsetX);
+    next.editOrigin = 'cutout';
+    next._cutoutSourceUrl = String(job.url || '').trim();
+    const src = nodeEditSpawnLayoutSize(sourceNode);
+    if(src.w > 0){
+        next.w = src.w;
+        next.h = src.h;
+        next._displayW = src.w;
+        next._displayH = src.h;
+    }
+    if(canConnect(sourceNode.id, next.id) && !connections.some(c => c.from === sourceNode.id && c.to === next.id)){
+        connections.push({id:uid('c'), from:sourceNode.id, to:next.id});
+    }
+    pendingImageEditRefreshIds.add(sourceNode.id);
+    pendingImageEditRefreshIds.add(next.id);
+    return next;
+}
+function isImageCutoutOpen(){
+    return Boolean(imageCutoutState && imageCutoutEl?.isConnected);
+}
+function buildImageCutoutHtml(st){
+    const en = langIsEn();
+    return `
+        <div class="image-expand-stage">
+            <img class="image-expand-keep" alt="" draggable="false" />
+        </div>
+        <div class="image-expand-dock" role="toolbar">
+            <button type="button" class="image-expand-icon" data-cutout-act="close" title="${escapeAttr(en ? 'Close' : '关闭')}" aria-label="close"><i data-lucide="x"></i></button>
+            <span class="image-expand-hint">${escapeHtml(en ? 'Cut out' : '抠出')}</span>
+            <input class="image-expand-prompt" type="text" maxlength="120" placeholder="${escapeAttr(en ? 'e.g. subject, person, cat (optional)' : '如：物体、人物、猫（可留空）')}" value="${escapeAttr(st.text || '')}" />
+            <button type="button" class="gen-btn gen-dock-send" data-cutout-act="run" title="${escapeAttr(en ? 'Cut out' : '开始抠图')}" aria-label="run">
+                <i data-lucide="arrow-up" class="w-4 h-4"></i>
+            </button>
+        </div>`;
+}
+function bindImageCutoutChrome(host){
+    host.onpointerdown = e => e.stopPropagation();
+    host.onmousedown = e => e.stopPropagation();
+    host.onclick = e => e.stopPropagation();
+    host.querySelector('[data-cutout-act="close"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        closeImageCutout();
+    });
+    const prompt = host.querySelector('.image-expand-prompt');
+    prompt?.addEventListener('input', () => {
+        if(imageCutoutState) imageCutoutState.text = String(prompt.value || '');
+    });
+    host.querySelector('[data-cutout-act="run"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void runImageCutoutFromPanel();
+    });
+}
+function closeImageCutout(opts={}){
+    clearImageExpandDockPosition(imageCutoutEl);
+    imageCutoutEl?.remove();
+    imageCutoutEl = null;
+    imageCutoutState = null;
+    nodesEl?.querySelectorAll?.('.is-image-expand-source')?.forEach(el => el.classList.remove('is-image-expand-source'));
+    if(opts.restoreViewport !== false) restoreImageEditCanvasFocus();
+    if(opts.syncBar !== false) syncImageActionBar();
+}
+function wireImageCutoutUi(){
+    if(imageCutoutUiWired) return;
+    imageCutoutUiWired = true;
+    on(document, 'keydown', event => {
+        if(!isImageCutoutOpen()) return;
+        if(event.key === 'Escape'){
+            event.preventDefault();
+            closeImageCutout();
+        }
+    });
+}
+function positionImageCutoutOverlay(){
+    const st = imageCutoutState;
+    if(!st || !imageCutoutEl || !board) return;
+    const hostInfo = findImageEditHost(st.nodeId, st.url);
+    const img = hostInfo?.img;
+    if(!img) return;
+    const imgRect = img.getBoundingClientRect();
+    const boardRect = board.getBoundingClientRect();
+    const width = Math.max(48, imgRect.width);
+    const height = Math.max(48, imgRect.height);
+    imageCutoutEl.style.left = `${imgRect.left - boardRect.left}px`;
+    imageCutoutEl.style.top = `${imgRect.top - boardRect.top}px`;
+    imageCutoutEl.style.width = `${width}px`;
+    imageCutoutEl.style.height = `${height}px`;
+    const stage = imageCutoutEl.querySelector('.image-expand-stage');
+    if(stage){
+        stage.style.width = `${width}px`;
+        stage.style.height = `${height}px`;
+    }
+    const keep = imageCutoutEl.querySelector('.image-expand-keep');
+    if(keep){
+        keep.style.left = '0px';
+        keep.style.top = '0px';
+        keep.style.width = `${width}px`;
+        keep.style.height = `${height}px`;
+    }
+    if(stage) positionImageExpandDock(stage, imageCutoutEl);
+}
+async function openImageCutout(target){
+    if(!target?.node || !target.url || !board) return;
+    if(isImageEditOpen()) closeImageEditor();
+    closeImageExpand({ restoreViewport: false, syncBar: false });
+    closeImageCutout({ restoreViewport: false, syncBar: false });
+    wireImageCutoutUi();
+    const node = target.node;
+    if(node.type !== 'image' || !node.url || isMissingAssetUrl(node.url)){
+        softAlert(langIsEn() ? 'No image to cut out' : '没有可抠图的图片');
+        return;
+    }
+    let srcW = 0;
+    let srcH = 0;
+    try {
+        const im = await loadImageBitmapForExport(node.url);
+        srcW = im.naturalWidth || im.width || 0;
+        srcH = im.naturalHeight || im.height || 0;
+    } catch(_){ /* fall through */ }
+    const hostInfo = findImageEditHost(node.id, node.url);
+    if((!srcW || !srcH) && hostInfo?.img){
+        srcW = hostInfo.img.naturalWidth || 0;
+        srcH = hostInfo.img.naturalHeight || 0;
+    }
+    imageCutoutState = {
+        nodeId: node.id,
+        url: node.url,
+        name: node.name || outputImageName(node.url),
+        srcW, srcH,
+        text: RUNNINGHUB_CUTOUT_TEXT_FIELD.fieldValue,
+        running: false,
+    };
+    const host = document.createElement('div');
+    host.className = 'image-expand-host is-opening';
+    host.innerHTML = buildImageCutoutHtml(imageCutoutState);
+    const keep = host.querySelector('.image-expand-keep');
+    if(keep){
+        if(shouldUseCrossOriginImage(node.url)) keep.crossOrigin = 'anonymous';
+        keep.src = node.url;
+    }
+    bindImageCutoutChrome(host);
+    removeImageActionBar();
+    board.appendChild(host);
+    imageCutoutEl = host;
+    const keepReady = (!keep || (keep.complete && keep.naturalWidth))
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            keep.onload = () => resolve();
+            keep.onerror = () => resolve();
+        });
+    positionImageCutoutOverlay();
+    await keepReady;
+    const sourceNodeEl = hostInfo?.host?.closest?.('.node');
+    beginImageExpandOpenFade(host, sourceNodeEl);
+    await prepareImageEditCanvasFocus(node.id, 'cutout');
+    if(!imageCutoutState || imageCutoutState.nodeId !== node.id) return;
+    if(!board || !imageCutoutEl) return;
+    positionImageCutoutOverlay();
+    finishImageExpandOpenFade(host);
+    refreshIcons(host);
+}
+function runImageCutoutFromPanel(){
+    const st = imageCutoutState;
+    if(!st || st.running) return;
+    const node = nodes.find(n => n.id === st.nodeId);
+    if(!node || node.type !== 'image' || !node.url || isMissingAssetUrl(node.url)) return;
+    const text = String(st.text || '').trim() || RUNNINGHUB_CUTOUT_TEXT_FIELD.fieldValue;
+    const job = { url: node.url, name: node.name, text };
+    closeImageCutout({ restoreViewport: false });
+    clearImageEditViewportSession();
+    pushUndo();
+    const spawned = spawnCutoutPendingImageNode(node, job);
+    if(!spawned){
+        softAlert(langIsEn() ? 'Could not create image node.' : '未能创建图片节点');
+        return;
+    }
+    const pendingId = uid('p');
+    const run = {
+        node: { id: node.id },
+        prompt: langIsEn() ? 'Cut out subject' : '抠图',
+        taskLabel: langIsEn() ? 'Cutout' : '抠图',
+    };
+    pushExpandImagePending(spawned, makePending(pendingId, run, {
+        stageLabel: langIsEn() ? 'Cutting out…' : '抠图中…',
+    }));
+    selected.clear();
+    selected.add(spawned.id);
+    commitStructureDomPatch({ addedIds: [spawned.id], refreshIds: [node.id, spawned.id] });
+    void focusExpandResultNode(spawned.id);
+    scheduleSaveNow();
+    setStatus(langIsEn() ? 'Cutout queued on new node' : '抠图已开始，新节点生成中');
+    void runImageCutoutJob(job, spawned, node, pendingId);
+}
+async function runImageCutoutJob(job, targetNode, source, pendingId){
+    const node = () => nodes.find(n => n.id === targetNode?.id);
+    const run = {
+        node: { id: source.id },
+        prompt: langIsEn() ? 'Cut out subject' : '抠图',
+        taskLabel: langIsEn() ? 'Cutout' : '抠图',
+    };
+    try {
+        if(!node()) throw new Error(langIsEn() ? 'Cutout node missing' : '抠图节点已丢失');
+        const keyFields = rhApiKeyRequestFields(null);
+        // 本地画布图不是公网 URL，须先上传 RunningHub 拿 fileName
+        const fileName = await rhUploadValueIfNeeded(job.url, null);
+        if(!fileName) throw new Error(langIsEn() ? 'Could not upload source image' : '原图上传失败');
+        const nodeInfoList = [
+            { nodeId: RUNNINGHUB_CUTOUT_IMAGE_FIELD.nodeId, fieldName: RUNNINGHUB_CUTOUT_IMAGE_FIELD.fieldName, fieldValue: fileName },
+            { nodeId: RUNNINGHUB_CUTOUT_TEXT_FIELD.nodeId, fieldName: RUNNINGHUB_CUTOUT_TEXT_FIELD.fieldName, fieldValue: job.text || RUNNINGHUB_CUTOUT_TEXT_FIELD.fieldValue },
+        ];
+        const submit = await fetch('/api/runninghub/submit', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({ webappId: RUNNINGHUB_CUTOUT_APP_ID, nodeInfoList, instanceType:'', ...keyFields })
+        }).then(async r => {
+            const data = await r.json();
+            if(!r.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhFailed'));
+            return data.data || data;
+        });
+        const taskId = submit.taskId;
+        if(!taskId) throw new Error(tr('canvas.rhNoTaskId'));
+        run.request = {
+            task_id: taskId,
+            webappId: RUNNINGHUB_CUTOUT_APP_ID,
+            backend: 'runninghub',
+            mode: 'app',
+            apiKeyId: keyFields.apiKeyId || '',
+            useWallet: Boolean(keyFields.useWallet),
+        };
+        const cur = node();
+        if(!cur) throw new Error(langIsEn() ? 'Cutout node missing' : '抠图节点已丢失');
+        const pending = (cur._pending || []).find(p => p.id === pendingId);
+        if(pending){
+            pending.canvasTaskId = String(taskId);
+            pending.canvasTaskType = 'runninghub';
+            pending.run = run;
+            registerCanvasTaskLedger(taskId, {
+                canvasId: canvas?.id || '',
+                hostNodeId: targetNode.id || '',
+                genNodeId: targetNode.id || '',
+                pendingId,
+                run,
+                appendGenerated: false,
+                startedAt: Number(pending.startedAt || nowMs()),
+                canvasTaskType: 'runninghub',
+            });
+        } else {
+            pushExpandImagePending(cur, makePending(pendingId, run, {
+                canvasTaskId: taskId,
+                canvasTaskType: 'runninghub',
+                stageLabel: langIsEn() ? 'Cutting out…' : '抠图中…',
+            }));
+        }
+        refreshNodes([targetNode.id, source.id]);
+        scheduleSaveNow();
+        void pollRunningHubTask(taskId);
+    } catch(err){
+        console.warn('[runImageCutoutJob]', err);
+        const cur = node();
+        if(cur){
+            markExpandPendingFailed(cur, pendingId, err?.message);
+        }
+        softAlert(err?.message || (langIsEn() ? 'Cutout failed' : '抠图失败'));
+        setStatus('');
+        scheduleSaveNow();
+    }
+}
 function syncImageActionBar(){
     if(isImageExpandOpen()){
         const onlyId = selected.size === 1 ? [...selected][0] : null;
@@ -26085,6 +26322,16 @@ function syncImageActionBar(){
         }
         removeImageActionBar();
         positionImageExpandOverlay();
+        return;
+    }
+    if(isImageCutoutOpen()){
+        const onlyId = selected.size === 1 ? [...selected][0] : null;
+        if(onlyId !== imageCutoutState.nodeId){
+            closeImageCutout();
+            return;
+        }
+        removeImageActionBar();
+        positionImageCutoutOverlay();
         return;
     }
     if(isImageEditOpen()){
@@ -33212,6 +33459,22 @@ function applyCompletedRhOutputs(ctx, outputs, meta, taskId){
         : nodes.find(n => n.id === (meta.run?.node?.id || pending.run?.node?.id) && n.type === 'rh');
     const runMs = Math.max(0, Number(meta.runMs || 0) || (nowMs() - Number(pending.startedAt || nowMs())));
     const run = meta.run || pending.run || {};
+    // 抠图结果宿主是「图片节点」而非 RH 节点：把第一张结果图写回该节点
+    if(!rhNode && out?.type === 'image'){
+        const url = outputUrlValue(outputs[0]);
+        if(url){
+            out.url = url;
+            if(!nodeFloatTitleCustom(out)){
+                out.name = outputImageName(url) || String(out.name || 'cutout').replace(/_cutout$/, '') || 'cutout';
+            }
+        }
+        addGenerationLog({run, outputs: outputs.map(o => (typeof o === 'string' ? o : o?.url)).filter(Boolean), runMs});
+        refreshNodes([out.id]);
+        if(run?.node?.id) refreshNodes([run.node.id]);
+        unregisterCanvasTaskLedger(taskId);
+        scheduleSaveNow();
+        return;
+    }
     if(!rhNode){
         orphanImagesOntoCanvas(outputs.map(item => item.url), { ...meta, run, taskId, canvasId: canvas?.id });
         unregisterCanvasTaskLedger(taskId);
@@ -33298,6 +33561,15 @@ function failRunningHubTask(taskId, message){
     const {out, pending, gen: ctxGen} = ctx;
     const run = pending.run || raw?.run || {};
     const runMs = Math.max(0, nowMs() - Number(pending.startedAt || nowMs()));
+    // 抠图结果宿主是「图片节点」：失败时在原位保留失败态，勿留空节点
+    if(out?.type === 'image' && !out.url && out.editOrigin === 'cutout'){
+        markExpandPendingFailed(out, pending.id, message || (langIsEn() ? 'Cutout failed' : '抠图失败'));
+        softAlert(message || tr('canvas.generationFailed'));
+        addGenerationLog({run, outputs:[], runMs, error:message || tr('canvas.generationFailed')});
+        unregisterCanvasTaskLedger(taskId);
+        scheduleSaveNow();
+        return;
+    }
     if(!pending._recovered){
         out._pending = (out._pending || []).filter(p => p.id !== pending.id);
     }
@@ -38311,6 +38583,12 @@ board.onmousedown = e => {
         closeImageExpand();
         return;
     }
+    if(isImageCutoutOpen()){
+        if(Date.now() - imageEditOpenedAt < 480) return;
+        if(e.target.closest?.('.image-expand-host')) return;
+        closeImageCutout();
+        return;
+    }
     // 空白左键拖拽框选（单击空白=清选中，在 finishSelection 里判断位移）
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     closeCreateMenu();
@@ -39015,6 +39293,7 @@ export function disposeInfiniteCanvasEngine({ preserveEditor = false } = {}) {
     imageEditFocusNodeId = '';
     forceClearImageEditChrome();
     try { closeImageExpand(); } catch(_) {}
+    try { closeImageCutout(); } catch(_) {}
     try { closeTextNodeExpand(); } catch(_) {}
   } catch(_) {}
   try { flushLiveCanvasDraftPersist(); } catch(_) {}
