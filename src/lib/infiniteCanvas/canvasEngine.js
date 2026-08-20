@@ -29585,6 +29585,11 @@ function commitMediaOutputs(host, sourceNode, urls, compareRef, metas, opts={}){
         appendOutputImages(host, urls, compareRef, metas, opts.layout || null);
     }
     mergeGeneratedOutputs(sourceNode, urls, Boolean(opts.cascade || opts.appendGenerated));
+    // 生成完成即预热最新图片原图：用户大概率马上点开查看，提前下载解码省去等待
+    (Array.isArray(urls) ? urls : []).slice(-4).forEach(u => {
+        const url = outputUrlValue(u);
+        if(url && !isVideoUrl(url) && !isAudioUrl(url)) prefetchOutputOriginal(url);
+    });
 }
 /** 生成中：若「节点结果」已打开则刷新 pending；不自动弹窗抢焦点 */
 function revealGeneratorResultsWhileRunning(gen){
@@ -34321,6 +34326,39 @@ function outputLightboxIsVideo(url, out){
     if(out?.type === 'video' || out?.type === 'image' && mediaKindForNode(out) === 'video') return true;
     return false;
 }
+/** 原图预加载缓存：悬停/生成完成即后台解码原图，点开灯箱直接复用（秒开原图）。 */
+const decodedOriginalCache = new Map(); // url -> HTMLImageElement（已解码）
+const DECODED_ORIGINAL_CACHE_MAX = 6;
+// 超大图（如 5504x3072）解出位图约 67MB，不入池只预热 HTTP 缓存；典型 1k/2k 图仍走解码复用
+const DECODED_ORIGINAL_MAX_PIXELS = 16 * 1024 * 1024;
+function decodedOriginalKey(url){
+    return String(url || '').trim();
+}
+function prefetchOutputOriginal(url){
+    const key = decodedOriginalKey(url);
+    if(!key || key.startsWith('blob:') || key.startsWith('data:')
+        || isVideoUrl(key) || isAudioUrl(key) || isMissingAssetUrl(key)) return;
+    if(decodedOriginalCache.has(key)) return;
+    const img = new Image();
+    img.decoding = 'async';
+    img.onload = () => {
+        const px = (img.naturalWidth || 0) * (img.naturalHeight || 0);
+        if(px > 0 && px <= DECODED_ORIGINAL_MAX_PIXELS){
+            decodedOriginalCache.set(key, img);
+            while(decodedOriginalCache.size > DECODED_ORIGINAL_CACHE_MAX){
+                const oldest = decodedOriginalCache.keys().next().value;
+                decodedOriginalCache.delete(oldest);
+            }
+        }
+        // 超大图不进解码池，但字节已写入浏览器 HTTP 缓存：点开时仅剩解码、几乎无网络等待
+    };
+    img.onerror = () => { decodedOriginalCache.delete(key); };
+    img.src = key;
+}
+function decodedOriginalFor(url){
+    const img = decodedOriginalCache.get(decodedOriginalKey(url));
+    return img && img.complete && img.naturalWidth > 0 ? img : null;
+}
 function openOutputLightbox(url, out, compareUrl){
     if(!url) return;
     resetOutputPreviewZoom();
@@ -34363,24 +34401,25 @@ function openOutputLightbox(url, out, compareUrl){
     outputLightboxImg.draggable = false;
     outputCompareResult.draggable = false;
     outputCompareOriginal.draggable = false;
-    outputLightboxImg.onload = () => {
-        outputResolutionText(`${outputLightboxImg.naturalWidth} x ${outputLightboxImg.naturalHeight}`, meta);
-    };
     const urlPath = String(url).split('?')[0];
-    const thumbSrc = canvasThumbUrl(url);
     const alreadyFull = String(outputLightboxImg.getAttribute('src') || '').split('?')[0] === urlPath;
     if(alreadyFull){
         // 关闭时保留了解码位图，且就是这张原图：零延迟复用，不重设 src
         outputResolutionText(`${outputLightboxImg.naturalWidth} x ${outputLightboxImg.naturalHeight}`, meta);
     } else {
-        // 先用画布已加载的缩略图占位（点开即见），原图后台加载完再无缝换高清
-        outputLightboxImg.src = thumbSrc;
-        if(thumbSrc !== url){
-            const fullImg = new Image();
-            fullImg.onload = () => {
-                if(currentOutputLightboxUrl === url) outputLightboxImg.src = url;
+        const cached = decodedOriginalFor(url);
+        if(cached){
+            // 悬停/生成完成时已预解码原图：直接换 src，命中浏览器解码缓存、近零延迟
+            outputLightboxImg.src = url;
+            outputResolutionText(`${cached.naturalWidth} x ${cached.naturalHeight}`, meta);
+        } else {
+            // 未预加载：直接加载原图（用户要的就是原图，不再走可能 404 的缩略图占位）
+            outputLightboxImg.onload = () => {
+                if(currentOutputLightboxUrl === url){
+                    outputResolutionText(`${outputLightboxImg.naturalWidth} x ${outputLightboxImg.naturalHeight}`, meta);
+                }
             };
-            fullImg.src = url;
+            outputLightboxImg.src = url;
         }
     }
     outputCompareResult.src = url;
@@ -38157,6 +38196,18 @@ if(canvasRoot){
         const from = e.relatedTarget?.closest?.('.node');
         if(from === node) return;
         setNodePortsOpen(node, true);
+    }, true);
+    // 悬停媒体缩略图即预热原图：点开灯箱直接看到原图，不等下载
+    on(canvasRoot, 'pointerover', e => {
+        const t = e.target;
+        if(!t || !(t instanceof Element)) return;
+        const el = t.closest?.('[data-preview-url], [data-output-url], [data-full-src]');
+        if(!el) return;
+        const url = el.getAttribute('data-preview-url')
+            || el.getAttribute('data-output-url')
+            || el.getAttribute('data-full-src')
+            || '';
+        if(url) prefetchOutputOriginal(url);
     }, true);
     on(canvasRoot, 'pointerout', e => {
         if(!canvas || !nodesEl) return;
