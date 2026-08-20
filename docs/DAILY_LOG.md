@@ -480,3 +480,4 @@
 - 画布修复上线：图片组子图挂载、图台小图缩略图、放大查看先占位再换原图+复用缓存
 - 版本号功能上线 v1.0.91：git 提交总数自动递增 + 头像菜单展示 + version.json no-cache；注意先 commit 再 build 再 deploy 顺序
 - 拖入/粘贴图片 blob 占位秒现已上线 v1.0.95；deploy:safe 前置 build:prod 根治版本号偏小
+- 扩图修复重开（只用 RunningHub）：扩图只留 gpt-image-2，走 RunningHub i2i 透明通道单图（原图垫大画布+四周透明 alpha=0，单张 PNG 传 imageUrls，透明区=待生成，无需 mask）；nano-banana-pro 从扩图移除（端点无 mask 字段）；删除 comfly 扩图链路；待实测 RunningHub gpt i2i 对透明通道的 outpaint 效果

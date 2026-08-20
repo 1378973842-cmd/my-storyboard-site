@@ -264,6 +264,8 @@
         { "id": "AG246", "desc": "扩图修复并重开（只用 RunningHub）：扩图只留 gpt-image-2，走 RunningHub i2i 透明通道单图（原图垫大画布+四周透明 alpha=0，单张 PNG 传 imageUrls，透明区=待生成，无需 mask 字段）；nano-banana-pro 从扩图移除（端点无 mask 字段）；删除 comfly 扩图链路（hasExpandMask 分支/inlineExpandOutpaintRefs/resolveGatewayEditModel）；IMAGE_EXPAND_ENABLED 重开 true；Blockers=待实测 RunningHub gpt i2i 对透明通道的 outpaint 效果", "status": "done", "priority": 280 },
         { "id": "AG247", "desc": "RH 输出预览：视频改为内联播放器（静音/播放/进度/放大，无需点进灯箱）；图片与视频均显示收藏星；多结果加「查看全部」2 列网格切换；收藏时把当次 prompt/model 随 media_kind 回写收藏库，我的收藏页视频可直接内联播放并回显提示词", "status": "done", "priority": 281 },
         { "id": "AG247c", "desc": "check：rh-output-video-inline-fav-grid", "status": "done", "priority": 281 },
+        { "id": "AG248", "desc": "图片生成节点工具栏新增「抠图」：点击像扩图一样进入聚焦面板（底部工具栏=关闭+提示词输入+生成按钮，复用扩图 dock 视觉与开场弹簧动效）→ 上传原图到 RunningHub 抠图应用（appId 1957864327736913921）→ 提交/轮询 → 透明底结果生成新图片节点（插原图下方并自动连线，失败原位标红）", "status": "done", "priority": 282 },
+        { "id": "AG248c", "desc": "check：image-cutout-runninghub", "status": "done", "priority": 282 },
         { "id": "AG206c", "desc": "check：image-edit-viewport-focus", "status": "done", "priority": 240 },
         { "id": "AG199c", "desc": "check：rh-output-layout（含 RH skip stage / 去框）", "status": "done", "priority": 233 },
         { "id": "AG30", "desc": "图片组：子图自然尺寸落地后防抖重排扩容，避免默认框装不下", "status": "done", "priority": 51 },
