@@ -1606,8 +1606,7 @@ let cropAspectLock = 'original';
 let imageEditMode = 'crop';
 let imageEditModeTouched = false;
 /** 扩图：原图外框（pad 为原图像素） */
-/** ponytail: 临时关闭扩图；恢复时改 true */
-const IMAGE_EXPAND_ENABLED = false;
+const IMAGE_EXPAND_ENABLED = true;
 let imageExpandState = null;
 let imageExpandEl = null;
 let imageExpandDrag = null;
@@ -9561,11 +9560,20 @@ function imageBatchOwningImage(imageNodeId){
     if(!imageNodeId) return null;
     return nodes.find(g => g.type === 'imageBatch' && (g.items || []).includes(imageNodeId)) || null;
 }
+function imageNodeSourceUrl(node){
+    if(!node || node.type !== 'image') return '';
+    if(String(node._expandSourceUrl || '').trim()) return String(node._expandSourceUrl).trim();
+    const srcId = connections.find(c => c.to === node.id)?.from;
+    if(!srcId) return '';
+    const src = nodes.find(n => n.id === srcId);
+    return String(src?.url || '').trim();
+}
 function openImageNodeLightbox(imageNode){
     const url = String(imageNode?.url || '').trim();
     if(!url || isMissingAssetUrl(url) || mediaKindForNode(imageNode) !== 'image') return;
     const batch = imageBatchOwningImage(imageNode.id);
-    openOutputLightbox(url, batch || null);
+    const compareUrl = imageNode.editOrigin === 'expand' ? imageNodeSourceUrl(imageNode) : '';
+    openOutputLightbox(url, batch || null, compareUrl);
 }
 function createImageBatchChild(batch, url, name, index){
     const i = index ?? imageBatchAllChildImages(batch).length;
@@ -25190,6 +25198,47 @@ function expandNearestG2Ratio(w, h){
     }
     return best;
 }
+/** 扩图：把外框比例吸附到最近的 gpt-image-2 预设比例（只补透明边、原图 keep 位置不动），
+ *  让透明 PNG 的宽高比与发给 RunningHub 的 aspectRatio 枚举严格一致，否则模型会拉伸/裁切原图导致框对不齐。 */
+function snapExpandFrameToG2(st){
+    if(!st) return;
+    const w = st.srcW + st.padL + st.padR;
+    const h = st.srcH + st.padT + st.padB;
+    const ratio = expandNearestG2Ratio(w, h);
+    const [a, b] = String(ratio).split(':').map(Number);
+    if(!a || !b) return;
+    const target = a / b;
+    const cur = w / h;
+    if(Math.abs(Math.log(cur / target)) < 0.004) return;
+    if(cur > target){
+        // 太宽：加高。优先加在「没贴住」的一侧，避免撑开用户贴住的边（贴边=那条边外不生图）
+        const nextH = Math.round(w / target);
+        const extra = Math.max(0, nextH - h);
+        if(st.padT === 0 && st.padB > 0) st.padB += extra;
+        else if(st.padB === 0 && st.padT > 0) st.padT += extra;
+        else {
+            const t = st.padT + st.padB;
+            const share = t > 0 ? st.padT / t : 0.5;
+            const addT = Math.round(extra * share);
+            st.padT += addT;
+            st.padB += extra - addT;
+        }
+    } else {
+        // 太窄：加宽。优先加在「没贴住」的一侧
+        const nextW = Math.round(h * target);
+        const extra = Math.max(0, nextW - w);
+        if(st.padL === 0 && st.padR > 0) st.padR += extra;
+        else if(st.padR === 0 && st.padL > 0) st.padL += extra;
+        else {
+            const s = st.padL + st.padR;
+            const share = s > 0 ? st.padL / s : 0.5;
+            const addL = Math.round(extra * share);
+            st.padL += addL;
+            st.padR += extra - addL;
+        }
+    }
+    clampExpandPads(st);
+}
 function expandRatioValue(lock, srcW, srcH){
     if(lock === 'free') return 0;
     if(lock === 'original' || !lock) return Number(srcW) / Math.max(1, Number(srcH));
@@ -25323,44 +25372,37 @@ function expandTargetPixels(st){
     }
     return { w: outW, h: outH, ratio, tier, canvasW, canvasH };
 }
-function scaleExpandCanvas(src, w, h){
-    if(!src || src.width === w && src.height === h) return src;
-    const out = document.createElement('canvas');
-    out.width = w;
-    out.height = h;
-    out.getContext('2d').drawImage(src, 0, 0, w, h);
-    return out;
-}
-/** 扩图：灰底拼图 + edits 遮罩（透明=待生成灰区，白=保留原图）→ 等比缩放到 API 尺寸 */
-function buildExpandGrayComposite(st, orig){
+/** 扩图：gpt-image-2 单图透明通道（透明=待生成，不透明=保留，无需 mask 字段）。
+ *  返回两张图：outpaint（透明 PNG，上传给模型）+ preview（灰底，仅本地预览让待扩图区可见）。
+ *  一步合成到 target 尺寸：只 drawImage 原图（缩放仅发生在原图内部），透明是 clearRect 背景，
+ *  原图区域 alpha 恒 255、透明区 alpha 恒 0，边界保持硬边——避免「原图+透明」整体二次缩放时
+ *  双线性插值把贴边像素混成半透明，导致 gpt-image-2 把贴边当待生成区而糊掉。 */
+function buildExpandOutpaint(st, orig){
     const keep = expandKeepRect(st);
     const target = expandTargetPixels(st);
-    const native = document.createElement('canvas');
-    native.width = keep.canvasW;
-    native.height = keep.canvasH;
-    const nctx = native.getContext('2d');
-    nctx.fillStyle = '#808080';
-    nctx.fillRect(0, 0, keep.canvasW, keep.canvasH);
-    nctx.drawImage(orig, keep.x, keep.y, keep.w, keep.h);
-    const maskNative = document.createElement('canvas');
-    maskNative.width = keep.canvasW;
-    maskNative.height = keep.canvasH;
-    const mctx = maskNative.getContext('2d');
-    mctx.clearRect(0, 0, keep.canvasW, keep.canvasH);
-    mctx.fillStyle = '#ffffff';
-    mctx.fillRect(keep.x, keep.y, keep.w, keep.h);
-    return {
-        composite: scaleExpandCanvas(native, target.w, target.h),
-        mask: scaleExpandCanvas(maskNative, target.w, target.h),
-        target,
-    };
+    const sx = target.w / keep.canvasW;
+    const sy = target.h / keep.canvasH;
+    const outpaint = document.createElement('canvas');
+    outpaint.width = target.w;
+    outpaint.height = target.h;
+    const octx = outpaint.getContext('2d');
+    octx.clearRect(0, 0, target.w, target.h);
+    octx.drawImage(orig, keep.x * sx, keep.y * sy, keep.w * sx, keep.h * sy);
+    const preview = document.createElement('canvas');
+    preview.width = target.w;
+    preview.height = target.h;
+    const pctx = preview.getContext('2d');
+    pctx.fillStyle = '#808080';
+    pctx.fillRect(0, 0, target.w, target.h);
+    pctx.drawImage(orig, keep.x * sx, keep.y * sy, keep.w * sx, keep.h * sy);
+    return { outpaint, preview, target };
 }
 function invalidateImageExpandRangeConfirm(){
     const st = imageExpandState;
     if(!st?.rangeConfirmed) return;
     st.rangeConfirmed = false;
     st.confirmedCompositeUrl = '';
-    st.confirmedMaskUrl = '';
+    st.confirmedPreviewUrl = '';
     st.confirmedTarget = null;
     applyImageExpandRangeConfirmedUi(false);
 }
@@ -25387,7 +25429,7 @@ function applyImageExpandRangeConfirmedUi(confirmed){
             stage.appendChild(preview);
         }
         if(preview){
-            preview.src = st.confirmedCompositeUrl;
+            preview.src = st.confirmedPreviewUrl || st.confirmedCompositeUrl;
             preview.hidden = false;
         }
         if(keep) keep.hidden = true;
@@ -25421,16 +25463,14 @@ async function confirmImageExpandRange(){
     if(confirmBtn) confirmBtn.disabled = true;
     setStatus(langIsEn() ? 'Compositing expand preview…' : '正在合成扩图预览…');
     try {
+        snapExpandFrameToG2(st);
         const orig = await loadImageBitmapForExport(st.url);
-        const { composite, mask, target } = buildExpandGrayComposite(st, orig);
-        const [uploaded, maskUploaded] = await Promise.all([
-            uploadCroppedBlob(await canvasToPngBlob(composite), 'expand-draft.png'),
-            uploadCroppedBlob(await canvasToPngBlob(mask), 'expand-mask.png'),
-        ]);
-        if(!uploaded?.url || !maskUploaded?.url) throw new Error(langIsEn() ? 'Upload failed' : '上传失败');
+        const { outpaint, preview, target } = buildExpandOutpaint(st, orig);
+        const uploaded = await uploadCroppedBlob(await canvasToPngBlob(outpaint), 'expand-outpaint.png');
+        if(!uploaded?.url) throw new Error(langIsEn() ? 'Upload failed' : '上传失败');
         st.rangeConfirmed = true;
         st.confirmedCompositeUrl = uploaded.url;
-        st.confirmedMaskUrl = maskUploaded.url;
+        st.confirmedPreviewUrl = preview.toDataURL('image/png');
         st.confirmedTarget = { w: target.w, h: target.h, ratio: target.ratio, tier: target.tier };
         applyImageExpandRangeConfirmedUi(true);
         setStatus(langIsEn() ? 'Expand area confirmed' : '扩图范围已确定');
@@ -25462,11 +25502,6 @@ function buildImageExpandHtml(st){
     ].map(([key, label]) => `<button type="button" class="image-expand-menu-item${st.quality === key ? ' is-active' : ''}" data-expand-quality="${escapeAttr(key)}">${escapeHtml(label)}</button>`).join('');
     const sizeLabel = st.size === '2k' ? '2K' : '1K';
     const qualityLabel = st.quality === 'low' ? (en ? 'Low' : '低') : st.quality === 'high' ? (en ? 'High' : '高') : (en ? 'Medium' : '中');
-    const modelItems = [
-        ['gpt-image-2', 'GPT Image2'],
-        ['nano-banana-pro', 'Nano Banana Pro'],
-    ].map(([key, label]) => `<button type="button" class="image-expand-menu-item${st.model === key ? ' is-active' : ''}" data-expand-model="${escapeAttr(key)}">${escapeHtml(label)}</button>`).join('');
-    const modelLabel = st.model === 'nano-banana-pro' ? 'Nano Banana Pro' : 'GPT Image2';
     const handles = ['n','s','e','w','nw','ne','sw','se'].map(k => `<span class="image-expand-handle ${k}" data-expand-handle="${k}"></span>`).join('');
     const rangeHint = en
         ? 'Adjust the frame, then confirm the gray expand area'
@@ -25498,19 +25533,12 @@ function buildImageExpandHtml(st){
                 </button>
                 <div class="image-expand-menu" data-expand-panel="size" hidden>${sizeItems}</div>
             </div>
-            <div class="image-expand-drop" data-expand-quality-wrap${isGptImage2Model(st.model) ? '' : ' hidden'}>
+            <div class="image-expand-drop">
                 <button type="button" class="image-expand-drop-btn" data-expand-menu="quality" aria-expanded="false">
                     <span data-expand-quality-label>${escapeHtml(qualityLabel)}</span>
                     <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
                 </button>
                 <div class="image-expand-menu" data-expand-panel="quality" hidden>${qualityItems}</div>
-            </div>
-            <div class="image-expand-drop">
-                <button type="button" class="image-expand-drop-btn" data-expand-menu="model" aria-expanded="false">
-                    <span data-expand-model-label>${escapeHtml(modelLabel)}</span>
-                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
-                </button>
-                <div class="image-expand-menu" data-expand-panel="model" hidden>${modelItems}</div>
             </div>
             <button type="button" class="gen-btn gen-dock-send" data-expand-act="run" disabled title="${escapeAttr(en ? 'Generate' : '开始扩图')}" aria-label="run">
                 <i data-lucide="arrow-up" class="w-4 h-4"></i>
@@ -25587,22 +25615,6 @@ function bindImageExpandChrome(host){
                     : (en ? 'Medium' : '中');
             }
             closeImageExpandMenus();
-        });
-    });
-    host.querySelectorAll('[data-expand-model]').forEach(btn => {
-        btn.addEventListener('click', e => {
-            e.stopPropagation();
-            if(!imageExpandState) return;
-            invalidateImageExpandRangeConfirm();
-            const next = btn.getAttribute('data-expand-model') || 'gpt-image-2';
-            imageExpandState.model = next === 'nano-banana-pro' ? 'nano-banana-pro' : 'gpt-image-2';
-            host.querySelectorAll('[data-expand-model]').forEach(b => b.classList.toggle('is-active', b === btn));
-            const label = host.querySelector('[data-expand-model-label]');
-            if(label){
-                label.textContent = imageExpandState.model === 'nano-banana-pro' ? 'Nano Banana Pro' : 'GPT Image2';
-            }
-            closeImageExpandMenus();
-            syncExpandModelChrome();
         });
     });
     const prompt = host.querySelector('.image-expand-prompt');
@@ -25815,7 +25827,7 @@ async function openImageExpand(target){
         running: false,
         rangeConfirmed: false,
         confirmedCompositeUrl: '',
-        confirmedMaskUrl: '',
+        confirmedPreviewUrl: '',
         confirmedTarget: null,
     };
     applyExpandAspect(imageExpandState, 'auto');
@@ -25828,7 +25840,6 @@ async function openImageExpand(target){
         keep.src = target.url;
     }
     bindImageExpandChrome(host);
-    syncExpandModelChrome();
     removeImageActionBar();
     board.appendChild(host);
     imageExpandEl = host;
@@ -25851,26 +25862,18 @@ async function openImageExpand(target){
 }
 function expandPromptText(userText){
     const base = langIsEn()
-        ? 'Outpaint edit. Pixels colored exactly #808080 are the ONLY areas to generate. The existing photograph pixels must stay unchanged in place—do not move, recenter, rescale, or crop the original content (same composition position, colors, lighting, perspective). Seamlessly extend the scene only into the gray regions. No watermarks, frames, or captions.'
-        : '扩图编辑：图中 #808080 中性灰像素才是需要生成的扩展区；已有照片像素必须原位置完全保留，禁止移动、重新居中、缩放或裁切原图（构图位置、色彩、光线、透视均不可改）。只在灰色区域无缝延伸现有场景。不要水印、边框或文字。';
+        ? 'Outpaint edit. The transparent areas (alpha=0) are the ONLY areas to generate. The opaque pixels (the original image) must stay unchanged in place—do not move, recenter, rescale, or crop the original content (same composition position, colors, lighting, perspective). Seamlessly extend the scene only into the transparent regions. No watermarks, frames, or captions.'
+        : '扩图编辑：透明区域（alpha=0）才是需要生成的扩展区；不透明像素（原图）必须原位置完全保留，禁止移动、重新居中、缩放或裁切原图（构图位置、色彩、光线、透视均不可改）。只在透明区域无缝延伸现有场景。不要水印、边框或文字。';
     const extra = String(userText || '').trim();
+    const zone = langIsEn() ? 'the transparent areas' : '透明区域';
     if(!extra){
         return langIsEn()
-            ? `${base} Extend naturally into the gray areas only. Do not invent unrelated new subjects.`
-            : `${base} 只在灰色区域按原画面自然延伸，不要编造无关新主体。`;
+            ? `${base} Extend naturally into ${zone} only. Do not invent unrelated new subjects.`
+            : `${base} 只在${zone}按原画面自然延伸，不要编造无关新主体。`;
     }
     return langIsEn()
-        ? `${base} In the gray expand areas: ${extra}`
-        : `${base} 灰色扩展区域内容：${extra}`;
-}
-function syncExpandModelChrome(){
-    const host = imageExpandEl;
-    const st = imageExpandState;
-    if(!host || !st) return;
-    const gpt = isGptImage2Model(st.model);
-    host.querySelectorAll('[data-expand-quality-wrap]').forEach(el => {
-        el.hidden = !gpt;
-    });
+        ? `${base} In ${zone}: ${extra}`
+        : `${base} ${zone}内容：${extra}`;
 }
 function spawnExpandPendingImageNode(sourceNode, st){
     if(!sourceNode || !st) return null;
@@ -25886,6 +25889,7 @@ function spawnExpandPendingImageNode(sourceNode, st){
     const baseName = String(st.name || 'image').replace(/\.[^.]+$/, '');
     const next = addGeneratedImageNode({ url: '', name: `${baseName}_expand` }, sourceNode, '_expand', offsetY);
     next.editOrigin = 'expand';
+    next._expandSourceUrl = String(st.confirmedCompositeUrl || '').trim();
     const src = nodeEditSpawnLayoutSize(sourceNode);
     if(src.w > 0){
         next.w = src.w;
@@ -25956,7 +25960,7 @@ async function runImageExpandJob(st, targetNode, source, pendingId){
     const promptText = expandPromptText(st.prompt);
     const run = { node: { id: source.id }, prompt: promptText, taskLabel: langIsEn() ? 'Expand' : '扩图' };
     try {
-        if(!st.confirmedCompositeUrl || !st.confirmedMaskUrl || !st.confirmedTarget){
+        if(!st.confirmedCompositeUrl || !st.confirmedTarget){
             throw new Error(langIsEn() ? 'Confirm expand area first' : '请先确定扩图范围');
         }
         const target = st.confirmedTarget;
@@ -25964,7 +25968,7 @@ async function runImageExpandJob(st, targetNode, source, pendingId){
         if(!node()) throw new Error(langIsEn() ? 'Expand node missing' : '扩图节点已丢失');
         const payload = {
             prompt: promptText,
-            provider_id: resolveImageProviderId('runninghub') || resolveImageProviderId('comfly'),
+            provider_id: resolveImageProviderId('runninghub'),
             model,
             size: `${target.w}x${target.h}`,
             canvas_resolution: target.tier,
@@ -25972,11 +25976,10 @@ async function runImageExpandJob(st, targetNode, source, pendingId){
             expand_outpaint: true,
             reference_images: [
                 { url: st.confirmedCompositeUrl, name: 'expand-source.png', role: 'source' },
-                { url: st.confirmedMaskUrl, name: 'expand-mask.png', role: 'mask' },
             ],
             canvas_id: canvas?.id || '',
             node_id: targetNode.id || '',
-            quality: isGptImage2Model(model) ? (normalizedImageQuality(st.quality) || 'medium') : undefined,
+            quality: normalizedImageQuality(st.quality) || 'medium',
         };
         const task = await createCanvasImageTask(payload);
         const cur = node();
@@ -26020,7 +26023,7 @@ async function runImageExpandJob(st, targetNode, source, pendingId){
 async function runImageExpand(){
     const st = imageExpandState;
     if(!st || st.running) return;
-    if(!st.rangeConfirmed || !st.confirmedCompositeUrl || !st.confirmedMaskUrl){
+    if(!st.rangeConfirmed || !st.confirmedCompositeUrl){
         softAlert(langIsEn() ? 'Confirm the expand area first (gray preview).' : '请先点「确定扩图范围」，确认灰边预览后再生成');
         return;
     }
@@ -26046,7 +26049,6 @@ async function runImageExpand(){
         model: st.model,
         prompt: st.prompt,
         confirmedCompositeUrl: st.confirmedCompositeUrl,
-        confirmedMaskUrl: st.confirmedMaskUrl,
         confirmedTarget: st.confirmedTarget,
     };
     pushUndo();
@@ -28042,6 +28044,150 @@ function rhMediaPreviewHtml(ref, kind){
         ? `<img src="${safe}" data-url="${safe}" alt="" draggable="false">`
         : `<i data-lucide="image" class="w-6 h-6"></i>`;
 }
+/** 输出预览媒体：视频=内联播放器（静音/收藏/播放/进度/放大），图片=缩略图+收藏星 */
+function rhOutputMediaHtml(ref){
+    const url = typeof ref === 'string' ? ref : (ref?.url || '');
+    const kind = ref?.kind || (isVideoUrl(url) ? 'video' : isAudioUrl(url) ? 'audio' : 'image');
+    if(kind === 'video'){
+        return url && !isMissingAssetUrl(url)
+            ? genStageVideoPlayerHtml(url)
+            : `<i data-lucide="file-video" class="w-6 h-6"></i>`;
+    }
+    if(kind === 'audio') return `<i data-lucide="file-audio" class="w-6 h-6"></i>`;
+    return url && !isMissingAssetUrl(url)
+        ? `<img src="${escapeAttr(url)}" data-url="${escapeAttr(url)}" alt="" draggable="false">${genStageCoverFavHtml(url)}`
+        : `<i data-lucide="image" class="w-6 h-6"></i>`;
+}
+/** 全部结果网格：2 列可滚，视频带播放角标，每格可收藏 / 点击放大 */
+function rhOutputGridHtml(refs){
+    return (refs || []).map(ref => {
+        const url = ref.url;
+        const safe = escapeAttr(url);
+        const kind = ref.kind || 'image';
+        const media = kind === 'video'
+            ? `<video src="${safe}" muted playsinline preload="metadata" draggable="false"></video>`
+            : (isMissingAssetUrl(url)
+                ? missingAssetHtml(url, true)
+                : `<img src="${escapeAttr(canvasThumbUrl(url))}" data-full-src="${safe}" alt="" loading="eager" decoding="sync" draggable="false">`);
+        const playBadge = kind === 'video' ? `<span class="rh-grid-play" aria-hidden="true"><i data-lucide="play" class="w-3 h-3"></i></span>` : '';
+        return `<div class="rh-output-grid-item" data-preview-url="${safe}" role="button" tabindex="0">
+            <div class="rh-output-grid-media">${media}${playBadge}</div>
+            ${genStageCoverFavHtml(url)}
+        </div>`;
+    }).join('');
+}
+/** 收藏星统一绑定：取节点历史里该 URL 的提示词/模型回写收藏，视频也照常收藏 */
+function bindRhOutputFavoriteButtons(container, node){
+    if(!container) return;
+    container.querySelectorAll('.gen-stage-cover-fav[data-action="fav"]').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            const url = btn.getAttribute('data-url')
+                || btn.closest('[data-preview-url]')?.getAttribute('data-preview-url')
+                || '';
+            if(!url) return;
+            const ref = generatedImageRefs(node).find(r => r.url === url) || {url};
+            const meta = {
+                prompt: ref.prompt || '',
+                model: ref.model || 'RunningHub',
+                params: {
+                    media_kind: ref.kind || 'image',
+                    backend: 'runninghub',
+                    run_ms: Number(ref.runMs || 0) || 0,
+                },
+            };
+            void toggleFavoriteForUrl(url, meta, node, btn);
+        };
+    });
+}
+/** RH 输出视频内联播放器控件（静音/播放/进度/放大），无剪辑选区 */
+function bindRhOutputVideoShell(shell, node){
+    const video = shell.querySelector('.gen-stage-video-el');
+    if(!video) return;
+    const playBtn = shell.querySelector('[data-video-action="play"]');
+    const muteBtn = shell.querySelector('[data-video-action="mute"]');
+    const expandBtn = shell.querySelector('[data-video-action="expand"]');
+    const seek = shell.querySelector('.gen-stage-video-seek');
+    const tcur = shell.querySelector('.gen-stage-video-tcur');
+    const tdur = shell.querySelector('.gen-stage-video-tdur');
+    const syncPlayIcon = () => {
+        if(!playBtn) return;
+        const paused = video.paused;
+        playBtn.innerHTML = `<i data-lucide="${paused ? 'play' : 'pause'}"></i>`;
+        playBtn.title = paused ? (langIsEn() ? 'Play' : '播放') : (langIsEn() ? 'Pause' : '暂停');
+        playBtn.setAttribute('aria-label', playBtn.title);
+        refreshIcons(playBtn);
+    };
+    const syncMuteIcon = () => {
+        if(!muteBtn) return;
+        const muted = Boolean(video.muted || video.volume === 0);
+        muteBtn.innerHTML = `<i data-lucide="${muted ? 'volume-x' : 'volume-2'}"></i>`;
+        muteBtn.title = muted ? (langIsEn() ? 'Unmute' : '取消静音') : (langIsEn() ? 'Mute' : '静音');
+        muteBtn.setAttribute('aria-label', muteBtn.title);
+        muteBtn.classList.toggle('is-muted', muted);
+        refreshIcons(muteBtn);
+    };
+    const syncTime = () => {
+        const dur = Number(video.duration);
+        const cur = Number(video.currentTime) || 0;
+        if(tcur) tcur.textContent = formatGenStageVideoTime(cur);
+        if(tdur) tdur.textContent = Number.isFinite(dur) ? formatGenStageVideoTime(dur) : '0.0s';
+        if(seek && Number.isFinite(dur) && dur > 0 && !seek.matches(':active')){
+            seek.value = String(Math.round((cur / dur) * 1000));
+        }
+    };
+    shell.querySelectorAll('button, input').forEach(el => {
+        el.onmousedown = e => e.stopPropagation();
+        el.ondblclick = e => { e.preventDefault(); e.stopPropagation(); };
+    });
+    if(playBtn){
+        playBtn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            if(video.paused){ void video.play().catch(() => {}); } else { video.pause(); }
+            syncPlayIcon();
+        };
+    }
+    if(muteBtn){
+        muteBtn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            video.muted = !video.muted;
+            if(!video.muted && video.volume === 0) video.volume = 1;
+            syncMuteIcon();
+        };
+    }
+    if(expandBtn){
+        expandBtn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            const url = shell.getAttribute('data-video-url')
+                || shell.closest('[data-preview-url]')?.getAttribute('data-preview-url')
+                || '';
+            if(url) openOutputLightbox(url, node);
+        };
+    }
+    if(seek){
+        const seekTo = () => {
+            const dur = Number(video.duration);
+            if(!Number.isFinite(dur) || dur <= 0) return;
+            video.currentTime = (Number(seek.value) / 1000) * dur;
+            syncTime();
+        };
+        seek.oninput = e => { e.stopPropagation(); seekTo(); };
+        seek.onchange = e => { e.stopPropagation(); seekTo(); };
+    }
+    video.onplay = syncPlayIcon;
+    video.onpause = syncPlayIcon;
+    video.onended = () => { syncPlayIcon(); syncTime(); };
+    video.ontimeupdate = syncTime;
+    video.onloadedmetadata = syncTime;
+    syncPlayIcon();
+    syncMuteIcon();
+    syncTime();
+}
 /** 输入/输出框跟媒体真实比例，避免固定 1:1 裁切 */
 function rhApplyFrameAspect(frameEl, mediaEl, opts={}){
     if(!frameEl || !mediaEl) return;
@@ -28193,34 +28339,38 @@ function rhRenderOutputPane(container, node){
     const idx = Math.max(0, Math.min(refs.length - 1, Number(node.previewIndex ?? refs.length - 1)));
     const runMs = Math.max(0, Number(current?.runMs || 0) || 0);
     const durationText = runMs ? formatRunDuration(runMs) : '';
+    const gridMode = Boolean(node.rhOutputGrid) && refs.length > 1;
     // 媒体独占输出井（与左侧输入图同高）；用时/历史条挪到运行钮上方，避免把输出图顶矮
-    container.innerHTML = `
-        <div class="rh-output-shell" data-rh-output-count="${refs.length}" data-rh-output-kind="${escapeAttr(kind)}">
-            <div class="rh-output-media" data-preview-url="${escapeAttr(url)}">
-                ${rhMediaPreviewHtml(url, kind)}
+    if(gridMode){
+        container.innerHTML = `<div class="rh-output-grid">${rhOutputGridHtml(refs)}</div>`;
+    } else {
+        container.innerHTML = `
+            <div class="rh-output-shell" data-rh-output-count="${refs.length}" data-rh-output-kind="${escapeAttr(kind)}">
+                <div class="rh-output-media" data-preview-url="${escapeAttr(url)}">
+                    ${rhOutputMediaHtml(current)}
+                </div>
             </div>
-        </div>
-    `;
+        `;
+    }
+    const gridToggleTitle = gridMode
+        ? (langIsEn() ? 'Single view' : '单图视图')
+        : (langIsEn() ? 'View all results' : '查看全部结果');
     if(toolbarSlot){
         toolbarSlot.innerHTML = `
             <div class="rh-output-toolbar">
                 <div class="rh-output-toolbar-meta">
                     ${durationText ? `<span class="rh-output-duration" title="${escapeAttr(langIsEn() ? 'Generation time' : '生成用时')}">${escapeHtml(durationText)}</span>` : '<span class="rh-output-toolbar-spacer"></span>'}
                 </div>
-                ${refs.length > 1 ? `<div class="rh-output-history" role="group" aria-label="${langIsEn() ? 'Output history' : '生成历史'}">
+                <div class="rh-output-toolbar-actions">
+                ${refs.length > 1 ? `<button type="button" class="rh-output-grid-toggle${gridMode ? ' is-active' : ''}" data-rh-grid-toggle="1" title="${escapeAttr(gridToggleTitle)}" aria-label="${escapeAttr(gridToggleTitle)}" aria-pressed="${gridMode ? 'true' : 'false'}"><i data-lucide="layout-grid" class="w-3.5 h-3.5"></i></button>` : ''}
+                ${refs.length > 1 && !gridMode ? `<div class="rh-output-history" role="group" aria-label="${langIsEn() ? 'Output history' : '生成历史'}">
                     <button type="button" class="rh-output-nav" data-rh-hist="-1" title="${langIsEn() ? 'Previous' : '上一条'}" aria-label="${langIsEn() ? 'Previous' : '上一条'}"><i data-lucide="chevron-left" class="w-3.5 h-3.5"></i></button>
                     <button type="button" class="rh-output-count" data-rh-hist="1" title="${langIsEn() ? 'Next output' : '下一条'}">${idx + 1}/${refs.length}</button>
                     <button type="button" class="rh-output-nav" data-rh-hist="1" title="${langIsEn() ? 'Next' : '下一条'}" aria-label="${langIsEn() ? 'Next' : '下一条'}"><i data-lucide="chevron-right" class="w-3.5 h-3.5"></i></button>
                 </div>` : ''}
+                </div>
             </div>
         `;
-    }
-    const mediaEl = container.querySelector('.rh-output-media');
-    const mediaTag = mediaEl?.querySelector('img, video');
-    if(mediaEl && mediaTag){
-        rhApplyFrameAspect(mediaEl, mediaTag, {
-            onApplied: () => scheduleFitRhNodeFrame(node),
-        });
     }
     const stepHistory = (delta) => {
         if(refs.length <= 1) return;
@@ -28237,11 +28387,48 @@ function rhRenderOutputPane(container, node){
             stepHistory(Number(btn.getAttribute('data-rh-hist') || 1) || 1);
         });
     });
-    mediaEl?.addEventListener('click', e => {
-        e.stopPropagation();
-        if(!url) return;
-        openOutputLightbox(url, node);
+    histRoot.querySelectorAll('[data-rh-grid-toggle]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            node.rhOutputGrid = !node.rhOutputGrid;
+            rhRenderOutputPane(container, node);
+            scheduleFitRhNodeFrame(node);
+            scheduleSave();
+        };
     });
+    if(gridMode){
+        container.querySelectorAll('.rh-output-grid-item').forEach(item => {
+            const u = item.getAttribute('data-preview-url') || '';
+            item.onmousedown = e => { if(e.target.closest('button')) e.stopPropagation(); };
+            item.onclick = e => {
+                if(e.target.closest('button')) return;
+                e.preventDefault();
+                e.stopPropagation();
+                if(u) openOutputLightbox(u, node);
+            };
+        });
+        bindRhOutputFavoriteButtons(container, node);
+    } else {
+        const mediaEl = container.querySelector('.rh-output-media');
+        const mediaTag = mediaEl?.querySelector('img, video');
+        if(mediaEl && mediaTag){
+            rhApplyFrameAspect(mediaEl, mediaTag, {
+                onApplied: () => scheduleFitRhNodeFrame(node),
+            });
+        }
+        const videoShell = mediaEl?.querySelector('.gen-stage-video-shell');
+        if(videoShell) bindRhOutputVideoShell(videoShell, node);
+        // 视频已由内联播放器接管点击；图片点击仍开灯箱
+        if(mediaEl && kind !== 'video'){
+            mediaEl.addEventListener('click', e => {
+                e.stopPropagation();
+                if(!url) return;
+                openOutputLightbox(url, node);
+            });
+        }
+        bindRhOutputFavoriteButtons(container, node);
+    }
     refreshIcons(paneOut || container);
 }
 function renderRhBody(node){
@@ -29415,11 +29602,15 @@ function generatedImageRefs(node){
             if(!url) return null;
             const kind = mediaKindForOutputItem(item);
             const runMs = Number(item?.runMs || 0) || 0;
+            const prompt = String(item?.prompt || '').trim();
+            const model = String(item?.model || '').trim();
             return {
                 url,
                 name:outputImageName(url) || `${node.type || 'generated'}-${i + 1}`,
                 kind,
                 ...(runMs ? {runMs} : {}),
+                ...(prompt ? {prompt} : {}),
+                ...(model ? {model} : {}),
                 index:i,
             };
         })
@@ -31740,6 +31931,10 @@ function outputMetaFor(url, out){
         const hist = generatorHistoryItems(node).find(x => outputUrlValue(x) === url);
         return hist && typeof hist === 'object' ? hist : {};
     }
+    if(node?.type === 'rh' && Array.isArray(node.generatedOutputs)){
+        const hit = node.generatedOutputs.find(x => outputUrlValue(x) === url);
+        return hit && typeof hit === 'object' ? hit : {};
+    }
     const list = node?.images || out?.images || [];
     const item = list.find(x => outputUrlValue(x) === url);
     return item && typeof item === 'object' ? item : {};
@@ -32361,9 +32556,15 @@ function mergeGeneratedOutputs(node, outputs, append=false){
                 || 'image');
         if(!keepGeneratedMedia && kind !== 'image') return null;
         const runMs = Number(item?.runMs || 0) || 0;
-        // 有用时或非图片时保留对象，避免 RH 用时被压成纯 URL 丢掉
-        if(kind === 'image' && !runMs) return url;
-        return runMs ? {url, kind, runMs} : {url, kind};
+        const prompt = String(item?.prompt || '').trim();
+        const model = String(item?.model || '').trim();
+        // 有用时或非图片时保留对象，避免 RH 用时被压成纯 URL 丢掉；顺带保留提示词/模型供收藏回显
+        if(kind === 'image' && !runMs && !prompt && !model) return url;
+        const entry = {url, kind};
+        if(runMs) entry.runMs = runMs;
+        if(prompt) entry.prompt = prompt;
+        if(model) entry.model = model;
+        return entry;
     }).filter(Boolean);
     if(!append){
         node.generatedOutputs = clean;
@@ -33012,7 +33213,15 @@ function applyCompletedRhOutputs(ctx, outputs, meta, taskId){
         scheduleSaveNow();
         return;
     }
-    commitMediaOutputs(out, rhNode, outputs, run?.refs?.[0], [{runMs}], {
+    const prompt = String(run?.prompt || '').trim();
+    const model = String(run?.taskLabel || runTaskLabel(run) || 'RunningHub').trim();
+    const enrichedOutputs = outputs.map(o => {
+        const item = typeof o === 'string' ? {url: o} : {...o};
+        if(prompt) item.prompt = prompt;
+        if(model) item.model = model;
+        return item;
+    });
+    commitMediaOutputs(out, rhNode, enrichedOutputs, run?.refs?.[0], [{runMs}], {
         appendGenerated: Boolean(pending.appendGenerated ?? true),
     });
     if((rhNode.generatedOutputs || []).length > MAX_GEN_HISTORY){
@@ -33852,9 +34061,10 @@ function navigateOutputLightbox(direction){
 }
 function bindOutputLightboxFavorite(url, out, meta){
     if(!outputFavoriteBtn) return;
-    const imageOk = !!url && !isVideoUrl(url) && !isMissingAssetUrl(url);
-    outputFavoriteBtn.style.display = imageOk ? '' : 'none';
-    if(!imageOk){
+    // 视频/音频也允许收藏（收藏库按 URL 识别媒体类型并回显提示词）
+    const ok = !!url && !isMissingAssetUrl(url);
+    outputFavoriteBtn.style.display = ok ? '' : 'none';
+    if(!ok){
         outputFavoriteBtn.onclick = null;
         return;
     }
@@ -34111,7 +34321,7 @@ function outputLightboxIsVideo(url, out){
     if(out?.type === 'video' || out?.type === 'image' && mediaKindForNode(out) === 'video') return true;
     return false;
 }
-function openOutputLightbox(url, out){
+function openOutputLightbox(url, out, compareUrl){
     if(!url) return;
     resetOutputPreviewZoom();
     currentOutputLightboxOutId = out?.id || '';
@@ -34121,7 +34331,7 @@ function openOutputLightbox(url, out){
     setupOutputPromptPanel(meta);
     bindOutputLightboxFavorite(url, liveOut || out, meta);
     outputResolutionText('--', meta);
-    currentOutputCompareUrl = outputCompareUrlFor(url, liveOut || out);
+    currentOutputCompareUrl = compareUrl || outputCompareUrlFor(url, liveOut || out);
     setOutputCompareMode(false);
     const videoMode = outputLightboxIsVideo(url, liveOut || out);
     outputLightboxImg.style.display = videoMode ? 'none' : 'block';

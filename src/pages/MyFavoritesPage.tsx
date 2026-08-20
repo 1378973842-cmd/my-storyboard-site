@@ -32,6 +32,19 @@ type ContextMenuState = {
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 
+function isVideoUrl(url: string): boolean {
+  const clean = String(url || '').split('?')[0].toLowerCase();
+  return /\.(mp4|webm|mov|m4v|mkv)$/.test(clean);
+}
+
+function isVideoFavorite(item: FavoriteItem): boolean {
+  const params = (item.params || {}) as Record<string, unknown>;
+  const kind = String(params.media_kind || params.kind || '').toLowerCase();
+  if (kind === 'video') return true;
+  if (kind === 'image') return false;
+  return isVideoUrl(item.thumbnail_path) || isVideoUrl(item.preview_path || '');
+}
+
 export const MyFavoritesPage = memo(function MyFavoritesPage({
   shellActive,
 }: {
@@ -198,21 +211,35 @@ export const MyFavoritesPage = memo(function MyFavoritesPage({
                 transition={spring}
                 className="overflow-hidden rounded-[1.5rem] bg-[#131313]/80 outline outline-[0.5px] outline-[#45464d]/20 transition-shadow duration-300 hover:shadow-[0_48px_96px_-56px_rgba(0,0,0,0.6)]"
               >
-                <button
-                  type="button"
-                  className="group relative block aspect-[4/3] w-full cursor-zoom-in bg-[#1c1b1b] text-left"
-                  onClick={() => setPreviewUrl(item.preview_path || item.thumbnail_path)}
-                  onContextMenu={(event) => openImageContextMenu(event, item)}
-                  aria-label="放大查看图片"
-                >
-                  <img
-                    src={item.thumbnail_path}
-                    alt=""
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-                    loading="lazy"
-                    draggable={false}
-                  />
-                </button>
+                {isVideoFavorite(item) ? (
+                  <div className="relative aspect-[4/3] w-full bg-[#1c1b1b]">
+                    <video
+                      src={item.thumbnail_path}
+                      controls
+                      muted
+                      playsInline
+                      preload="metadata"
+                      className="h-full w-full object-cover"
+                      onContextMenu={(event) => openImageContextMenu(event, item)}
+                    />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="group relative block aspect-[4/3] w-full cursor-zoom-in bg-[#1c1b1b] text-left"
+                    onClick={() => setPreviewUrl(item.preview_path || item.thumbnail_path)}
+                    onContextMenu={(event) => openImageContextMenu(event, item)}
+                    aria-label="放大查看图片"
+                  >
+                    <img
+                      src={item.thumbnail_path}
+                      alt=""
+                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+                      loading="lazy"
+                      draggable={false}
+                    />
+                  </button>
+                )}
                 <div className="space-y-3 p-5">
                   <CopyablePromptText text={item.prompt} />
                   <p className="text-xs uppercase tracking-[0.12em] text-[#e5e2e1]/45">
