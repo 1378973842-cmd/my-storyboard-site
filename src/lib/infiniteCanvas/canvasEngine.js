@@ -77,7 +77,7 @@ function writeLastCanvasId(id){
 }
 function isCanvasInteracting(){
     // 裁剪/画笔/旋转聚焦中也算交互：禁止远程同步把视口打回旧比例
-    return Boolean(dragBoard || dragNode || pendingNodeDrag || resizeNode || minimapDrag || tempLink || selectDrag || isImageEditOpen() || isImageExpandOpen() || isImageCutoutOpen() || imageEditViewportAnimActive);
+    return Boolean(dragBoard || dragNode || pendingNodeDrag || resizeNode || minimapDrag || tempLink || selectDrag || isImageEditOpen() || isImageExpandOpen() || isImageCutoutOpen() || isImageUpscaleOpen() || imageEditViewportAnimActive);
 }
 /** 焦点在画布可编辑控件内时的上下文（节点表单 / gen-dock） */
 function editingFocusContext(){
@@ -1611,6 +1611,11 @@ const IMAGE_EXPAND_ENABLED = true;
 const RUNNINGHUB_CUTOUT_APP_ID = '1957864327736913921';
 const RUNNINGHUB_CUTOUT_IMAGE_FIELD = { nodeId: '122', fieldName: 'image' };
 const RUNNINGHUB_CUTOUT_TEXT_FIELD = { nodeId: '399', fieldName: 'text', fieldValue: '物体' };
+/** 高清放大：RunningHub v2 自定义工作流（图像超分/增强，POST /openapi/v2/run/workflow） */
+const RUNNINGHUB_UPSCALE_APP_PATH = '/openapi/v2/topazlabs/image-gigapixel-art-and-cgi';
+const RUNNINGHUB_UPSCALE_SCALE_OPTIONS = ['1x', '2x', '4x'];
+const RUNNINGHUB_UPSCALE_FORMAT_OPTIONS = ['jpeg', 'png', 'tiff'];
+const RUNNINGHUB_UPSCALE_SUBJECT_OPTIONS = ['All', 'Foreground', 'Background'];
 let imageExpandState = null;
 let imageExpandEl = null;
 let imageExpandDrag = null;
@@ -1619,6 +1624,10 @@ let imageExpandUiWired = false;
 let imageCutoutState = null;
 let imageCutoutEl = null;
 let imageCutoutUiWired = false;
+/** 高清放大：RunningHub v2 超分面板（复用扩图 dock 视觉 + 下拉选择） */
+let imageUpscaleState = null;
+let imageUpscaleEl = null;
+let imageUpscaleUiWired = false;
 /** 旋转/镜像：角度 0/90/180/270；翻转相对当前角度 */
 let imageEditRotateDeg = 0;
 let imageEditFlipH = false;
@@ -4030,8 +4039,11 @@ function applyViewport(){
         if(tDock) positionTextNodeDock(tDock);
     }
     if(cropState && imageEditMode === 'crop') positionImageEditCropDock();
+    if(cropState && imageEditMode === 'brush') positionImageEditBrushDock();
+    if(cropState && imageEditMode === 'rotate') positionImageEditRotateDock();
     if(imageExpandState) positionImageExpandOverlay();
     if(imageCutoutState) positionImageCutoutOverlay();
+    if(imageUpscaleState) positionImageUpscaleOverlay();
     if(videoTrimState?.nodeId) positionVideoTrimDock();
     if(genBatchPick?.nodeId){
         const pickNode = nodes.find(n => n.id === genBatchPick.nodeId);
@@ -7486,15 +7498,26 @@ function findImageEditHost(nodeId, url){
     const nodeEl = nodeId ? nodesEl?.querySelector(`.node[data-id="${CSS.escape(nodeId)}"]`) : null;
     if(!nodeEl) return null;
     const want = String(url || '').trim();
-    const imgs = [...nodeEl.querySelectorAll('img')].filter(img => img && !img.closest('.image-edit-modal'));
+    // 生成台主图用缩略图渲染（src=_thumb.webp，data-full-src=原图 URL）。必须同时比对
+    // data-full-src，否则匹配不到主图时会误拿叠卡背后的 peek 缩略图（DOM 里 peek 在 hero 之前）。
+    const matches = (el) => {
+        if(!want) return true;
+        const full = String(el.getAttribute('data-full-src') || '');
+        const src = String(el.getAttribute('src') || el.currentSrc || el.src || '');
+        const cands = [full, src].filter(Boolean);
+        return cands.some(c => c === want || c.endsWith(want) || want.endsWith(c));
+    };
+    const heroSel = '.gen-stage-stack-hero img, .gen-stage-hero img, .image-preview-wrap img';
+    const heroImgs = [...nodeEl.querySelectorAll(heroSel)].filter(el => el && !el.closest('.image-edit-modal'));
+    // 其余可编辑图：排除叠卡扇层/缩略图条/网格格（这些不是主图，且定位是 absolute 会带偏覆盖层）
+    const otherImgs = [...nodeEl.querySelectorAll('img')].filter(el =>
+        el && !el.closest('.image-edit-modal')
+        && !el.closest('.gen-stage-stack-peek, .gen-stage-thumb, .gen-stage-thumbs, .gen-stage-tile'));
     let img = null;
     if(want){
-        img = imgs.find(el => {
-            const src = String(el.getAttribute('src') || el.currentSrc || el.src || '');
-            return src === want || src.endsWith(want) || want.endsWith(src);
-        }) || null;
+        img = heroImgs.find(matches) || otherImgs.find(matches) || null;
     }
-    if(!img) img = nodeEl.querySelector('.image-preview-wrap img') || imgs[0] || null;
+    if(!img) img = heroImgs[0] || otherImgs[0] || null;
     if(!img) return null;
     const host = img.closest('.image-preview-wrap, .gen-stage-tile-media, .gen-stage-stack-hero, .gen-stage-hero, .gen-stage-tile') || img.parentElement;
     if(!(host instanceof HTMLElement)) return null;
@@ -7516,6 +7539,8 @@ function attachInplaceEditSurface(host, img, mode){
     host.classList.add('crop-canvas', 'is-canvas-inplace');
     host.classList.toggle('brush-mode', mode === 'brush');
     host.classList.toggle('rotate-mode', mode === 'rotate');
+    // 编辑态只留主图：隐掉叠卡背后扇出的其它结果图，避免「散落在旁边」
+    host.closest('.node')?.classList.add('is-image-edit-active');
     syncInplaceEditOverlays(mode);
     return true;
 }
@@ -7543,6 +7568,7 @@ function detachInplaceEditSurface(){
     const host = imageEditInplaceHost;
     if(host){
         host.classList.remove('crop-canvas', 'is-canvas-inplace', 'brush-mode', 'rotate-mode', 'grid-custom-h', 'grid-custom-v', 'dragging-image');
+        host.closest('.node')?.classList.remove('is-image-edit-active');
     }
     stashEditSurfaceHome();
     imageEditInplaceHost = null;
@@ -12354,14 +12380,14 @@ function viewportTargetForNodeFocus(node, opts = {}){
     const w = Math.max(48, Number(nodeEl?.offsetWidth || node.w || 260));
     const h = Math.max(48, Number(nodeEl?.offsetHeight || node.h || 300));
     const boardRect = board.getBoundingClientRect();
-    const mode = opts.mode === 'brush' ? 'brush' : opts.mode === 'expand' ? 'expand' : opts.mode === 'cutout' ? 'cutout' : 'crop';
+    const mode = opts.mode === 'brush' ? 'brush' : opts.mode === 'expand' ? 'expand' : opts.mode === 'cutout' ? 'cutout' : opts.mode === 'upscale' ? 'upscale' : 'crop';
     let marginTop = mode === 'brush' ? 96 : 56;
     let marginBottom = mode === 'crop' ? 110 : 56;
     let marginX = 72;
     let focusW = w;
     let focusH = h;
     let fill = 0.92;
-    if(mode === 'cutout'){
+    if(mode === 'cutout' || mode === 'upscale'){
         marginTop = 72;
         marginBottom = 96;
         marginX = 80;
@@ -12498,6 +12524,8 @@ function setImageEditMode(mode, userTouched=false){
     domGet('imageEditRotateDock')?.classList.toggle('active', imageEditMode === 'rotate');
     if(imageEditMode === 'crop') positionImageEditCropDock();
     else clearImageEditCropDockPosition();
+    if(imageEditMode === 'brush') positionImageEditBrushDock();
+    if(imageEditMode === 'rotate') positionImageEditRotateDock();
     if(imageEditMode !== 'crop') setCropAspectMenuOpen(false);
     const title = domGet('imageEditTitle');
     const sub = domGet('imageEditSub');
@@ -14019,7 +14047,7 @@ function addGeneratedImageNode(file, sourceNode, suffix, offsetX=0, extra={}){
     return next;
 }
 function normalizeImageEditOrigin(kind){
-    if(kind === 'brush' || kind === 'rotate' || kind === 'crop' || kind === 'expand' || kind === 'cutout') return kind;
+    if(kind === 'brush' || kind === 'rotate' || kind === 'crop' || kind === 'expand' || kind === 'cutout' || kind === 'upscale') return kind;
     return '';
 }
 function imageEditOriginLabel(kind){
@@ -14029,6 +14057,7 @@ function imageEditOriginLabel(kind){
     if(k === 'crop') return langIsEn() ? 'Crop' : '裁剪';
     if(k === 'expand') return langIsEn() ? 'Expand' : '扩图';
     if(k === 'cutout') return langIsEn() ? 'Cutout' : '抠图';
+    if(k === 'upscale') return langIsEn() ? 'Upscale' : '高清放大';
     return '';
 }
 /** 用户双击浮标改过的显示名（优先于默认「图片节点 N」等） */
@@ -14501,6 +14530,8 @@ function syncImageEditRotatePreview(){
         }
     });
     if(nodeEl) scheduleLinkGeometryRefresh(new Set([nodeEl.dataset.id].filter(Boolean)));
+    // 旋转后外框宽高对调，工具栏需跟随重贴到图片上方
+    requestAnimationFrame(() => positionImageEditRotateDock());
 }
 function rotateImageEditBy90(){
     if(!cropState || imageEditMode !== 'rotate') return;
@@ -14583,6 +14614,37 @@ function clearImageEditCropDockPosition(){
     dock.style.bottom = '';
     dock.style.transform = '';
     dock.style.zIndex = '';
+}
+/** 画笔/旋转底栏：锚到图片上方水平居中（fixed，随缩放/平移重贴），对齐裁剪底栏「贴图」手感 */
+function positionImageEditTopDock(dockId, mode){
+    const dock = domGet(dockId);
+    if(!dock) return;
+    if(!cropState || imageEditMode !== mode || !dock.classList.contains('active')){
+        dock.style.position = '';
+        dock.style.left = '';
+        dock.style.top = '';
+        dock.style.bottom = '';
+        dock.style.transform = '';
+        dock.style.zIndex = '';
+        return;
+    }
+    const img = editDisplayImage();
+    if(!img?.isConnected) return;
+    const rect = img.getBoundingClientRect();
+    if(rect.width < 8 || rect.height < 8) return;
+    const gap = 18;
+    dock.style.position = 'fixed';
+    dock.style.left = `${rect.left + rect.width / 2}px`;
+    dock.style.top = 'auto';
+    dock.style.bottom = `${Math.max(0, window.innerHeight - rect.top + gap)}px`;
+    dock.style.transform = 'translateX(-50%)';
+    dock.style.zIndex = '40';
+}
+function positionImageEditBrushDock(){
+    positionImageEditTopDock('imageEditBrushDock', 'brush');
+}
+function positionImageEditRotateDock(){
+    positionImageEditTopDock('imageEditRotateDock', 'rotate');
 }
 /** Gen 结果台：把 history / previewRoundUrls 中的旧 URL 换成新图 */
 function replaceGeneratorMediaUrl(gen, oldUrl, newUrl, opts={}){
@@ -14720,6 +14782,7 @@ async function openImageEditorCore({nodeId, url, name, saveTarget, mode='crop'})
     if(!url || isMissingAssetUrl(url)) return;
     closeImageExpand({ restoreViewport: false, syncBar: false });
     closeImageCutout({ restoreViewport: false, syncBar: false });
+    closeImageUpscale({ restoreViewport: false, syncBar: false });
     ensureImageEditorUi();
     const focusId = nodeId || saveTarget?.ownerNodeId || saveTarget?.nodeId || '';
     const editMode = mode === 'brush' ? 'brush' : mode === 'rotate' ? 'rotate' : 'crop';
@@ -16102,8 +16165,11 @@ function renderNode(node){
     if(hidePorts) el.classList.add('in-image-batch');
     if(!hidePorts && canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"><span class="port-dot"></span></div>`);
     if(!hidePorts && canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"><span class="port-dot"></span></div>`);
-    el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
-    el.querySelector('.resize-handle').onmousedown = e => { if(e.button === 0 && !e.shiftKey) startNodeResize(e, node); };
+    // 生成类节点（生图/生视频 Gen Console + 图片节点）不提供右下角拉伸手柄
+    if(!isGenConsoleNode(node) && node.type !== 'image'){
+        el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
+        el.querySelector('.resize-handle').onmousedown = e => { if(e.button === 0 && !e.shiftKey) startNodeResize(e, node); };
+    }
     el.ondragstart = e => { e.preventDefault(); e.stopPropagation(); };
     bindNodeLayoutObserver(el);
     if(node.type === 'prompt') syncTextNodeFrame(node, el);
@@ -22760,10 +22826,9 @@ function bindGenStageInteractions(root, node){
                 try { pushUndo(); } catch(_){ /* ignore */ }
                 setGeneratorPrimaryByDisplaySwap(node, idx, url);
                 refreshDownstreamGenConsumers(node.id);
-                // 设为主图后立刻收起网格，回到叠卡封面
+                // 设为主图后立刻收起网格，回到叠卡封面（chrome 由 setGenStageHistoryOpen 内部按动画时机同步）
                 setGenStageHistoryOpen(node, false);
                 scheduleSave();
-                syncImageGenDock();
                 return;
             }
             if(action === 'collapse'){
@@ -23571,8 +23636,9 @@ function setGenStageHistoryOpen(node, open, opts={}){
         else ghosts.forEach(g => g.remove());
     }
     scheduleSave();
+    // 节点几何（宽高）在 refresh 时已同步落定，dock 立即跟随才不延迟；
+    // 收回时 actionBar 挂回由 remountImageActionBar 在 _stageFlipping 期间跳过入场动画，避免与 FLIP 叠闪。
     syncImageGenDock();
-    // 展开/收起后立刻同步动作条（展开=卸掉，收起=挂回）
     syncImageActionBar();
     return true;
 }
@@ -23792,7 +23858,6 @@ function openGenStageResultMenu(nodeId, clientX, clientY, opts={}){
         refreshDownstreamGenConsumers(node.id);
         setGenStageHistoryOpen(node, false);
         refreshAfter();
-        syncImageGenDock();
         setStatus(en ? 'Set as primary' : '已设为主图');
     });
     imageNodeMenu.querySelector('[data-gen-favorite]')?.addEventListener('click', e => {
@@ -25122,6 +25187,10 @@ function bindImageActionBar(host, target){
         e.stopPropagation();
         void openImageCutout(target);
     });
+    host.querySelector('[data-action="upscale"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void openImageUpscale(target);
+    });
     host.querySelector('[data-action="edit"]')?.addEventListener('click', e => {
         e.stopPropagation();
         openVideoTrimDock(node);
@@ -25167,6 +25236,7 @@ function imageActionBarHtmlForTarget(target){
             <button type="button" class="image-action-bar-btn" data-action="crop" title="${escapeAttr(en ? 'Crop' : '裁剪')}" aria-label="crop"><i data-lucide="crop"></i></button>
             ${IMAGE_EXPAND_ENABLED ? `<button type="button" class="image-action-bar-btn" data-action="expand" title="${escapeAttr(en ? 'Expand / outpaint' : '扩图')}" aria-label="expand"><i data-lucide="expand"></i></button>` : ''}
             <button type="button" class="image-action-bar-btn" data-action="cutout" title="${escapeAttr(en ? 'Cutout / remove background' : '抠图')}" aria-label="cutout"><i data-lucide="wand-2"></i></button>
+            <button type="button" class="image-action-bar-btn" data-action="upscale" title="${escapeAttr(en ? 'Upscale (HD)' : '高清放大')}" aria-label="upscale"><svg class="image-action-bar-btn-hd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="5.5" width="21" height="13" rx="2.5"></rect><text x="12" y="16.4" text-anchor="middle" font-family="Manrope, Inter, sans-serif" font-size="10.5" font-weight="800" letter-spacing="-0.2" fill="currentColor" stroke="none">HD</text></svg></button>
             <button type="button" class="image-action-bar-btn" data-action="brush" title="${escapeAttr(en ? 'Brush' : '画笔')}" aria-label="brush"><i data-lucide="paintbrush"></i></button>
             <button type="button" class="image-action-bar-btn" data-action="rotate" title="${escapeAttr(en ? 'Rotate & mirror' : '旋转与镜像')}" aria-label="rotate"><i data-lucide="rotate-3d"></i></button>
             <span class="image-action-bar-sep" aria-hidden="true"></span>
@@ -25195,7 +25265,7 @@ function remountImageActionBar(node){
     imageActionBarNodeId = node.id;
     imageActionBarUrl = target.url;
     positionImageActionBar(node);
-    if(shouldEnter) playCanvasChromeEnter(host, 'up');
+    if(shouldEnter && !node._stageFlipping) playCanvasChromeEnter(host, 'up');
     requestAnimationFrame(() => positionImageActionBar(node));
     refreshIcons(host);
 }
@@ -26154,26 +26224,26 @@ async function openImageCutout(target){
     closeImageCutout({ restoreViewport: false, syncBar: false });
     wireImageCutoutUi();
     const node = target.node;
-    if(node.type !== 'image' || !node.url || isMissingAssetUrl(node.url)){
+    if(!target.url || isMissingAssetUrl(target.url)){
         softAlert(langIsEn() ? 'No image to cut out' : '没有可抠图的图片');
         return;
     }
     let srcW = 0;
     let srcH = 0;
     try {
-        const im = await loadImageBitmapForExport(node.url);
+        const im = await loadImageBitmapForExport(target.url);
         srcW = im.naturalWidth || im.width || 0;
         srcH = im.naturalHeight || im.height || 0;
     } catch(_){ /* fall through */ }
-    const hostInfo = findImageEditHost(node.id, node.url);
+    const hostInfo = findImageEditHost(node.id, target.url);
     if((!srcW || !srcH) && hostInfo?.img){
         srcW = hostInfo.img.naturalWidth || 0;
         srcH = hostInfo.img.naturalHeight || 0;
     }
     imageCutoutState = {
         nodeId: node.id,
-        url: node.url,
-        name: node.name || outputImageName(node.url),
+        url: target.url,
+        name: target.histItem?.name || node.name || outputImageName(target.url),
         srcW, srcH,
         text: RUNNINGHUB_CUTOUT_TEXT_FIELD.fieldValue,
         running: false,
@@ -26183,8 +26253,8 @@ async function openImageCutout(target){
     host.innerHTML = buildImageCutoutHtml(imageCutoutState);
     const keep = host.querySelector('.image-expand-keep');
     if(keep){
-        if(shouldUseCrossOriginImage(node.url)) keep.crossOrigin = 'anonymous';
-        keep.src = node.url;
+        if(shouldUseCrossOriginImage(target.url)) keep.crossOrigin = 'anonymous';
+        keep.src = target.url;
     }
     bindImageCutoutChrome(host);
     removeImageActionBar();
@@ -26211,9 +26281,9 @@ function runImageCutoutFromPanel(){
     const st = imageCutoutState;
     if(!st || st.running) return;
     const node = nodes.find(n => n.id === st.nodeId);
-    if(!node || node.type !== 'image' || !node.url || isMissingAssetUrl(node.url)) return;
+    if(!node || !st.url || isMissingAssetUrl(st.url)) return;
     const text = String(st.text || '').trim() || RUNNINGHUB_CUTOUT_TEXT_FIELD.fieldValue;
-    const job = { url: node.url, name: node.name, text };
+    const job = { url: st.url, name: st.name, text };
     closeImageCutout({ restoreViewport: false });
     clearImageEditViewportSession();
     pushUndo();
@@ -26313,6 +26383,371 @@ async function runImageCutoutJob(job, targetNode, source, pendingId){
         scheduleSaveNow();
     }
 }
+/** 高清放大：RunningHub v2 超分面板（复用扩图 dock 视觉 + 下拉选择） */
+function isImageUpscaleOpen(){
+    return Boolean(imageUpscaleState && imageUpscaleEl?.isConnected);
+}
+function upscaleMenuItems(st, options, dataKey){
+    return options.map(opt => {
+        const active = String(st[dataKey]) === opt ? ' is-active' : '';
+        return `<button type="button" class="image-expand-menu-item${active}" data-upscale-${dataKey}="${escapeAttr(opt)}">${escapeHtml(opt)}</button>`;
+    }).join('');
+}
+function buildImageUpscaleHtml(st){
+    const en = langIsEn();
+    return `
+        <div class="image-expand-stage">
+            <img class="image-expand-keep" alt="" draggable="false" />
+        </div>
+        <div class="image-expand-dock" role="toolbar">
+            <button type="button" class="image-expand-icon" data-upscale-act="close" title="${escapeAttr(en ? 'Close' : '关闭')}" aria-label="close"><i data-lucide="x"></i></button>
+            <span class="image-expand-hint">${escapeHtml(en ? 'Upscale' : '高清放大')}</span>
+            <div class="image-expand-drop">
+                <button type="button" class="image-expand-drop-btn" data-upscale-menu="scale" aria-expanded="false">
+                    <span>${escapeHtml(en ? 'Scale' : '倍数')}</span>
+                    <span data-upscale-scale-label>${escapeHtml(st.scale || RUNNINGHUB_UPSCALE_SCALE_OPTIONS[1])}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-upscale-panel="scale" hidden>${upscaleMenuItems(st, RUNNINGHUB_UPSCALE_SCALE_OPTIONS, 'scale')}</div>
+            </div>
+            <div class="image-expand-drop">
+                <button type="button" class="image-expand-drop-btn" data-upscale-menu="format" aria-expanded="false">
+                    <span>${escapeHtml(en ? 'Format' : '格式')}</span>
+                    <span data-upscale-format-label>${escapeHtml(st.format || RUNNINGHUB_UPSCALE_FORMAT_OPTIONS[0])}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-upscale-panel="format" hidden>${upscaleMenuItems(st, RUNNINGHUB_UPSCALE_FORMAT_OPTIONS, 'format')}</div>
+            </div>
+            <div class="image-expand-drop">
+                <button type="button" class="image-expand-drop-btn" data-upscale-menu="subject" aria-expanded="false">
+                    <span>${escapeHtml(en ? 'Subject' : '主体')}</span>
+                    <span data-upscale-subject-label>${escapeHtml(st.subject || RUNNINGHUB_UPSCALE_SUBJECT_OPTIONS[0])}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-upscale-panel="subject" hidden>${upscaleMenuItems(st, RUNNINGHUB_UPSCALE_SUBJECT_OPTIONS, 'subject')}</div>
+            </div>
+            <button type="button" class="gen-btn gen-dock-send" data-upscale-act="run" title="${escapeAttr(en ? 'Upscale' : '开始放大')}" aria-label="run">
+                <i data-lucide="arrow-up" class="w-4 h-4"></i>
+            </button>
+        </div>`;
+}
+function closeImageUpscaleMenus(except){
+    imageUpscaleEl?.querySelectorAll('.image-expand-menu').forEach(menu => {
+        if(menu !== except) menu.hidden = true;
+    });
+    imageUpscaleEl?.querySelectorAll('[data-upscale-menu]').forEach(btn => {
+        const key = btn.getAttribute('data-upscale-menu');
+        const menu = imageUpscaleEl?.querySelector(`[data-upscale-panel="${key}"]`);
+        btn.setAttribute('aria-expanded', menu && !menu.hidden ? 'true' : 'false');
+        btn.classList.toggle('is-open', Boolean(menu && !menu.hidden));
+    });
+}
+function bindImageUpscaleChrome(host){
+    host.onpointerdown = e => e.stopPropagation();
+    host.onmousedown = e => e.stopPropagation();
+    host.onclick = e => e.stopPropagation();
+    host.querySelector('[data-upscale-act="close"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        closeImageUpscale();
+    });
+    host.querySelectorAll('[data-upscale-menu]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            const key = btn.getAttribute('data-upscale-menu');
+            const menu = host.querySelector(`[data-upscale-panel="${key}"]`);
+            if(!menu) return;
+            const next = menu.hidden;
+            closeImageUpscaleMenus(menu);
+            menu.hidden = !next;
+            btn.setAttribute('aria-expanded', next ? 'true' : 'false');
+            btn.classList.toggle('is-open', next);
+        });
+    });
+    const bindSelect = (dataKey, labelSelector) => {
+        host.querySelectorAll(`[data-upscale-${dataKey}]`).forEach(btn => {
+            btn.addEventListener('click', e => {
+                e.stopPropagation();
+                if(!imageUpscaleState) return;
+                imageUpscaleState[dataKey] = btn.getAttribute(`data-upscale-${dataKey}`) || '';
+                host.querySelectorAll(`[data-upscale-${dataKey}]`).forEach(b => b.classList.toggle('is-active', b === btn));
+                const label = host.querySelector(labelSelector);
+                if(label) label.textContent = imageUpscaleState[dataKey];
+                closeImageUpscaleMenus();
+            });
+        });
+    };
+    bindSelect('scale', '[data-upscale-scale-label]');
+    bindSelect('format', '[data-upscale-format-label]');
+    bindSelect('subject', '[data-upscale-subject-label]');
+    host.querySelector('[data-upscale-act="run"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void runImageUpscaleFromPanel();
+    });
+}
+function closeImageUpscale(opts={}){
+    clearImageExpandDockPosition(imageUpscaleEl);
+    imageUpscaleEl?.remove();
+    imageUpscaleEl = null;
+    imageUpscaleState = null;
+    nodesEl?.querySelectorAll?.('.is-image-expand-source')?.forEach(el => el.classList.remove('is-image-expand-source'));
+    if(opts.restoreViewport !== false) restoreImageEditCanvasFocus();
+    if(opts.syncBar !== false) syncImageActionBar();
+}
+function wireImageUpscaleUi(){
+    if(imageUpscaleUiWired) return;
+    imageUpscaleUiWired = true;
+    on(document, 'keydown', event => {
+        if(!isImageUpscaleOpen()) return;
+        if(event.key === 'Escape'){
+            event.preventDefault();
+            closeImageUpscale();
+        }
+    });
+}
+function positionImageUpscaleOverlay(){
+    const st = imageUpscaleState;
+    if(!st || !imageUpscaleEl || !board) return;
+    const hostInfo = findImageEditHost(st.nodeId, st.url);
+    const img = hostInfo?.img;
+    if(!img) return;
+    const imgRect = img.getBoundingClientRect();
+    const boardRect = board.getBoundingClientRect();
+    const width = Math.max(48, imgRect.width);
+    const height = Math.max(48, imgRect.height);
+    imageUpscaleEl.style.left = `${imgRect.left - boardRect.left}px`;
+    imageUpscaleEl.style.top = `${imgRect.top - boardRect.top}px`;
+    imageUpscaleEl.style.width = `${width}px`;
+    imageUpscaleEl.style.height = `${height}px`;
+    const stage = imageUpscaleEl.querySelector('.image-expand-stage');
+    if(stage){
+        stage.style.width = `${width}px`;
+        stage.style.height = `${height}px`;
+    }
+    const keep = imageUpscaleEl.querySelector('.image-expand-keep');
+    if(keep){
+        keep.style.left = '0px';
+        keep.style.top = '0px';
+        keep.style.width = `${width}px`;
+        keep.style.height = `${height}px`;
+    }
+    if(stage) positionImageExpandDock(stage, imageUpscaleEl);
+}
+async function openImageUpscale(target){
+    if(!target?.node || !target.url || !board) return;
+    if(isImageEditOpen()) closeImageEditor();
+    closeImageExpand({ restoreViewport: false, syncBar: false });
+    closeImageCutout({ restoreViewport: false, syncBar: false });
+    closeImageUpscale({ restoreViewport: false, syncBar: false });
+    wireImageUpscaleUi();
+    const node = target.node;
+    if(!target.url || isMissingAssetUrl(target.url)){
+        softAlert(langIsEn() ? 'No image to upscale' : '没有可放大的图片');
+        return;
+    }
+    let srcW = 0;
+    let srcH = 0;
+    try {
+        const im = await loadImageBitmapForExport(target.url);
+        srcW = im.naturalWidth || im.width || 0;
+        srcH = im.naturalHeight || im.height || 0;
+    } catch(_){ /* fall through */ }
+    const hostInfo = findImageEditHost(node.id, target.url);
+    if((!srcW || !srcH) && hostInfo?.img){
+        srcW = hostInfo.img.naturalWidth || 0;
+        srcH = hostInfo.img.naturalHeight || 0;
+    }
+    if(!srcW || !srcH){
+        softAlert(langIsEn() ? 'Image not loaded yet.' : '图片尚未加载完成');
+        return;
+    }
+    imageUpscaleState = {
+        nodeId: node.id,
+        url: target.url,
+        name: target.histItem?.name || node.name || outputImageName(target.url),
+        srcW, srcH,
+        scale: RUNNINGHUB_UPSCALE_SCALE_OPTIONS[1],
+        format: RUNNINGHUB_UPSCALE_FORMAT_OPTIONS[0],
+        subject: RUNNINGHUB_UPSCALE_SUBJECT_OPTIONS[0],
+        running: false,
+    };
+    const host = document.createElement('div');
+    host.className = 'image-expand-host is-opening';
+    host.innerHTML = buildImageUpscaleHtml(imageUpscaleState);
+    const keep = host.querySelector('.image-expand-keep');
+    if(keep){
+        if(shouldUseCrossOriginImage(target.url)) keep.crossOrigin = 'anonymous';
+        keep.src = target.url;
+    }
+    bindImageUpscaleChrome(host);
+    removeImageActionBar();
+    board.appendChild(host);
+    imageUpscaleEl = host;
+    const keepReady = (!keep || (keep.complete && keep.naturalWidth))
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            keep.onload = () => resolve();
+            keep.onerror = () => resolve();
+        });
+    positionImageUpscaleOverlay();
+    await keepReady;
+    const sourceNodeEl = hostInfo?.host?.closest?.('.node');
+    beginImageExpandOpenFade(host, sourceNodeEl);
+    await prepareImageEditCanvasFocus(node.id, 'upscale');
+    if(!imageUpscaleState || imageUpscaleState.nodeId !== node.id) return;
+    if(!board || !imageUpscaleEl) return;
+    positionImageUpscaleOverlay();
+    finishImageExpandOpenFade(host);
+    refreshIcons(host);
+}
+/** 高清放大：把选中图片上传到 RunningHub v2 超分应用，结果生成一张新图片节点（插在原图下方并自动连线） */
+function spawnUpscalePendingImageNode(sourceNode, job){
+    if(!sourceNode || !job) return null;
+    const siblings = connections
+        .filter(c => c.from === sourceNode.id)
+        .map(c => nodes.find(n => n.id === c.to))
+        .filter(n => n?.type === 'image')
+        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
+    let offsetX = 0;
+    siblings.forEach(sib => {
+        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
+    });
+    const baseName = String(job.name || 'image').replace(/\.[^.]+$/, '');
+    const next = addGeneratedImageNode({ url: '', name: `${baseName}_upscale` }, sourceNode, '_upscale', offsetX);
+    next.editOrigin = 'upscale';
+    const src = nodeEditSpawnLayoutSize(sourceNode);
+    if(src.w > 0){
+        next.w = src.w;
+        next.h = src.h;
+        next._displayW = src.w;
+        next._displayH = src.h;
+    }
+    if(canConnect(sourceNode.id, next.id) && !connections.some(c => c.from === sourceNode.id && c.to === next.id)){
+        connections.push({id:uid('c'), from:sourceNode.id, to:next.id});
+    }
+    pendingImageEditRefreshIds.add(sourceNode.id);
+    pendingImageEditRefreshIds.add(next.id);
+    return next;
+}
+function runImageUpscaleFromPanel(){
+    const st = imageUpscaleState;
+    if(!st || st.running) return;
+    const node = nodes.find(n => n.id === st.nodeId);
+    if(!node || !st.url || isMissingAssetUrl(st.url)) return;
+    const job = { url: st.url, name: st.name, srcW: st.srcW, srcH: st.srcH, scale: st.scale, format: st.format, subject: st.subject };
+    closeImageUpscale({ restoreViewport: false });
+    clearImageEditViewportSession();
+    pushUndo();
+    const spawned = spawnUpscalePendingImageNode(node, job);
+    if(!spawned){
+        softAlert(langIsEn() ? 'Could not create image node.' : '未能创建图片节点');
+        return;
+    }
+    const pendingId = uid('p');
+    const run = {
+        node: { id: node.id },
+        prompt: langIsEn() ? 'HD upscale' : '高清放大',
+        taskLabel: langIsEn() ? 'Upscale' : '高清放大',
+    };
+    pushExpandImagePending(spawned, makePending(pendingId, run, {
+        stageLabel: langIsEn() ? 'Upscaling…' : '高清放大中…',
+    }));
+    selected.clear();
+    selected.add(spawned.id);
+    commitStructureDomPatch({ addedIds: [spawned.id], refreshIds: [node.id, spawned.id] });
+    void focusExpandResultNode(spawned.id);
+    scheduleSaveNow();
+    setStatus(langIsEn() ? 'Upscale queued on new node' : '高清放大已开始，新节点生成中');
+    void runImageUpscaleJob(job, spawned, node, pendingId);
+}
+async function runImageUpscaleJob(job, targetNode, source, pendingId){
+    const node = () => nodes.find(n => n.id === targetNode?.id);
+    const run = {
+        node: { id: source.id },
+        prompt: langIsEn() ? 'HD upscale' : '高清放大',
+        taskLabel: langIsEn() ? 'Upscale' : '高清放大',
+    };
+    try {
+        if(!node()) throw new Error(langIsEn() ? 'Upscale node missing' : '高清放大节点已丢失');
+        const keyFields = rhApiKeyRequestFields(null);
+        // 标准模型 API 的 imageUrl 需要公网 URL（下载画布素材 → 上传拿 download_url）
+        const imageUrl = await rhUploadImageDownloadUrl(job.url, null);
+        if(!imageUrl) throw new Error(langIsEn() ? 'Could not upload source image' : '原图上传失败');
+        const scale = parseInt(String(job.scale || '2x')) || 2;
+        const outputWidth = Math.max(1, Math.min(32000, Math.round((job.srcW || 0) * scale)));
+        const outputHeight = Math.max(1, Math.min(32000, Math.round((job.srcH || 0) * scale)));
+        const submit = await fetch('/api/runninghub/v2/run-topaz-upscale', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                imageUrl,
+                outputWidth,
+                outputHeight,
+                outputFormat: job.format || 'jpeg',
+                cropToFill: false,
+                deblurStrength: 0.5,
+                strength: 0.25,
+                fixCompression: 0,
+                denoise: 0,
+                sharpen: 0,
+                subjectDetection: job.subject || 'All',
+                faceEnhancement: false,
+                faceEnhancementStrength: 0.8,
+                faceEnhancementCreativity: 0,
+                ...keyFields
+            })
+        }).then(async r => {
+            const data = await r.json();
+            if(!r.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhFailed'));
+            return data.data || data;
+        });
+        const taskId = submit.taskId;
+        if(!taskId) throw new Error(tr('canvas.rhNoTaskId'));
+        run.request = {
+            task_id: taskId,
+            backend: 'runninghub',
+            mode: 'app',
+            apiKeyId: keyFields.apiKeyId || '',
+            useWallet: Boolean(keyFields.useWallet),
+            version: '2',
+        };
+        const cur = node();
+        if(!cur) throw new Error(langIsEn() ? 'Upscale node missing' : '高清放大节点已丢失');
+        const pending = (cur._pending || []).find(p => p.id === pendingId);
+        if(pending){
+            pending.canvasTaskId = String(taskId);
+            pending.canvasTaskType = 'runninghub';
+            pending.run = run;
+            registerCanvasTaskLedger(taskId, {
+                canvasId: canvas?.id || '',
+                hostNodeId: targetNode.id || '',
+                genNodeId: targetNode.id || '',
+                pendingId,
+                run,
+                appendGenerated: false,
+                startedAt: Number(pending.startedAt || nowMs()),
+                canvasTaskType: 'runninghub',
+            });
+        } else {
+            pushExpandImagePending(cur, makePending(pendingId, run, {
+                canvasTaskId: taskId,
+                canvasTaskType: 'runninghub',
+                stageLabel: langIsEn() ? 'Upscaling…' : '高清放大中…',
+            }));
+        }
+        refreshNodes([targetNode.id, source.id]);
+        scheduleSaveNow();
+        void pollRunningHubTask(taskId);
+    } catch(err){
+        console.warn('[runImageUpscaleJob]', err);
+        const cur = node();
+        if(cur){
+            markExpandPendingFailed(cur, pendingId, err?.message);
+        }
+        softAlert(err?.message || (langIsEn() ? 'Upscale failed' : '高清放大失败'));
+        setStatus('');
+        scheduleSaveNow();
+    }
+}
 function syncImageActionBar(){
     if(isImageExpandOpen()){
         const onlyId = selected.size === 1 ? [...selected][0] : null;
@@ -26332,6 +26767,16 @@ function syncImageActionBar(){
         }
         removeImageActionBar();
         positionImageCutoutOverlay();
+        return;
+    }
+    if(isImageUpscaleOpen()){
+        const onlyId = selected.size === 1 ? [...selected][0] : null;
+        if(onlyId !== imageUpscaleState.nodeId){
+            closeImageUpscale();
+            return;
+        }
+        removeImageActionBar();
+        positionImageUpscaleOverlay();
         return;
     }
     if(isImageEditOpen()){
@@ -29329,7 +29774,7 @@ async function rhImportWorkflowJson(nodeId, file){
         softAlert(err.message || tr('canvas.rhWorkflowJsonInvalid'));
     }
 }
-async function rhUploadValueIfNeeded(value, node=null){
+async function rhUploadValueIfNeeded(value, node=null, version=''){
     const text = String(value || '').trim();
     if(!text) return '';
     // 画布素材多在 /uploads/…，须先传到 RunningHub 拿 fileName；与 RhLivePreviewPanel.uploadValueIfNeeded 对齐。
@@ -29338,14 +29783,30 @@ async function rhUploadValueIfNeeded(value, node=null){
         || text.startsWith('/output/')
         || text.startsWith('/assets/');
     if(!needsUpload) return text;
+    const payload = {url:text, ...rhApiKeyRequestFields(node)};
+    if(version) payload.version = version;
     const res = await apiFetch('/api/runninghub/upload-asset', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({url:text, ...rhApiKeyRequestFields(node)})
+        body:JSON.stringify(payload)
     });
     const data = await res.json();
     if(!res.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhUploadFailed'));
     return data.data?.fileName || text;
+}
+/** 标准模型 API（app 形态）需要 imageUrl 传公网 URL：上传素材拿 download_url，回退 fileName / 原文本 */
+async function rhUploadImageDownloadUrl(value, node=null){
+    const text = String(value || '').trim();
+    if(!text) return '';
+    const payload = {url:text, version:'2', ...rhApiKeyRequestFields(node)};
+    const res = await apiFetch('/api/runninghub/upload-asset', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if(!res.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhUploadFailed'));
+    return data.data?.downloadUrl || data.data?.fileName || text;
 }
 function rhSummarizeTaskFail(raw){
     if(raw == null || raw === '') return tr('canvas.rhFailed');
@@ -32350,8 +32811,29 @@ function reportPlatformError({run, error, runMs=0}){
     }).catch(() => {});
 }
 function addGenerationLog({run, outputs=[], runMs=0, error=''}){
-    if(!error) return;
-    reportPlatformError({run, error, runMs});
+    if(error) reportPlatformError({run, error, runMs});
+    if(!canvas) return;
+    canvas.logs = canvas.logs || [];
+    const request = run?.request || {};
+    const prompt = String(run?.prompt || '').slice(0, 2000);
+    const safeOutputs = Array.isArray(outputs)
+        ? outputs.map(o => typeof o === 'string' ? o : (o?.url || '')).filter(Boolean).slice(0, 50)
+        : [];
+    canvas.logs.unshift({
+        id: uid('log'),
+        createdAt: Date.now(),
+        status: error ? 'failed' : 'ok',
+        prompt,
+        platform: runPlatformLabel(run),
+        model: run?.taskLabel || runTaskLabel(run),
+        request,
+        outputs: safeOutputs,
+        error: String(error || ''),
+        runMs: Number(runMs || 0),
+    });
+    if(canvas.logs.length > 500) canvas.logs.length = 500;
+    renderCanvasLog();
+    scheduleSave();
 }
 function filteredCanvasLogs(){
     const logs = canvas?.logs || [];
@@ -33465,7 +33947,7 @@ function applyCompletedRhOutputs(ctx, outputs, meta, taskId){
         if(url){
             out.url = url;
             if(!nodeFloatTitleCustom(out)){
-                out.name = outputImageName(url) || String(out.name || 'cutout').replace(/_cutout$/, '') || 'cutout';
+                out.name = outputImageName(url) || String(out.name || out.editOrigin || 'image').replace(/_(cutout|upscale)$/, '') || out.editOrigin || 'image';
             }
         }
         addGenerationLog({run, outputs: outputs.map(o => (typeof o === 'string' ? o : o?.url)).filter(Boolean), runMs});
@@ -33562,10 +34044,13 @@ function failRunningHubTask(taskId, message){
     const run = pending.run || raw?.run || {};
     const runMs = Math.max(0, nowMs() - Number(pending.startedAt || nowMs()));
     // 抠图结果宿主是「图片节点」：失败时在原位保留失败态，勿留空节点
-    if(out?.type === 'image' && !out.url && out.editOrigin === 'cutout'){
-        markExpandPendingFailed(out, pending.id, message || (langIsEn() ? 'Cutout failed' : '抠图失败'));
-        softAlert(message || tr('canvas.generationFailed'));
-        addGenerationLog({run, outputs:[], runMs, error:message || tr('canvas.generationFailed')});
+    if(out?.type === 'image' && !out.url && (out.editOrigin === 'cutout' || out.editOrigin === 'upscale')){
+        const failLabel = out.editOrigin === 'upscale'
+            ? (langIsEn() ? 'Upscale failed' : '高清放大失败')
+            : (langIsEn() ? 'Cutout failed' : '抠图失败');
+        markExpandPendingFailed(out, pending.id, message || failLabel);
+        showErrorModal(message || failLabel, failLabel);
+        addGenerationLog({run, outputs:[], runMs, error:message || failLabel});
         unregisterCanvasTaskLedger(taskId);
         scheduleSaveNow();
         return;
@@ -33598,6 +34083,7 @@ async function pollRunningHubTask(taskId){
                 useWallet: req.useWallet ? '1' : '0',
                 apiKeyId: req.apiKeyId || '',
             });
+            if(req.version === '2') q.set('version', '2');
             const data = await apiFetch(`/api/runninghub/query?${q}`).then(async r => {
                 const json = await r.json();
                 if(!r.ok || json.success === false) throw new Error(json.detail || json.error || tr('canvas.rhFailed'));
@@ -38589,6 +39075,12 @@ board.onmousedown = e => {
         closeImageCutout();
         return;
     }
+    if(isImageUpscaleOpen()){
+        if(Date.now() - imageEditOpenedAt < 480) return;
+        if(e.target.closest?.('.image-expand-host')) return;
+        closeImageUpscale();
+        return;
+    }
     // 空白左键拖拽框选（单击空白=清选中，在 finishSelection 里判断位移）
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     closeCreateMenu();
@@ -39294,6 +39786,7 @@ export function disposeInfiniteCanvasEngine({ preserveEditor = false } = {}) {
     forceClearImageEditChrome();
     try { closeImageExpand(); } catch(_) {}
     try { closeImageCutout(); } catch(_) {}
+    try { closeImageUpscale(); } catch(_) {}
     try { closeTextNodeExpand(); } catch(_) {}
   } catch(_) {}
   try { flushLiveCanvasDraftPersist(); } catch(_) {}

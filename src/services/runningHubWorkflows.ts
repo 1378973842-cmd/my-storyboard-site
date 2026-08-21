@@ -514,19 +514,98 @@ async function storeRemoteOutput(
   };
 }
 
+/** ComfyUI 节点错误值 → 可读文本（node_errors 的 value 常是 {errors:[{message}], class_type}） */
+function comfyNodeErrorText(v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "string") return v.trim();
+  if (typeof v !== "object") return String(v);
+  const obj = v as Record<string, unknown>;
+  const errors = obj.errors;
+  if (Array.isArray(errors)) {
+    const parts = errors
+      .map((e) => {
+        const text = formatRhApiError(e, "");
+        return text && text !== "{}" && text !== "[]" ? text : "";
+      })
+      .filter(Boolean);
+    if (parts.length) return parts.join("；");
+  }
+  const cls = obj.class_type ?? obj.classType;
+  const msg = obj.message ?? obj.msg;
+  if (msg != null) {
+    const text = formatRhApiError(msg, "");
+    if (text) return cls ? `${cls}：${text}` : text;
+  }
+  return formatRhApiError(v, "");
+}
+
+/** 解析 v2 的 promptTips（JSON 字符串）：挖出 node_errors / error / failedReason 等真实失败详情 */
+function promptTipsError(raw: unknown): string {
+  if (!raw || typeof raw !== "string") return "";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return "";
+  }
+  if (!parsed || typeof parsed !== "object") return "";
+  const obj = parsed as Record<string, unknown>;
+  const nodeErrors = obj.node_errors;
+  if (nodeErrors && typeof nodeErrors === "object" && !Array.isArray(nodeErrors)) {
+    const parts: string[] = [];
+    for (const [k, v] of Object.entries(nodeErrors as Record<string, unknown>)) {
+      const text = comfyNodeErrorText(v);
+      if (text) parts.push(`节点${k}：${text}`);
+    }
+    if (parts.length) return parts.join("；");
+  }
+  for (const key of ["error", "failedReason", "failReason", "message"]) {
+    const value = obj[key];
+    if (value == null) continue;
+    if (typeof value === "object" && !Array.isArray(value) && !Object.keys(value as object).length) continue;
+    const text = formatRhApiError(value, "");
+    if (text && text !== "{}" && text !== "[]" && text !== "null") return text;
+  }
+  return "";
+}
+
+/** 提取 failedReason/failReason 对象里的具体执行错误（node_name + exception_message），比笼统 errorMessage 更具体 */
+function failedReasonDetailText(v: unknown): string {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return "";
+  const obj = v as Record<string, unknown>;
+  const msg = obj.exception_message ?? obj.exceptionMessage ?? obj.message ?? obj.error;
+  if (msg == null) return "";
+  const text = formatRhApiError(msg, "");
+  if (!text || text === "{}" || text === "[]") return "";
+  const node = String(obj.node_name ?? obj.nodeName ?? obj.node_id ?? "").trim();
+  const type = String(obj.exception_type ?? obj.exceptionType ?? "").trim();
+  const parts: string[] = [];
+  if (node) parts.push(`节点「${node}」执行失败`);
+  else parts.push("工作流执行失败");
+  parts.push(text);
+  if (type) parts.push(`（${type}）`);
+  return parts.join("：");
+}
+
 function failReason(raw: unknown): string {
   if (!raw || typeof raw !== "object") return formatRhApiError(raw, "");
   const obj = raw as Record<string, unknown>;
   const data = obj.data;
+  // 1) 最具体：promptTips 的 node_errors
+  const tips = promptTipsError(obj.promptTips);
+  if (tips) return tips;
+  // 2) 次具体：failedReason/failReason 对象里的 exception_message（真正的执行错误）
+  for (const fr of [obj.failedReason, obj.failReason, (data as Record<string, unknown> | undefined)?.failedReason, (data as Record<string, unknown> | undefined)?.failReason]) {
+    const detail = failedReasonDetailText(fr);
+    if (detail) return detail;
+  }
+  // 3) 兜底：笼统文案（errorMessage 等）
   const candidates: unknown[] = [];
   if (data && typeof data === "object") {
     const d = data as Record<string, unknown>;
-    // 优先可读文案；空对象 failedReason:{} 交给 formatRhApiError 跳过
     candidates.push(
       d.errorMessage,
       d.error_message,
-      d.failedReason,
-      d.failReason,
       d.message,
       d.error,
       d.errorCode != null || d.error_code != null
@@ -542,6 +621,47 @@ function failReason(raw: unknown): string {
     if (text && text !== "{}" && text !== "[]") return text;
   }
   return formatRhApiError(raw, "");
+}
+
+/** RunningHub v2 返回体里抠 taskId（顶层或 data 内） */
+function extractRhTaskId(raw: unknown): string {
+  if (!raw || typeof raw !== "object") return "";
+  const obj = raw as Record<string, unknown>;
+  for (const key of ["taskId", "task_id", "id"]) {
+    if (obj[key]) return String(obj[key]);
+  }
+  const data = obj.data;
+  if (data && typeof data === "object") {
+    const d = data as Record<string, unknown>;
+    for (const key of ["taskId", "task_id", "id"]) {
+      if (d[key]) return String(d[key]);
+    }
+  }
+  return "";
+}
+
+/** RunningHub v2 查询状态字符串 → 归一化 SUCCESS/FAILED/RUNNING/QUEUED/UNKNOWN */
+function rhV2Status(raw: unknown): string {
+  if (!raw || typeof raw !== "object") return "UNKNOWN";
+  const obj = raw as Record<string, unknown>;
+  const data = obj.data;
+  const values: unknown[] = [obj.status, obj.state, obj.taskStatus, obj.task_status];
+  if (data && typeof data === "object") {
+    const d = data as Record<string, unknown>;
+    values.push(d.status, d.state, d.taskStatus, d.task_status);
+  }
+  let status = "";
+  for (const v of values) {
+    if (v != null && String(v).trim()) {
+      status = String(v).trim().toUpperCase();
+      break;
+    }
+  }
+  if (["SUCCESS", "SUCCEEDED", "COMPLETED", "COMPLETE", "FINISHED", "DONE"].includes(status)) return "SUCCESS";
+  if (["FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED"].includes(status)) return "FAILED";
+  if (["QUEUED", "QUEUE", "WAITING", "PENDING"].includes(status)) return "QUEUED";
+  if (["RUNNING", "PROCESSING", "IN_PROGRESS", "EXECUTING"].includes(status)) return "RUNNING";
+  return "UNKNOWN";
 }
 
 function normalizeNodeInfoList(raw: unknown): { nodeId: string; fieldName: string; fieldValue: string }[] {
@@ -765,6 +885,138 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
     }
   });
 
+  // ---- 运行时：AI 应用一键跑（RunningHub v2：POST /openapi/v2/run/ai-app/:appId）----
+  app.post("/api/runninghub/v2/run-ai-app", ...mw, async (req: Request, res) => {
+    try {
+      const body = req.body || {};
+      const appId = String(body.appId || "").trim();
+      if (!appId) throw httpError(400, "appId 必填");
+      const useWallet = Boolean(body.useWallet);
+      const apiKey = resolveRequestApiKey({
+        apiKeyId: body.apiKeyId,
+        apiKey: body.apiKey,
+        useWallet,
+      });
+      const payload: Record<string, unknown> = {
+        nodeInfoList: Array.isArray(body.nodeInfoList) ? body.nodeInfoList : [],
+        instanceType: String(body.instanceType || "default").trim() || "default",
+        usePersonalQueue: String(body.usePersonalQueue ?? "false"),
+      };
+      const resp = await fetch(rhUrl(`/openapi/v2/run/ai-app/${encodeURIComponent(appId)}`), {
+        method: "POST",
+        headers: rhHeaders(true, apiKey),
+        body: JSON.stringify(payload),
+      });
+      const raw = (await rhJson(resp)) as Record<string, unknown>;
+      if (!resp.ok) throw httpError(resp.status, JSON.stringify(raw).slice(0, 800));
+      // v2 返回扁平 errorCode/errorMessage（如 901 webapp not exists），须与 code 一并识别。
+      // v2 成功时 errorCode 为「空字符串」，须视为成功（空串既不 undefined 也不 null，直接 !isSuccessCode 会误判）
+      const errCode = raw.errorCode ?? raw.error_code ?? raw.code;
+      const errText = errCode == null ? "" : String(errCode).trim();
+      if (errText && !isSuccessCode(errCode)) {
+        const msg = failReason(raw) || formatRhApiError(raw, "RunningHub v2 提交失败");
+        throw httpError(400, msg);
+      }
+      const taskId = extractRhTaskId(raw);
+      if (!taskId) throw httpError(502, `RunningHub v2 未返回 taskId：${JSON.stringify(raw).slice(0, 300)}`);
+      res.json({ success: true, data: { taskId, raw } });
+    } catch (err) {
+      sendError(res, err, "提交高清放大任务失败");
+    }
+  });
+
+  app.post("/api/runninghub/v2/run-workflow", ...mw, async (req: Request, res) => {
+    try {
+      const body = req.body || {};
+      const workflowId = String(body.workflowId || "").trim();
+      if (!workflowId) throw httpError(400, "workflowId 必填");
+      const useWallet = Boolean(body.useWallet);
+      const apiKey = resolveRequestApiKey({
+        apiKeyId: body.apiKeyId,
+        apiKey: body.apiKey,
+        useWallet,
+      });
+      const payload: Record<string, unknown> = {
+        addMetadata: body.addMetadata !== false,
+        nodeInfoList: Array.isArray(body.nodeInfoList) ? body.nodeInfoList : [],
+        instanceType: String(body.instanceType || "default").trim() || "default",
+        usePersonalQueue: String(body.usePersonalQueue ?? "false"),
+      };
+      const resp = await fetch(rhUrl(`/openapi/v2/run/workflow/${encodeURIComponent(workflowId)}`), {
+        method: "POST",
+        headers: rhHeaders(true, apiKey),
+        body: JSON.stringify(payload),
+      });
+      const raw = (await rhJson(resp)) as Record<string, unknown>;
+      if (!resp.ok) throw httpError(resp.status, JSON.stringify(raw).slice(0, 800));
+      // v2 返回扁平 errorCode/errorMessage（如 901 webapp not exists），须与 code 一并识别。
+      // v2 成功时 errorCode 为「空字符串」，须视为成功（空串既不 undefined 也不 null，直接 !isSuccessCode 会误判）
+      const errCode = raw.errorCode ?? raw.error_code ?? raw.code;
+      const errText = errCode == null ? "" : String(errCode).trim();
+      if (errText && !isSuccessCode(errCode)) {
+        const msg = failReason(raw) || formatRhApiError(raw, "RunningHub v2 工作流提交失败");
+        throw httpError(400, msg);
+      }
+      const taskId = extractRhTaskId(raw);
+      if (!taskId) throw httpError(502, `RunningHub v2 未返回 taskId：${JSON.stringify(raw).slice(0, 300)}`);
+      res.json({ success: true, data: { taskId, raw } });
+    } catch (err) {
+      sendError(res, err, "提交高清放大工作流失败");
+    }
+  });
+
+  // ---- 运行时：高清放大（RunningHub 标准模型 API，扁平参数 + slug 路径）----
+  app.post("/api/runninghub/v2/run-topaz-upscale", ...mw, async (req: Request, res) => {
+    try {
+      const body = req.body || {};
+      const imageUrl = String(body.imageUrl || "").trim();
+      if (!imageUrl) throw httpError(400, "imageUrl 必填");
+      const useWallet = Boolean(body.useWallet);
+      const apiKey = resolveRequestApiKey({
+        apiKeyId: body.apiKeyId,
+        apiKey: body.apiKey,
+        useWallet,
+      });
+      // 仅转发已知业务字段，避免把 apiKeyId/useWallet 等内部字段泄露给 RunningHub
+      const payload: Record<string, unknown> = {
+        imageUrl,
+        outputFormat: String(body.outputFormat || "jpeg"),
+        cropToFill: Boolean(body.cropToFill),
+        deblurStrength: Number(body.deblurStrength ?? 0.5),
+        strength: Number(body.strength ?? 0.25),
+        fixCompression: Number(body.fixCompression ?? 0),
+        denoise: Number(body.denoise ?? 0),
+        sharpen: Number(body.sharpen ?? 0),
+        subjectDetection: String(body.subjectDetection || "All"),
+        faceEnhancement: Boolean(body.faceEnhancement),
+        faceEnhancementStrength: Number(body.faceEnhancementStrength ?? 0.8),
+        faceEnhancementCreativity: Number(body.faceEnhancementCreativity ?? 0),
+      };
+      const w = Number(body.outputWidth);
+      const h = Number(body.outputHeight);
+      if (Number.isFinite(w) && w >= 1) payload.outputWidth = Math.min(32000, Math.round(w));
+      if (Number.isFinite(h) && h >= 1) payload.outputHeight = Math.min(32000, Math.round(h));
+      const resp = await fetch(rhUrl("/openapi/v2/topazlabs/image-gigapixel-art-and-cgi"), {
+        method: "POST",
+        headers: rhHeaders(true, apiKey),
+        body: JSON.stringify(payload),
+      });
+      const raw = (await rhJson(resp)) as Record<string, unknown>;
+      if (!resp.ok) throw httpError(resp.status, JSON.stringify(raw).slice(0, 800));
+      const errCode = raw.errorCode ?? raw.error_code ?? raw.code;
+      const errText = errCode == null ? "" : String(errCode).trim();
+      if (errText && !isSuccessCode(errCode)) {
+        const msg = failReason(raw) || formatRhApiError(raw, "RunningHub 高清放大提交失败");
+        throw httpError(400, msg);
+      }
+      const taskId = extractRhTaskId(raw);
+      if (!taskId) throw httpError(502, `RunningHub 未返回 taskId：${JSON.stringify(raw).slice(0, 300)}`);
+      res.json({ success: true, data: { taskId, raw } });
+    } catch (err) {
+      sendError(res, err, "提交高清放大任务失败");
+    }
+  });
+
   app.post("/api/runninghub/workflow-submit", ...mw, async (req: Request, res) => {
     try {
       const body = req.body || {};
@@ -813,6 +1065,51 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
         apiKey: req.query.apiKey,
         useWallet,
       });
+      const version = String(req.query.version || "").trim();
+      // RunningHub v2（/openapi/v2/run/ai-app 提交的任务）：用 /openapi/v2/query 查询
+      if (version === "2") {
+        const resp = await fetch(rhUrl("/openapi/v2/query"), {
+          method: "POST",
+          headers: rhHeaders(true, apiKey),
+          body: JSON.stringify({ taskId }),
+        });
+        const raw = (await rhJson(resp)) as Record<string, unknown>;
+        if (!resp.ok) throw httpError(resp.status, JSON.stringify(raw).slice(0, 800));
+        const status = rhV2Status(raw);
+        const outputs: RhOutputRef[] = [];
+        if (status === "SUCCESS") {
+          // v2 查询返回扁平结构：results 在顶层（RUNNING 时为 null），非 data.results
+          for (const remote of extractOutputRefs(raw)) {
+            try {
+              outputs.push(await storeRemoteOutput(remote.url, deps.projectRoot, {
+                fileType: remote.fileType,
+                kind: remote.kind,
+              }));
+            } catch {
+              outputs.push(remote);
+            }
+          }
+        }
+        console.log(`[runninghub] v2 query taskId=${taskId} status=${status} outputs=${outputs.length}`);
+        if (status === "FAILED") {
+          // 失败时把 promptTips / failedReason 落一条短日志，便于定位工作流真实报错（勿 dump 全 raw）
+          console.log(
+            `[runninghub] v2 FAILED taskId=${taskId} promptTips=${JSON.stringify(raw.promptTips ?? "").slice(0, 500)} failedReason=${JSON.stringify(raw.failedReason ?? "").slice(0, 500)}`
+          );
+        }
+        res.json({
+          success: true,
+          data: {
+            status,
+            urls: outputs.map((item) => item.url),
+            outputs,
+            failReason: failReason(raw),
+            code: raw.code,
+            raw,
+          },
+        });
+        return;
+      }
       const resp = await fetch(rhUrl("/task/openapi/outputs"), {
         method: "POST",
         headers: rhHeaders(true, apiKey),
@@ -873,11 +1170,14 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
       });
       const { buffer, mime, filename } = await readAssetBytes(sourceUrl, deps.projectRoot);
       if (!buffer.length) throw httpError(400, "素材为空，无法上传到 RunningHub");
+      const v2 = String(body.version || "").trim() === "2";
       const form = new FormData();
-      form.append("apiKey", apiKey);
-      form.append("fileType", "input");
       form.append("file", new Blob([new Uint8Array(buffer)], { type: mime }), filename);
-      const resp = await fetch(rhUrl("/task/openapi/upload"), {
+      if (!v2) {
+        form.append("apiKey", apiKey);
+        form.append("fileType", "input");
+      }
+      const resp = await fetch(rhUrl(v2 ? "/openapi/v2/media/upload/binary" : "/task/openapi/upload"), {
         method: "POST",
         headers: rhHeaders(false, apiKey),
         body: form as unknown as BodyInit,
@@ -886,7 +1186,9 @@ export function registerRunningHubWorkflowRoutes(app: Express, deps: RunningHubW
       if (!resp.ok) throw httpError(resp.status, JSON.stringify(raw).slice(0, 800));
       const data = raw.data as Record<string, unknown> | undefined;
       if (isSuccessCode(raw.code) && data?.fileName) {
-        return res.json({ success: true, data: { fileName: data.fileName, fileType: data.fileType || mime } });
+        // v2 上传额外返回 download_url（标准模型 API 的 imageUrl 需要公网 URL，而非 fileName）
+        const downloadUrl = String(data.download_url ?? data.downloadUrl ?? "").trim();
+        return res.json({ success: true, data: { fileName: data.fileName, downloadUrl, fileType: data.fileType || mime } });
       }
       throw httpError(400, formatRhApiError(raw.msg, `RunningHub 上传失败：${JSON.stringify(raw).slice(0, 300)}`));
     } catch (err) {
