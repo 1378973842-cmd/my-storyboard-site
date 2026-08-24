@@ -7,10 +7,13 @@ import {
   ChevronRight,
   ClipboardCopy,
   Copy,
+  Download,
   Folder,
   FolderPlus,
   ImagePlus,
+  Maximize,
   MoreHorizontal,
+  MousePointer2,
   Pencil,
   Plus,
   Search,
@@ -20,7 +23,12 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { isInfiniteCanvasEditorOpen, placeImageUrlOnCanvas } from '../../lib/infiniteCanvas/canvasEngine.js';
+import {
+  downloadCanvasMediaUrl,
+  isInfiniteCanvasEditorOpen,
+  openCanvasLightboxForUrl,
+  placeImageUrlOnCanvas,
+} from '../../lib/infiniteCanvas/canvasEngine.js';
 import { readJsonResponse } from '../../lib/readJsonResponse';
 import {
   addAssetItem,
@@ -39,6 +47,48 @@ import {
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
 const FAVORITES_ID = '__favorites__';
+
+const isEn = () => (window as unknown as { StudioI18n?: { lang?: () => string } }).StudioI18n?.lang?.() === 'en';
+
+/** 缩略图悬停三键：查看（放大查看）·使用（放画布）·下载 */
+function renderMediaHoverActions(url: string, name: string) {
+  const en = isEn();
+  const place = () => {
+    if (!isInfiniteCanvasEditorOpen()) return;
+    placeImageUrlOnCanvas(url, name || 'image');
+  };
+  return (
+    <div className="media-hover-actions">
+      <button
+        type="button"
+        className="media-hover-btn"
+        title={en ? 'View (enlarge)' : '查看（放大查看）'}
+        onClick={e => { e.stopPropagation(); e.preventDefault(); openCanvasLightboxForUrl(url); }}
+      >
+        <Maximize className="h-3.5 w-3.5" />
+        <span>{en ? 'View' : '查看'}</span>
+      </button>
+      <button
+        type="button"
+        className="media-hover-btn"
+        title={en ? 'Use (place on canvas)' : '使用（拖进画布）'}
+        onClick={e => { e.stopPropagation(); e.preventDefault(); place(); }}
+      >
+        <MousePointer2 className="h-3.5 w-3.5" />
+        <span>{en ? 'Use' : '使用'}</span>
+      </button>
+      <button
+        type="button"
+        className="media-hover-btn"
+        title={en ? 'Download' : '下载'}
+        onClick={e => { e.stopPropagation(); e.preventDefault(); void downloadCanvasMediaUrl(url, name || 'image').catch(() => {}); }}
+      >
+        <Download className="h-3.5 w-3.5" />
+        <span>{en ? 'Download' : '下载'}</span>
+      </button>
+    </div>
+  );
+}
 
 type LibraryScope = 'personal' | 'team';
 type FavoriteItem = {
@@ -699,7 +749,10 @@ export const CanvasMaterialLibrary = memo(function CanvasMaterialLibrary({
                             placeImageUrlOnCanvas(item.url, item.name || 'image');
                           }}
                         >
-                          <img src={item.url} alt="" loading="lazy" draggable={false} />
+                          <div className="canvas-material-library-item-media">
+                            <img src={item.url} alt="" loading="lazy" draggable={false} />
+                            {renderMediaHoverActions(item.url, item.name || 'image')}
+                          </div>
                           <div className="canvas-material-library-item-meta">
                             <span title={item.name}>{item.name}</span>
                             <div className="canvas-material-library-item-actions">
@@ -920,7 +973,10 @@ export const CanvasMaterialLibrary = memo(function CanvasMaterialLibrary({
                             placeImageUrlOnCanvas(url, item.model || 'favorite');
                           }}
                         >
-                          <img src={item.thumbnail_path || url} alt="" loading="lazy" draggable={false} />
+                          <div className="canvas-material-library-item-media">
+                            <img src={item.thumbnail_path || url} alt="" loading="lazy" draggable={false} />
+                            {renderMediaHoverActions(url, item.model || 'favorite')}
+                          </div>
                           <div className="canvas-material-library-item-meta">
                             <span title={item.prompt || item.model}>{item.prompt || item.model || '收藏'}</span>
                             <div className="canvas-material-library-item-actions">

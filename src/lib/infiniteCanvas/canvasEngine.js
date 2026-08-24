@@ -608,7 +608,7 @@ let gateFilterType = 'all';
 let gateSortBy = 'updated';
 let gateSortOrder = 'desc';
 let gateViewMode = 'grid';
-let workflowTemplateModal, workflowTemplateList, workflowTemplateBtn;
+let workflowTemplateModal, workflowTemplateList, workflowTemplateBtn, saveWorkflowTemplateBtn;
 let outputLightbox, outputPreview, outputLightboxImg, outputCompareContainer, outputCompareResult;
 let outputCompareOriginal, outputCompareOriginalWrap, outputCompareSlider, outputResolution;
 let outputDownloadBtn, outputFavoriteBtn, outputCompareBtn, outputLightboxVideo, outputPromptPanel, outputPromptText, outputCopyPromptBtn;
@@ -838,6 +838,7 @@ function bindDomElements(root) {
   workflowTemplateModal = g('workflowTemplateModal');
   workflowTemplateList = g('workflowTemplateList');
   workflowTemplateBtn = g('workflowTemplateBtn');
+  saveWorkflowTemplateBtn = g('saveWorkflowTemplateBtn');
   workflowTemplateSearchInput = g('workflowTemplateSearchInput');
   workflowTemplateTitleInput = g('workflowTemplateTitleInput');
   workflowTemplateDescInput = g('workflowTemplateDescInput');
@@ -5487,7 +5488,14 @@ function serializableCanvasNode(node){
     // 上传中的占位节点 url 是本地 blob:，禁止落盘，否则刷新后成死链
     if(copy.url && String(copy.url).startsWith('blob:')) delete copy.url;
     if(Array.isArray(copy.history)){
-        copy.history = copy.history.map(slimHistoryEntryForSave);
+        copy.history = copy.history.map(slimHistoryEntryForSave).map(h => {
+            if(h && typeof h === 'object' && String(h.url || '').startsWith('blob:')) return {...h, url: ''};
+            return h;
+        });
+    }
+    // 视频占位 blob 也在 previewRoundUrls 里，同样禁止落盘防死链
+    if(Array.isArray(copy.previewRoundUrls)){
+        copy.previewRoundUrls = copy.previewRoundUrls.map(item => String(outputUrlValue(item)).startsWith('blob:') ? '' : item);
     }
     return copy;
 }
@@ -5780,7 +5788,6 @@ function stripNodeForWorkflowTemplate(node){
         copy.url = '';
         copy.name = copy.name || (langIsEn() ? 'Reference image' : '参考图');
     }
-    if(copy.type === 'group' || copy.type === 'imageBatch') copy.items = [];
     if(copy.type === 'frameStack') copy.images = [];
     if(copy.type === 'video') copy.url = '';
     return copy;
@@ -6201,6 +6208,7 @@ function renderWorkflowTemplateLists(){
 }
 function closeWorkflowTemplateSaveForm(){
     workflowTemplateSaveForm?.setAttribute('hidden', '');
+    saveWorkflowTemplateBtn?.removeAttribute('hidden');
 }
 function openWorkflowTemplateSaveForm(mode = 'canvas'){
     if(mode === 'canvas' && (!canvas || !nodes.length)){
@@ -6220,6 +6228,7 @@ function openWorkflowTemplateSaveForm(mode = 'canvas'){
     if(workflowTemplateDescInput) workflowTemplateDescInput.value = '';
     workflowTemplateSaveForm?.removeAttribute('hidden');
     workflowTemplateDeleteBar?.setAttribute('hidden', '');
+    saveWorkflowTemplateBtn?.setAttribute('hidden', '');
     workflowTemplateTitleInput?.focus();
     workflowTemplateTitleInput?.select();
 }
@@ -8711,6 +8720,47 @@ function buildUploadedVideoNode(url, point, name=''){
     applyHailuoVideoDefaults(node);
     return node;
 }
+/** 上传视频节点：收集 history / previewRoundUrls 里的媒体 URL（去重，供占位 blob 替换与释放） */
+function uploadedVideoNodeUrls(node){
+    if(!node || node.type !== 'video') return [];
+    const urls = [];
+    (Array.isArray(node.history) ? node.history : []).forEach(h => {
+        const u = outputUrlValue(h);
+        if(u && !urls.includes(u)) urls.push(u);
+    });
+    (Array.isArray(node.previewRoundUrls) ? node.previewRoundUrls : []).forEach(item => {
+        const u = outputUrlValue(item);
+        if(u && !urls.includes(u)) urls.push(u);
+    });
+    return urls;
+}
+/** 释放上传视频节点的占位 blob（上传失败/删节点时防泄漏） */
+function revokeVideoNodeBlobUrls(node){
+    uploadedVideoNodeUrls(node).forEach(u => {
+        if(String(u).startsWith('blob:')){
+            try { URL.revokeObjectURL(u); } catch(_) { /* ignore */ }
+        }
+    });
+}
+/** 后台上传完成后，把上传视频节点里的占位 blob 换成真实 URL */
+function replaceUploadedVideoNodeUrl(node, url, name){
+    if(!node || node.type !== 'video' || !url) return;
+    revokeVideoNodeBlobUrls(node);
+    if(Array.isArray(node.history)){
+        node.history = node.history.map(h => {
+            if(h && typeof h === 'object' && String(h.url || '').startsWith('blob:')){
+                return {...h, url, name: String(name || h.name || '').trim() || outputImageName(url)};
+            }
+            return h;
+        });
+    }
+    if(Array.isArray(node.previewRoundUrls)){
+        node.previewRoundUrls = node.previewRoundUrls.map(item => {
+            const v = outputUrlValue(item);
+            return String(v).startsWith('blob:') ? url : item;
+        });
+    }
+}
 function addRhNode(point){
     const p = point || defaultPoint(180, 0);
     return addNode({
@@ -9597,17 +9647,27 @@ function imageBatchOwningImage(imageNodeId){
 }
 function imageNodeSourceUrl(node){
     if(!node || node.type !== 'image') return '';
+    // 各编辑功能记录的原图：新统一字段优先，其次兼容旧数据字段
+    if(String(node._editSourceUrl || '').trim()) return String(node._editSourceUrl).trim();
+    if(String(node._cutoutSourceUrl || '').trim()) return String(node._cutoutSourceUrl).trim();
     if(String(node._expandSourceUrl || '').trim()) return String(node._expandSourceUrl).trim();
+    // 无显式源 URL 时回退连线：图片节点取上游 url，生图台取封面/主图
     const srcId = connections.find(c => c.to === node.id)?.from;
     if(!srcId) return '';
     const src = nodes.find(n => n.id === srcId);
+    if(!src) return '';
+    if(isGenConsoleNode(src)){
+        const urls = generatorPreviewUrls(src);
+        return String(genStageCollapsedDisplayUrl(src, urls) || '').trim();
+    }
     return String(src?.url || '').trim();
 }
 function openImageNodeLightbox(imageNode){
     const url = String(imageNode?.url || '').trim();
     if(!url || isMissingAssetUrl(url) || mediaKindForNode(imageNode) !== 'image') return;
     const batch = imageBatchOwningImage(imageNode.id);
-    const compareUrl = imageNode.editOrigin === 'expand' ? imageNodeSourceUrl(imageNode) : '';
+    // 编辑派生的图片节点（裁剪/画笔/旋转/扩图/抠图/高清放大）都带原图来源，灯箱里可滑块对比
+    const compareUrl = imageNodeSourceUrl(imageNode);
     openOutputLightbox(url, batch || null, compareUrl);
 }
 function createImageBatchChild(batch, url, name, index){
@@ -10691,7 +10751,10 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
     const base = point || lastMouseBoard || screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
     const imageFiles = supported.filter(f => mediaKindForUpload(f) === 'image');
     const otherFiles = supported.filter(f => mediaKindForUpload(f) !== 'image');
+    const videoFiles = otherFiles.filter(f => mediaKindForUpload(f) === 'video');
+    const audioFiles = otherFiles.filter(f => mediaKindForUpload(f) === 'audio');
     const created = [];
+    const videoPlaceholderIds = [];
 
     // 图片：立即用本地 blob 占位建节点，松手即见，不再等原图上传
     imageFiles.forEach((file, i) => {
@@ -10708,22 +10771,26 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
         created.push(nodes[nodes.length - 1]);
     });
 
-    // 视频/音频：保持原「先上传完再建节点」逻辑（未报性能问题，勿动）
-    if(otherFiles.length){
+    // 视频：立即用本地 blob 占位建节点，后台上传完再换真实 URL（对齐图片「秒现」体验，根治大视频拖入要等半天）
+    videoFiles.forEach((file, i) => {
+        const at = {x:base.x + (imageFiles.length + i) * 36, y:base.y + (imageFiles.length + i) * 36};
+        const displayName = String(file?.name || '').trim() || 'video';
+        const node = buildUploadedVideoNode(URL.createObjectURL(file), at, displayName);
+        ensureNodeFloatIndex(node, 'video');
+        nodes.push(node);
+        created.push(node);
+        videoPlaceholderIds.push(node.id);
+    });
+
+    // 音频仍走「先上传完再建节点」（罕见，保持原逻辑）
+    if(audioFiles.length){
         const form = new FormData();
-        otherFiles.forEach(file => form.append('files', file));
+        audioFiles.forEach(file => form.append('files', file));
         const data = await apiFetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
         (data.files || []).forEach((file, i) => {
-            const kind = file.kind || mediaKindForUpload(otherFiles[i]);
-            const displayName = String(otherFiles[i]?.name || file.name || '').trim() || outputImageName(file.url);
-            const at = {x:base.x + (imageFiles.length + i) * 36, y:base.y + (imageFiles.length + i) * 36};
-            if(kind === 'video' && file.url){
-                const node = buildUploadedVideoNode(file.url, at, displayName);
-                ensureNodeFloatIndex(node, 'video');
-                nodes.push(node);
-                created.push(node);
-                return;
-            }
+            const kind = file.kind || mediaKindForUpload(audioFiles[i]);
+            const displayName = String(audioFiles[i]?.name || file.name || '').trim() || outputImageName(file.url);
+            const at = {x:base.x + (imageFiles.length + videoFiles.length + i) * 36, y:base.y + (imageFiles.length + videoFiles.length + i) * 36};
             const node = {id:uid('img'), type:'image', x:at.x, y:at.y, url:file.url, name:displayName, mediaKind:kind};
             nodes.push(node);
             created.push(node);
@@ -10783,7 +10850,42 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
                 setStatus('Ready');
                 showErrorModal(err?.message || (langIsEn() ? 'Image import failed' : '导入图片失败'), langIsEn() ? 'Image import failed' : '导入图片失败');
             });
-    } else {
+    }
+
+    // 视频后台上传，完成后把占位 blob 换成真实 URL 再落盘
+    if(videoFiles.length){
+        const placeholderIds = [...videoPlaceholderIds];
+        const form = new FormData();
+        videoFiles.forEach(file => form.append('files', file));
+        void apiFetch('/api/ai/upload', {method:'POST', body:form})
+            .then(async r => {
+                if(!r.ok) throw new Error(await responseErrorMessage(r, langIsEn() ? 'Upload failed' : '上传失败'));
+                return r.json();
+            })
+            .then(data => {
+                (data.files || []).forEach((file, i) => {
+                    const node = nodes.find(n => n.id === placeholderIds[i]);
+                    if(!node || !file?.url) return;
+                    replaceUploadedVideoNodeUrl(node, file.url, videoFiles[i]?.name);
+                });
+                refreshNodes(placeholderIds);
+                scheduleSave();
+            })
+            .catch(err => {
+                const ids = new Set(placeholderIds);
+                placeholderIds.forEach(id => {
+                    const n = nodes.find(x => x.id === id);
+                    if(n) revokeVideoNodeBlobUrls(n);
+                });
+                nodes = nodes.filter(n => !ids.has(n.id));
+                connections = connections.filter(c => !ids.has(c.from) && !ids.has(c.to));
+                render({ force: true });
+                setStatus('Ready');
+                showErrorModal(err?.message || (langIsEn() ? 'Video import failed' : '导入视频失败'), langIsEn() ? 'Video import failed' : '导入视频失败');
+            });
+    }
+
+    if(!imageFiles.length && !videoFiles.length){
         scheduleSave();
     }
     return created;
@@ -11952,23 +12054,53 @@ function renderHistoryLibrary(){
                     const durBadge = durationLabel
                         ? `<span class="history-library-card-duration">${escapeHtml(durationLabel)}</span>`
                         : '';
-                    return `<button type="button" class="history-library-card${kind === 'video' ? ' is-video' : ''}" data-url="${escapeAttr(url)}" data-name="${escapeAttr((item.model || 'gen') + '')}" data-kind="${escapeAttr(kind)}" title="${escapeAttr(tip)}">
+                    const viewLabel = langIsEn() ? 'View' : '查看';
+                    const useLabel = langIsEn() ? 'Use' : '使用';
+                    const downloadLabel = langIsEn() ? 'Download' : '下载';
+                    return `<div class="history-library-card${kind === 'video' ? ' is-video' : ''}" role="button" tabindex="0" data-url="${escapeAttr(url)}" data-name="${escapeAttr((item.model || 'gen') + '')}" data-kind="${escapeAttr(kind)}" title="${escapeAttr(tip)}">
                         ${media}
                         ${durBadge}
-                    </button>`;
+                        <div class="media-hover-actions">
+                            <button type="button" class="media-hover-btn" data-hover-action="view" title="${escapeAttr(viewLabel)}"><i data-lucide="maximize"></i><span>${escapeHtml(viewLabel)}</span></button>
+                            <button type="button" class="media-hover-btn" data-hover-action="use" title="${escapeAttr(useLabel)}"><i data-lucide="mouse-pointer-2"></i><span>${escapeHtml(useLabel)}</span></button>
+                            <button type="button" class="media-hover-btn" data-hover-action="download" title="${escapeAttr(downloadLabel)}"><i data-lucide="download"></i><span>${escapeHtml(downloadLabel)}</span></button>
+                        </div>
+                    </div>`;
                 }).join('')}
             </div>
         </section>
     `).join('');
-    historyLibraryList.querySelectorAll('.history-library-card').forEach(btn => {
-        btn.onclick = () => {
-            const url = btn.getAttribute('data-url');
-            const name = btn.getAttribute('data-name') || 'image';
-            if(!url) return;
-            placeImageUrlOnCanvas(url, name);
+    historyLibraryList.querySelectorAll('.history-library-card').forEach(card => {
+        const readUrl = () => card.getAttribute('data-url');
+        const readName = () => card.getAttribute('data-name') || 'image';
+        card.onclick = e => {
+            if(e.target.closest('[data-hover-action]')) return;
+            const u = readUrl();
+            if(!u) return;
+            placeImageUrlOnCanvas(u, readName());
             closeCanvasLog();
         };
+        card.onkeydown = e => {
+            if(e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            const u = readUrl();
+            if(!u) return;
+            placeImageUrlOnCanvas(u, readName());
+            closeCanvasLog();
+        };
+        card.querySelectorAll('[data-hover-action]').forEach(btn => {
+            btn.onclick = e => {
+                e.stopPropagation();
+                e.preventDefault();
+                const u = readUrl();
+                if(!u) return;
+                const action = btn.getAttribute('data-hover-action');
+                if(action === 'view') openCanvasLightboxForUrl(u);
+                else if(action === 'download') downloadCanvasMediaUrl(u, readName()).catch(err => softAlert(err?.message || (langIsEn() ? 'Download failed' : '下载失败')));
+            };
+        });
     });
+    refreshIcons(historyLibraryList);
 }
 async function loadHistoryLibrary(){
     if(!historyLibraryList) return;
@@ -14302,6 +14434,9 @@ function spawnEditedImageNodeFromSource(file, sourceNode, opts={}){
     }
     const origin = normalizeImageEditOrigin(opts.editOrigin || imageEditMode);
     if(origin) next.editOrigin = origin;
+    // 记录原图 URL，供放大查看里的「原图 vs 结果」滑块对比
+    const sourceUrl = String(opts.sourceUrl || '').trim();
+    if(sourceUrl) next._editSourceUrl = sourceUrl;
     if(canConnect(sourceNode.id, next.id) && !connections.some(c => c.from === sourceNode.id && c.to === next.id)){
         connections.push({id:uid('c'), from:sourceNode.id, to:next.id});
     }
@@ -14726,7 +14861,7 @@ async function commitImageEditorFile(file){
         if(!owner) return false;
         try { pushUndo(); } catch(_){ /* ignore */ }
         // 裁剪/画笔/旋转：不改写生图台原图，右侧连出新图片节点
-        const spawned = spawnEditedImageNodeFromSource(file, owner, {editOrigin: imageEditMode});
+        const spawned = spawnEditedImageNodeFromSource(file, owner, {editOrigin: imageEditMode, sourceUrl: target.url});
         if(!spawned) return false;
         scheduleSaveNow();
         return true;
@@ -14735,7 +14870,7 @@ async function commitImageEditorFile(file){
     if(!node) return false;
     try { pushUndo(); } catch(_){ /* ignore */ }
     // 图片节点同样：保存后连出新图，保留原节点
-    const spawned = spawnEditedImageNodeFromSource(file, node, {editOrigin: imageEditMode});
+    const spawned = spawnEditedImageNodeFromSource(file, node, {editOrigin: imageEditMode, sourceUrl: node.url});
     if(!spawned) return false;
     scheduleSaveNow();
     return true;
@@ -24783,12 +24918,13 @@ function resolveImageActionBarTarget(node){
     if(node.type === 'video'){
         const videoUrls = all.filter(u => u && !isMissingAssetUrl(u) && isVideoUrl(u));
         if(!videoUrls.length) return null;
-        let url = all[previewIndex] || coverUrl || focusUrl || '';
+        // 收起态动作条始终对齐「封面视频」（主图/最新一条），勿被灯箱残留 focus 带偏下载错视频
+        let url = coverUrl || all[previewIndex] || focusUrl || '';
         if(!url || isMissingAssetUrl(url) || !isVideoUrl(url)){
             url = videoUrls[videoUrls.length - 1] || videoUrls[0] || '';
-            previewIndex = genStageFindPreviewIndex(all, url);
         }
         if(!url) return null;
+        previewIndex = genStageFindPreviewIndex(all, url);
         const histItem = generatorHistoryItems(node).find(x => outputUrlValue(x.url) === outputUrlValue(url)) || {url};
         return {kind:'video-gen', node, url, previewIndex: Math.max(0, previewIndex), histItem};
     }
@@ -25864,6 +26000,7 @@ async function openImageExpand(target){
     removeImageActionBar();
     board.appendChild(host);
     imageExpandEl = host;
+    refreshIcons(host);
     const sourceNodeEl = hostInfo?.host?.closest?.('.node');
     const keepReady = (!keep || (keep.complete && keep.naturalWidth))
         ? Promise.resolve()
@@ -25879,7 +26016,6 @@ async function openImageExpand(target){
     if(!board || !imageExpandEl) return;
     positionImageExpandOverlay();
     finishImageExpandOpenFade(host);
-    refreshIcons(host);
 }
 function expandPromptText(userText){
     const base = langIsEn()
@@ -25911,6 +26047,7 @@ function spawnExpandPendingImageNode(sourceNode, st){
     const next = addGeneratedImageNode({ url: '', name: `${baseName}_expand` }, sourceNode, '_expand', offsetX);
     next.editOrigin = 'expand';
     next._expandSourceUrl = String(st.confirmedCompositeUrl || '').trim();
+    next._editSourceUrl = String(st.url || '').trim();
     const src = nodeEditSpawnLayoutSize(sourceNode);
     if(src.w > 0){
         next.w = src.w;
@@ -26120,6 +26257,7 @@ function spawnCutoutPendingImageNode(sourceNode, job){
     const next = addGeneratedImageNode({ url: '', name: `${baseName}_cutout` }, sourceNode, '_cutout', offsetX);
     next.editOrigin = 'cutout';
     next._cutoutSourceUrl = String(job.url || '').trim();
+    next._editSourceUrl = String(job.url || '').trim();
     const src = nodeEditSpawnLayoutSize(sourceNode);
     if(src.w > 0){
         next.w = src.w;
@@ -26260,6 +26398,7 @@ async function openImageCutout(target){
     removeImageActionBar();
     board.appendChild(host);
     imageCutoutEl = host;
+    refreshIcons(host);
     const keepReady = (!keep || (keep.complete && keep.naturalWidth))
         ? Promise.resolve()
         : new Promise(resolve => {
@@ -26275,7 +26414,6 @@ async function openImageCutout(target){
     if(!board || !imageCutoutEl) return;
     positionImageCutoutOverlay();
     finishImageExpandOpenFade(host);
-    refreshIcons(host);
 }
 function runImageCutoutFromPanel(){
     const st = imageCutoutState;
@@ -26582,6 +26720,7 @@ async function openImageUpscale(target){
     removeImageActionBar();
     board.appendChild(host);
     imageUpscaleEl = host;
+    refreshIcons(host);
     const keepReady = (!keep || (keep.complete && keep.naturalWidth))
         ? Promise.resolve()
         : new Promise(resolve => {
@@ -26597,7 +26736,6 @@ async function openImageUpscale(target){
     if(!board || !imageUpscaleEl) return;
     positionImageUpscaleOverlay();
     finishImageExpandOpenFade(host);
-    refreshIcons(host);
 }
 /** 高清放大：把选中图片上传到 RunningHub v2 超分应用，结果生成一张新图片节点（插在原图下方并自动连线） */
 function spawnUpscalePendingImageNode(sourceNode, job){
@@ -26614,6 +26752,7 @@ function spawnUpscalePendingImageNode(sourceNode, job){
     const baseName = String(job.name || 'image').replace(/\.[^.]+$/, '');
     const next = addGeneratedImageNode({ url: '', name: `${baseName}_upscale` }, sourceNode, '_upscale', offsetX);
     next.editOrigin = 'upscale';
+    next._editSourceUrl = String(job.url || '').trim();
     const src = nodeEditSpawnLayoutSize(sourceNode);
     if(src.w > 0){
         next.w = src.w;
@@ -39726,6 +39865,17 @@ export function isInfiniteCanvasEditorOpen() {
 /** 当前打开画布 id（顶栏切换列表用） */
 export function getCurrentCanvasId() {
   return canvas?.id ? String(canvas.id) : '';
+}
+
+/** 素材库/历史/收藏 悬停操作「查看」：直接打开灯箱放大查看 */
+export function openCanvasLightboxForUrl(url) {
+  if (!url) return;
+  openOutputLightbox(url, null, '');
+}
+
+/** 素材库/历史/收藏 悬停操作「下载」：下载到本地 */
+export function downloadCanvasMediaUrl(url, filename) {
+  return downloadUrl(url, filename || outputDownloadName(url));
 }
 
 export {

@@ -1055,6 +1055,49 @@
   display:block;
   background:#1c1b1b;
 }
+/* 历史生成 / 素材库 / 收藏 缩略图悬停三键：查看·使用·下载 */
+.media-hover-actions {
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  gap:6px;
+  padding:8px;
+  background:linear-gradient(180deg, rgba(14,14,14,0) 42%, rgba(14,14,14,.74) 100%);
+  opacity:0;
+  transition:opacity .16s ease;
+  pointer-events:none;
+  z-index:3;
+}
+.history-library-card:hover .media-hover-actions,
+.history-library-card:focus-visible .media-hover-actions,
+.canvas-material-library-item:hover .media-hover-actions {
+  opacity:1;
+  pointer-events:auto;
+}
+.media-hover-btn {
+  display:inline-flex;
+  flex-direction:column;
+  align-items:center;
+  gap:3px;
+  padding:5px 9px;
+  border:none;
+  border-radius:10px;
+  background:rgba(14,14,14,.72);
+  color:rgba(229,226,225,.94);
+  font-family:Manrope,Inter,-apple-system,sans-serif;
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.02em;
+  line-height:1;
+  cursor:pointer;
+  backdrop-filter:blur(8px);
+  box-shadow:0 4px 16px rgba(0,0,0,.3);
+}
+.media-hover-btn:hover { background:rgba(255,184,102,.18); color:#ffb866; }
+.media-hover-btn i,
+.media-hover-btn svg { width:14px; height:14px; }
 .history-library-empty {
   padding:36px 12px;
   text-align:center;
@@ -10643,6 +10686,7 @@ html.canvas-image-edit-open:has(.image-edit-modal.open.is-canvas-inline) .canvas
   outline:0.5px solid rgba(255,255,255,.08);
   cursor:grab;
 }
+.canvas-material-library-item-media { position:relative; }
 .canvas-material-library-item img {
   display:block;
   width:100%;
@@ -11334,6 +11378,7 @@ html.studio-theme-dark .comfy-random-btn.active,
 }
 .workflow-template-tool-btn:hover,
 .workflow-template-create-btn:hover { filter:brightness(1.06); transform:translateY(-1px); }
+.workflow-template-create-btn[hidden] { display:none !important; }
 .workflow-template-save-form {
   margin:0 0 12px;
   padding:14px;

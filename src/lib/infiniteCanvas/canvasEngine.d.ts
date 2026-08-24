@@ -47,3 +47,5 @@ export function closeImageEditor(): void;
 export function resetCropBox(): void;
 export function resetImageEditZoom(): void;
 export function placeImageUrlOnCanvas(url: string, name?: string): unknown;
+export function openCanvasLightboxForUrl(url: string): void;
+export function downloadCanvasMediaUrl(url: string, filename?: string): Promise<void>;
