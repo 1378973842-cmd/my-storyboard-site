@@ -1,7 +1,15 @@
 # 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  0. **画布五项检查（本次会话，已实测/未部署）**：
+  0. **阿里云 OSS 素材私有存储（本次会话，已开发/未部署，未填 OSS 配置则全走本地兜底）**：为提升线上大项目加载速度，把画布图片/视频/素材/AI 生成结果改为「OSS 私有读 + 后端签名 URL」存储（不再让服务器带宽/本地磁盘成为瓶颈）。已落地四层：
+     - **新增 `src/services/ossStore.ts`**：统一 OSS 客户端（`ali-oss`，仅 `OSS_BUCKET/OSS_ACCESS_KEY_ID/OSS_ACCESS_KEY_SECRET` 时启用）。提供 `isOssEnabled`/`mapUploadsPathToKey`/`keyToUploadsPath`/`uploadBufferToOss`/`ensureOssObjectUploaded`（懒迁移）/`signUploadsUrl`/`signUrl`/`ossConfigSummary`。`/uploads/...` 站内相对路径 ↔ OSS key（可选 `OSS_PREFIX`）映射，路径穿越防护。
+     - **四类落盘改 OSS 优先 + 本地兜底（双写）**：`server.ts` `persistAiImageToLocalStorage`（AI 生图）；`canvasVideoBridge.ts` `persistRemoteVideo`（上游视频）；`infiniteCanvasRoutes.ts` `/api/ai/upload` 与 `/api/asset-library/upload`；`assetLibraryStore.ts` `addAssetItem`/`addAssetItemFromBuffer`（素材库）。均：OSS 启用→优先上传 OSS，仍返回 `/uploads/...` 站内路径（不改前端 `<img>`/`<video>` src）。
+     - **读取走签名 URL**：`protectedUploads.ts` `serveProtectedUpload` 鉴权通过后，若 OSS 启用且对象存在（含从本地懒迁移补传）→ `302` 重定向到私有签名 URL（`signUploadsUrl`），浏览器直连 OSS 省服务器带宽；否则本地 `sendFile` 兜底（未配 OSS 行为完全不变）。
+     - **懒迁移**：旧 `public/uploads` 文件首次被请求时自动补传 OSS（`ensureOssObjectUploaded` 先 `head` 判断再上传）。
+     - 验证：`tsc --noEmit` ✅；`node init.mjs`（含 build）✅；未配 OSS 时服务正常启动+页面正常挂载（本地兜底路径验证）；`ossStore` 纯逻辑自检通过（路径映射/穿越防护/未启用兜底）。
+     - ⚠️ 需导演提供 `OSS_REGION/OSS_BUCKET/OSS_ACCESS_KEY_ID/OSS_ACCESS_KEY_SECRET` 写入服务器 `.env` 才真正启用；未填则全链路自动回退本地。
+  0. **切换项目卡顿优化（本次会话，已实测/未部署）**：经排查，切换项目「强烈卡顿延迟感」不是等当前画布渲染完，而是两类主线程阻塞——(a) 返回列表时 `loadCanvasList`(含 `loadCanvasCollections`) 网络往返后才全量建卡片 DOM；(b) `openCanvas` 里 `safeRender({ force:true })` 同步 `nodes.forEach(renderNode)` 全量建所有节点 DOM + 算全部连线。已做两处优化：**骨架屏**——`loadCanvasList` 期间先 `showGateListSkeleton()` 填 8 个 `.gate-list-skeleton` 占位（返回列表不再闪现空白/卡死），`renderCanvasList` 再 `hideGateListSkeleton()`；**开板分帧**——`safeRender({ force:true, deferOffViewport:true })` 首帧只渲染视口内节点，其余交 `renderOffViewportNodes` 按每帧 ≤8ms 分帧补齐（`offViewportRenderToken` 防跨板残留，非 defer 全量 render 会 `++` 取消未完成的补帧）。连线几何不依赖节点 DOM（`nodeLayoutSizeForPort` 用缓存 `_layoutW/H`，缺失回退 `n.w/size.w`），故分帧补齐不影响连线定位。验证：`node init.mjs` 通过；浏览器实测返回列表 `is-loading`+8 骨架→27 卡片正常替换，开板即出编辑器、节点跨帧补齐，连接线(24条)完好。
+  1. **画布五项检查（本次会话，已实测/未部署）**：
      1. **视频下载封面修复**：`resolveImageActionBarTarget` 对视频节点优先 `coverUrl`，忽略 `_lightboxFocusUrl`，多视频时上方下载=封面视频。
      2. **打组/创建工作流（已实测通过）**：图片生成+视频生成节点可「新建组」（框组）打组成功；选中组出「创建工作流」→ 填模板名称/说明 → 「保存模板」成功落库（`group.items` 保留成员、`history`/`previewRoundUrls`/`url` 剥离、创建/保存按钮无冲突）。已浏览器端到端跑通并核对保存后的模板 JSON。
      3. **线上视频上传慢**：拖入视频改本地 blob 占位秒现 + 后台上传完换真实 URL（`uploadedVideoNodeUrls`/`revokeVideoNodeBlobUrls`/`replaceUploadedVideoNodeUrl`；`serializableCanvasNode` 拦截 `history`/`previewRoundUrls` 的 `blob:`）。
@@ -16,30 +24,31 @@
      - **查看全部**：输出结果 >1 时工具栏出现「查看全部」网格切换（2 列可滚），每格可收藏/点击放大；可切回单图视图。
      - **收藏回显提示词**：收藏时把当次 `prompt`/`model`/`media_kind`/`run_ms` 一并写入 `canvas_generations`；「我的收藏」页视频直接内联播放、并回显当时提示词与模型。
      - 涉及：`canvasEngine.js`（`mergeGeneratedOutputs`/`generatedImageRefs`/`outputMetaFor`/`applyCompletedRhOutputs` 补 prompt+model；新增 `rhOutputMediaHtml`/`rhOutputGridHtml`/`bindRhOutputFavoriteButtons`/`bindRhOutputVideoShell`；`rhRenderOutputPane` 重构；`bindOutputLightboxFavorite` 放开视频）、`infinite-canvas.css`（网格/播放器/收藏星样式）、`MyFavoritesPage.tsx`（`isVideoUrl`/`isVideoFavorite` + 视频内联渲染）。
-  5. **线上**：`deploy` @ `a78040b`（拖入/粘贴图片本地 blob 占位，秒现）。
+  5. **线上**：`deploy` @ `3cb0ce6`（本次画布五项检查：悬停三键 + 视频封面下载 + 视频 blob 秒现，已上线 v1.0.102）。
   6. **拖入/粘贴占位（已上线）**：图片拖入/粘贴先用 `URL.createObjectURL` 本地占位立即显示，原图后台上传完再换真实 URL 落盘；`serializableCanvasNode` 拦截 `blob:` 不落盘防死链。
-  7. **部署版本号（已上线）**：`dist/version.json` 为 `v1.0.{git 提交总数}`（线上 `v1.0.95`），附 `revision` + `builtAt`。
+  7. **部署版本号（已上线）**：`dist/version.json` 为 `v1.0.{git 提交总数}`（线上 `v1.0.102`），附 `revision` + `builtAt`。
   8. **扩图已重开（只用 RunningHub）**：gpt-image-2 透明通道单图方案；nano 已移除；比例对齐已修复（吸附预设比例）。⚠️ 仍待实测 gpt i2i 对透明通道的生成式边界。
-  9. 远端备份：`/root/studio-backups/studio-20260819-154042.tar.gz`（约 6.5G）；策略留 3 份。
-- **验证状态**：`node init.mjs`（typecheck + build）✅（本次画布五项检查 + 高清放大 + 抠图改动已通过）；生产 PM2 online；健康检查 HTTP 200。
+  9. 远端备份：最新 `/root/studio-backups/studio-20260824-094135.tar.gz`（7.0G）；策略留 3 份。
+- **验证状态**：`node init.mjs`（typecheck + build）✅；生产 PM2 online；健康检查 HTTP 200；本次已部署上线 v1.0.102。
 - **本地网站**：`http://localhost:3005`。
 - **访问**：`http://8.163.127.198:3000`
 - **流程**：每次生产部署成功后，必须写一份 DreamGrid「系统消息」体例更新报告；默认只给文案，导演点头后再发站内公告。
-- **待办**：日间选中色是否改钴蓝待导演拍板；本次画布五项检查 + 高清放大 + 抠图 + 去拉伸手柄 + RH 输出改动**尚未 Git Commit / 未部署**。
+- **待办**：日间选中色是否改钴蓝待导演拍板；高清放大/抠图仍待导演实测 RunningHub 真实返回（透明底 PNG / v2 query 结构）。
 - **已知未覆盖（需导演决定是否继续）**：
   1. 画布「选择画布」入口页（`.canvas-gate`）仍是炭黑。
   2. Loop 节点内部少数浅色文字白底下略淡。
   3. 历史用户无 `login_events` 回填（仅新登录起有记录）。
   4. 旧画布 JSON 里的本板 logs 不再展示；新失败从本次改动起才进管理员报错日志。
   5. 大板仍无视口虚拟化；缩略图已上线，图极多时切板后新板首屏仍可能顿一下。
-- **Blockers**：视频剪辑无服务端 ffmpeg；关标签后任务归属仍依赖 sessionStorage（见 AG223）；扩图剩余待实测 gpt i2i 生成式边界；抠图待实测 RunningHub 抠图工作流真实返回（透明底 PNG 落板）；高清放大待实测 RunningHub v2 提交/查询（`/openapi/v2/run/ai-app` + `/openapi/v2/query`）真实返回结构与 `fieldData` 兼容性。
+- **Blockers**：视频剪辑无服务端 ffmpeg；关标签后任务归属仍依赖 sessionStorage（见 AG223）；扩图剩余待实测 gpt i2i 生成式边界；抠图待实测 RunningHub 抠图工作流真实返回（透明底 PNG 落板）；高清放大待实测 RunningHub v2 提交/查询（`/openapi/v2/run/ai-app` + `/openapi/v2/query`）真实返回结构与 `fieldData` 兼容性。**OSS 集成**：需导演提供阿里云 OSS 密钥（`OSS_REGION/OSS_BUCKET/OSS_ACCESS_KEY_ID/OSS_ACCESS_KEY_SECRET`）写入服务器 `.env` 才能真正启用；未填则自动回退本地（当前验证均基于未启用路径）。
 
 ## 新对话开场白（复制给 Agent）
 
 ```
 继续 gemini-deploy。先读 docs/HANDOFF.md。
-本次已新增：图片生成节点/图片节点「高清放大」按钮（RunningHub v2 app 2080628963772297217，上传→`/openapi/v2/run/ai-app` 提交→`/openapi/v2/query` 轮询→新节点高清结果；模型/倍数/主体三下拉）；图片节点「抠图」按钮（app 1957864327736913921）；RH 输出视频内联播放 + 收藏星 + 网格；node init.mjs 已过，但尚未 commit/部署。
-扩图已修复重开（只用 RunningHub：gpt-image-2 透明通道单图，不传 mask）。
-线上 deploy @ a78040b；gate 选择页仍是深色。
+本次已部署上线 v1.0.102（deploy @ 3cb0ce6）：画布五项检查——历史/素材库/收藏悬停三键（查看/使用/下载）、视频节点多视频下载对齐封面、拖入视频 blob 秒现、打组/创建工作流流程实测通过、视频台预览播放确认；另有高清放大 + 抠图 + 去拉伸手柄 + RH 输出预览增强均已随本次上线。
+当前新增（未部署）：切换项目卡顿优化——返回列表骨架屏 + 开板视口外节点分帧渲染。node init.mjs 已过，尚未 commit/部署。
+高清放大/抠图仍待导演实测 RunningHub 真实返回。
+gate 选择页仍是深色。
 按导演下一条继续。
 ```

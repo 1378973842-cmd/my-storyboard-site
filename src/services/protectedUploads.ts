@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import { existsSync } from "fs";
 import path from "path";
 import { canAccessUploadPath } from "./canvasGenerations.js";
+import { ensureOssObjectUploaded, isOssEnabled, signUploadsUrl } from "./ossStore.js";
 
 function uploadsAbsPath(projectRoot: string, webPath: string): string | null {
   const rel = String(webPath || "")
@@ -46,6 +47,30 @@ function serveProtectedUpload(
     res.status(403).json({ error: "无权访问该文件" });
     return;
   }
+  // OSS 私有读：对象已在 OSS（或从本地懒迁移补传）→ 302 到签名 URL，让浏览器直连 OSS 省服务器带宽
+  if (isOssEnabled()) {
+    void (async () => {
+      try {
+        const uploaded = await ensureOssObjectUploaded(projectRoot, webPath);
+        if (uploaded) {
+          res.redirect(302, signUploadsUrl(webPath));
+          return;
+        }
+      } catch (err) {
+        console.warn("[uploads] OSS 签名失败，回退本地", (err as Error)?.message);
+      }
+      serveLocalFallback(res, projectRoot, webPath);
+    })();
+    return;
+  }
+  serveLocalFallback(res, projectRoot, webPath);
+}
+
+function serveLocalFallback(
+  res: Response,
+  projectRoot: string,
+  webPath: string
+): void {
   const abs = uploadsAbsPath(projectRoot, webPath);
   if (!abs || !existsSync(abs)) {
     res.status(404).json({ error: "文件不存在" });

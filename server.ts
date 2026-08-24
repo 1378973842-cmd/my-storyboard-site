@@ -436,6 +436,20 @@ async function persistAiImageToLocalStorage(
   const relativeWebPath = `/uploads/${filename}`;
   const absPath = path.join(uploadsAbs, filename);
 
+  // OSS 私有读：启用时优先写入 OSS（读取走签名 URL），本地仍写一份兜底
+  try {
+    const oss = await import("./src/services/ossStore.js");
+    if (oss.isOssEnabled()) {
+      await oss.uploadBufferToOss({
+        key: oss.mapUploadsPathToKey(relativeWebPath),
+        buffer,
+        mime,
+        meta: ownerUserId ? { owner: ownerUserId } : undefined,
+      });
+    }
+  } catch (e) {
+    console.warn("[persist-image] OSS 上传失败，保留本地", (e as Error)?.message);
+  }
   await writeFile(absPath, buffer);
 
   // 落盘后同步生成画布渲染用的 WebP 缩略图；失败静默回退原图

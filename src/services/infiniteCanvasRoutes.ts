@@ -61,6 +61,11 @@ import {
   updateCanvasCollection,
 } from "./canvasCollectionsStore.js";
 import { requireSiteGate } from "./siteAccessGate.js";
+import {
+  isOssEnabled,
+  mapUploadsPathToKey,
+  uploadBufferToOss,
+} from "./ossStore.js";
 import { ensureGalleryThumbnail, recordCanvasGeneration, recordFileOwnership } from "./canvasGenerations.js";
 import {
   listRunningHubApiKeysForClient,
@@ -324,11 +329,11 @@ export function registerInfiniteCanvasRoutes(
     }
   });
 
-  app.post("/api/asset-library/items", gate, (req, res) => {
+  app.post("/api/asset-library/items", gate, async (req, res) => {
     try {
       const body = req.body || {};
       res.json(
-        addAssetItem(
+        await addAssetItem(
           {
             category_id: String(body.category_id || ""),
             url: String(body.url || ""),
@@ -342,13 +347,13 @@ export function registerInfiniteCanvasRoutes(
     }
   });
 
-  app.post("/api/asset-library/upload", gate, upload.single("file"), (req, res) => {
+  app.post("/api/asset-library/upload", gate, upload.single("file"), async (req, res) => {
     try {
       const file = req.file;
       if (!file?.buffer?.length) return res.status(400).json({ error: "缺少文件" });
       const categoryId = String(req.body?.category_id || "");
       res.json(
-        addAssetItemFromBuffer(
+        await addAssetItemFromBuffer(
           {
             category_id: categoryId,
             buffer: file.buffer,
@@ -576,9 +581,24 @@ export function registerInfiniteCanvasRoutes(
         if (!ext || ![".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(ext)) ext = ".png";
       }
       const filename = `canvas_${uuidv4().replace(/-/g, "").slice(0, 12)}${ext}`;
-      const abs = path.join(uploadsDir, filename);
-      writeFileSync(abs, file.buffer);
       const url = `/uploads/canvas/${filename}`;
+      const abs = path.join(uploadsDir, filename);
+      if (isOssEnabled()) {
+        // OSS 私有读：写入 OSS，站内仍返回 /uploads/canvas/... 供鉴权后签名访问
+        try {
+          await uploadBufferToOss({
+            key: mapUploadsPathToKey(url),
+            buffer: file.buffer,
+            mime: file.mimetype || mime,
+            meta: userId ? { owner: userId } : undefined,
+          });
+        } catch (e) {
+          console.warn("[ai/upload] OSS 上传失败，回退本地", mapUploadsPathToKey(url), (e as Error)?.message);
+          writeFileSync(abs, file.buffer);
+        }
+      } else {
+        writeFileSync(abs, file.buffer);
+      }
       if (userId && deps?.db) recordFileOwnership(deps.db, url, userId);
       if (kind === "image") await ensureGalleryThumbnail(projectRoot, url);
       uploaded.push({

@@ -100,9 +100,25 @@ async function persistRemoteVideo(url: string, projectRoot: string): Promise<str
     else if (ct.includes("quicktime") || ct.includes("mov")) ext = ".mov";
 
     const filename = `video_${uuidv4().replace(/-/g, "").slice(0, 16)}${ext}`;
+    const url = `/uploads/canvas/${filename}`;
     const abs = path.join(uploadsDir, filename);
-    writeFileSync(abs, Buffer.from(arr));
-    return `/uploads/canvas/${filename}`;
+    const buffer = Buffer.from(arr);
+    // OSS 私有读：启用时优先写入 OSS，本地仍写一份兜底
+    try {
+      const oss = await import("./ossStore.js");
+      if (oss.isOssEnabled()) {
+        await oss.uploadBufferToOss({
+          key: oss.mapUploadsPathToKey(url),
+          buffer,
+          mime: ct || "video/mp4",
+          meta: { kind: "canvas-video" },
+        });
+      }
+    } catch (e) {
+      console.warn("[canvas-video] OSS 上传失败，保留本地", (e as Error)?.message);
+    }
+    writeFileSync(abs, buffer);
+    return url;
   } finally {
     clearTimeout(timer);
   }

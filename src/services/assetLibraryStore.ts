@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFil
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import type { CanvasAccessContext } from "./infiniteCanvasStore.js";
+import { isOssEnabled, mapUploadsPathToKey, uploadBufferToOss } from "./ossStore.js";
 
 export type AssetLibraryItem = {
   id: string;
@@ -276,7 +277,7 @@ export function duplicateAssetCategory(categoryId: string, ctx?: CanvasAccessCon
   return { library: lib, category };
 }
 
-export function addAssetItem(
+export async function addAssetItem(
   payload: { category_id: string; url: string; name?: string },
   ctx?: CanvasAccessContext | null
 ) {
@@ -290,6 +291,19 @@ export function addAssetItem(
   const destName = `lib_${uuidv4().replace(/-/g, "").slice(0, 12)}_${safeBase}${ext}`;
   const destAbs = path.join(ownerAssetDir(ownerId), destName);
   copyFileSync(src, destAbs);
+  // OSS 启用时把素材库目标对象也上传（源已在 OSS 或本地双写）
+  if (isOssEnabled()) {
+    try {
+      const destUrl = `/uploads/asset-library/${ownerId.replace(/[^a-zA-Z0-9_-]/g, "")}/${destName}`;
+      await uploadBufferToOss({
+        key: mapUploadsPathToKey(destUrl),
+        buffer: readFileSync(destAbs),
+        meta: { owner: ownerId },
+      });
+    } catch (e) {
+      console.warn("[asset-library] OSS add 失败，保留本地", (e as Error)?.message);
+    }
+  }
   const item: AssetLibraryItem = {
     id: `asset_${uuidv4().replace(/-/g, "").slice(0, 12)}`,
     name: safeBase.slice(0, 120),
@@ -301,7 +315,7 @@ export function addAssetItem(
   return { library: lib, item };
 }
 
-export function addAssetItemFromBuffer(
+export async function addAssetItemFromBuffer(
   payload: { category_id: string; buffer: Buffer; filename?: string; mime?: string },
   ctx?: CanvasAccessContext | null
 ) {
@@ -313,6 +327,20 @@ export function addAssetItemFromBuffer(
   const safeBase = sanitizeName(path.basename(payload.filename || "upload", ext), "asset");
   const destName = `lib_${uuidv4().replace(/-/g, "").slice(0, 12)}_${safeBase}${ext}`;
   const destAbs = path.join(ownerAssetDir(ownerId), destName);
+  // 双写：OSS 启用时上传到 OSS（读取走签名 URL），同时保留本地兜底
+  if (isOssEnabled()) {
+    try {
+      const url = `/uploads/asset-library/${ownerId.replace(/[^a-zA-Z0-9_-]/g, "")}/${destName}`;
+      await uploadBufferToOss({
+        key: mapUploadsPathToKey(url),
+        buffer: payload.buffer,
+        mime: payload.mime || mime,
+        meta: { owner: ownerId },
+      });
+    } catch (e) {
+      console.warn("[asset-library] OSS 上传失败，保留本地", (e as Error)?.message);
+    }
+  }
   writeFileSync(destAbs, payload.buffer);
   const item: AssetLibraryItem = {
     id: `asset_${uuidv4().replace(/-/g, "").slice(0, 12)}`,
