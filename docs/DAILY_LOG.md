@@ -486,3 +486,9 @@
 
 ### 记录 / 说明
 - 画布五项检查收尾：视频下载封面修复、视频上传blob占位、历史/素材库/收藏悬停三键已改；打组/创建工作流/模板保存流程已浏览器端到端实测通过；视频台预览播放按钮确认已实现
+
+## 2026-08-24
+
+### 记录 / 说明
+- 部署上线 v1.0.102（deploy@3cb0ce6）：画布悬停三键+视频封面下载+视频blob秒现+打组/创建工作流+高清放大+抠图+去拉伸手柄+RH输出预览增强；远端备份 studio-20260824-094135.tar.gz(7.0G)
+- 切换项目卡顿优化：返回列表骨架屏(showGateListSkeleton/hideGateListSkeleton + .gate-list-skeleton) + 开板视口外节点分帧渲染(safeRender deferOffViewport → renderOffViewportNodes 每帧≤8ms，offViewportRenderToken 防跨板残留)；node init.mjs 通过，浏览器实测骨架屏→27卡片替换、开板即出编辑器节点跨帧补齐连线完好

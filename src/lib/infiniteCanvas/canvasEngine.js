@@ -551,6 +551,21 @@ function scheduleRenderCanvasList(){
         renderCanvasList();
     });
 }
+/** 画布选择页加载态：列表填充前显示骨架屏占位 */
+function showGateListSkeleton(count = 8){
+    if(!gateCanvasList) return;
+    gateCanvasList.classList.add('is-loading');
+    // 清掉旧卡片，仅保留骨架占位；网格自适应列数，占位足够即可
+    gateCanvasList.innerHTML = Array.from({length: count}, () =>
+        '<div class="canvas-item"><div class="gate-list-skeleton"></div></div>'
+    ).join('');
+    refreshIcons(gateCanvasList);
+}
+function hideGateListSkeleton(){
+    if(!gateCanvasList) return;
+    gateCanvasList.classList.remove('is-loading');
+    // 骨架占位会被 renderGateLibrary 整体重建，无需在这里清空
+}
 function tr(key){ return window.StudioI18n ? StudioI18n.t(key) : key; }
 function trf(key, values={}){
     return Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, String(value)), tr(key));
@@ -5743,6 +5758,9 @@ function msChatModelOptions(selected){
     return list.map(m => `<option value="${escapeHtml(m)}" ${m === sel ? 'selected' : ''}>${escapeHtml(m.split('/').pop().split(':')[0])}</option>`).join('');
 }
 async function loadCanvasList(openFirst=true){
+    // 返回列表/切板时先给骨架屏占位，避免网络往返 + 全量建卡片的空白/卡顿间隙
+    const showingGate = shell?.classList?.contains('no-canvas') || !canvas;
+    if(!openFirst && showingGate) showGateListSkeleton();
     try {
         const res = await apiFetch('/api/canvases');
         if(!res.ok) throw new Error(tr('canvas.canvasListFailed'));
@@ -6540,6 +6558,7 @@ function canvasDeleteConfirmMessage(title, mode){
     return trf('canvas.moveToTrashConfirmNamed', { name });
 }
 function renderCanvasList(){
+    hideGateListSkeleton();
     if(trashMode){
         renderGateTrashList(gateCanvasList);
         if(gateCollectionsRoot) gateCollectionsRoot.innerHTML = '';
@@ -7030,8 +7049,8 @@ async function openCanvas(id, options = {}){
         if(!savingCanvasNow) void saveCanvas().catch(() => {});
     }
     localCanvasDirty = false;
-    const liveShell = resolveLiveShell();
-    if(liveShell?.classList.contains('no-canvas')) liveShell.classList.remove('no-canvas');
+    // 移除 no-canvas 交给 setCanvasMode(true) 在数据就绪后执行：过早移除会让 gate 先消失、
+    // 旧/空 board 以 opacity:1 闪现一帧，造成「切项目闪一下」。这里保持 gate 直到新板数据到位。
     setStatus('Opening...');
     openingCanvas = true;
     try {
@@ -7070,7 +7089,7 @@ async function openCanvas(id, options = {}){
         setCanvasMode(true);
         writeLastCanvasId(canvas.id);
         renderCanvasList();
-        safeRender({ force: true });
+        safeRender({ force: true, deferOffViewport: true });
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 refreshInfiniteCanvasLayout();
@@ -15584,6 +15603,8 @@ function safeRender(options = {}){
 function render(options = {}){
     if(!options.force && (isCanvasInteracting() || isCanvasTextEditing())) return;
     if(!nodesEl || !world) return;
+    // 非 defer 全量渲染时，取消尚未跑完的视口外分帧补齐，避免跨板残留
+    if(!options.deferOffViewport) offViewportRenderToken++;
     const outputScrolls = captureOutputScrolls();
     const mediaStates = captureMediaPlaybackStates();
     const reusableMediaNodes = new Map();
@@ -15607,12 +15628,27 @@ function render(options = {}){
     [...nodesEl.children].forEach(child => {
         if(!reusableMediaNodes.has(child.dataset?.id)) child.remove();
     });
+    // 开板首帧：只渲染视口内节点，其余分帧补齐，避免大板一次性同步建 DOM 卡死切换
+    const defer = Boolean(options.deferOffViewport);
+    let offViewport = null;
+    const view = defer ? currentWorldViewRect() : null;
+    const pad = defer ? (VIEWPORT_CULL_PAD / Math.max(0.01, viewport.scale || 1)) : 0;
+    const minX = view ? view.x - pad : 0, minY = view ? view.y - pad : 0;
+    const maxX = view ? view.x + view.w + pad : 0, maxY = view ? view.y + view.h + pad : 0;
+    const inView = (node) => {
+        const r = estimatedNodeRect(node);
+        return r.x + r.w >= minX && r.x <= maxX && r.y + r.h >= minY && r.y <= maxY;
+    };
     nodes.forEach(node => {
         const old = reusableMediaNodes.get(node.id);
         if(old && keepWholeNodeIds.has(node.id)){
             nodesEl.appendChild(old);
             try { patchNodeHeadStatus(old, node); } catch(_){ /* ignore */ }
             try { syncNodePinDot(old, node); } catch(_){ /* ignore */ }
+            return;
+        }
+        if(defer && !inView(node)){
+            (offViewport ||= []).push(node);
             return;
         }
         const fresh = renderNode(node);
@@ -15632,6 +15668,39 @@ function render(options = {}){
     syncImageGenDock();
     syncCanvasPinHub();
     scheduleMinimapRender();
+    if(offViewport && offViewport.length){
+        renderOffViewportNodes(offViewport);
+    }
+}
+/** 分帧补齐视口外节点（开板首帧 defer 用）：每帧一批，避免同步阻塞主线程 */
+let offViewportRenderToken = 0;
+function renderOffViewportNodes(nodesList){
+    const token = ++offViewportRenderToken;
+    const pending = nodesList.slice();
+    const step = () => {
+        if(token !== offViewportRenderToken) return;
+        if(!nodesEl) return;
+        const deadline = performance.now() + 8; // 每帧 ≤8ms 增量
+        let appended = 0;
+        while(pending.length && performance.now() < deadline){
+            const node = pending.shift();
+            if(!node) continue;
+            const fresh = renderNode(node);
+            nodesEl.appendChild(fresh);
+            appended++;
+        }
+        if(appended){
+            scheduleLinkGeometryRefresh();
+            refreshIcons(nodesEl);
+        }
+        if(pending.length){
+            requestAnimationFrame(step);
+        } else {
+            refreshGeometry();
+            refreshGeometryAfterLayout();
+        }
+    };
+    requestAnimationFrame(step);
 }
 function refreshNodes(ids=[]){
     const uniqueIds = [...new Set((ids || []).filter(Boolean))];

@@ -12512,6 +12512,17 @@ html.studio-theme-dark .comfy-random-btn.active,
 }
 .gate-collection-delete-confirm .canvas-delete-box { width:100%; }
 .gate-list-empty-compact { padding:24px 16px; text-align:center; color:rgba(229,226,225,.42); font-size:12px; line-height:1.6; }
+/* 画布选择页骨架屏：切换项目等待列表时占位，避免闪现空白 */
+.gate-list.is-loading { pointer-events:none; }
+.gate-list-skeleton { width:100%; height:100%; border-radius:inherit; overflow:hidden; background:#161514; outline:0.5px solid rgba(255,255,255,.06); outline-offset:-0.5px; }
+.gate-list-skeleton::after {
+  content:""; display:block; width:100%; height:100%;
+  background:linear-gradient(100deg, rgba(255,255,255,0) 36%, rgba(255,255,255,.06) 50%, rgba(255,255,255,0) 64%);
+  background-size:200% 100%;
+  animation:gate-skeleton-shine 1.2s ease-in-out infinite;
+}
+@keyframes gate-skeleton-shine { 0% { background-position:150% 0; } 100% { background-position:-50% 0; } }
+.gate-list.is-list-view .gate-list-skeleton { min-height:64px; height:auto; }
 .gate-collection-browse-modal {
   position:fixed;
   inset:0;
