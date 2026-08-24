@@ -90,7 +90,19 @@ if [ -z "$ITEMS" ]; then
   echo ">>> 没有可备份文件（projects.db / data / uploads / .env 均不存在）"
   exit 1
 fi
+# 线上 uploads 持续写入时，tar 会报 file changed as we read it 并以 exit 1 结束，包通常仍可用
+set +e
 tar czf "$TAR" $ITEMS
+TAR_CODE=$?
+set -e
+if [ "$TAR_CODE" -ne 0 ]; then
+  if [ "$TAR_CODE" -eq 1 ] && [ -s "$TAR" ]; then
+    echo ">>> tar 警告：打包时有文件变化（常见于 uploads），备份包仍保留"
+  else
+    echo ">>> tar 失败 exit $TAR_CODE"
+    exit "$TAR_CODE"
+  fi
+fi
 BYTES=$(stat -c %s "$TAR")
 ls -lh "$TAR"
 ls -1t ${BACKUP_REMOTE_DIR}/studio-*.tar.gz 2>/dev/null | tail -n +$(( ${BACKUP_KEEP} + 1 )) | xargs -r rm -f
