@@ -32,6 +32,46 @@ function stripPrefix(key: string): string {
   return norm.startsWith(prefix + "/") ? norm.slice(prefix.length + 1) : norm;
 }
 
+function mimeFromUploadsRel(rel: string): string {
+  const ext = path.extname(rel).toLowerCase();
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".png") return "image/png";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  if (ext === ".mp4") return "video/mp4";
+  if (ext === ".webm") return "video/webm";
+  if (ext === ".mov") return "video/quicktime";
+  if (ext === ".mp3") return "audio/mpeg";
+  if (ext === ".wav") return "audio/wav";
+  return "application/octet-stream";
+}
+
+/** 读 /uploads 字节：本地盘优先，没有则走 OSS。生图/生视频参考图不要 HTTP 拉站内地址（无登录态会 401，RH 当空图）。 */
+export async function readUploadsBytes(
+  projectRoot: string,
+  internalPath: string
+): Promise<{ buffer: Buffer; mime: string; filename: string } | null> {
+  const normalized = normalizeInternalPath(internalPath);
+  if (!normalized) return null;
+  const rel = normalized.slice("/uploads/".length);
+  const abs = path.join(projectRoot, "public", "uploads", rel);
+  const root = path.join(projectRoot, "public", "uploads");
+  if (!abs.startsWith(root)) return null;
+  if (existsSync(abs)) {
+    return { buffer: readFileSync(abs), mime: mimeFromUploadsRel(rel), filename: path.basename(abs) };
+  }
+  if (!isOssEnabled()) return null;
+  try {
+    const r = await getClient().get(mapUploadsPathToKey(normalized));
+    const raw = r.content;
+    const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as Uint8Array);
+    if (!buffer.length) return null;
+    return { buffer, mime: mimeFromUploadsRel(rel), filename: path.basename(rel) };
+  } catch {
+    return null;
+  }
+}
+
 export function isOssEnabled(): boolean {
   return Boolean(
     process.env.OSS_BUCKET &&

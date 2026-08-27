@@ -9,9 +9,8 @@ import {
   textLlmConfigError,
 } from "./canvasTextLlmBridge.js";
 import { v4 as uuidv4 } from "uuid";
-import { existsSync, readFileSync } from "fs";
-import path from "path";
 import sharp from "sharp";
+import { readUploadsBytes } from "./ossStore.js";
 import {
   getStoryboardImageEnv,
   isPublicRunningHubImageUrl,
@@ -248,11 +247,9 @@ async function readImageBufferForGemini(projectRoot: string, input: string): Pro
   }
   const normalized = normalizeImageInputForUpload(trimmed, projectRoot);
   if (normalized.startsWith("/uploads/")) {
-    const rel = normalized.replace(/^\/uploads\//, "").replace(/\\/g, "/");
-    if (!rel || rel.includes("..")) throw new Error(`非法图片路径：${normalized}`);
-    const abs = path.join(projectRoot, "public", "uploads", rel);
-    if (!existsSync(abs)) throw new Error(`本地图片不存在：${normalized}`);
-    return readFileSync(abs);
+    const got = await readUploadsBytes(projectRoot, normalized);
+    if (!got) throw new Error(`本地图片不存在：${normalized}`);
+    return got.buffer;
   }
   if (/^https?:\/\//i.test(normalized) && isPublicRunningHubImageUrl(normalized)) {
     const resp = await fetch(normalized);

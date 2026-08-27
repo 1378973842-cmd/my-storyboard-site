@@ -492,3 +492,16 @@
 ### 记录 / 说明
 - 部署上线 v1.0.102（deploy@3cb0ce6）：画布悬停三键+视频封面下载+视频blob秒现+打组/创建工作流+高清放大+抠图+去拉伸手柄+RH输出预览增强；远端备份 studio-20260824-094135.tar.gz(7.0G)
 - 切换项目卡顿优化：返回列表骨架屏(showGateListSkeleton/hideGateListSkeleton + .gate-list-skeleton) + 开板视口外节点分帧渲染(safeRender deferOffViewport → renderOffViewportNodes 每帧≤8ms，offViewportRenderToken 防跨板残留)；node init.mjs 通过，浏览器实测骨架屏→27卡片替换、开板即出编辑器节点跨帧补齐连线完好
+- 生产 deploy:safe 上线 v1.0.105（0b01114）：切换项目骨架屏+分帧渲染+切板闪一下修复；OSS 代码已随包但服务器无 OSS_* 密钥未启用；备份 studio-20260824-134108.tar.gz(7.1G)；PM2 online HTTP 200
+
+## 2026-08-26
+
+### 记录 / 说明
+- 生图/生视频参考图上传前铺白；扩图仍传 alpha
+- Mx-Shell/九宫格参考图一多被底栏挡住：列表改纵向折行可滚，测高带 Agent 宽，栏内滚动底栏常显
+
+## 2026-08-27
+
+### 记录 / 说明
+- 图片生成节点编辑生图 RH 上传 504：PNG/大图转 JPEG 再传，504 重试 3 次
+- 线上生图不认参考图：/uploads 改 OSS/本地直读再传 RH；图片生成节点去掉默认角色造型锁定

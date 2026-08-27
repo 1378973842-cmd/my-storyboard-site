@@ -12,6 +12,7 @@ import { fileURLToPath } from "url";
 import {
   registerInfiniteCanvasRoutes,
 } from "./src/services/infiniteCanvasRoutes.js";
+import { readUploadsBytes } from "./src/services/ossStore.js";
 import {
   analyzeNineGridReferenceLooks,
   formatNineGridRefLooksForPhaseA,
@@ -26,6 +27,7 @@ import {
 } from "./src/services/canvasTextLlmBridge.js";
 import { buildNineGridImagePrompt, buildNineGridShotExpandRetryMessage, mapNineGridShotsFromLlm, NINE_GRID_JSON_OUTPUT_CONSTRAINT, NINE_GRID_SHOT_PROMPT_MIN_CHARS, nineGridShotsBelowMinChars } from "./src/lib/nineGrid/nineGridCore.js";
 import {
+  flattenAlphaForModelRef,
   getNineGridG2Path,
   getStoryboardImageEnv,
   runStoryboardRunningHubGenerateJob,
@@ -491,19 +493,10 @@ async function imageInputToBlob(
   }
 
   if (trimmed.startsWith("/uploads/") && projectRoot) {
-    const rel = trimmed.slice("/uploads/".length).replace(/\\/g, "/");
-    if (!rel || rel.includes("..")) throw new Error("非法图片路径");
-    const uploadsRoot = path.join(projectRoot, "public", "uploads");
-    const abs = path.join(uploadsRoot, rel);
-    if (!abs.startsWith(uploadsRoot) || !existsSync(abs)) {
-      throw new Error(`找不到上传文件 ${trimmed}`);
-    }
-    const buf = readFileSync(abs);
-    const ext = path.extname(abs).toLowerCase();
-    const mime =
-      ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : ext === ".webp" ? "image/webp" : "image/png";
-    const blob = new Blob([buf], { type: mime });
-    return { blob, filename: path.basename(abs) || `local.${guessExtFromMime(mime)}` };
+    const got = await readUploadsBytes(projectRoot, trimmed);
+    if (!got) throw new Error(`找不到上传文件 ${trimmed}`);
+    const blob = new Blob([got.buffer], { type: got.mime });
+    return { blob, filename: got.filename || `local.${guessExtFromMime(got.mime)}` };
   }
 
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
@@ -1939,6 +1932,7 @@ ${pixarInstruction}
               aspect_ratio,
               projectRoot,
               pathOverride: gptOfficialPath ? getNineGridG2Path() : undefined,
+              flattenAlpha: !expand_outpaint,
             })
           : await runStoryboardRunningHubJob({
               prompt: userPrompt,
@@ -1984,7 +1978,15 @@ ${pixarInstruction}
 
       console.log("[edit-image] modelCandidates:", modelCandidates, "timeoutMs:", timeoutMs, "imageCount:", orderedImageUrls.length);
 
-      const imageBlobs = await Promise.all(orderedImageUrls.map((u) => imageInputToBlob(u, projectRoot)));
+      const imageBlobs = await Promise.all(
+        orderedImageUrls.map(async (u) => {
+          const pack = await imageInputToBlob(u, projectRoot);
+          if (expand_outpaint) return pack;
+          const buf = Buffer.from(await pack.blob.arrayBuffer());
+          const flat = await flattenAlphaForModelRef(buf, pack.blob.type || "image/png", pack.filename);
+          return { blob: new Blob([new Uint8Array(flat.buffer)], { type: flat.mime }), filename: flat.filename };
+        })
+      );
       const maskUrl = typeof mask === "string" ? mask.trim() : "";
       const maskBlobPack = maskUrl ? await imageInputToBlob(maskUrl, projectRoot) : null;
 

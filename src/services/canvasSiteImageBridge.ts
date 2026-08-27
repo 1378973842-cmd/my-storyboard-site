@@ -237,7 +237,7 @@ export function mapCanvasToEditorRequest(
   const maskItem =
     refItems.find((r) => r.role === "mask" || /mask/i.test(r.name)) || null;
   const sourceItems = maskItem ? refItems.filter((r) => r !== maskItem) : refItems;
-  const prompt = sourceItems.length
+  const prompt = payload.nine_grid_agent && sourceItems.length
     ? augmentImagePromptWithReferenceCostumeLock(
         String(payload.prompt || "").trim() || "Edit the reference images.",
         sourceItems
@@ -373,7 +373,7 @@ async function executeCanvasGeneration(
   if (rawRefs.length > 0 && imageUrls.length === 0) {
     throw new Error("参考图地址无效，无法按所选模型生成");
   }
-  const enrichedPrompt = refItems.length
+  const enrichedPrompt = payload.nine_grid_agent && refItems.length
     ? augmentImagePromptWithReferenceCostumeLock(prompt, refItems)
     : prompt;
   const image_size = canvasResolutionToImageSize(payload.canvas_resolution);
@@ -467,6 +467,7 @@ async function executeCanvasGeneration(
           quality: payload.quality,
           projectRoot: deps.projectRoot,
           pathOverride: g2Path,
+          flattenAlpha: !payload.expand_outpaint,
         });
       } else {
         const nano2 = isNanoBanana2Model(model);

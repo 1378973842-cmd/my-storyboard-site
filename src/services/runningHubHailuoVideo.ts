@@ -2,9 +2,8 @@
  * RunningHub MiniMax 海螺 H3：multimodal-to-video
  * POST /openapi/v2/minimax/hailuo-h3/multimodal-to-video
  */
-import { existsSync, readFileSync } from "fs";
-import path from "path";
 import { FormData } from "undici";
+import { readUploadsBytes } from "./ossStore.js";
 import {
   getStoryboardImageEnv,
   isPublicRunningHubImageUrl,
@@ -121,29 +120,9 @@ async function readMediaBytes(
     return { buffer: buf, mime, filename: `upload.${ext}` };
   }
   if (trimmed.startsWith("/uploads/")) {
-    const rel = trimmed.replace(/^\/uploads\//, "").replace(/\\/g, "/");
-    if (rel.includes("..")) throw new Error("非法媒体路径");
-    const abs = path.join(projectRoot, "public", "uploads", rel);
-    if (!existsSync(abs)) throw new Error(`本地媒体不存在：${trimmed}`);
-    const buf = readFileSync(abs);
-    const ext = path.extname(abs).toLowerCase() || ".bin";
-    const mime =
-      ext === ".mp4"
-        ? "video/mp4"
-        : ext === ".webm"
-          ? "video/webm"
-          : ext === ".mov"
-            ? "video/quicktime"
-            : ext === ".mp3"
-              ? "audio/mpeg"
-              : ext === ".wav"
-                ? "audio/wav"
-                : ext === ".png"
-                  ? "image/png"
-                  : ext === ".webp"
-                    ? "image/webp"
-                    : "application/octet-stream";
-    return { buffer: buf, mime, filename: path.basename(abs) };
+    const got = await readUploadsBytes(projectRoot, trimmed);
+    if (!got) throw new Error(`本地媒体不存在：${trimmed}`);
+    return got;
   }
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
     const resp = await fetch(trimmed);
@@ -220,7 +199,9 @@ export async function runHailuoH3VideoJob(opts: {
   if (prompt.length > 20480) throw new Error("提示词过长（上限 20480）");
 
   const env = getRunningHubEnv();
-  const imageUrls = await resolveInputsToRunningHubUrls(opts.images || [], opts.projectRoot, env);
+  const imageUrls = await resolveInputsToRunningHubUrls(opts.images || [], opts.projectRoot, env, {
+    flattenAlpha: true,
+  });
   const videoUrls = await resolveMediaUrls(opts.videos || [], opts.projectRoot, env, 3);
   const audioUrls = await resolveMediaUrls(opts.audios || [], opts.projectRoot, env, 3);
 

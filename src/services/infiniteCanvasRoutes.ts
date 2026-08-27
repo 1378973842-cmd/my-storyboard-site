@@ -584,7 +584,6 @@ export function registerInfiniteCanvasRoutes(
       const url = `/uploads/canvas/${filename}`;
       const abs = path.join(uploadsDir, filename);
       if (isOssEnabled()) {
-        // OSS 私有读：写入 OSS，站内仍返回 /uploads/canvas/... 供鉴权后签名访问
         try {
           await uploadBufferToOss({
             key: mapUploadsPathToKey(url),
@@ -593,12 +592,11 @@ export function registerInfiniteCanvasRoutes(
             meta: userId ? { owner: userId } : undefined,
           });
         } catch (e) {
-          console.warn("[ai/upload] OSS 上传失败，回退本地", mapUploadsPathToKey(url), (e as Error)?.message);
-          writeFileSync(abs, file.buffer);
+          console.warn("[ai/upload] OSS 上传失败，仍写本地", mapUploadsPathToKey(url), (e as Error)?.message);
         }
-      } else {
-        writeFileSync(abs, file.buffer);
       }
+      mkdirSync(path.dirname(abs), { recursive: true });
+      writeFileSync(abs, file.buffer);
       if (userId && deps?.db) recordFileOwnership(deps.db, url, userId);
       if (kind === "image") await ensureGalleryThumbnail(projectRoot, url);
       uploaded.push({

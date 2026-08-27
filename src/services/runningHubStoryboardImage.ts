@@ -1,6 +1,6 @@
-import { readFileSync, existsSync } from "fs";
-import path from "path";
+import sharp from "sharp";
 import { FormData } from "undici";
+import { readUploadsBytes } from "./ossStore.js";
 
 export type StoryboardImageEnv = {
   apiBase: string;
@@ -243,15 +243,9 @@ async function readImageBytes(input: string, projectRoot: string): Promise<{ buf
     return { buffer: buf, mime, filename: `upload.${mime.includes("png") ? "png" : "jpg"}` };
   }
   if (trimmed.startsWith("/uploads/")) {
-    const rel = trimmed.replace(/^\/uploads\//, "").replace(/\\/g, "/");
-    if (rel.includes("..")) throw new Error("非法图片路径");
-    const abs = path.join(projectRoot, "public", "uploads", rel);
-    if (!existsSync(abs)) throw new Error(`本地图片不存在：${trimmed}`);
-    const buf = readFileSync(abs);
-    const ext = path.extname(abs).toLowerCase() || ".png";
-    const mime =
-      ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : ext === ".gif" ? "image/gif" : "image/jpeg";
-    return { buffer: buf, mime, filename: path.basename(abs) };
+    const got = await readUploadsBytes(projectRoot, trimmed);
+    if (!got) throw new Error(`本地图片不存在：${trimmed}`);
+    return got;
   }
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
     const resp = await fetch(trimmed);
@@ -272,6 +266,8 @@ export function isPublicRunningHubImageUrl(url: string): boolean {
   try {
     const u = new URL(url.trim());
     if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    // 站内 /uploads 要登录，RH 拉不到；必须读盘/OSS 再上传
+    if (u.pathname.startsWith("/uploads/")) return false;
     const host = u.hostname.toLowerCase();
     if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".local")) {
       return false;
@@ -287,8 +283,8 @@ export function isPublicRunningHubImageUrl(url: string): boolean {
   }
 }
 
-/** 将本站绝对 URL 还原为 /uploads/…，便于读本地文件并上传到 RunningHub */
-export function normalizeImageInputForUpload(input: string, projectRoot: string): string {
+/** 将本站绝对 URL 还原为 /uploads/…，便于读本地/OSS 再上传到 RunningHub（即使磁盘上没有文件） */
+export function normalizeImageInputForUpload(input: string, _projectRoot: string): string {
   const trimmed = input.trim();
   if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) return trimmed;
   try {
@@ -296,24 +292,58 @@ export function normalizeImageInputForUpload(input: string, projectRoot: string)
     if (!u.pathname.startsWith("/uploads/")) return trimmed;
     const rel = u.pathname.replace(/^\/uploads\//, "").replace(/\\/g, "/");
     if (rel.includes("..")) return trimmed;
-    const abs = path.join(projectRoot, "public", "uploads", rel);
-    if (existsSync(abs)) return u.pathname;
+    return u.pathname;
   } catch {
     /* ignore */
   }
   return trimmed;
 }
 
+export type FlattenedImageBytes = { buffer: Buffer; mime: string; filename: string };
+export type RunningHubUploadOpts = {
+  /** true：有 alpha 则铺白再传。扩图必须 false */
+  flattenAlpha?: boolean;
+};
+
+const MODEL_REF_FLATTEN_BG = { r: 255, g: 255, b: 255 };
+
+/** 生图/生视频参考图：有 alpha 则铺白底。扩图不要调用。 */
+export async function flattenAlphaForModelRef(
+  buffer: Buffer,
+  mime = "image/png",
+  filename = "upload.png"
+): Promise<FlattenedImageBytes> {
+  try {
+    const meta = await sharp(buffer).metadata();
+    if (!meta.hasAlpha) return { buffer, mime, filename };
+    const out = await sharp(buffer)
+      .rotate()
+      .flatten({ background: MODEL_REF_FLATTEN_BG })
+      .png()
+      .toBuffer();
+    const base = String(filename || "upload").replace(/\.[^.]+$/, "") || "upload";
+    return { buffer: out, mime: "image/png", filename: `${base}.png` };
+  } catch {
+    return { buffer, mime, filename };
+  }
+}
+
 export async function uploadBinaryToRunningHub(
   env: StoryboardImageEnv,
   input: string,
-  projectRoot: string
+  projectRoot: string,
+  opts?: RunningHubUploadOpts
 ): Promise<string> {
+  const flattenAlpha = Boolean(opts?.flattenAlpha);
   const normalized = normalizeImageInputForUpload(input, projectRoot);
-  if (isPublicRunningHubImageUrl(normalized)) {
-    return normalized.trim();
-  }
-  const { buffer, mime, filename } = await readImageBytes(normalized, projectRoot);
+  const publicUrl = isPublicRunningHubImageUrl(normalized) ? normalized.trim() : "";
+  if (publicUrl && !flattenAlpha) return publicUrl;
+  const read = await readImageBytes(normalized, projectRoot);
+  const packed = flattenAlpha
+    ? await flattenAlphaForModelRef(read.buffer, read.mime, read.filename)
+    : read;
+  if (publicUrl && packed.buffer.equals(read.buffer)) return publicUrl;
+  const { buffer, mime, filename } = packed;
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(buffer)], { type: mime }), filename);
   const res = await fetch(rhUrl(env, env.uploadPath), {
@@ -344,12 +374,13 @@ export async function uploadBinaryToRunningHub(
 export async function resolveInputsToRunningHubUrls(
   inputs: string[],
   projectRoot: string,
-  env: StoryboardImageEnv
+  env: StoryboardImageEnv,
+  opts?: RunningHubUploadOpts
 ): Promise<string[]> {
   const out: string[] = [];
   for (const input of inputs.slice(0, 10)) {
     if (!input?.trim()) continue;
-    out.push(await uploadBinaryToRunningHub(env, input.trim(), projectRoot));
+    out.push(await uploadBinaryToRunningHub(env, input.trim(), projectRoot, opts));
   }
   return out;
 }
@@ -443,7 +474,9 @@ export async function runStoryboardRunningHubJob(opts: {
 }): Promise<string> {
   const env = getStoryboardImageEnv();
   if (!env) throw new Error("未配置 STORYBOARD_IMAGE_API_KEY");
-  const imageUrls = await resolveInputsToRunningHubUrls(opts.images, opts.projectRoot, env);
+  const imageUrls = await resolveInputsToRunningHubUrls(opts.images, opts.projectRoot, env, {
+    flattenAlpha: true,
+  });
   if (!imageUrls.length) throw new Error("缺少参考图");
   const body = {
     prompt: opts.prompt.trim(),
@@ -464,10 +497,14 @@ export async function runStoryboardRunningHubG2Job(opts: {
   projectRoot: string;
   /** 覆盖 STORYBOARD_IMAGE_GPT_PATH（如九宫格 Agent 走官方渠道） */
   pathOverride?: string;
+  /** false：扩图保留透明通道。默认 true（生图节点铺白） */
+  flattenAlpha?: boolean;
 }): Promise<string> {
   const env = getStoryboardImageEnv();
   if (!env) throw new Error("未配置 STORYBOARD_IMAGE_API_KEY");
-  const imageUrls = await resolveInputsToRunningHubUrls(opts.images, opts.projectRoot, env);
+  const imageUrls = await resolveInputsToRunningHubUrls(opts.images, opts.projectRoot, env, {
+    flattenAlpha: opts.flattenAlpha !== false,
+  });
   if (!imageUrls.length) throw new Error("缺少参考图");
   const g2 = mapRunningHubG2OutputParams(opts.image_size, opts.aspect_ratio, opts.quality);
   const body = {
@@ -539,7 +576,9 @@ export async function runStoryboardRunningHubGenerateJob(opts: {
 
   if (cited.length > 0 && refs.length > 0) {
     const urls = cited.map((i) => refs[i]).filter(Boolean);
-    const imageUrls = await resolveInputsToRunningHubUrls(urls, opts.projectRoot, env);
+    const imageUrls = await resolveInputsToRunningHubUrls(urls, opts.projectRoot, env, {
+      flattenAlpha: true,
+    });
     const body = { prompt: opts.prompt.trim(), imageUrls, resolution, aspectRatio };
     const path =
       (opts.pathOverrideI2I?.trim() || env.editPath).trim() || env.editPath;
@@ -577,12 +616,16 @@ async function resolveYouchuanImageRefs(
 ): Promise<{ imageUrl: string | null; sref: string | null }> {
   let resolvedImageUrl: string | null = null;
   if (imageUrl?.trim()) {
-    const urls = await resolveInputsToRunningHubUrls([imageUrl.trim()], projectRoot, env);
+    const urls = await resolveInputsToRunningHubUrls([imageUrl.trim()], projectRoot, env, {
+      flattenAlpha: true,
+    });
     resolvedImageUrl = urls[0] || null;
   }
   let resolvedSref: string | null = null;
   if (sref?.trim()) {
-    const urls = await resolveInputsToRunningHubUrls([sref.trim()], projectRoot, env);
+    const urls = await resolveInputsToRunningHubUrls([sref.trim()], projectRoot, env, {
+      flattenAlpha: true,
+    });
     resolvedSref = urls[0] || null;
   }
   return { imageUrl: resolvedImageUrl, sref: resolvedSref };

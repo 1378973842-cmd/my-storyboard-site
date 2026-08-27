@@ -1,7 +1,6 @@
 /* eslint-disable */
 /** Infinite canvas engine — scoped to canvasRoot. */
 import {
-    augmentImagePromptWithReferenceCostumeLock,
     buildNineGridImagePrompt,
     dataUrlToBlob,
     estimateNineGridGap,
@@ -3265,9 +3264,13 @@ function measureRhBaseFrame(node, el){
     // 视频反推共用 RH sized 壳规则，探针也挂 rh-node，测高才与实节点一致
     probe.className = `${node.type}-node${isScaleShellNode(node) ? ' agent-scale-node' : ''}${node.type === 'videoReverse' ? ' rh-node' : node.type === 'rh' ? ' rh-node' : ''} rh-measure rh-measure-probe`;
     probe.setAttribute('aria-hidden', 'true');
+    // 探针必须跟实节点同一 --rh-base-w，否则 Agent（600/640）会按 RH 默认 820 测，参考图少折行、壳高偏矮，多出来的行被底栏裁掉
+    const baseW = scaleShellBaseW(node);
+    probe.style.setProperty('--rh-base-w', `${baseW}px`);
     const clone = wrap.cloneNode(true);
     clone.style.transform = 'none';
     clone.style.setProperty('--rh-ui-scale', '1');
+    clone.style.setProperty('--rh-base-w', `${baseW}px`);
     probe.appendChild(clone);
     root.appendChild(probe);
     const h = Math.max(120, Math.ceil(clone.scrollHeight || clone.offsetHeight || 420));
@@ -16381,6 +16384,9 @@ function renderNode(node){
     if(isScaleShellNode(node)){
         delete node._rhBaseFrameH;
         scheduleFitRhNodeFrame(node);
+        el.querySelectorAll('.agent-h-col-scroll').forEach(col => {
+            col.addEventListener('wheel', e => e.stopPropagation(), {passive:true});
+        });
     }
     mountCanvasCustomSelects(el);
     bindNodeFloatTitleRename(el, node);
@@ -18030,6 +18036,7 @@ function renderMxShellRefList(list, node, emptyText=null){
     const entries = collectMxShellRefEntries(node);
     if(!entries.length){
         list.innerHTML = `<div class="nine-grid-ref-empty">${escapeHtml(emptyText || (langIsEn() ? 'Optional: connect reference images' : '可选：连接角色/道具/场景参考图'))}</div>`;
+        scheduleFitRhNodeFrame(node);
         return;
     }
     const namedCount = entries.filter(e => String(node.refNames[e.key] || e.name || '').trim()).length;
@@ -18077,6 +18084,9 @@ function renderMxShellRefList(list, node, emptyText=null){
             scheduleSave();
         };
     });
+    const row = list.querySelector('.nine-grid-ref-row');
+    if(row) row.addEventListener('wheel', e => e.stopPropagation(), {passive:true});
+    scheduleFitRhNodeFrame(node);
 }
 async function resolveMxShellImageUrlForApi(rawUrl){
     const url = String(rawUrl || '').trim();
@@ -20447,6 +20457,7 @@ function renderNineGridRefList(list, node, emptyText=null){
     const entries = collectNineGridRefEntries(node);
     if(!entries.length){
         list.innerHTML = `<div class="nine-grid-ref-empty">${escapeHtml(emptyText || (langIsEn() ? 'Connect reference images' : '请连接参考图'))}</div>`;
+        scheduleFitRhNodeFrame(node);
         return;
     }
     list.innerHTML = `
@@ -20479,6 +20490,9 @@ function renderNineGridRefList(list, node, emptyText=null){
             scheduleSave();
         };
     });
+    const row = list.querySelector('.nine-grid-ref-row');
+    if(row) row.addEventListener('wheel', e => e.stopPropagation(), {passive:true});
+    scheduleFitRhNodeFrame(node);
 }
 function normalizeNineGridAgentNode(node){
     if(!node || node.type !== 'nineGridAgent') return;
@@ -30868,7 +30882,7 @@ function isBatchPosterAgentType(type){
     return type === 'batchPosterAgent';
 }
 function isGeneratorLikeNode(node){
-    return node && (CANVAS_GENERATOR_TYPES.includes(node.type) || isBatchPosterAgentType(node.type) || isNineGridAgentType(node.type));
+    return node && (CANVAS_GENERATOR_TYPES.includes(node.type) || isBatchPosterAgentType(node.type) || isNineGridAgentType(node.type) || isMxShellFamilyAgent(node));
 }
 function syncGeneratorInputs(){
     syncAllLoopImageBatchSizes();
@@ -30911,11 +30925,13 @@ function refreshGeneratorInputViews(){
             return;
         }
         if(gen.type === 'nineGridAgent'){
-            const sources = orderedSources(gen, generatorSources(gen));
-            const imageInputs = sources
-                .map(src => ({...src, refs:imageRefsOnly(src.refs || [])}))
-                .filter(src => src.refs?.length);
             renderNineGridRefList(el.querySelector('.nine-grid-input-list'), gen, langIsEn() ? 'Connect reference images' : '请连接参考图');
+            return;
+        }
+        if(isMxShellFamilyAgent(gen)){
+            const fold = el.querySelector('.agent-refs-fold');
+            if(fold) fold.open = collectMxShellRefEntries(gen).length > 0;
+            renderMxShellRefList(el.querySelector('.mx-shell-ref-list'), gen, langIsEn() ? 'Optional: connect reference images' : '可选：连接角色/道具/场景参考图');
             return;
         }
         const sources = orderedSources(gen, generatorSources(gen));
@@ -31063,11 +31079,8 @@ function perItemGroupImageRefs(sources, loopCtx){
 }
 async function buildGeneratorTaskPayload(gen, prompt, refs){
     const rawPrompt = prompt || 'Edit the reference images.';
-    const enrichedPrompt = refs?.length
-        ? augmentImagePromptWithReferenceCostumeLock(rawPrompt, refs)
-        : rawPrompt;
     const payload = {
-        prompt: enrichedPrompt,
+        prompt: rawPrompt,
         provider_id:resolveImageProviderId(gen.apiProvider || 'comfly'),
         model:resolveImageModel(gen.model),
         size:await generatorSizeForRun(gen, refs),
@@ -31317,7 +31330,7 @@ async function runGeneratorLegacy(genId, opts={}){
     try {
         const rawPrompt = prompt || 'Edit the reference images.';
         const payload = {
-            prompt: refs.length ? augmentImagePromptWithReferenceCostumeLock(rawPrompt, refs) : rawPrompt,
+            prompt: rawPrompt,
             provider_id:resolveImageProviderId(gen.apiProvider || 'comfly'),
             model:resolveImageModel(gen.model),
             size:await generatorSizeForRun(gen, refs),
