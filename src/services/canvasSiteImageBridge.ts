@@ -105,6 +105,22 @@ function absoluteUrl(req: Request, url: string): string {
   return u;
 }
 
+/** edit-image 表单：站内 /uploads 保持相对路径，避免 loopback 无 Cookie 拉绝对 URL 401 */
+function editImageRefUrl(req: Request, url: string): string {
+  const u = String(url || "").trim();
+  if (!u) return u;
+  if (u.startsWith("/uploads/")) return u.split("?")[0];
+  if (/^https?:\/\//i.test(u)) {
+    try {
+      const parsed = new URL(u);
+      if (parsed.pathname.startsWith("/uploads/")) return parsed.pathname;
+    } catch {
+      /* ignore */
+    }
+  }
+  return absoluteUrl(req, u);
+}
+
 function isGptImage2(model?: string): boolean {
   return /^gpt-image-2(-稳定)?$/i.test(String(model || "").trim());
 }
@@ -244,8 +260,8 @@ export function mapCanvasToEditorRequest(
       )
     : String(payload.prompt || "").trim() || "Edit the reference images.";
   const model = String(payload.model || "").trim();
-  const images = sourceItems.map((r) => absoluteUrl(req, r.url)).filter(Boolean);
-  const mask = maskItem ? absoluteUrl(req, maskItem.url) : "";
+  const images = sourceItems.map((r) => editImageRefUrl(req, r.url)).filter(Boolean);
+  const mask = maskItem ? editImageRefUrl(req, maskItem.url) : "";
   const aspect_ratio = isGptImage2(model)
     ? gpt2AspectRatioFromPayload(payload)
     : canvasRatioToAspectRatio(payload);
@@ -366,9 +382,11 @@ async function executeCanvasGeneration(
     .map((r) => ({
       url: String(r?.url || "").trim(),
       name: String(r?.name || "").trim(),
+      role: String(r?.role || "").trim(),
     }))
     .filter((r) => r.url);
   const imageUrls = refItems.map((r) => absoluteUrl(req, r.url)).filter(Boolean);
+  const hasMaskRef = refItems.some((r) => r.role === "mask" || /mask/i.test(r.name));
   // 前端已连参考图但 URL 解析失败时，禁止静默掉进 nano 文生图
   if (rawRefs.length > 0 && imageUrls.length === 0) {
     throw new Error("参考图地址无效，无法按所选模型生成");
@@ -445,7 +463,8 @@ async function executeCanvasGeneration(
 
   if (imageUrls.length > 0) {
     let upstreamUrl: string;
-    if (rhEnv) {
+    // 有独立 mask 时必须走 /api/edit-image 表单（RH G2 会把 mask 当普通参考图吃掉）
+    if (rhEnv && !hasMaskRef) {
       if (isGptImage2(model)) {
         const g2Path = resolveG2I2IPath(model, payload.nine_grid_agent);
         console.log("[canvas-image/runninghub-g2]", {
@@ -489,6 +508,12 @@ async function executeCanvasGeneration(
         });
       }
     } else {
+      console.log("[canvas-image/edit-form]", {
+        model,
+        images: imageUrls.length,
+        has_mask: hasMaskRef,
+        expand_outpaint: Boolean(payload.expand_outpaint),
+      });
       const { body } = mapCanvasToEditorRequest(req, payload);
       const upstream = await callSiteEditImage(req, body);
       if (!upstream.ok) {

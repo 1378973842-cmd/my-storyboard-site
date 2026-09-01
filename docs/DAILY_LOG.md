@@ -505,3 +505,34 @@
 ### 记录 / 说明
 - 图片生成节点编辑生图 RH 上传 504：PNG/大图转 JPEG 再传，504 重试 3 次
 - 线上生图不认参考图：/uploads 改 OSS/本地直读再传 RH；图片生成节点去掉默认角色造型锁定
+- 生产部署 v1.0.107 a66e2d0：参考图 OSS 直读交 RH、生图不再造型锁定、透明铺白、九宫格参考图折行；Caddy https://dreamgrid.cn HTTP 200
+
+### 今日提交（Git）
+- `a66e2d0` fix(canvas): send OSS refs to RunningHub and stop gen-node costume lock
+
+## 2026-08-31
+
+### 记录 / 说明
+- 图片动作条重绘双选菜单骨架（蒙版/框选）；AG261 done，AG262/263 待实现
+- AG262 蒙版重绘：上下栏+涂蒙版+gpt-image-2 mask edit-form；有 mask 不再丢 RH
+- 修蒙版重绘401：uploads绝对URL改本地直读
+- 蒙版重绘改走RH透明通道，对齐图片生成STORYBOARD key
+- 蒙版重绘完成后羽化贴回原图，锁未涂区域
+- 蒙版重绘改走 RH Qwen Edit 工作流(2029197668701970433)：透明PNG作LoadImage mask，去掉整图edit+贴回
+- AG263 框选重绘：裁切+Qwen生成+PixelRunner羽化贴回/YUV融合校色(total78/feather16等)
+- 框选重绘改回 nano-banana-pro 图片生成API图生图（勿用Qwen工作流）；贴回校色仍保留
+- 框选重绘深度对照 PixelRunner：修 contain 透明留白+合成 alpha；仍缺 stretch/local-mesh
+- 框选重绘根因：坐标用了画布 _thumb naturalWidth，裁切按原图像素→左上角白边；nano 发明错脸。已改 keep 原图尺寸 + crop 换算。
+- 蒙版重绘灯箱同管道 compare baseline（edit-compare-baseline）
+- 新视角：动作条入口+箭头公式+gpt/nano 走图片生成 API
+- 灯箱对比以结果图 contain 框铺原图，消尺寸不同假偏移
+- 新视角飞出双选：箭头指向保留；3D机位=立板环绕预览，提交干净原图+数值机位提示词
+- 灯箱对比改裁切窗口：左边不再透出结果图
+- 灯箱对比：单击按钮开关；滑杆随缩放层走，去掉放大后线旁多边
+- 3D机位预览改深度立板（Depth Anything）并修焦段对消；生成仍走干净原图
+- 3D机位深度改走服务端 Depth Anything；HUD 显示模型名，失败写出原因
+
+## 2026-09-01
+
+### 记录 / 说明
+- 3D机位改为原图+预览双参考；Depth Anything Small 仍是相对立板

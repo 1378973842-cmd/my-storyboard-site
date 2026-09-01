@@ -25,5 +25,6 @@ data/canvas-collections/*
 !data/canvas-collections/.gitkeep
 data/asset-library/*
 !data/asset-library/.gitkeep
+data/hf-cache/
 data/runninghub-workflows.json
 data/runninghub-apps.json

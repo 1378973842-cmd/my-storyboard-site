@@ -492,9 +492,22 @@ async function imageInputToBlob(
     return { blob, filename: `upload.${guessExtFromMime(mime)}` };
   }
 
-  if (trimmed.startsWith("/uploads/") && projectRoot) {
-    const got = await readUploadsBytes(projectRoot, trimmed);
-    if (!got) throw new Error(`找不到上传文件 ${trimmed}`);
+  // 站内 /uploads：含绝对 URL（http://localhost:3005/uploads/...）。
+  // 服务端无 Cookie 去拉会 401；一律本地盘/OSS 直读。
+  let uploadsPath = "";
+  if (trimmed.startsWith("/uploads/")) {
+    uploadsPath = trimmed.split("?")[0];
+  } else if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    try {
+      const u = new URL(trimmed);
+      if (u.pathname.startsWith("/uploads/")) uploadsPath = u.pathname;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (uploadsPath && projectRoot) {
+    const got = await readUploadsBytes(projectRoot, uploadsPath);
+    if (!got) throw new Error(`找不到上传文件 ${uploadsPath}`);
     const blob = new Blob([got.buffer], { type: got.mime });
     return { blob, filename: got.filename || `local.${guessExtFromMime(got.mime)}` };
   }
@@ -1919,9 +1932,9 @@ ${pixarInstruction}
     }
 
     const rhEnv = getStoryboardImageEnv();
-    const skipRhForOutpaint =
-      Boolean(expand_outpaint) && typeof mask === "string" && mask.trim().length > 0;
-    if (rhEnv && !skipRhForOutpaint) {
+    // 有 mask 时走下方表单 edits（RH 路径会丢 mask）；扩图无独立 mask 仍走 RH 透明通道
+    const hasMask = typeof mask === "string" && mask.trim().length > 0;
+    if (rhEnv && !hasMask) {
       try {
         const userPrompt = String(prompt).trim();
         const url = gptRequested

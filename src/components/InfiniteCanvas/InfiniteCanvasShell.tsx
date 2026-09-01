@@ -873,12 +873,16 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                   <div id="outputLightboxShell" className="output-lightbox-shell">
                   <div id="outputPreview" className="output-preview">
                       <div id="outputCompareContainer" className="output-compare">
-                          <img id="outputCompareResult" alt="result image" />
-                          <div id="outputCompareOriginalWrap" className="output-compare-original-wrap">
-                              <img id="outputCompareOriginal" alt="input image" />
-                          </div>
-                          <div id="outputCompareSlider" className="output-compare-slider">
-                              <div className="output-compare-handle"><i data-lucide="move-horizontal" className="w-4 h-4"></i></div>
+                          <div id="outputCompareLayer" className="output-compare-layer">
+                              <img id="outputCompareResult" alt="结果" />
+                              <div id="outputCompareOriginalWrap" className="output-compare-original-wrap">
+                                  <img id="outputCompareOriginal" alt="原图" />
+                                  <span className="output-compare-tag is-before">原图</span>
+                              </div>
+                              <span className="output-compare-tag is-after">结果</span>
+                              <div id="outputCompareSlider" className="output-compare-slider">
+                                  <div className="output-compare-handle"><i data-lucide="move-horizontal" className="w-4 h-4"></i></div>
+                              </div>
                           </div>
                       </div>
                       <img id="outputLightboxImg" className="output-single-img" src="" alt="output preview" />

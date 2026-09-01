@@ -52,6 +52,9 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    optimizeDeps: {
+      exclude: ['@huggingface/transformers'],
+    },
     server: {
       origin: `http://localhost:${devHttpPort}`,
       hmr:

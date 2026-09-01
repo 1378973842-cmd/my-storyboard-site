@@ -34,6 +34,34 @@ import {
     canOrphanOntoCurrent,
     shouldParkTaskResult,
 } from './canvasTaskIsolation.js';
+import {
+    DEFAULT_BOX_REPAINT_BLEND_CONFIG,
+    stitchBoxRepaintResult,
+} from './boxRepaintBlendMatch.js';
+import {
+    NOVEL_VIEW_DEFAULT_MODEL,
+    NOVEL_VIEW_DEFAULT_WIDTH,
+    NOVEL_VIEW_MODELS,
+    clamp01,
+    clampWidthFrac,
+    drawNovelViewArrow,
+    hasNovelViewArrow,
+    nearestAspectRatio,
+    novelViewFromArrow,
+} from './novelViewCamera.js';
+import {
+    NOVEL_VIEW_ORBIT_DEFAULT,
+    buildNovelViewOrbitPrompt,
+    clampOrbitCamera,
+    orbitCaptureSize,
+    orbitHudChips,
+} from './novelViewOrbit.js';
+import {
+    NOVEL_VIEW_DEPTH_STRENGTH_DEFAULT,
+    clampDepthStrength,
+} from './novelViewDepth.js';
+import { estimateNovelViewDepth, novelViewDepthModelLabel, shortNovelViewDepthError } from './novelViewDepthEstimate.js';
+import { createNovelViewOrbitView } from './novelViewOrbitView.js';
 let canvasRoot = null;
 function apiFetch(url, options = {}) {
     return fetch(url, { credentials: 'same-origin', ...options });
@@ -76,7 +104,7 @@ function writeLastCanvasId(id){
 }
 function isCanvasInteracting(){
     // 裁剪/画笔/旋转聚焦中也算交互：禁止远程同步把视口打回旧比例
-    return Boolean(dragBoard || dragNode || pendingNodeDrag || resizeNode || minimapDrag || tempLink || selectDrag || isImageEditOpen() || isImageExpandOpen() || isImageCutoutOpen() || isImageUpscaleOpen() || imageEditViewportAnimActive);
+    return Boolean(dragBoard || dragNode || pendingNodeDrag || resizeNode || minimapDrag || tempLink || selectDrag || isImageEditOpen() || isImageExpandOpen() || isImageCutoutOpen() || isImageUpscaleOpen() || isImageMaskRepaintOpen() || isImageBoxRepaintOpen() || isImageNovelViewOpen() || isImageNovelOrbitOpen() || imageEditViewportAnimActive);
 }
 /** 焦点在画布可编辑控件内时的上下文（节点表单 / gen-dock） */
 function editingFocusContext(){
@@ -623,7 +651,7 @@ let gateSortBy = 'updated';
 let gateSortOrder = 'desc';
 let gateViewMode = 'grid';
 let workflowTemplateModal, workflowTemplateList, workflowTemplateBtn, saveWorkflowTemplateBtn;
-let outputLightbox, outputPreview, outputLightboxImg, outputCompareContainer, outputCompareResult;
+let outputLightbox, outputPreview, outputLightboxImg, outputCompareContainer, outputCompareLayer, outputCompareResult;
 let outputCompareOriginal, outputCompareOriginalWrap, outputCompareSlider, outputResolution;
 let outputDownloadBtn, outputFavoriteBtn, outputCompareBtn, outputLightboxVideo, outputPromptPanel, outputPromptText, outputCopyPromptBtn;
 let outputRerunBtn, logModal, logList, logSearchInput, logModalCount, logClearBar, logClearBtn, logClearCancel, logClearConfirm, errorModal, errorTitle, errorMessage;
@@ -820,6 +848,7 @@ function bindDomElements(root) {
   outputPreview = g('outputPreview');
   outputLightboxImg = g('outputLightboxImg');
   outputCompareContainer = g('outputCompareContainer');
+  outputCompareLayer = g('outputCompareLayer');
   outputCompareResult = g('outputCompareResult');
   outputCompareOriginal = g('outputCompareOriginal');
   outputCompareOriginalWrap = g('outputCompareOriginalWrap');
@@ -1575,10 +1604,14 @@ const MS_GEN_MODELS = {
 let hasManagedImageModels = false;
 let hasManagedChatModels = false;
 let outputCompareDrag = false;
+let outputCompareBox = {left:0, top:0, w:0, h:0};
+let outputComparePercent = 50;
 let outputPreviewZoom = 1;
 let outputPreviewPan = {x: 0, y: 0};
 let outputPreviewPanDrag = null;
 let currentOutputCompareUrl = '';
+let outputCompareDocDelegated = false;
+let outputCompareToggleAt = 0;
 let currentOutputMeta = null;
 let currentOutputLightboxOutId = '';
 let currentOutputLightboxUrl = '';
@@ -1639,10 +1672,43 @@ let imageExpandUiWired = false;
 let imageCutoutState = null;
 let imageCutoutEl = null;
 let imageCutoutUiWired = false;
+/** 蒙版重绘：涂蒙版 + 提示词 → RunningHub Qwen Edit 工作流（LoadImage alpha=MASK） */
+const RUNNINGHUB_MASK_REPAINT_WORKFLOW_ID = '2029197668701970433';
+const RUNNINGHUB_MASK_REPAINT_IMAGE_FIELD = { nodeId: '13', fieldName: 'image' };
+const RUNNINGHUB_MASK_REPAINT_TEXT_FIELD = { nodeId: '15', fieldName: 'text' };
+/** 输出尺寸：QwenEditConfigPreparer.ref_longest_edge，避免默认 3000 把原图拉大 */
+const RUNNINGHUB_MASK_REPAINT_SIZE_FIELD = { nodeId: '52', fieldName: 'ref_longest_edge' };
+/** 框选重绘：裁切上传长边上限（对齐 PixelRunner maxDimension） */
+const BOX_REPAINT_UPLOAD_MAX_EDGE = 1536;
+const MASK_REPAINT_BRUSH_ALPHA = 115;
+const MASK_REPAINT_BRUSH_COLOR = `rgba(255,255,255,${MASK_REPAINT_BRUSH_ALPHA / 255})`;
+let imageMaskRepaintState = null;
+let imageMaskRepaintEl = null;
+let imageMaskRepaintUiWired = false;
+let imageMaskRepaintStroke = null;
+/** 框选重绘：矩形选区 + 提示词 → 裁切生成 → 羽化贴回 + PixelRunner 融合校色 */
+let imageBoxRepaintState = null;
+let imageBoxRepaintEl = null;
+let imageBoxRepaintUiWired = false;
+let imageBoxRepaintDrag = null;
 /** 高清放大：RunningHub v2 超分面板（复用扩图 dock 视觉 + 下拉选择） */
 let imageUpscaleState = null;
 let imageUpscaleEl = null;
 let imageUpscaleUiWired = false;
+/** 新视角：图上画箭头 → 视角指令 → 图片生成节点同一套 API */
+let imageNovelViewState = null;
+let imageNovelViewEl = null;
+let imageNovelViewUiWired = false;
+let imageNovelViewDrag = null;
+/** 新视角·3D机位：绕立板旋转相机 → 数值提示词 + 干净原图 i2i */
+let imageNovelOrbitState = null;
+let imageNovelOrbitEl = null;
+let imageNovelOrbitUiWired = false;
+let imageNovelOrbitView = null;
+let imageNovelViewMenuEl = null;
+let imageNovelViewMenuTimer = 0;
+let imageNovelViewMenuCloseTimer = 0;
+let imageNovelViewMenuTarget = null;
 /** 旋转/镜像：角度 0/90/180/270；翻转相对当前角度 */
 let imageEditRotateDeg = 0;
 let imageEditFlipH = false;
@@ -2749,6 +2815,11 @@ let imageGenDockNodeId = null;
 let imageActionBarEl = null;
 let imageActionBarNodeId = null;
 let imageActionBarUrl = '';
+/** 重绘双选菜单（挂在动作条「重绘」钮上） */
+let imageRepaintMenuEl = null;
+let imageRepaintMenuTimer = 0;
+let imageRepaintMenuCloseTimer = 0;
+let imageRepaintMenuTarget = null;
 /** 视频剪辑底栏（对齐图片裁剪 dock 动效） */
 let videoTrimState = null; // {nodeId, url, duration, start, end, host}
 let videoTrimStripBusy = 0;
@@ -3706,6 +3777,11 @@ function morphEmptyGenStageToConsoleRatio(node){
 /** 图台尺寸变化后，把浮动控制台重新贴到节点下方 */
 function scheduleImageGenDockFollow(node){
     if(!node) return;
+    // 叠卡↔网格翻牌中勿连贴三次：节点已缩、幽灵还在飞，控制台瞬移会闪
+    if(node._stageFlipping){
+        scheduleImageActionBarFollow(node);
+        return;
+    }
     if(imageGenDockNodeId === node.id && imageGenDockEl){
         positionImageGenDock(node);
         // 双 rAF：等 aspect-ratio / 字体把节点高度落稳后再贴一次，避免台/控制台错位
@@ -4063,6 +4139,10 @@ function applyViewport(){
     if(imageExpandState) positionImageExpandOverlay();
     if(imageCutoutState) positionImageCutoutOverlay();
     if(imageUpscaleState) positionImageUpscaleOverlay();
+    if(imageMaskRepaintState) positionImageMaskRepaintOverlay();
+    if(imageBoxRepaintState) positionImageBoxRepaintOverlay();
+    if(imageNovelViewState) positionImageNovelViewOverlay();
+    if(imageNovelOrbitState) positionImageNovelOrbitOverlay();
     if(videoTrimState?.nodeId) positionVideoTrimDock();
     if(genBatchPick?.nodeId){
         const pickNode = nodes.find(n => n.id === genBatchPick.nodeId);
@@ -7746,6 +7826,7 @@ on(window, 'studio-theme-change', event => applyTheme(event.detail?.theme || 'li
 ensureImageEditorUi();
 on(window, 'resize', () => {
     if(cropState) syncImageEditOverflow();
+    if(outputPreview?.classList.contains('compare-mode')) layoutOutputCompareImages();
 });
 bindClick(backToManagerBtn, () => returnToCanvasManager());
 bindCanvasMenuWheelScroll();
@@ -7780,7 +7861,7 @@ function canStartBoardPanFromTarget(target){
     if(!board || !target) return false;
     if(isEditableTarget(target)) return false;
     if(target.closest?.(
-        '.node, .selection-box, #selectionBox, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .image-gen-dock-host, .image-action-bar-host, .image-expand-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .canvas-pin-hub, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
+        '.node, .selection-box, #selectionBox, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .image-gen-dock-host, .image-action-bar-host, .image-repaint-menu, .image-expand-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .canvas-pin-hub, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
     )) return false;
     return board.contains(target);
 }
@@ -7789,7 +7870,7 @@ function canStartForcedPanFromTarget(target){
     if(!board || !target) return false;
     if(isEditableTarget(target)) return false;
     if(target.closest?.(
-        'button, select, textarea, input, .port, .resize-handle, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .canvas-custom-select, .image-gen-dock-host, .image-action-bar-host, .image-expand-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .canvas-pin-hub, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
+        'button, select, textarea, input, .port, .resize-handle, .minimap, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .link-delete, .link-hit, .link-controls, .canvas-custom-select, .image-gen-dock-host, .image-action-bar-host, .image-repaint-menu, .image-expand-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .canvas-pin-hub, .text-format-bar-host, .text-node-dock-host, .text-expand-modal, .asset-lib-save-modal, .gen-dock, .gen-batch-pick-bar, .canvas-custom-select-panel, .canvas-custom-select-menu'
     )) return false;
     return board.contains(target);
 }
@@ -9667,12 +9748,31 @@ function imageBatchOwningImage(imageNodeId){
     if(!imageNodeId) return null;
     return nodes.find(g => g.type === 'imageBatch' && (g.items || []).includes(imageNodeId)) || null;
 }
+function imageAssetPath(url){
+    const raw = String(url || '').trim().split('#')[0].split('?')[0];
+    if(!raw) return '';
+    try{
+        const origin = (typeof location !== 'undefined' && location.origin) ? location.origin : 'http://local.invalid';
+        return decodeURI(new URL(raw, origin).pathname).replace(/\\/g, '/');
+    }catch(_){
+        return raw.replace(/\\/g, '/');
+    }
+}
+function sameImageAsset(a, b){
+    const pa = imageAssetPath(a);
+    const pb = imageAssetPath(b);
+    return Boolean(pa) && pa === pb;
+}
 function imageNodeSourceUrl(node){
     if(!node || node.type !== 'image') return '';
+    const self = String(node.url || '').trim();
+    const pick = (raw) => {
+        const u = String(raw || '').trim();
+        return u && !sameImageAsset(u, self) ? u : '';
+    };
     // 各编辑功能记录的原图：新统一字段优先，其次兼容旧数据字段
-    if(String(node._editSourceUrl || '').trim()) return String(node._editSourceUrl).trim();
-    if(String(node._cutoutSourceUrl || '').trim()) return String(node._cutoutSourceUrl).trim();
-    if(String(node._expandSourceUrl || '').trim()) return String(node._expandSourceUrl).trim();
+    const explicit = pick(node._editSourceUrl) || pick(node._cutoutSourceUrl) || pick(node._expandSourceUrl);
+    if(explicit) return explicit;
     // 无显式源 URL 时回退连线：图片节点取上游 url，生图台取封面/主图
     const srcId = connections.find(c => c.to === node.id)?.from;
     if(!srcId) return '';
@@ -9680,17 +9780,47 @@ function imageNodeSourceUrl(node){
     if(!src) return '';
     if(isGenConsoleNode(src)){
         const urls = generatorPreviewUrls(src);
-        return String(genStageCollapsedDisplayUrl(src, urls) || '').trim();
+        return pick(genStageCollapsedDisplayUrl(src, urls));
     }
-    return String(src?.url || '').trim();
+    return pick(src?.url);
+}
+function bindImageEditCompareSource(out, resultUrl){
+    const src = String(out?._editSourceUrl || out?._cutoutSourceUrl || out?._expandSourceUrl || '').trim();
+    const url = String(resultUrl || out?.url || '').trim();
+    if(!out || !src || !url || sameImageAsset(src, url)) return;
+    out.imageComparisons = out.imageComparisons || {};
+    out.imageComparisons[url] = { url: src, name: 'source' };
+}
+function resolveCompareOriginalSrc(resultUrl, node){
+    const result = String(resultUrl || '').trim();
+    const mapped = node?.imageComparisons?.[result];
+    const candidates = [
+        node?._editSourceUrl,
+        node?._cutoutSourceUrl,
+        node?._expandSourceUrl,
+        typeof mapped === 'string' ? mapped : mapped?.url,
+        imageNodeSourceUrl(node),
+    ];
+    if(node?.imageComparisons){
+        for(const [key, value] of Object.entries(node.imageComparisons)){
+            if(!sameImageAsset(key, result)) continue;
+            candidates.push(typeof value === 'string' ? value : value?.url);
+        }
+    }
+    for(const raw of candidates){
+        const u = String(raw || '').trim();
+        if(!u || sameImageAsset(u, result)) continue;
+        return u;
+    }
+    return '';
 }
 function openImageNodeLightbox(imageNode){
     const url = String(imageNode?.url || '').trim();
     if(!url || isMissingAssetUrl(url) || mediaKindForNode(imageNode) !== 'image') return;
     const batch = imageBatchOwningImage(imageNode.id);
-    // 编辑派生的图片节点（裁剪/画笔/旋转/扩图/抠图/高清放大）都带原图来源，灯箱里可滑块对比
-    const compareUrl = imageNodeSourceUrl(imageNode);
-    openOutputLightbox(url, batch || null, compareUrl);
+    // 编辑派生节点（裁剪/画笔/旋转/扩图/抠图/高清/蒙版/框选/新视角）带原图来源，灯箱可滑块对比
+    const compareUrl = resolveCompareOriginalSrc(url, imageNode);
+    openOutputLightbox(url, imageNode, compareUrl);
 }
 function createImageBatchChild(batch, url, name, index){
     const i = index ?? imageBatchAllChildImages(batch).length;
@@ -12534,15 +12664,15 @@ function viewportTargetForNodeFocus(node, opts = {}){
     const w = Math.max(48, Number(nodeEl?.offsetWidth || node.w || 260));
     const h = Math.max(48, Number(nodeEl?.offsetHeight || node.h || 300));
     const boardRect = board.getBoundingClientRect();
-    const mode = opts.mode === 'brush' ? 'brush' : opts.mode === 'expand' ? 'expand' : opts.mode === 'cutout' ? 'cutout' : opts.mode === 'upscale' ? 'upscale' : 'crop';
+    const mode = opts.mode === 'brush' ? 'brush' : opts.mode === 'expand' ? 'expand' : opts.mode === 'cutout' ? 'cutout' : opts.mode === 'upscale' ? 'upscale' : opts.mode === 'repaint' ? 'repaint' : opts.mode === 'novel-view' || opts.mode === 'novel-view-orbit' ? 'novel-view' : 'crop';
     let marginTop = mode === 'brush' ? 96 : 56;
     let marginBottom = mode === 'crop' ? 110 : 56;
     let marginX = 72;
     let focusW = w;
     let focusH = h;
     let fill = 0.92;
-    if(mode === 'cutout' || mode === 'upscale'){
-        marginTop = 72;
+    if(mode === 'cutout' || mode === 'upscale' || mode === 'repaint' || mode === 'novel-view'){
+        marginTop = mode === 'repaint' ? 96 : 72;
         marginBottom = 96;
         marginX = 80;
         fill = 0.82;
@@ -14201,7 +14331,7 @@ function addGeneratedImageNode(file, sourceNode, suffix, offsetX=0, extra={}){
     return next;
 }
 function normalizeImageEditOrigin(kind){
-    if(kind === 'brush' || kind === 'rotate' || kind === 'crop' || kind === 'expand' || kind === 'cutout' || kind === 'upscale') return kind;
+    if(kind === 'brush' || kind === 'rotate' || kind === 'crop' || kind === 'expand' || kind === 'cutout' || kind === 'upscale' || kind === 'repaint' || kind === 'box-repaint' || kind === 'novel-view' || kind === 'novel-view-orbit') return kind;
     return '';
 }
 function imageEditOriginLabel(kind){
@@ -14212,6 +14342,10 @@ function imageEditOriginLabel(kind){
     if(k === 'expand') return langIsEn() ? 'Expand' : '扩图';
     if(k === 'cutout') return langIsEn() ? 'Cutout' : '抠图';
     if(k === 'upscale') return langIsEn() ? 'Upscale' : '高清放大';
+    if(k === 'repaint') return langIsEn() ? 'Mask repaint' : '蒙版重绘';
+    if(k === 'box-repaint') return langIsEn() ? 'Box repaint' : '框选重绘';
+    if(k === 'novel-view') return langIsEn() ? 'New view' : '新视角';
+    if(k === 'novel-view-orbit') return langIsEn() ? '3D camera' : '3D机位';
     return '';
 }
 /** 用户双击浮标改过的显示名（优先于默认「图片节点 N」等） */
@@ -14246,7 +14380,8 @@ function imageEditOriginBadgeHtml(node){
     const fallback = imageEditOriginLabel(node?.editOrigin);
     if(!fallback) return '';
     const label = nodeFloatTitleCustom(node) || fallback;
-    return `<span class="canvas-float-title image-edit-origin-badge" data-edit-origin="${escapeAttr(node.editOrigin)}" title="${escapeAttr(label)}"><i data-lucide="image"></i><span class="float-title-label" data-float-rename="1">${escapeHtml(label)}</span></span>`;
+    const icon = node.editOrigin === 'box-repaint' ? 'square' : node.editOrigin === 'repaint' ? 'paintbrush' : (node.editOrigin === 'novel-view' || node.editOrigin === 'novel-view-orbit') ? 'move-3d' : 'image';
+    return `<span class="canvas-float-title image-edit-origin-badge" data-edit-origin="${escapeAttr(node.editOrigin)}" title="${escapeAttr(label)}"><i data-lucide="${icon}"></i><span class="float-title-label" data-float-rename="1">${escapeHtml(label)}</span></span>`;
 }
 /** 画布外导入的图片/视频：左上浮标显示文件名（无编辑来源说明时） */
 function imageMediaFloatTitleLabel(node){
@@ -14940,6 +15075,10 @@ async function openImageEditorCore({nodeId, url, name, saveTarget, mode='crop'})
     closeImageExpand({ restoreViewport: false, syncBar: false });
     closeImageCutout({ restoreViewport: false, syncBar: false });
     closeImageUpscale({ restoreViewport: false, syncBar: false });
+    closeImageMaskRepaint({ restoreViewport: false, syncBar: false });
+    closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
+    closeImageNovelView({ restoreViewport: false, syncBar: false });
+    closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
     ensureImageEditorUi();
     const focusId = nodeId || saveTarget?.ownerNodeId || saveTarget?.nodeId || '';
     const editMode = mode === 'brush' ? 'brush' : mode === 'rotate' ? 'rotate' : 'crop';
@@ -23804,9 +23943,11 @@ function playGenStageFlipMorph(stage, firstMap, ghosts, {expanding=true, node=nu
                 peekEls.forEach(el => { el.style.transition = ''; el.style.opacity = ''; });
                 stage.classList.remove('is-flipping');
                 if(node) delete node._stageFlipping;
+                if(imageGenDockEl) imageGenDockEl.style.transition = '';
                 // 尺寸已在 refresh 时算好，收尾再 fit 会微挪一截，像对齐校正
                 try { refreshGeometryAfterLayout(); } catch(_){ /* ignore */ }
-                if(node && selected.has(node.id)) positionImageGenDock(node);
+                if(node) finishImageGenDockAfterStageFlip(node);
+                if(node && selected.has(node.id)) syncImageActionBar();
                 if(node && isGenBatchPicking(node)) syncGenBatchPickBar();
             }, 220);
         });
@@ -23818,12 +23959,42 @@ function playGenStageFlipMorph(stage, firstMap, ghosts, {expanding=true, node=nu
         new Promise(resolve => setTimeout(resolve, GEN_STAGE_FLIP_MS + maxDelay + 320))
     ]).then(finish);
 }
+/** 图台收回：控制台就地淡出，翻牌结束后再决定淡入或卸掉 */
+function softHideImageGenDockForCollapse(){
+    if(!imageGenDockEl || imageGenDockEl.hidden) return false;
+    const el = imageGenDockEl;
+    el.dataset.stageCollapseExit = '1';
+    el.style.pointerEvents = 'none';
+    el.style.transition = '';
+    playCanvasChromeExit(el, 'up');
+    return true;
+}
+/** 翻牌收尾：仍选中则贴底淡入；已取消选中则卸掉宿主 */
+function finishImageGenDockAfterStageFlip(node){
+    const el = imageGenDockEl;
+    if(!el?.isConnected) return;
+    const wasExit = el.dataset.stageCollapseExit === '1';
+    delete el.dataset.stageCollapseExit;
+    el.classList.remove('is-exit-up', 'is-exit-down');
+    if(!node || !selected.has(node.id) || imageGenDockNodeId !== node.id){
+        removeImageGenDock();
+        return;
+    }
+    el.hidden = false;
+    el.removeAttribute('aria-hidden');
+    el.style.pointerEvents = 'auto';
+    positionImageGenDock(node);
+    if(wasExit) playCanvasChromeEnter(el, 'down');
+}
 /** 叠卡↔网格：铺开 / 叠合；程序化切换可传 animate:false */
 function setGenStageHistoryOpen(node, open, opts={}){
     if(!node || !isGenConsoleNode(node)) return false;
     const next = !!open;
     if(!!node.historyOpen === next) return false;
     const animate = opts.animate !== false && !prefersGenStageReducedMotion();
+    const collapsingDock = Boolean(
+        !next && animate && imageGenDockNodeId === node.id && imageGenDockEl?.isConnected && !imageGenDockEl.hidden
+    );
     const nodeEl = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
     const host = nodeEl?.querySelector?.('.gen-stage-slot');
     const stage = host?.querySelector?.('.gen-stage');
@@ -23845,6 +24016,8 @@ function setGenStageHistoryOpen(node, open, opts={}){
             stage.style.pointerEvents = 'none';
         }
     }
+    // 收回：控制台先淡出，勿跟节点底边瞬移；翻牌结束后再淡入
+    if(collapsingDock && firstMap) softHideImageGenDockForCollapse();
     node.historyOpen = next;
     if(nodeEl) refreshGenStage(nodeEl, node, {deferFollowUpFit: !!firstMap});
     else refreshNodes([node.id]);
@@ -23854,10 +24027,9 @@ function setGenStageHistoryOpen(node, open, opts={}){
         else ghosts.forEach(g => g.remove());
     }
     scheduleSave();
-    // 节点几何（宽高）在 refresh 时已同步落定，dock 立即跟随才不延迟；
-    // 收回时 actionBar 挂回由 remountImageActionBar 在 _stageFlipping 期间跳过入场动画，避免与 FLIP 叠闪。
+    // 翻牌中勿 snap 控制台；收回时动作条等翻完再挂，避免与 FLIP 叠闪
     syncImageGenDock();
-    syncImageActionBar();
+    if(!(node._stageFlipping && !next)) syncImageActionBar();
     return true;
 }
 function refreshGenStage(root, node, opts={}){
@@ -24474,7 +24646,7 @@ function restoreImageGenDockAfterLink(){
 function playCanvasChromeEnter(el, dir='up'){
     if(!el) return;
     if(typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    el.classList.remove('is-enter-up', 'is-enter-down');
+    el.classList.remove('is-enter-up', 'is-enter-down', 'is-exit-up', 'is-exit-down');
     void el.offsetWidth;
     el.classList.add(dir === 'down' ? 'is-enter-down' : 'is-enter-up');
     const done = ev => {
@@ -24484,24 +24656,54 @@ function playCanvasChromeEnter(el, dir='up'){
     };
     el.addEventListener('animationend', done);
 }
-function removeImageGenDock(){
-    if(imageGenDockEl?.__sizeOutsideClose){
-        document.removeEventListener('pointerdown', imageGenDockEl.__sizeOutsideClose, true);
-        imageGenDockEl.__sizeOutsideClose = null;
+function playCanvasChromeExit(el, dir='up'){
+    if(!el) return;
+    if(typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches){
+        el.classList.add(dir === 'down' ? 'is-exit-down' : 'is-exit-up');
+        return;
     }
-    imageGenDockEl?.remove();
-    imageGenDockEl = null;
-    imageGenDockNodeId = null;
-    // 清掉遗留宿主（旧版挂在 #nodes、HMR 残留、双挂载）
+    el.classList.remove('is-enter-up', 'is-enter-down', 'is-exit-up', 'is-exit-down');
+    void el.offsetWidth;
+    el.classList.add(dir === 'down' ? 'is-exit-down' : 'is-exit-up');
+}
+function purgeOrphanImageGenDocks(keepEl=null){
     const roots = [canvasRoot, board, nodesEl, document].filter(Boolean);
     const seen = new Set();
     roots.forEach(root => {
         root.querySelectorAll?.('.image-gen-dock-host, .gen-dock-size-panel.is-ported').forEach(el => {
-            if(seen.has(el)) return;
+            if(seen.has(el) || el === keepEl || el === imageGenDockEl) return;
             seen.add(el);
             el.remove();
         });
     });
+}
+function removeImageGenDock(opts={}){
+    if(imageGenDockEl?.__sizeOutsideClose){
+        document.removeEventListener('pointerdown', imageGenDockEl.__sizeOutsideClose, true);
+        imageGenDockEl.__sizeOutsideClose = null;
+    }
+    const el = imageGenDockEl;
+    const soft = Boolean(
+        opts.animate
+        && el?.isConnected
+        && !el.hidden
+        && !(typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)
+    );
+    imageGenDockEl = null;
+    imageGenDockNodeId = null;
+    if(soft){
+        el.style.pointerEvents = 'none';
+        const alreadyExiting = el.dataset.stageCollapseExit === '1' || el.classList.contains('is-exit-up');
+        delete el.dataset.stageCollapseExit;
+        if(!alreadyExiting) playCanvasChromeExit(el, 'up');
+        setTimeout(() => {
+            el.remove();
+            purgeOrphanImageGenDocks();
+        }, alreadyExiting ? 300 : 320);
+        return;
+    }
+    el?.remove();
+    purgeOrphanImageGenDocks();
 }
 function positionImageGenDock(node){
     if(!imageGenDockEl || !node || !board) return;
@@ -24872,7 +25074,7 @@ function remountImageGenDock(node){
     imageGenDockEl = host;
     imageGenDockNodeId = node.id;
     scheduleImageGenDockFollow(node);
-    if(shouldEnter) playCanvasChromeEnter(host, 'down');
+    if(shouldEnter && !node._stageFlipping) playCanvasChromeEnter(host, 'down');
     refreshIcons(host);
     if(keepPrompt){
         const ta = host.querySelector?.('.gen-dock-prompt');
@@ -24927,7 +25129,17 @@ function syncImageGenDock(){
             && imageGenDockEl?.contains?.(document.activeElement)
             && selected.size === 0
         ) return;
-        removeImageGenDock();
+        // 点空白收回图台：跟退场动画一起卸，勿瞬隐
+        removeImageGenDock({
+            animate: Boolean(
+                imageGenDockEl?.isConnected
+                && (
+                    imageGenDockEl.dataset.stageCollapseExit === '1'
+                    || imageGenDockEl.classList.contains('is-exit-up')
+                    || !imageGenDockEl.hidden
+                )
+            )
+        });
     } else if(disabled){
         // 禁用：与节点变灰同帧收起；隐藏而非销毁，恢复时可瞬间展开
         if(imageGenDockNodeId === only.id && imageGenDockEl?.isConnected){
@@ -24953,19 +25165,25 @@ function syncImageGenDock(){
             try { active.blur?.(); } catch(_){ /* ignore */ }
         }
         if(imageGenDockNodeId === only.id && imageGenDockEl?.isConnected){
-            const wasHidden = Boolean(imageGenDockEl.hidden);
-            imageGenDockEl.hidden = false;
-            imageGenDockEl.removeAttribute('aria-hidden');
-            imageGenDockEl.style.pointerEvents = 'auto';
-            // 从禁用展开：只定位；常态/点 xx 都 softRefresh；孤儿宿主且未打字才 remount
-            if(wasHidden){
-                positionImageGenDock(only);
-                playCanvasChromeEnter(imageGenDockEl, 'down');
-            } else if(orphanCount > 1 && !textEditingHere){
-                remountImageGenDock(only);
+            // 收回淡出中：保持退场态，勿强制显示/重定位
+            if(only._stageFlipping && imageGenDockEl.dataset.stageCollapseExit === '1'){
+                // keep soft-hidden
+            } else if(only._stageFlipping){
+                // 展开翻牌：保持原位
             } else {
-                softRefreshGeneratorInputLists(only);
-                positionImageGenDock(only);
+                const wasHidden = Boolean(imageGenDockEl.hidden);
+                imageGenDockEl.hidden = false;
+                imageGenDockEl.removeAttribute('aria-hidden');
+                imageGenDockEl.style.pointerEvents = 'auto';
+                if(wasHidden){
+                    positionImageGenDock(only);
+                    playCanvasChromeEnter(imageGenDockEl, 'down');
+                } else if(orphanCount > 1 && !textEditingHere){
+                    remountImageGenDock(only);
+                } else {
+                    softRefreshGeneratorInputLists(only);
+                    positionImageGenDock(only);
+                }
             }
         } else if(!textEditingHere || switchingAwayWhileTyping){
             remountImageGenDock(only);
@@ -25024,6 +25242,8 @@ function resolveImageActionBarTarget(node){
     return {kind:'gen', node, url, previewIndex: Math.max(0, previewIndex), histItem};
 }
 function removeImageActionBar(){
+    closeImageRepaintMenu();
+    closeImageNovelViewMenu();
     closeVideoCaptureMenu();
     closeCanvasPinSwatchRail();
     imageActionBarEl?.remove();
@@ -25410,6 +25630,8 @@ function bindImageActionBar(host, target){
         e.stopPropagation();
         void openImageUpscale(target);
     });
+    bindImageNovelViewMenu(host, target);
+    bindImageRepaintMenu(host, target);
     host.querySelector('[data-action="edit"]')?.addEventListener('click', e => {
         e.stopPropagation();
         openVideoTrimDock(node);
@@ -25435,6 +25657,1451 @@ function bindImageActionBar(host, target){
         else openGeneratorHistoryLightbox(node, url);
     });
 }
+function closeImageRepaintMenu(){
+    if(imageRepaintMenuTimer){
+        clearTimeout(imageRepaintMenuTimer);
+        imageRepaintMenuTimer = 0;
+    }
+    if(imageRepaintMenuCloseTimer){
+        clearTimeout(imageRepaintMenuCloseTimer);
+        imageRepaintMenuCloseTimer = 0;
+    }
+    const menu = imageRepaintMenuEl;
+    imageRepaintMenuEl = null;
+    imageRepaintMenuTarget = null;
+    if(!menu) return;
+    const wrap = menu.closest?.('.image-action-repaint-wrap');
+    wrap?.classList.remove('is-open');
+    wrap?.querySelector?.('[data-action="repaint"]')?.setAttribute('aria-expanded', 'false');
+    menu.hidden = true;
+    menu.classList.remove('is-open');
+}
+function openImageRepaintMenu(wrap, target){
+    if(!wrap || !target) return;
+    const menu = wrap.querySelector('.image-repaint-menu');
+    const btn = wrap.querySelector('[data-action="repaint"]');
+    if(!menu || !btn) return;
+    if(imageRepaintMenuEl && imageRepaintMenuEl !== menu) closeImageRepaintMenu();
+    closeImageNovelViewMenu();
+    imageRepaintMenuEl = menu;
+    imageRepaintMenuTarget = target;
+    wrap.classList.add('is-open');
+    btn.setAttribute('aria-expanded', 'true');
+    menu.hidden = false;
+    menu.classList.add('is-open');
+}
+/** 蒙版重绘 / 框选重绘入口 */
+function startImageRepaintMode(mode, target){
+    closeImageRepaintMenu();
+    if(!target?.url){
+        softAlert(langIsEn() ? 'No image to repaint' : '没有可重绘的图片');
+        return;
+    }
+    if(mode === 'mask'){
+        void openImageMaskRepaint(target);
+        return;
+    }
+    if(mode === 'crop'){
+        void openImageBoxRepaint(target);
+        return;
+    }
+}
+function isImageMaskRepaintOpen(){
+    return Boolean(imageMaskRepaintState && imageMaskRepaintEl?.isConnected);
+}
+function maskRepaintCanvas(){
+    return imageMaskRepaintEl?.querySelector?.('.image-repaint-mask-canvas') || null;
+}
+function maskRepaintHasPaint(){
+    const c = maskRepaintCanvas();
+    if(!c?.width || !c?.height) return false;
+    try {
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        const data = ctx.getImageData(0, 0, c.width, c.height).data;
+        for(let i = 3; i < data.length; i += 16){
+            if(data[i] > 8) return true;
+        }
+    } catch(_){ /* ignore */ }
+    return false;
+}
+function resizeMaskRepaintCanvas(){
+    const st = imageMaskRepaintState;
+    const canvasEl = maskRepaintCanvas();
+    const keep = imageMaskRepaintEl?.querySelector?.('.image-expand-keep');
+    if(!st || !canvasEl || !keep) return;
+    const w = Math.max(1, st.srcW || keep.naturalWidth || 1);
+    const h = Math.max(1, st.srcH || keep.naturalHeight || 1);
+    if(canvasEl.width !== w || canvasEl.height !== h){
+        canvasEl.width = w;
+        canvasEl.height = h;
+        st.undoStack = [];
+        st.dirty = false;
+    }
+    canvasEl.style.width = `${keep.clientWidth || keep.getBoundingClientRect().width || w}px`;
+    canvasEl.style.height = `${keep.clientHeight || keep.getBoundingClientRect().height || h}px`;
+}
+function maskRepaintPoint(event){
+    const canvasEl = maskRepaintCanvas();
+    if(!canvasEl) return null;
+    const rect = canvasEl.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / Math.max(1, rect.width)) * canvasEl.width;
+    const y = ((event.clientY - rect.top) / Math.max(1, rect.height)) * canvasEl.height;
+    return { x, y };
+}
+function pushMaskRepaintUndo(){
+    const st = imageMaskRepaintState;
+    const canvasEl = maskRepaintCanvas();
+    if(!st || !canvasEl) return;
+    try {
+        const ctx = canvasEl.getContext('2d', { willReadFrequently: true });
+        st.undoStack = st.undoStack || [];
+        st.undoStack.push(ctx.getImageData(0, 0, canvasEl.width, canvasEl.height));
+        if(st.undoStack.length > 24) st.undoStack.shift();
+    } catch(_){ /* ignore */ }
+}
+function undoMaskRepaintStroke(){
+    const st = imageMaskRepaintState;
+    const canvasEl = maskRepaintCanvas();
+    if(!st || !canvasEl || !(st.undoStack || []).length) return;
+    const snap = st.undoStack.pop();
+    const ctx = canvasEl.getContext('2d');
+    ctx.putImageData(snap, 0, 0);
+    st.dirty = maskRepaintHasPaint();
+}
+function clearMaskRepaintPaint(){
+    const st = imageMaskRepaintState;
+    const canvasEl = maskRepaintCanvas();
+    if(!st || !canvasEl) return;
+    pushMaskRepaintUndo();
+    const ctx = canvasEl.getContext('2d');
+    ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+    st.dirty = false;
+}
+function beginMaskRepaintStroke(event){
+    const st = imageMaskRepaintState;
+    const canvasEl = maskRepaintCanvas();
+    if(!st || !canvasEl || st.running) return;
+    const p = maskRepaintPoint(event);
+    if(!p) return;
+    pushMaskRepaintUndo();
+    const ctx = canvasEl.getContext('2d');
+    const eraser = st.tool === 'eraser';
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(2, Number(st.brushSize) || 48);
+    if(eraser){
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.strokeStyle = 'rgba(0,0,0,1)';
+    } else {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = MASK_REPAINT_BRUSH_COLOR;
+    }
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    imageMaskRepaintStroke = { last: p, eraser };
+    st.dirty = true;
+    event.preventDefault();
+}
+function moveMaskRepaintStroke(event){
+    if(!imageMaskRepaintStroke) return;
+    const canvasEl = maskRepaintCanvas();
+    if(!canvasEl) return;
+    const p = maskRepaintPoint(event);
+    if(!p) return;
+    const ctx = canvasEl.getContext('2d');
+    const last = imageMaskRepaintStroke.last;
+    ctx.beginPath();
+    ctx.moveTo(last.x, last.y);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    imageMaskRepaintStroke.last = p;
+    event.preventDefault();
+}
+function endMaskRepaintStroke(){
+    if(!imageMaskRepaintStroke) return;
+    const canvasEl = maskRepaintCanvas();
+    canvasEl?.getContext('2d')?.restore();
+    imageMaskRepaintStroke = null;
+    if(imageMaskRepaintState) imageMaskRepaintState.dirty = maskRepaintHasPaint();
+}
+function syncMaskRepaintToolUi(host = imageMaskRepaintEl){
+    if(!host || !imageMaskRepaintState) return;
+    host.querySelectorAll('[data-repaint-tool]').forEach(btn => {
+        btn.classList.toggle('is-active', btn.dataset.repaintTool === imageMaskRepaintState.tool);
+    });
+}
+function buildImageMaskRepaintHtml(st){
+    const en = langIsEn();
+    const model = String(st.model || models.gpt || 'gpt-image-2');
+    return `
+        <div class="image-repaint-top-dock" role="toolbar" aria-label="${escapeAttr(en ? 'Mask tools' : '蒙版工具')}">
+            <button type="button" class="image-expand-icon" data-repaint-act="close" title="${escapeAttr(en ? 'Close' : '关闭')}" aria-label="close"><i data-lucide="x"></i></button>
+            <span class="image-repaint-top-sep" aria-hidden="true"></span>
+            <button type="button" class="image-expand-icon" data-repaint-tool="free" title="${escapeAttr(en ? 'Brush' : '画笔')}" aria-label="brush"><i data-lucide="brush"></i></button>
+            <button type="button" class="image-expand-icon" data-repaint-tool="rect" title="${escapeAttr(en ? 'Box' : '框选')}" aria-label="rect"><i data-lucide="square"></i></button>
+            <button type="button" class="image-expand-icon" data-repaint-tool="eraser" title="${escapeAttr(en ? 'Eraser' : '橡皮')}" aria-label="eraser"><i data-lucide="eraser"></i></button>
+            <label class="image-repaint-size" title="${escapeAttr(en ? 'Brush size' : '笔刷大小')}">
+                <i data-lucide="pencil"></i>
+                <input type="range" min="8" max="160" step="1" value="${escapeAttr(String(st.brushSize || 48))}" data-repaint-size />
+            </label>
+            <span class="image-repaint-top-sep" aria-hidden="true"></span>
+            <button type="button" class="image-expand-icon" data-repaint-act="undo" title="${escapeAttr(en ? 'Undo' : '撤销')}" aria-label="undo"><i data-lucide="undo-2"></i></button>
+            <button type="button" class="image-expand-icon" data-repaint-act="clear" title="${escapeAttr(en ? 'Clear mask' : '清空蒙版')}" aria-label="clear"><i data-lucide="trash-2"></i></button>
+        </div>
+        <div class="image-expand-stage">
+            <img class="image-expand-keep" alt="" draggable="false" />
+            <canvas class="image-repaint-mask-canvas" aria-label="${escapeAttr(en ? 'Paint mask' : '绘制蒙版')}"></canvas>
+        </div>
+        <div class="image-expand-dock" role="toolbar">
+            <span class="image-expand-hint">${escapeHtml(en ? 'Paint mask to repaint' : '绘制蒙版以重绘')}</span>
+            <input class="image-expand-prompt" type="text" maxlength="800" placeholder="${escapeAttr(en ? 'Describe what to change…' : '描述你想改变什么...')}" value="${escapeAttr(st.prompt || '')}" />
+            <button type="button" class="image-expand-chip" data-repaint-chip="model" title="${escapeAttr(en ? 'Model' : '模型')}">${escapeHtml(model)}</button>
+            <button type="button" class="gen-btn gen-dock-send" data-repaint-act="run" title="${escapeAttr(en ? 'Generate' : '开始重绘')}" aria-label="run">
+                <i data-lucide="arrow-up" class="w-4 h-4"></i>
+            </button>
+        </div>`;
+}
+function bindImageMaskRepaintChrome(host){
+    host.onpointerdown = e => e.stopPropagation();
+    host.onmousedown = e => e.stopPropagation();
+    host.onclick = e => e.stopPropagation();
+    host.querySelector('[data-repaint-act="close"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        closeImageMaskRepaint();
+    });
+    host.querySelector('[data-repaint-act="undo"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        undoMaskRepaintStroke();
+    });
+    host.querySelector('[data-repaint-act="clear"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        clearMaskRepaintPaint();
+    });
+    host.querySelectorAll('[data-repaint-tool]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            if(!imageMaskRepaintState) return;
+            imageMaskRepaintState.tool = btn.dataset.repaintTool || 'free';
+            syncMaskRepaintToolUi(host);
+        });
+    });
+    const size = host.querySelector('[data-repaint-size]');
+    size?.addEventListener('input', () => {
+        if(imageMaskRepaintState) imageMaskRepaintState.brushSize = Number(size.value) || 48;
+    });
+    const prompt = host.querySelector('.image-expand-prompt');
+    prompt?.addEventListener('input', () => {
+        if(imageMaskRepaintState) imageMaskRepaintState.prompt = String(prompt.value || '');
+    });
+    host.querySelector('[data-repaint-act="run"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void runImageMaskRepaintFromPanel();
+    });
+    const canvasEl = host.querySelector('.image-repaint-mask-canvas');
+    canvasEl?.addEventListener('pointerdown', e => {
+        if(e.button !== 0) return;
+        if(imageMaskRepaintState?.tool === 'rect'){
+            beginMaskRepaintRect(e);
+            return;
+        }
+        beginMaskRepaintStroke(e);
+        canvasEl.setPointerCapture?.(e.pointerId);
+    });
+    canvasEl?.addEventListener('pointermove', e => {
+        if(imageMaskRepaintStroke?.rect){
+            moveMaskRepaintRect(e);
+            return;
+        }
+        moveMaskRepaintStroke(e);
+    });
+    const endStroke = () => {
+        if(imageMaskRepaintStroke?.rect) endMaskRepaintRect();
+        else endMaskRepaintStroke();
+    };
+    canvasEl?.addEventListener('pointerup', endStroke);
+    canvasEl?.addEventListener('pointercancel', endStroke);
+    syncMaskRepaintToolUi(host);
+}
+function beginMaskRepaintRect(event){
+    const st = imageMaskRepaintState;
+    const canvasEl = maskRepaintCanvas();
+    if(!st || !canvasEl || st.running) return;
+    const p = maskRepaintPoint(event);
+    if(!p) return;
+    pushMaskRepaintUndo();
+    imageMaskRepaintStroke = { rect: true, start: p, last: p, snap: canvasEl.getContext('2d').getImageData(0, 0, canvasEl.width, canvasEl.height) };
+    event.preventDefault();
+}
+function moveMaskRepaintRect(event){
+    if(!imageMaskRepaintStroke?.rect) return;
+    const canvasEl = maskRepaintCanvas();
+    if(!canvasEl) return;
+    const p = maskRepaintPoint(event);
+    if(!p) return;
+    const ctx = canvasEl.getContext('2d');
+    ctx.putImageData(imageMaskRepaintStroke.snap, 0, 0);
+    const x = Math.min(imageMaskRepaintStroke.start.x, p.x);
+    const y = Math.min(imageMaskRepaintStroke.start.y, p.y);
+    const w = Math.abs(p.x - imageMaskRepaintStroke.start.x);
+    const h = Math.abs(p.y - imageMaskRepaintStroke.start.y);
+    ctx.fillStyle = MASK_REPAINT_BRUSH_COLOR;
+    ctx.fillRect(x, y, w, h);
+    imageMaskRepaintStroke.last = p;
+    event.preventDefault();
+}
+function endMaskRepaintRect(){
+    if(!imageMaskRepaintStroke?.rect) return;
+    imageMaskRepaintStroke = null;
+    if(imageMaskRepaintState) imageMaskRepaintState.dirty = maskRepaintHasPaint();
+}
+function closeImageMaskRepaint(opts={}){
+    imageMaskRepaintStroke = null;
+    clearImageExpandDockPosition(imageMaskRepaintEl);
+    const top = imageMaskRepaintEl?.querySelector?.('.image-repaint-top-dock');
+    if(top){
+        top.style.position = '';
+        top.style.left = '';
+        top.style.top = '';
+        top.style.transform = '';
+        top.style.zIndex = '';
+    }
+    imageMaskRepaintEl?.remove();
+    imageMaskRepaintEl = null;
+    imageMaskRepaintState = null;
+    nodesEl?.querySelectorAll?.('.is-image-expand-source')?.forEach(el => el.classList.remove('is-image-expand-source'));
+    if(opts.restoreViewport !== false) restoreImageEditCanvasFocus();
+    if(opts.syncBar !== false) syncImageActionBar();
+}
+function wireImageMaskRepaintUi(){
+    if(imageMaskRepaintUiWired) return;
+    imageMaskRepaintUiWired = true;
+    on(document, 'keydown', event => {
+        if(!isImageMaskRepaintOpen()) return;
+        if(event.key === 'Escape'){
+            event.preventDefault();
+            closeImageMaskRepaint();
+        }
+    });
+}
+function positionImageMaskRepaintTopDock(stage, hostEl = imageMaskRepaintEl){
+    const dock = hostEl?.querySelector('.image-repaint-top-dock');
+    if(!dock || !stage?.isConnected) return;
+    const rect = stage.getBoundingClientRect();
+    if(rect.width < 8 || rect.height < 8) return;
+    dock.style.position = 'fixed';
+    dock.style.left = `${rect.left + rect.width / 2}px`;
+    dock.style.top = `${rect.top - 14}px`;
+    dock.style.transform = 'translate(-50%, -100%)';
+    dock.style.zIndex = '87';
+    dock.style.width = 'max-content';
+}
+function positionImageMaskRepaintOverlay(){
+    const st = imageMaskRepaintState;
+    if(!st || !imageMaskRepaintEl || !board) return;
+    const hostInfo = findImageEditHost(st.nodeId, st.url);
+    const img = hostInfo?.img;
+    if(!img) return;
+    const imgRect = img.getBoundingClientRect();
+    const boardRect = board.getBoundingClientRect();
+    const width = Math.max(48, imgRect.width);
+    const height = Math.max(48, imgRect.height);
+    imageMaskRepaintEl.style.left = `${imgRect.left - boardRect.left}px`;
+    imageMaskRepaintEl.style.top = `${imgRect.top - boardRect.top}px`;
+    imageMaskRepaintEl.style.width = `${width}px`;
+    imageMaskRepaintEl.style.height = `${height}px`;
+    const stage = imageMaskRepaintEl.querySelector('.image-expand-stage');
+    if(stage){
+        stage.style.width = `${width}px`;
+        stage.style.height = `${height}px`;
+    }
+    const keep = imageMaskRepaintEl.querySelector('.image-expand-keep');
+    if(keep){
+        keep.style.left = '0px';
+        keep.style.top = '0px';
+        keep.style.width = `${width}px`;
+        keep.style.height = `${height}px`;
+    }
+    resizeMaskRepaintCanvas();
+    if(stage){
+        positionImageExpandDock(stage, imageMaskRepaintEl);
+        positionImageMaskRepaintTopDock(stage, imageMaskRepaintEl);
+    }
+}
+async function openImageMaskRepaint(target){
+    if(!target?.node || !target.url || !board) return;
+    if(isImageEditOpen()) closeImageEditor();
+    closeImageExpand({ restoreViewport: false, syncBar: false });
+    closeImageCutout({ restoreViewport: false, syncBar: false });
+    closeImageUpscale({ restoreViewport: false, syncBar: false });
+    closeImageMaskRepaint({ restoreViewport: false, syncBar: false });
+    closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
+    closeImageNovelView({ restoreViewport: false, syncBar: false });
+    closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
+    wireImageMaskRepaintUi();
+    const node = target.node;
+    if(!target.url || isMissingAssetUrl(target.url)){
+        softAlert(langIsEn() ? 'No image to repaint' : '没有可重绘的图片');
+        return;
+    }
+    // 同框选：坐标用原图 keep.natural，勿用画布 _thumb 的 naturalWidth
+    const hostInfo = findImageEditHost(node.id, target.url);
+    imageMaskRepaintState = {
+        nodeId: node.id,
+        url: target.url,
+        name: target.histItem?.name || node.name || outputImageName(target.url),
+        srcW: 0,
+        srcH: 0,
+        prompt: '',
+        model: models.gpt || 'gpt-image-2',
+        brushSize: 48,
+        tool: 'free',
+        undoStack: [],
+        dirty: false,
+        running: false,
+    };
+    const host = document.createElement('div');
+    host.className = 'image-expand-host is-opening image-mask-repaint-host';
+    host.innerHTML = buildImageMaskRepaintHtml(imageMaskRepaintState);
+    const keep = host.querySelector('.image-expand-keep');
+    if(keep){
+        if(shouldUseCrossOriginImage(target.url)) keep.crossOrigin = 'anonymous';
+        keep.src = target.url;
+    }
+    bindImageMaskRepaintChrome(host);
+    removeImageActionBar();
+    board.appendChild(host);
+    imageMaskRepaintEl = host;
+    imageEditOpenedAt = Date.now();
+    refreshIcons(host);
+    // 聚焦完成前保持不可见，避免缩略幽灵
+    const keepReady = (!keep || (keep.complete && keep.naturalWidth))
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            keep.onload = () => resolve();
+            keep.onerror = () => resolve();
+        });
+    await Promise.all([
+        keepReady.then(() => {
+            if(!imageMaskRepaintState) return;
+            applyImageEditKeepNaturalSize(imageMaskRepaintState, keep);
+            resizeMaskRepaintCanvas();
+        }),
+        prepareImageEditCanvasFocus(node.id, 'repaint'),
+    ]);
+    if(!imageMaskRepaintState || imageMaskRepaintState.nodeId !== node.id) return;
+    if(!board || !imageMaskRepaintEl) return;
+    resizeMaskRepaintCanvas();
+    positionImageMaskRepaintOverlay();
+    const sourceNodeEl = hostInfo?.host?.closest?.('.node');
+    beginImageExpandOpenFade(host, sourceNodeEl);
+    await new Promise(resolve => {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                setTimeout(resolve, 520);
+            });
+        });
+    });
+    if(!imageMaskRepaintState || imageMaskRepaintState.nodeId !== node.id) return;
+    if(!board || !imageMaskRepaintEl) return;
+    positionImageMaskRepaintOverlay();
+    finishImageExpandOpenFade(host);
+}
+function spawnMaskRepaintPendingImageNode(sourceNode, job){
+    if(!sourceNode || !job) return null;
+    const siblings = connections
+        .filter(c => c.from === sourceNode.id)
+        .map(c => nodes.find(n => n.id === c.to))
+        .filter(n => n?.type === 'image')
+        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
+    let offsetX = 0;
+    siblings.forEach(sib => {
+        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
+    });
+    const baseName = String(job.name || 'image').replace(/\.[^.]+$/, '');
+    const next = addGeneratedImageNode({ url: '', name: `${baseName}_repaint` }, sourceNode, '_repaint', offsetX);
+    next.editOrigin = 'repaint';
+    next._editSourceUrl = String(job.url || '').trim();
+    const src = nodeEditSpawnLayoutSize(sourceNode);
+    if(src.w > 0){
+        next.w = src.w;
+        next.h = src.h;
+        next._displayW = src.w;
+        next._displayH = src.h;
+    }
+    if(canConnect(sourceNode.id, next.id) && !connections.some(c => c.from === sourceNode.id && c.to === next.id)){
+        connections.push({id:uid('c'), from:sourceNode.id, to:next.id});
+    }
+    pendingImageEditRefreshIds.add(sourceNode.id);
+    pendingImageEditRefreshIds.add(next.id);
+    return next;
+}
+/**
+ * 蒙版 → 透明 PNG（给 RH LoadImage）：涂抹越实 → alpha 越低。
+ * Comfy LoadImage：MASK = 1 - alpha/255，故透明=编辑、不透明=保留。
+ * 禁止硬阈值打洞（ma>8→0）：会丢掉笔刷抗锯齿软边，MASK 硬切易在项链等细边出缝。
+ */
+async function composeMaskRepaintTransparentPng(sourceUrl, drawCanvas){
+    const orig = await loadImageBitmapForExport(sourceUrl);
+    // 输出尺寸以原图为准（与 st.url / keep.natural 一致），蒙版按比例采样
+    const w = Math.max(1, orig.naturalWidth || orig.width || drawCanvas?.width || 1);
+    const h = Math.max(1, orig.naturalHeight || orig.height || drawCanvas?.height || 1);
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    const ctx = out.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(orig, 0, 0, w, h);
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const maskCtx = drawCanvas.getContext('2d', { willReadFrequently: true });
+    const mw = drawCanvas.width;
+    const mh = drawCanvas.height;
+    const maskData = maskCtx.getImageData(0, 0, mw, mh).data;
+    const scaleX = mw / w;
+    const scaleY = mh / h;
+    const brushCeil = Math.max(1, MASK_REPAINT_BRUSH_ALPHA);
+    for(let y = 0; y < h; y++){
+        for(let x = 0; x < w; x++){
+            const mx = Math.min(mw - 1, Math.max(0, Math.floor(x * scaleX)));
+            const my = Math.min(mh - 1, Math.max(0, Math.floor(y * scaleY)));
+            const ma = maskData[(my * mw + mx) * 4 + 3];
+            if(ma <= 0) continue;
+            const strength = Math.min(1, ma / brushCeil);
+            const i = (y * w + x) * 4 + 3;
+            // alpha' = alpha * (1 - strength)：满笔≈0，边缘按抗锯齿渐变
+            imgData.data[i] = Math.max(0, Math.min(255, Math.round(imgData.data[i] * (1 - strength))));
+        }
+    }
+    ctx.putImageData(imgData, 0, 0);
+    return out;
+}
+async function runImageMaskRepaintFromPanel(){
+    const st = imageMaskRepaintState;
+    if(!st || st.running) return;
+    const node = nodes.find(n => n.id === st.nodeId);
+    if(!node || !st.url || isMissingAssetUrl(st.url)) return;
+    const promptText = String(st.prompt || '').trim();
+    if(!promptText){
+        softAlert(langIsEn() ? 'Describe what to change first.' : '请先描述你想改变什么');
+        return;
+    }
+    if(!maskRepaintHasPaint()){
+        softAlert(langIsEn() ? 'Paint a mask on the area to change.' : '请先在要修改的区域绘制蒙版');
+        return;
+    }
+    const canvasEl = maskRepaintCanvas();
+    if(!canvasEl) return;
+    st.running = true;
+    setStatus(langIsEn() ? 'Preparing repaint input…' : '正在准备重绘输入…');
+    let compositeUrl = '';
+    try {
+        // Qwen Edit LoadImage：涂抹区 alpha=0 → MASK 输出，工作流按遮罩改图
+        const composed = await composeMaskRepaintTransparentPng(st.url, canvasEl);
+        const blob = await canvasToPngBlob(composed);
+        if(!blob) throw new Error(langIsEn() ? 'Could not export composite' : '无法导出重绘输入');
+        const base = String(st.name || 'image').replace(/\.[^.]+$/, '');
+        const file = await uploadCroppedBlob(blob, `${base}_repaint.png`);
+        compositeUrl = String(file?.url || '').trim();
+        if(!compositeUrl) throw new Error(langIsEn() ? 'Upload failed' : '上传失败');
+    } catch(err){
+        st.running = false;
+        softAlert(err?.message || (langIsEn() ? 'Mask prepare failed' : '蒙版准备失败'));
+        setStatus('');
+        return;
+    }
+    const job = {
+        url: st.url,
+        name: st.name,
+        prompt: promptText,
+        srcW: st.srcW,
+        srcH: st.srcH,
+        compositeUrl,
+    };
+    closeImageMaskRepaint({ restoreViewport: false });
+    clearImageEditViewportSession();
+    pushUndo();
+    const spawned = spawnMaskRepaintPendingImageNode(node, job);
+    if(!spawned){
+        softAlert(langIsEn() ? 'Could not create image node.' : '未能创建图片节点');
+        return;
+    }
+    const pendingId = uid('p');
+    const run = {
+        node: { id: node.id },
+        prompt: promptText,
+        taskLabel: langIsEn() ? 'Mask repaint' : '蒙版重绘',
+    };
+    pushExpandImagePending(spawned, makePending(pendingId, run, {
+        stageLabel: langIsEn() ? 'Repainting…' : '重绘中…',
+    }));
+    selected.clear();
+    selected.add(spawned.id);
+    commitStructureDomPatch({ addedIds: [spawned.id], refreshIds: [node.id, spawned.id] });
+    void focusExpandResultNode(spawned.id);
+    scheduleSaveNow();
+    setStatus(langIsEn() ? 'Mask repaint queued on new node' : '蒙版重绘已开始，新节点生成中');
+    void runImageMaskRepaintJob(job, spawned, node, pendingId);
+}
+async function runImageMaskRepaintJob(job, targetNode, source, pendingId){
+    const node = () => nodes.find(n => n.id === targetNode?.id);
+    const run = {
+        node: { id: source.id },
+        prompt: job.prompt,
+        taskLabel: langIsEn() ? 'Mask repaint' : '蒙版重绘',
+    };
+    try {
+        if(!node()) throw new Error(langIsEn() ? 'Repaint node missing' : '重绘节点已丢失');
+        const keyFields = rhApiKeyRequestFields(null);
+        const sourceUrl = String(job.compositeUrl || job.url || '').trim();
+        // LoadImage 必须吃 RH 上传返回的 fileName（api/….png），不是 download_url。
+        // download_url 给标准模型 API / Topaz；若误塞进 LoadImage，可能被当 URL 拉取并经 jpeg 管线丢 alpha。
+        const imageValue = await rhUploadValueIfNeeded(sourceUrl, null, '2');
+        if(!imageValue) throw new Error(langIsEn() ? 'Could not upload source image' : '原图上传失败');
+        const longest = Math.max(1, Number(job.srcW) || 1, Number(job.srcH) || 1);
+        const nodeInfoList = [
+            {
+                nodeId: RUNNINGHUB_MASK_REPAINT_IMAGE_FIELD.nodeId,
+                fieldName: RUNNINGHUB_MASK_REPAINT_IMAGE_FIELD.fieldName,
+                fieldValue: imageValue,
+            },
+            {
+                nodeId: RUNNINGHUB_MASK_REPAINT_TEXT_FIELD.nodeId,
+                fieldName: RUNNINGHUB_MASK_REPAINT_TEXT_FIELD.fieldName,
+                fieldValue: String(job.prompt || '').trim(),
+            },
+            {
+                nodeId: RUNNINGHUB_MASK_REPAINT_SIZE_FIELD.nodeId,
+                fieldName: RUNNINGHUB_MASK_REPAINT_SIZE_FIELD.fieldName,
+                fieldValue: String(Math.min(4096, Math.max(64, Math.round(longest)))),
+            },
+        ];
+        const submit = await fetch('/api/runninghub/v2/run-workflow', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                workflowId: RUNNINGHUB_MASK_REPAINT_WORKFLOW_ID,
+                nodeInfoList,
+                instanceType: 'default',
+                usePersonalQueue: 'false',
+                addMetadata: true,
+                ...keyFields,
+            }),
+        }).then(async r => {
+            const data = await r.json();
+            if(!r.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhFailed'));
+            return data.data || data;
+        });
+        const taskId = submit.taskId;
+        if(!taskId) throw new Error(tr('canvas.rhNoTaskId'));
+        run.request = {
+            task_id: taskId,
+            workflowId: RUNNINGHUB_MASK_REPAINT_WORKFLOW_ID,
+            backend: 'runninghub',
+            mode: 'workflow',
+            apiKeyId: keyFields.apiKeyId || '',
+            useWallet: Boolean(keyFields.useWallet),
+            version: '2',
+        };
+        const cur = node();
+        if(!cur) throw new Error(langIsEn() ? 'Repaint node missing' : '重绘节点已丢失');
+        const pending = (cur._pending || []).find(p => p.id === pendingId);
+        if(pending){
+            pending.canvasTaskId = String(taskId);
+            pending.canvasTaskType = 'runninghub';
+            pending.run = run;
+            registerCanvasTaskLedger(taskId, {
+                canvasId: canvas?.id || '',
+                hostNodeId: targetNode.id || '',
+                genNodeId: targetNode.id || '',
+                pendingId,
+                run,
+                appendGenerated: false,
+                startedAt: Number(pending.startedAt || nowMs()),
+                canvasTaskType: 'runninghub',
+            });
+        } else {
+            pushExpandImagePending(cur, makePending(pendingId, run, {
+                canvasTaskId: taskId,
+                canvasTaskType: 'runninghub',
+                stageLabel: langIsEn() ? 'Repainting…' : '重绘中…',
+            }));
+        }
+        refreshNodes([targetNode.id, source.id]);
+        scheduleSaveNow();
+        void pollRunningHubTask(taskId);
+    } catch(err){
+        console.warn('[runImageMaskRepaintJob]', err);
+        const cur = node();
+        if(cur) markExpandPendingFailed(cur, pendingId, err?.message);
+        softAlert(err?.message || (langIsEn() ? 'Mask repaint failed' : '蒙版重绘失败'));
+        setStatus('');
+        scheduleSaveNow();
+    }
+}
+/** ── 框选重绘（AG263）：裁切 → Qwen 工作流 → PixelRunner 羽化贴回+融合校色 ── */
+function isImageBoxRepaintOpen(){
+    return Boolean(imageBoxRepaintState && imageBoxRepaintEl?.isConnected);
+}
+function closeImageBoxRepaint(opts={}){
+    imageBoxRepaintDrag = null;
+    clearImageExpandDockPosition(imageBoxRepaintEl);
+    const top = imageBoxRepaintEl?.querySelector?.('.image-repaint-top-dock');
+    if(top){
+        top.style.position = '';
+        top.style.left = '';
+        top.style.top = '';
+        top.style.transform = '';
+        top.style.zIndex = '';
+    }
+    imageBoxRepaintEl?.remove();
+    imageBoxRepaintEl = null;
+    imageBoxRepaintState = null;
+    nodesEl?.querySelectorAll?.('.is-image-expand-source')?.forEach(el => el.classList.remove('is-image-expand-source'));
+    if(opts.restoreViewport !== false) restoreImageEditCanvasFocus();
+    if(opts.syncBar !== false) syncImageActionBar();
+}
+function wireImageBoxRepaintUi(){
+    if(imageBoxRepaintUiWired) return;
+    imageBoxRepaintUiWired = true;
+    on(document, 'keydown', event => {
+        if(!isImageBoxRepaintOpen()) return;
+        if(event.key === 'Escape'){
+            event.preventDefault();
+            closeImageBoxRepaint();
+        }
+    });
+}
+function buildImageBoxRepaintHtml(st){
+    const en = langIsEn();
+    const model = String(st.model || models.nano || 'nano-banana-pro');
+    return `
+        <div class="image-repaint-top-dock" role="toolbar" aria-label="${escapeAttr(en ? 'Box tools' : '框选工具')}">
+            <button type="button" class="image-expand-icon" data-box-repaint-act="close" title="${escapeAttr(en ? 'Close' : '关闭')}" aria-label="close"><i data-lucide="x"></i></button>
+            <span class="image-repaint-top-sep" aria-hidden="true"></span>
+            <button type="button" class="image-expand-icon" data-box-repaint-act="clear" title="${escapeAttr(en ? 'Clear box' : '清空框选')}" aria-label="clear"><i data-lucide="trash-2"></i></button>
+        </div>
+        <div class="image-expand-stage">
+            <img class="image-expand-keep" alt="" draggable="false" />
+            <div class="image-box-repaint-layer" aria-label="${escapeAttr(en ? 'Drag to select' : '拖拽框选')}">
+                <div class="image-box-repaint-rect" hidden></div>
+            </div>
+        </div>
+        <div class="image-expand-dock" role="toolbar">
+            <span class="image-expand-hint">${escapeHtml(en ? 'Drag a box · nano-banana-pro' : '拖拽框选 · nano-banana-pro')}</span>
+            <input class="image-expand-prompt" type="text" maxlength="800" placeholder="${escapeAttr(en ? 'Describe what to change…' : '描述你想改变什么...')}" value="${escapeAttr(st.prompt || '')}" />
+            <button type="button" class="image-expand-chip" data-box-repaint-chip="model" title="${escapeAttr(en ? 'Model' : '模型')}">${escapeHtml(model)}</button>
+            <button type="button" class="gen-btn gen-dock-send" data-box-repaint-act="run" title="${escapeAttr(en ? 'Generate' : '开始重绘')}" aria-label="run">
+                <i data-lucide="arrow-up" class="w-4 h-4"></i>
+            </button>
+        </div>`;
+}
+function boxRepaintLayer(){
+    return imageBoxRepaintEl?.querySelector?.('.image-box-repaint-layer') || null;
+}
+function boxRepaintRectEl(){
+    return imageBoxRepaintEl?.querySelector?.('.image-box-repaint-rect') || null;
+}
+function syncBoxRepaintRectUi(){
+    const st = imageBoxRepaintState;
+    const rectEl = boxRepaintRectEl();
+    const layer = boxRepaintLayer();
+    if(!st || !rectEl || !layer) return;
+    const box = st.box;
+    if(!box || box.w < 2 || box.h < 2){
+        rectEl.hidden = true;
+        return;
+    }
+    const lw = Math.max(1, layer.clientWidth || 1);
+    const lh = Math.max(1, layer.clientHeight || 1);
+    const srcW = Math.max(1, st.srcW || 1);
+    const srcH = Math.max(1, st.srcH || 1);
+    rectEl.hidden = false;
+    rectEl.style.left = `${(box.x / srcW) * lw}px`;
+    rectEl.style.top = `${(box.y / srcH) * lh}px`;
+    rectEl.style.width = `${(box.w / srcW) * lw}px`;
+    rectEl.style.height = `${(box.h / srcH) * lh}px`;
+}
+/** keep 加载后强制用原图 natural 作坐标空间；若曾误用缩略图尺寸则等比换算已有框 */
+function applyImageEditKeepNaturalSize(st, keep){
+    if(!st || !keep) return;
+    const nw = Math.max(0, keep.naturalWidth || 0);
+    const nh = Math.max(0, keep.naturalHeight || 0);
+    if(!nw || !nh) return;
+    const ow = Math.max(0, Number(st.srcW) || 0);
+    const oh = Math.max(0, Number(st.srcH) || 0);
+    if(ow > 1 && oh > 1 && st.box && (Math.abs(ow - nw) > 1 || Math.abs(oh - nh) > 1)){
+        const sx = nw / ow;
+        const sy = nh / oh;
+        st.box = {
+            x: Number(st.box.x) * sx,
+            y: Number(st.box.y) * sy,
+            w: Number(st.box.w) * sx,
+            h: Number(st.box.h) * sy,
+        };
+    }
+    st.srcW = nw;
+    st.srcH = nh;
+}
+/** 框选坐标若落在缩略图尺寸上，按原图像素换算（防裁到左上角） */
+function scaleBoxRepaintCoordsToImage(box, coordW, coordH, imageW, imageH){
+    const b = box || {};
+    let x = Number(b.x) || 0;
+    let y = Number(b.y) || 0;
+    let w = Number(b.w) || 0;
+    let h = Number(b.h) || 0;
+    const cw = Math.max(0, Number(coordW) || 0);
+    const ch = Math.max(0, Number(coordH) || 0);
+    const ow = Math.max(1, Number(imageW) || 1);
+    const oh = Math.max(1, Number(imageH) || 1);
+    if(cw > 1 && ch > 1 && (Math.abs(cw - ow) > 1 || Math.abs(ch - oh) > 1)){
+        x *= ow / cw;
+        y *= oh / ch;
+        w *= ow / cw;
+        h *= oh / ch;
+    }
+    return { x, y, w, h };
+}
+function boxRepaintPoint(event){
+    const layer = boxRepaintLayer();
+    const st = imageBoxRepaintState;
+    if(!layer || !st) return null;
+    const rect = layer.getBoundingClientRect();
+    const nx = (event.clientX - rect.left) / Math.max(1, rect.width);
+    const ny = (event.clientY - rect.top) / Math.max(1, rect.height);
+    return {
+        x: Math.max(0, Math.min(1, nx)) * Math.max(1, st.srcW || 1),
+        y: Math.max(0, Math.min(1, ny)) * Math.max(1, st.srcH || 1),
+    };
+}
+function positionImageBoxRepaintOverlay(){
+    const st = imageBoxRepaintState;
+    if(!st || !imageBoxRepaintEl || !board) return;
+    const hostInfo = findImageEditHost(st.nodeId, st.url);
+    const img = hostInfo?.img;
+    if(!img) return;
+    const imgRect = img.getBoundingClientRect();
+    const boardRect = board.getBoundingClientRect();
+    const width = Math.max(48, imgRect.width);
+    const height = Math.max(48, imgRect.height);
+    imageBoxRepaintEl.style.left = `${imgRect.left - boardRect.left}px`;
+    imageBoxRepaintEl.style.top = `${imgRect.top - boardRect.top}px`;
+    imageBoxRepaintEl.style.width = `${width}px`;
+    imageBoxRepaintEl.style.height = `${height}px`;
+    const stage = imageBoxRepaintEl.querySelector('.image-expand-stage');
+    if(stage){
+        stage.style.width = `${width}px`;
+        stage.style.height = `${height}px`;
+    }
+    const keep = imageBoxRepaintEl.querySelector('.image-expand-keep');
+    if(keep){
+        keep.style.left = '0px';
+        keep.style.top = '0px';
+        keep.style.width = `${width}px`;
+        keep.style.height = `${height}px`;
+    }
+    syncBoxRepaintRectUi();
+    if(stage){
+        positionImageExpandDock(stage, imageBoxRepaintEl);
+        positionImageMaskRepaintTopDock(stage, imageBoxRepaintEl);
+    }
+}
+function bindImageBoxRepaintChrome(host){
+    host.onpointerdown = e => e.stopPropagation();
+    host.onmousedown = e => e.stopPropagation();
+    host.onclick = e => e.stopPropagation();
+    host.querySelector('[data-box-repaint-act="close"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        closeImageBoxRepaint();
+    });
+    host.querySelector('[data-box-repaint-act="clear"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        if(imageBoxRepaintState) imageBoxRepaintState.box = null;
+        syncBoxRepaintRectUi();
+    });
+    const prompt = host.querySelector('.image-expand-prompt');
+    prompt?.addEventListener('input', () => {
+        if(imageBoxRepaintState) imageBoxRepaintState.prompt = String(prompt.value || '');
+    });
+    host.querySelector('[data-box-repaint-act="run"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void runImageBoxRepaintFromPanel();
+    });
+    const layer = host.querySelector('.image-box-repaint-layer');
+    layer?.addEventListener('pointerdown', e => {
+        if(e.button !== 0 || !imageBoxRepaintState || imageBoxRepaintState.running) return;
+        const p = boxRepaintPoint(e);
+        if(!p) return;
+        imageBoxRepaintDrag = { start: p, last: p };
+        imageBoxRepaintState.box = { x: p.x, y: p.y, w: 0, h: 0 };
+        syncBoxRepaintRectUi();
+        layer.setPointerCapture?.(e.pointerId);
+        e.preventDefault();
+    });
+    layer?.addEventListener('pointermove', e => {
+        if(!imageBoxRepaintDrag || !imageBoxRepaintState) return;
+        const p = boxRepaintPoint(e);
+        if(!p) return;
+        const x = Math.min(imageBoxRepaintDrag.start.x, p.x);
+        const y = Math.min(imageBoxRepaintDrag.start.y, p.y);
+        const w = Math.abs(p.x - imageBoxRepaintDrag.start.x);
+        const h = Math.abs(p.y - imageBoxRepaintDrag.start.y);
+        imageBoxRepaintState.box = { x, y, w, h };
+        imageBoxRepaintDrag.last = p;
+        syncBoxRepaintRectUi();
+        e.preventDefault();
+    });
+    const endDrag = () => {
+        if(!imageBoxRepaintDrag || !imageBoxRepaintState) return;
+        imageBoxRepaintDrag = null;
+        const box = imageBoxRepaintState.box;
+        if(box && (box.w < 8 || box.h < 8)){
+            imageBoxRepaintState.box = null;
+            syncBoxRepaintRectUi();
+        }
+    };
+    layer?.addEventListener('pointerup', endDrag);
+    layer?.addEventListener('pointercancel', endDrag);
+}
+async function openImageBoxRepaint(target){
+    if(!target?.node || !target.url || !board) return;
+    if(isImageEditOpen()) closeImageEditor();
+    closeImageExpand({ restoreViewport: false, syncBar: false });
+    closeImageCutout({ restoreViewport: false, syncBar: false });
+    closeImageUpscale({ restoreViewport: false, syncBar: false });
+    closeImageMaskRepaint({ restoreViewport: false, syncBar: false });
+    closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
+    closeImageNovelView({ restoreViewport: false, syncBar: false });
+    closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
+    wireImageBoxRepaintUi();
+    const node = target.node;
+    if(!target.url || isMissingAssetUrl(target.url)){
+        softAlert(langIsEn() ? 'No image to repaint' : '没有可重绘的图片');
+        return;
+    }
+    // 坐标必须用原图 natural 尺寸（keep.src=target.url）。画布节点常是 _thumb.webp，
+    // 若用 shown.naturalWidth 再 `||= keep`，框会按缩略图像素裁到原图左上角。
+    const hostInfo = findImageEditHost(node.id, target.url);
+    imageBoxRepaintState = {
+        nodeId: node.id,
+        url: target.url,
+        name: target.histItem?.name || node.name || outputImageName(target.url),
+        srcW: 0,
+        srcH: 0,
+        prompt: '',
+        model: models.nano || 'nano-banana-pro',
+        box: null,
+        blend: { ...DEFAULT_BOX_REPAINT_BLEND_CONFIG },
+        running: false,
+    };
+    const host = document.createElement('div');
+    host.className = 'image-expand-host is-opening image-box-repaint-host';
+    host.innerHTML = buildImageBoxRepaintHtml(imageBoxRepaintState);
+    const keep = host.querySelector('.image-expand-keep');
+    if(keep){
+        if(shouldUseCrossOriginImage(target.url)) keep.crossOrigin = 'anonymous';
+        keep.src = target.url;
+    }
+    bindImageBoxRepaintChrome(host);
+    removeImageActionBar();
+    board.appendChild(host);
+    imageBoxRepaintEl = host;
+    imageEditOpenedAt = Date.now();
+    refreshIcons(host);
+    // 聚焦完成前只挂 is-opening、不加 is-open → 控制台/图不可见，避免左边缩略幽灵
+    const keepReady = (!keep || (keep.complete && keep.naturalWidth))
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            keep.onload = () => resolve();
+            keep.onerror = () => resolve();
+        });
+    await Promise.all([
+        keepReady.then(() => {
+            if(!imageBoxRepaintState) return;
+            applyImageEditKeepNaturalSize(imageBoxRepaintState, keep);
+        }),
+        prepareImageEditCanvasFocus(node.id, 'repaint'),
+    ]);
+    if(!imageBoxRepaintState || imageBoxRepaintState.nodeId !== node.id) return;
+    if(!board || !imageBoxRepaintEl) return;
+    positionImageBoxRepaintOverlay();
+    const sourceNodeEl = hostInfo?.host?.closest?.('.node');
+    beginImageExpandOpenFade(host, sourceNodeEl);
+    // 等 is-open 落地后再卸 opening，让大图位上的淡入播完
+    await new Promise(resolve => {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                setTimeout(resolve, 520);
+            });
+        });
+    });
+    if(!imageBoxRepaintState || imageBoxRepaintState.nodeId !== node.id) return;
+    if(!board || !imageBoxRepaintEl) return;
+    positionImageBoxRepaintOverlay();
+    finishImageExpandOpenFade(host);
+}
+function spawnBoxRepaintPendingImageNode(sourceNode, job){
+    if(!sourceNode || !job) return null;
+    const siblings = connections
+        .filter(c => c.from === sourceNode.id)
+        .map(c => nodes.find(n => n.id === c.to))
+        .filter(n => n?.type === 'image')
+        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
+    let offsetX = 0;
+    siblings.forEach(sib => {
+        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
+    });
+    const baseName = String(job.name || 'image').replace(/\.[^.]+$/, '');
+    const next = addGeneratedImageNode({ url: '', name: `${baseName}_box_repaint` }, sourceNode, '_box_repaint', offsetX);
+    next.editOrigin = 'box-repaint';
+    next._editSourceUrl = String(job.url || '').trim();
+    next._boxRepaintBounds = job.box ? { ...job.box } : null;
+    next._boxRepaintBlend = job.blend ? { ...job.blend } : { ...DEFAULT_BOX_REPAINT_BLEND_CONFIG };
+    const src = nodeEditSpawnLayoutSize(sourceNode);
+    if(src.w > 0){
+        next.w = src.w;
+        next.h = src.h;
+        next._displayW = src.w;
+        next._displayH = src.h;
+    }
+    if(canConnect(sourceNode.id, next.id) && !connections.some(c => c.from === sourceNode.id && c.to === next.id)){
+        connections.push({id:uid('c'), from:sourceNode.id, to:next.id});
+    }
+    pendingImageEditRefreshIds.add(sourceNode.id);
+    pendingImageEditRefreshIds.add(next.id);
+    return next;
+}
+async function exportBoxRepaintCropBlob(sourceUrl, box, maxEdge = BOX_REPAINT_UPLOAD_MAX_EDGE, coordSpace = null){
+    const orig = await loadImageBitmapForExport(sourceUrl);
+    const ow = Math.max(1, orig.naturalWidth || orig.width || 1);
+    const oh = Math.max(1, orig.naturalHeight || orig.height || 1);
+    const scaled = scaleBoxRepaintCoordsToImage(box, coordSpace?.w, coordSpace?.h, ow, oh);
+    const x = Math.max(0, Math.min(ow - 1, Math.round(scaled.x)));
+    const y = Math.max(0, Math.min(oh - 1, Math.round(scaled.y)));
+    const w = Math.max(1, Math.min(ow - x, Math.round(scaled.w)));
+    const h = Math.max(1, Math.min(oh - y, Math.round(scaled.h)));
+    let outW = w;
+    let outH = h;
+    const long = Math.max(w, h);
+    if(long > maxEdge){
+        const scale = maxEdge / long;
+        outW = Math.max(1, Math.round(w * scale));
+        outH = Math.max(1, Math.round(h * scale));
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(orig, x, y, w, h, 0, 0, outW, outH);
+    // 对齐 PixelRunner：JPEG 质量阶梯，目标 ≤9MB，硬限 10MB
+    const targetBytes = 9_000_000;
+    const hardLimitBytes = 10_000_000;
+    const qualities = [0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.5, 0.4, 0.32];
+    let blob = null;
+    for(const q of qualities){
+        blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', q));
+        if(blob && blob.size <= targetBytes) break;
+    }
+    if(blob && blob.size > hardLimitBytes){
+        // 再缩一半长边重试最低质量
+        const scale2 = 0.5;
+        const c2 = document.createElement('canvas');
+        c2.width = Math.max(1, Math.round(outW * scale2));
+        c2.height = Math.max(1, Math.round(outH * scale2));
+        c2.getContext('2d').drawImage(canvas, 0, 0, c2.width, c2.height);
+        blob = await new Promise(resolve => c2.toBlob(resolve, 'image/jpeg', 0.32));
+        outW = c2.width;
+        outH = c2.height;
+    }
+    if(!blob) throw new Error(langIsEn() ? 'Could not export JPEG crop' : '无法导出 JPEG 裁切');
+    return { blob, box: { x, y, w, h }, outW, outH };
+}
+async function runImageBoxRepaintFromPanel(){
+    const st = imageBoxRepaintState;
+    if(!st || st.running) return;
+    const node = nodes.find(n => n.id === st.nodeId);
+    if(!node || !st.url || isMissingAssetUrl(st.url)) return;
+    const promptText = String(st.prompt || '').trim();
+    if(!promptText){
+        softAlert(langIsEn() ? 'Describe what to change first.' : '请先描述你想改变什么');
+        return;
+    }
+    const box = st.box;
+    if(!box || box.w < 8 || box.h < 8){
+        softAlert(langIsEn() ? 'Drag a box on the area to change.' : '请先拖拽框选要修改的区域');
+        return;
+    }
+    if(!st.srcW || !st.srcH){
+        softAlert(langIsEn() ? 'Image size not ready. Close and reopen repaint.' : '原图尺寸未就绪，请关闭后重开框选重绘');
+        return;
+    }
+    st.running = true;
+    setStatus(langIsEn() ? 'Preparing box crop…' : '正在准备框选裁切…');
+    let cropUrl = '';
+    let normalizedBox = box;
+    try {
+        const cropped = await exportBoxRepaintCropBlob(
+            st.url,
+            box,
+            BOX_REPAINT_UPLOAD_MAX_EDGE,
+            { w: st.srcW, h: st.srcH },
+        );
+        normalizedBox = cropped.box;
+        if(!cropped.blob) throw new Error(langIsEn() ? 'Could not export crop' : '无法导出框选区域');
+        const base = String(st.name || 'image').replace(/\.[^.]+$/, '');
+        const file = await uploadCroppedBlob(cropped.blob, `${base}_box_crop.jpg`);
+        cropUrl = String(file?.url || '').trim();
+        if(!cropUrl) throw new Error(langIsEn() ? 'Upload failed' : '上传失败');
+    } catch(err){
+        st.running = false;
+        softAlert(err?.message || (langIsEn() ? 'Crop prepare failed' : '框选准备失败'));
+        setStatus('');
+        return;
+    }
+    const job = {
+        url: st.url,
+        name: st.name,
+        prompt: promptText,
+        box: normalizedBox,
+        cropUrl,
+        model: models.nano || 'nano-banana-pro',
+        blend: { ...(st.blend || DEFAULT_BOX_REPAINT_BLEND_CONFIG) },
+        srcW: st.srcW,
+        srcH: st.srcH,
+    };
+    closeImageBoxRepaint({ restoreViewport: false });
+    clearImageEditViewportSession();
+    pushUndo();
+    const spawned = spawnBoxRepaintPendingImageNode(node, job);
+    if(!spawned){
+        softAlert(langIsEn() ? 'Could not create image node.' : '未能创建图片节点');
+        return;
+    }
+    const pendingId = uid('p');
+    const run = {
+        node: { id: node.id },
+        prompt: promptText,
+        taskLabel: langIsEn() ? 'Box repaint' : '框选重绘',
+    };
+    pushExpandImagePending(spawned, makePending(pendingId, run, {
+        stageLabel: langIsEn() ? 'Repainting…' : '重绘中…',
+    }));
+    selected.clear();
+    selected.add(spawned.id);
+    commitStructureDomPatch({ addedIds: [spawned.id], refreshIds: [node.id, spawned.id] });
+    void focusExpandResultNode(spawned.id);
+    scheduleSaveNow();
+    setStatus(langIsEn() ? 'Box repaint queued on new node' : '框选重绘已开始，新节点生成中');
+    void runImageBoxRepaintJob(job, spawned, node, pendingId);
+}
+function buildBoxRepaintPrompt(userText){
+    const en = langIsEn();
+    const extra = String(userText || '').trim();
+    // nano 对短指令易「新画一张」：必须锁就地编辑，禁止角标/第二张脸拼贴
+    const base = en
+        ? 'In-place image edit of the attached crop. Keep the exact same subject identity, face structure, pose, framing, camera angle, lighting, colors, and background. Apply ONLY the user request. Do NOT add any new person, face, portrait inset, collage, sticker, watermark, caption, or corner thumbnail. Do NOT replace the subject with a different person. Do NOT invent a second head.'
+        : '就地编辑附图裁切区：保持同一主体身份、五官结构、姿势、构图、机位、光线、色彩与背景不变。只执行用户要求。禁止新增人物、面孔、肖像小图、拼贴、贴纸、水印、文字或角落缩略图。禁止换成另一个人。禁止凭空画第二张脸/头像。';
+    if(!extra){
+        return en
+            ? `${base} Make only a subtle natural refinement.`
+            : `${base} 仅做轻微自然调整。`;
+    }
+    return en
+        ? `${base} User request: ${extra}`
+        : `${base} 用户要求：${extra}`;
+}
+async function runImageBoxRepaintJob(job, targetNode, source, pendingId){
+    const node = () => nodes.find(n => n.id === targetNode?.id);
+    const userPrompt = String(job.prompt || '').trim();
+    const run = {
+        node: { id: source.id },
+        prompt: userPrompt,
+        taskLabel: langIsEn() ? 'Box repaint' : '框选重绘',
+    };
+    try {
+        if(!node()) throw new Error(langIsEn() ? 'Repaint node missing' : '重绘节点已丢失');
+        const cropUrl = String(job.cropUrl || '').trim();
+        if(!cropUrl) throw new Error(langIsEn() ? 'Missing crop image' : '缺少裁切图');
+        const w = Math.max(1, Number(job.box?.w) || 1);
+        const h = Math.max(1, Number(job.box?.h) || 1);
+        // 框选重绘：走图片生成 API（nano-banana-pro 图生图），不是 Qwen 工作流
+        const model = String(job.model || models.nano || 'nano-banana-pro').trim() || 'nano-banana-pro';
+        const payload = {
+            prompt: buildBoxRepaintPrompt(userPrompt),
+            provider_id: resolveImageProviderId('runninghub'),
+            model,
+            size: `${w}x${h}`,
+            canvas_resolution: (w >= 1600 || h >= 1600) ? '2k' : '1k',
+            canvas_ratio: expandNearestG2Ratio(w, h),
+            reference_images: [
+                { url: cropUrl, name: 'box-crop.png', role: 'source' },
+            ],
+            canvas_id: canvas?.id || '',
+            node_id: targetNode.id || '',
+            quality: 'medium',
+        };
+        const task = await createCanvasImageTask(payload);
+        const cur = node();
+        if(!cur) throw new Error(langIsEn() ? 'Repaint node missing' : '重绘节点已丢失');
+        const pending = (cur._pending || []).find(p => p.id === pendingId);
+        if(pending){
+            pending.canvasTaskId = String(task.task_id || '');
+            pending.canvasTaskType = 'online-image';
+            pending.run = run;
+            registerCanvasTaskLedger(task.task_id, {
+                canvasId: canvas?.id || '',
+                hostNodeId: targetNode.id || '',
+                genNodeId: targetNode.id || '',
+                pendingId,
+                run,
+                appendGenerated: false,
+                startedAt: Number(pending.startedAt || nowMs()),
+                canvasTaskType: 'online-image',
+            });
+        } else {
+            pushExpandImagePending(cur, makePending(pendingId, run, {
+                canvasTaskId: task.task_id,
+                canvasTaskType: 'online-image',
+                stageLabel: langIsEn() ? 'Repainting…' : '重绘中…',
+            }));
+        }
+        refreshNodes([targetNode.id, source.id]);
+        scheduleSaveNow();
+        void pollCanvasImageTask(task.task_id);
+    } catch(err){
+        console.warn('[runImageBoxRepaintJob]', err);
+        const cur = node();
+        if(cur) markExpandPendingFailed(cur, pendingId, err?.message);
+        softAlert(err?.message || (langIsEn() ? 'Box repaint failed' : '框选重绘失败'));
+        setStatus('');
+        scheduleSaveNow();
+    }
+}
+async function finalizeBoxRepaintStitch(out, rawUrl, taskId, meta, images){
+    const sourceUrl = String(out?._editSourceUrl || '').trim();
+    const box = out?._boxRepaintBounds;
+    const blend = out?._boxRepaintBlend || DEFAULT_BOX_REPAINT_BLEND_CONFIG;
+    try {
+        if(!sourceUrl || !box) throw new Error('missing box stitch refs');
+        setStatus(langIsEn() ? 'Blending colors & stitching…' : '正在融合校色并贴回…');
+        const stitched = await stitchBoxRepaintResult({
+            originalUrl: sourceUrl,
+            resultUrl: rawUrl,
+            box,
+            config: blend,
+        });
+        const patch = stitched.patchImageData;
+        if(!patch?.data?.length) throw new Error('missing feathered patch');
+        const patchCanvas = document.createElement('canvas');
+        patchCanvas.width = patch.width;
+        patchCanvas.height = patch.height;
+        patchCanvas.getContext('2d').putImageData(
+            new ImageData(new Uint8ClampedArray(patch.data), patch.width, patch.height),
+            0,
+            0
+        );
+        const patchBlob = await canvasToPngBlob(patchCanvas);
+        if(!patchBlob) throw new Error(langIsEn() ? 'Could not export patch' : '无法导出选区贴片');
+        // 服务端 sharp 只改选区，并生成同管道对比底图——灯箱必须对比 compareUrl，不能对比原 JPEG
+        const form = new FormData();
+        form.append('sourceUrl', sourceUrl);
+        form.append('box', JSON.stringify(stitched.box));
+        form.append('patch', patchBlob, 'box-repaint-patch.png');
+        const res = await apiFetch('/api/canvas/box-repaint-composite', { method: 'POST', body: form });
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok || data?.success === false){
+            throw new Error(data?.detail || data?.error || (langIsEn() ? 'Server stitch failed' : '服务端贴回失败'));
+        }
+        const url = String(data?.url || '').trim();
+        const compareUrl = String(data?.compareUrl || '').trim();
+        if(!url) throw new Error(langIsEn() ? 'Stitch upload failed' : '贴回结果上传失败');
+        out.url = url;
+        // 对比底图与结果图同源解码；框外像素应完全一致
+        if(compareUrl) out._editSourceUrl = compareUrl;
+        bindImageEditCompareSource(out, url);
+        if(!nodeFloatTitleCustom(out)){
+            out.name = outputImageName(url) || String(out.name || 'box_repaint').replace(/_box_repaint$/, '') || 'box_repaint';
+        }
+    } catch(err){
+        console.warn('[finalizeBoxRepaintStitch]', err);
+        out.url = rawUrl;
+        softAlert(langIsEn()
+            ? 'Blend/stitch failed; showing raw model crop output.'
+            : '融合贴回失败，已保留模型原图（边缘可能有色差）。');
+    }
+    addGenerationLog({run:meta.run, outputs:images, runMs:meta.runMs || 0});
+    refreshNodes([out.id]);
+    if(meta.run?.node?.id) refreshNodes([meta.run.node.id]);
+    unregisterCanvasTaskLedger(taskId);
+    scheduleSaveNow();
+    setStatus('');
+}
+
+/** 蒙版结果落地后：原图走 sharp 同管道 PNG，灯箱对比用它代替原 JPEG */
+async function ensureMaskRepaintCompareBaseline(out){
+    const sourceUrl = String(out?._editSourceUrl || '').trim();
+    if(!out || !sourceUrl) return;
+    try {
+        const res = await apiFetch('/api/canvas/edit-compare-baseline', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sourceUrl }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok || data?.success === false){
+            throw new Error(data?.detail || data?.error || 'compare baseline failed');
+        }
+        const compareUrl = String(data?.compareUrl || '').trim();
+        if(!compareUrl) return;
+        out._editSourceUrl = compareUrl;
+        bindImageEditCompareSource(out, out.url);
+        scheduleSaveNow();
+    } catch(err){
+        console.warn('[ensureMaskRepaintCompareBaseline]', err);
+    }
+}
+
+function bindImageRepaintMenu(host, target){
+    const wrap = host.querySelector('.image-action-repaint-wrap');
+    if(!wrap) return;
+    const btn = wrap.querySelector('[data-action="repaint"]');
+    const menu = wrap.querySelector('.image-repaint-menu');
+    if(!btn || !menu) return;
+    const clearOpenTimer = () => {
+        if(imageRepaintMenuTimer){
+            clearTimeout(imageRepaintMenuTimer);
+            imageRepaintMenuTimer = 0;
+        }
+    };
+    const clearCloseTimer = () => {
+        if(imageRepaintMenuCloseTimer){
+            clearTimeout(imageRepaintMenuCloseTimer);
+            imageRepaintMenuCloseTimer = 0;
+        }
+    };
+    const scheduleOpen = () => {
+        clearCloseTimer();
+        clearOpenTimer();
+        imageRepaintMenuTimer = setTimeout(() => openImageRepaintMenu(wrap, target), 160);
+    };
+    const scheduleClose = () => {
+        clearOpenTimer();
+        clearCloseTimer();
+        imageRepaintMenuCloseTimer = setTimeout(() => {
+            if(imageRepaintMenuEl === menu) closeImageRepaintMenu();
+        }, 220);
+    };
+    wrap.addEventListener('pointerenter', scheduleOpen);
+    wrap.addEventListener('pointerleave', scheduleClose);
+    btn.addEventListener('click', e => {
+        e.stopPropagation();
+        clearOpenTimer();
+        clearCloseTimer();
+        if(wrap.classList.contains('is-open') && imageRepaintMenuEl === menu){
+            closeImageRepaintMenu();
+            return;
+        }
+        openImageRepaintMenu(wrap, target);
+    });
+    menu.querySelectorAll('[data-repaint-mode]').forEach(item => {
+        item.addEventListener('click', e => {
+            e.stopPropagation();
+            startImageRepaintMode(item.dataset.repaintMode, target);
+        });
+    });
+}
+function closeImageNovelViewMenu(){
+    if(imageNovelViewMenuTimer){
+        clearTimeout(imageNovelViewMenuTimer);
+        imageNovelViewMenuTimer = 0;
+    }
+    if(imageNovelViewMenuCloseTimer){
+        clearTimeout(imageNovelViewMenuCloseTimer);
+        imageNovelViewMenuCloseTimer = 0;
+    }
+    const menu = imageNovelViewMenuEl;
+    imageNovelViewMenuEl = null;
+    imageNovelViewMenuTarget = null;
+    if(!menu) return;
+    const wrap = menu.closest?.('.image-action-novel-wrap');
+    wrap?.classList.remove('is-open');
+    wrap?.querySelector?.('[data-action="novel-view"]')?.setAttribute('aria-expanded', 'false');
+    menu.hidden = true;
+    menu.classList.remove('is-open');
+}
+function openImageNovelViewMenu(wrap, target){
+    if(!wrap || !target) return;
+    const menu = wrap.querySelector('.image-repaint-menu');
+    const btn = wrap.querySelector('[data-action="novel-view"]');
+    if(!menu || !btn) return;
+    if(imageNovelViewMenuEl && imageNovelViewMenuEl !== menu) closeImageNovelViewMenu();
+    closeImageRepaintMenu();
+    imageNovelViewMenuEl = menu;
+    imageNovelViewMenuTarget = target;
+    wrap.classList.add('is-open');
+    btn.setAttribute('aria-expanded', 'true');
+    menu.hidden = false;
+    menu.classList.add('is-open');
+}
+function startImageNovelViewMode(mode, target){
+    closeImageNovelViewMenu();
+    if(!target?.url){
+        softAlert(langIsEn() ? 'No image for a new view' : '没有可变换视角的图片');
+        return;
+    }
+    if(mode === 'orbit'){
+        void openImageNovelOrbit(target);
+        return;
+    }
+    void openImageNovelView(target);
+}
+function bindImageNovelViewMenu(host, target){
+    const wrap = host.querySelector('.image-action-novel-wrap');
+    if(!wrap) return;
+    const btn = wrap.querySelector('[data-action="novel-view"]');
+    const menu = wrap.querySelector('.image-repaint-menu');
+    if(!btn || !menu) return;
+    const clearOpenTimer = () => {
+        if(imageNovelViewMenuTimer){
+            clearTimeout(imageNovelViewMenuTimer);
+            imageNovelViewMenuTimer = 0;
+        }
+    };
+    const clearCloseTimer = () => {
+        if(imageNovelViewMenuCloseTimer){
+            clearTimeout(imageNovelViewMenuCloseTimer);
+            imageNovelViewMenuCloseTimer = 0;
+        }
+    };
+    const scheduleOpen = () => {
+        clearCloseTimer();
+        clearOpenTimer();
+        imageNovelViewMenuTimer = setTimeout(() => openImageNovelViewMenu(wrap, target), 160);
+    };
+    const scheduleClose = () => {
+        clearOpenTimer();
+        clearCloseTimer();
+        imageNovelViewMenuCloseTimer = setTimeout(() => {
+            if(imageNovelViewMenuEl === menu) closeImageNovelViewMenu();
+        }, 220);
+    };
+    wrap.addEventListener('pointerenter', scheduleOpen);
+    wrap.addEventListener('pointerleave', scheduleClose);
+    btn.addEventListener('click', e => {
+        e.stopPropagation();
+        clearOpenTimer();
+        clearCloseTimer();
+        if(wrap.classList.contains('is-open') && imageNovelViewMenuEl === menu){
+            closeImageNovelViewMenu();
+            return;
+        }
+        openImageNovelViewMenu(wrap, target);
+    });
+    menu.querySelectorAll('[data-novel-view-mode]').forEach(item => {
+        item.addEventListener('click', e => {
+            e.stopPropagation();
+            startImageNovelViewMode(item.dataset.novelViewMode, target);
+        });
+    });
+}
 function imageActionBarHtmlForTarget(target){
     const en = langIsEn();
     const pinBtn = canvasPinActionBtnHtml(target?.node);
@@ -25450,12 +27117,52 @@ function imageActionBarHtmlForTarget(target){
             <button type="button" class="image-action-bar-btn" data-action="enlarge" title="${escapeAttr(en ? 'Enlarge' : '放大查看')}" aria-label="enlarge"><i data-lucide="maximize-2"></i></button>
         </div>`;
     }
+    const repaintMenu = `
+            <span class="image-action-repaint-wrap">
+                <button type="button" class="image-action-bar-btn" data-action="repaint" title="${escapeAttr(en ? 'Repaint' : '重绘')}" aria-label="repaint" aria-haspopup="menu" aria-expanded="false"><i data-lucide="sparkles"></i></button>
+                <div class="image-repaint-menu" role="menu" hidden>
+                    <button type="button" class="image-repaint-menu-btn" data-repaint-mode="mask" role="menuitem">
+                        <i data-lucide="brush"></i>
+                        <span class="image-repaint-menu-copy">
+                            <span class="image-repaint-menu-title">${escapeHtml(en ? 'Mask repaint' : '蒙版重绘')}</span>
+                            <span class="image-repaint-menu-desc">${escapeHtml(en ? 'Paint a mask, then generate' : '涂蒙版后描述变化并生成')}</span>
+                        </span>
+                    </button>
+                    <button type="button" class="image-repaint-menu-btn" data-repaint-mode="crop" role="menuitem">
+                        <i data-lucide="crop"></i>
+                        <span class="image-repaint-menu-copy">
+                            <span class="image-repaint-menu-title">${escapeHtml(en ? 'Box repaint' : '框选重绘')}</span>
+                            <span class="image-repaint-menu-desc">${escapeHtml(en ? 'Crop → generate → stitch back' : '裁切生成后羽化贴回')}</span>
+                        </span>
+                    </button>
+                </div>
+            </span>`;
     return `
         <div class="image-action-bar" role="toolbar" aria-label="${escapeAttr(en ? 'Image actions' : '图片操作')}">
             <button type="button" class="image-action-bar-btn" data-action="crop" title="${escapeAttr(en ? 'Crop' : '裁剪')}" aria-label="crop"><i data-lucide="crop"></i></button>
             ${IMAGE_EXPAND_ENABLED ? `<button type="button" class="image-action-bar-btn" data-action="expand" title="${escapeAttr(en ? 'Expand / outpaint' : '扩图')}" aria-label="expand"><i data-lucide="expand"></i></button>` : ''}
             <button type="button" class="image-action-bar-btn" data-action="cutout" title="${escapeAttr(en ? 'Cutout / remove background' : '抠图')}" aria-label="cutout"><i data-lucide="wand-2"></i></button>
             <button type="button" class="image-action-bar-btn" data-action="upscale" title="${escapeAttr(en ? 'Upscale (HD)' : '高清放大')}" aria-label="upscale"><svg class="image-action-bar-btn-hd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="5.5" width="21" height="13" rx="2.5"></rect><text x="12" y="16.4" text-anchor="middle" font-family="Manrope, Inter, sans-serif" font-size="10.5" font-weight="800" letter-spacing="-0.2" fill="currentColor" stroke="none">HD</text></svg></button>
+            <span class="image-action-novel-wrap">
+                <button type="button" class="image-action-bar-btn" data-action="novel-view" title="${escapeAttr(en ? 'New viewpoint' : '新视角')}" aria-label="novel-view" aria-haspopup="menu" aria-expanded="false"><i data-lucide="move-3d"></i></button>
+                <div class="image-repaint-menu" role="menu" hidden>
+                    <button type="button" class="image-repaint-menu-btn" data-novel-view-mode="arrow" role="menuitem">
+                        <i data-lucide="move-up-right"></i>
+                        <span class="image-repaint-menu-copy">
+                            <span class="image-repaint-menu-title">${escapeHtml(en ? 'Arrow aim' : '箭头指向')}</span>
+                            <span class="image-repaint-menu-desc">${escapeHtml(en ? 'Draw a camera arrow on the frame' : '在画面里画机位箭头')}</span>
+                        </span>
+                    </button>
+                    <button type="button" class="image-repaint-menu-btn" data-novel-view-mode="orbit" role="menuitem">
+                        <i data-lucide="rotate-3d"></i>
+                        <span class="image-repaint-menu-copy">
+                            <span class="image-repaint-menu-title">${escapeHtml(en ? '3D camera' : '3D机位')}</span>
+                            <span class="image-repaint-menu-desc">${escapeHtml(en ? 'Orbit the still, then generate' : '绕图旋转相机，按数值出图')}</span>
+                        </span>
+                    </button>
+                </div>
+            </span>
+            ${repaintMenu}
             <button type="button" class="image-action-bar-btn" data-action="brush" title="${escapeAttr(en ? 'Brush' : '画笔')}" aria-label="brush"><i data-lucide="paintbrush"></i></button>
             <button type="button" class="image-action-bar-btn" data-action="rotate" title="${escapeAttr(en ? 'Rotate & mirror' : '旋转与镜像')}" aria-label="rotate"><i data-lucide="rotate-3d"></i></button>
             <span class="image-action-bar-sep" aria-hidden="true"></span>
@@ -26035,6 +27742,10 @@ async function openImageExpand(target){
     if(!target?.node || !target.url || !board) return;
     if(isImageEditOpen()) closeImageEditor();
     closeImageExpand({ restoreViewport: false, syncBar: false });
+    closeImageMaskRepaint({ restoreViewport: false, syncBar: false });
+    closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
+    closeImageNovelView({ restoreViewport: false, syncBar: false });
+    closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
     wireImageExpandUi();
     let srcW = 0;
     let srcH = 0;
@@ -26443,6 +28154,11 @@ async function openImageCutout(target){
     if(isImageEditOpen()) closeImageEditor();
     closeImageExpand({ restoreViewport: false, syncBar: false });
     closeImageCutout({ restoreViewport: false, syncBar: false });
+    closeImageUpscale({ restoreViewport: false, syncBar: false });
+    closeImageMaskRepaint({ restoreViewport: false, syncBar: false });
+    closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
+    closeImageNovelView({ restoreViewport: false, syncBar: false });
+    closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
     wireImageCutoutUi();
     const node = target.node;
     if(!target.url || isMissingAssetUrl(target.url)){
@@ -26759,6 +28475,10 @@ async function openImageUpscale(target){
     closeImageExpand({ restoreViewport: false, syncBar: false });
     closeImageCutout({ restoreViewport: false, syncBar: false });
     closeImageUpscale({ restoreViewport: false, syncBar: false });
+    closeImageMaskRepaint({ restoreViewport: false, syncBar: false });
+    closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
+    closeImageNovelView({ restoreViewport: false, syncBar: false });
+    closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
     wireImageUpscaleUi();
     const node = target.node;
     if(!target.url || isMissingAssetUrl(target.url)){
@@ -26970,6 +28690,1061 @@ async function runImageUpscaleJob(job, targetNode, source, pendingId){
         scheduleSaveNow();
     }
 }
+function isImageNovelViewOpen(){
+    return Boolean(imageNovelViewState && imageNovelViewEl?.isConnected);
+}
+function novelViewCanvas(){
+    return imageNovelViewEl?.querySelector?.('.image-novel-view-canvas') || null;
+}
+function novelViewRatioKeys(model){
+    return isGptImage2Model(model) ? GENERATOR_G2_RATIO_KEYS : GENERATOR_NANO_RATIO_KEYS;
+}
+function paintNovelViewArrow(){
+    const st = imageNovelViewState;
+    const canvasEl = novelViewCanvas();
+    if(!st || !canvasEl) return;
+    const ctx = canvasEl.getContext('2d');
+    if(!ctx) return;
+    ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+    if(hasNovelViewArrow(st.arrowStart, st.arrowEnd)){
+        drawNovelViewArrow(ctx, canvasEl.width, canvasEl.height, st.arrowStart, st.arrowEnd, st.widthFrac);
+    }
+}
+function syncNovelViewHud(host = imageNovelViewEl){
+    const st = imageNovelViewState;
+    const hud = host?.querySelector?.('.image-novel-view-hud');
+    if(!st || !hud) return;
+    const en = langIsEn();
+    const view = novelViewFromArrow(st.arrowStart, st.arrowEnd, st.widthFrac, st.depthDir);
+    const chips = view.hasArrow
+        ? [
+            `${en ? 'Focal' : '焦段'} ${view.focalMm}mm`,
+            `${en ? 'Aperture' : '光圈'} ${view.apertureText}`,
+            `${en ? 'L/R' : '左右'} · ${view.axes.yawText}`,
+            `${en ? 'U/D' : '上下'} · ${view.axes.pitchText}`,
+            `${en ? 'Depth' : '纵深'} · ${view.axes.depthText}`,
+        ]
+        : [en ? 'Drag to draw a camera arrow' : '按住拖拽画出机位箭头'];
+    hud.innerHTML = chips.map((label, i) => `<span class="image-novel-view-chip${i === 0 && view.hasArrow ? ' is-accent' : ''}">${escapeHtml(label)}</span>`).join('');
+    const send = host.querySelector('[data-novel-view-act="run"]');
+    if(send) send.disabled = !view.hasArrow || Boolean(st.running);
+}
+function closeNovelViewMenus(except){
+    imageNovelViewEl?.querySelectorAll('.image-expand-menu').forEach(menu => {
+        if(menu !== except) menu.hidden = true;
+    });
+    imageNovelViewEl?.querySelectorAll('[data-novel-view-menu]').forEach(btn => {
+        const key = btn.getAttribute('data-novel-view-menu');
+        const menu = imageNovelViewEl?.querySelector(`[data-novel-view-panel="${key}"]`);
+        btn.setAttribute('aria-expanded', menu && !menu.hidden ? 'true' : 'false');
+        btn.classList.toggle('is-open', Boolean(menu && !menu.hidden));
+    });
+}
+function syncNovelViewModelUi(host = imageNovelViewEl){
+    const st = imageNovelViewState;
+    if(!st || !host) return;
+    const model = String(st.model || NOVEL_VIEW_DEFAULT_MODEL);
+    const label = host.querySelector('[data-novel-view-model-label]');
+    if(label) label.textContent = model;
+    host.querySelectorAll('[data-novel-view-model]').forEach(btn => {
+        btn.classList.toggle('is-active', btn.getAttribute('data-novel-view-model') === model);
+    });
+    const qualityDrop = host.querySelector('[data-novel-view-quality-drop]');
+    if(qualityDrop) qualityDrop.hidden = !isGptImage2Model(model);
+}
+function buildImageNovelViewHtml(st){
+    const en = langIsEn();
+    const model = String(st.model || NOVEL_VIEW_DEFAULT_MODEL);
+    const sizeLabel = st.size === '2k' ? '2K' : '1K';
+    const qualityLabel = st.quality === 'low' ? (en ? 'Low' : '低') : st.quality === 'high' ? (en ? 'High' : '高') : (en ? 'Medium' : '中');
+    const modelItems = NOVEL_VIEW_MODELS.map(key => `<button type="button" class="image-expand-menu-item${model === key ? ' is-active' : ''}" data-novel-view-model="${escapeAttr(key)}">${escapeHtml(key)}</button>`).join('');
+    const sizeItems = [['1k', '1K'], ['2k', '2K']].map(([key, label]) => `<button type="button" class="image-expand-menu-item${st.size === key ? ' is-active' : ''}" data-novel-view-size="${escapeAttr(key)}">${escapeHtml(label)}</button>`).join('');
+    const qualityItems = [['low', en ? 'Low' : '低'], ['medium', en ? 'Medium' : '中'], ['high', en ? 'High' : '高']].map(([key, label]) => `<button type="button" class="image-expand-menu-item${st.quality === key ? ' is-active' : ''}" data-novel-view-quality="${escapeAttr(key)}">${escapeHtml(label)}</button>`).join('');
+    return `
+        <div class="image-novel-view-hud"></div>
+        <div class="image-expand-stage">
+            <img class="image-expand-keep" alt="" draggable="false" />
+            <canvas class="image-novel-view-canvas" aria-label="${escapeAttr(en ? 'Draw camera arrow' : '绘制机位箭头')}"></canvas>
+        </div>
+        <div class="image-expand-dock" role="toolbar">
+            <button type="button" class="image-expand-icon" data-novel-view-act="close" title="${escapeAttr(en ? 'Close' : '关闭')}" aria-label="close"><i data-lucide="x"></i></button>
+            <span class="image-expand-hint">${escapeHtml(en ? 'Drag arrow · wheel=aperture · right-drag=forward' : '拖箭头 · 滚轮调光圈 · 右键拖=朝前')}</span>
+            <div class="image-expand-drop">
+                <button type="button" class="image-expand-drop-btn" data-novel-view-menu="model" aria-expanded="false">
+                    <span data-novel-view-model-label>${escapeHtml(model)}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-novel-view-panel="model" hidden>${modelItems}</div>
+            </div>
+            <div class="image-expand-drop">
+                <button type="button" class="image-expand-drop-btn" data-novel-view-menu="size" aria-expanded="false">
+                    <span data-novel-view-size-label>${escapeHtml(sizeLabel)}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-novel-view-panel="size" hidden>${sizeItems}</div>
+            </div>
+            <div class="image-expand-drop" data-novel-view-quality-drop ${isGptImage2Model(model) ? '' : 'hidden'}>
+                <button type="button" class="image-expand-drop-btn" data-novel-view-menu="quality" aria-expanded="false">
+                    <span data-novel-view-quality-label>${escapeHtml(qualityLabel)}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-novel-view-panel="quality" hidden>${qualityItems}</div>
+            </div>
+            <button type="button" class="gen-btn gen-dock-send" data-novel-view-act="run" title="${escapeAttr(en ? 'Generate new view' : '生成新视角')}" aria-label="run">
+                <i data-lucide="arrow-up" class="w-4 h-4"></i>
+            </button>
+        </div>`;
+}
+function novelViewPoint(event){
+    const canvasEl = novelViewCanvas();
+    if(!canvasEl) return null;
+    const rect = canvasEl.getBoundingClientRect();
+    const w = Math.max(1, rect.width);
+    const h = Math.max(1, rect.height);
+    return {
+        x: clamp01((event.clientX - rect.left) / w),
+        y: clamp01((event.clientY - rect.top) / h),
+    };
+}
+function novelViewHitHandle(st, p){
+    if(!st?.arrowStart || !p) return '';
+    const canvasEl = novelViewCanvas();
+    const w = Math.max(1, canvasEl?.clientWidth || 1);
+    const h = Math.max(1, canvasEl?.clientHeight || 1);
+    const r = 22 / Math.min(w, h);
+    if(Math.hypot(p.x - st.arrowStart.x, p.y - st.arrowStart.y) <= r) return 'start';
+    if(st.arrowEnd && Math.hypot(p.x - st.arrowEnd.x, p.y - st.arrowEnd.y) <= r) return 'end';
+    return '';
+}
+function beginNovelViewDrag(event){
+    const st = imageNovelViewState;
+    if(!st || st.running) return;
+    if(event.button !== 0 && event.button !== 2) return;
+    const p = novelViewPoint(event);
+    if(!p) return;
+    const hit = novelViewHitHandle(st, p);
+    if(event.button === 2) st.depthDir = 'out';
+    else if(!hit) st.depthDir = 'into';
+    imageNovelViewDrag = {
+        mode: hit || 'draw',
+        pointerId: event.pointerId,
+    };
+    if(!hit){
+        st.arrowStart = p;
+        st.arrowEnd = p;
+    }
+    event.preventDefault();
+    event.currentTarget?.setPointerCapture?.(event.pointerId);
+    paintNovelViewArrow();
+    syncNovelViewHud();
+}
+function moveNovelViewDrag(event){
+    const st = imageNovelViewState;
+    if(!st || !imageNovelViewDrag) return;
+    const p = novelViewPoint(event);
+    if(!p) return;
+    if(imageNovelViewDrag.mode === 'start') st.arrowStart = p;
+    else st.arrowEnd = p;
+    paintNovelViewArrow();
+    syncNovelViewHud();
+    event.preventDefault();
+}
+function endNovelViewDrag(){
+    imageNovelViewDrag = null;
+    const st = imageNovelViewState;
+    if(st && !hasNovelViewArrow(st.arrowStart, st.arrowEnd)){
+        st.arrowStart = null;
+        st.arrowEnd = null;
+        paintNovelViewArrow();
+        syncNovelViewHud();
+    }
+}
+function bindImageNovelViewChrome(host){
+    host.onpointerdown = e => e.stopPropagation();
+    host.onmousedown = e => e.stopPropagation();
+    host.onclick = e => e.stopPropagation();
+    host.oncontextmenu = e => {
+        e.preventDefault();
+        e.stopPropagation();
+    };
+    host.addEventListener('wheel', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        if(!imageNovelViewState || imageNovelViewState.running) return;
+        const dir = e.deltaY < 0 ? 0.006 : -0.006;
+        imageNovelViewState.widthFrac = clampWidthFrac(imageNovelViewState.widthFrac + dir);
+        paintNovelViewArrow();
+        syncNovelViewHud();
+    }, { passive: false });
+    host.querySelector('[data-novel-view-act="close"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        closeImageNovelView();
+    });
+    host.querySelectorAll('[data-novel-view-menu]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            const key = btn.getAttribute('data-novel-view-menu');
+            const menu = host.querySelector(`[data-novel-view-panel="${key}"]`);
+            if(!menu) return;
+            const next = menu.hidden;
+            closeNovelViewMenus(menu);
+            menu.hidden = !next;
+            btn.setAttribute('aria-expanded', next ? 'true' : 'false');
+            btn.classList.toggle('is-open', next);
+        });
+    });
+    host.querySelectorAll('[data-novel-view-model]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            if(!imageNovelViewState) return;
+            imageNovelViewState.model = btn.getAttribute('data-novel-view-model') || NOVEL_VIEW_DEFAULT_MODEL;
+            syncNovelViewModelUi(host);
+            closeNovelViewMenus();
+        });
+    });
+    host.querySelectorAll('[data-novel-view-size]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            if(!imageNovelViewState) return;
+            imageNovelViewState.size = btn.getAttribute('data-novel-view-size') || '1k';
+            const label = host.querySelector('[data-novel-view-size-label]');
+            if(label) label.textContent = imageNovelViewState.size === '2k' ? '2K' : '1K';
+            host.querySelectorAll('[data-novel-view-size]').forEach(b => b.classList.toggle('is-active', b === btn));
+            closeNovelViewMenus();
+        });
+    });
+    host.querySelectorAll('[data-novel-view-quality]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            if(!imageNovelViewState) return;
+            imageNovelViewState.quality = btn.getAttribute('data-novel-view-quality') || 'medium';
+            const en = langIsEn();
+            const q = imageNovelViewState.quality;
+            const label = host.querySelector('[data-novel-view-quality-label]');
+            if(label) label.textContent = q === 'low' ? (en ? 'Low' : '低') : q === 'high' ? (en ? 'High' : '高') : (en ? 'Medium' : '中');
+            host.querySelectorAll('[data-novel-view-quality]').forEach(b => b.classList.toggle('is-active', b === btn));
+            closeNovelViewMenus();
+        });
+    });
+    host.querySelector('[data-novel-view-act="run"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void runImageNovelViewFromPanel();
+    });
+    const canvasEl = host.querySelector('.image-novel-view-canvas');
+    canvasEl?.addEventListener('pointerdown', beginNovelViewDrag);
+    canvasEl?.addEventListener('pointermove', moveNovelViewDrag);
+    canvasEl?.addEventListener('pointerup', endNovelViewDrag);
+    canvasEl?.addEventListener('pointercancel', endNovelViewDrag);
+    syncNovelViewHud(host);
+    syncNovelViewModelUi(host);
+}
+function closeImageNovelView(opts={}){
+    imageNovelViewDrag = null;
+    clearImageExpandDockPosition(imageNovelViewEl);
+    imageNovelViewEl?.remove();
+    imageNovelViewEl = null;
+    imageNovelViewState = null;
+    nodesEl?.querySelectorAll?.('.is-image-expand-source')?.forEach(el => el.classList.remove('is-image-expand-source'));
+    if(opts.restoreViewport !== false) restoreImageEditCanvasFocus();
+    if(opts.syncBar !== false) syncImageActionBar();
+}
+function wireImageNovelViewUi(){
+    if(imageNovelViewUiWired) return;
+    imageNovelViewUiWired = true;
+    on(document, 'keydown', event => {
+        if(!isImageNovelViewOpen()) return;
+        if(event.key === 'Escape'){
+            event.preventDefault();
+            closeImageNovelView();
+            return;
+        }
+        if(event.key === 'Enter' && !event.repeat){
+            const t = event.target;
+            if(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+            event.preventDefault();
+            void runImageNovelViewFromPanel();
+        }
+    });
+}
+function positionImageNovelViewOverlay(){
+    const st = imageNovelViewState;
+    if(!st || !imageNovelViewEl || !board) return;
+    const hostInfo = findImageEditHost(st.nodeId, st.url);
+    const img = hostInfo?.img;
+    if(!img) return;
+    const imgRect = img.getBoundingClientRect();
+    const boardRect = board.getBoundingClientRect();
+    const width = Math.max(48, imgRect.width);
+    const height = Math.max(48, imgRect.height);
+    imageNovelViewEl.style.left = `${imgRect.left - boardRect.left}px`;
+    imageNovelViewEl.style.top = `${imgRect.top - boardRect.top}px`;
+    imageNovelViewEl.style.width = `${width}px`;
+    imageNovelViewEl.style.height = `${height}px`;
+    const stage = imageNovelViewEl.querySelector('.image-expand-stage');
+    if(stage){
+        stage.style.width = `${width}px`;
+        stage.style.height = `${height}px`;
+    }
+    const keep = imageNovelViewEl.querySelector('.image-expand-keep');
+    if(keep){
+        keep.style.left = '0px';
+        keep.style.top = '0px';
+        keep.style.width = `${width}px`;
+        keep.style.height = `${height}px`;
+        applyImageEditKeepNaturalSize(st, keep);
+    }
+    const canvasEl = novelViewCanvas();
+    if(canvasEl){
+        const dw = Math.max(1, Math.round(width));
+        const dh = Math.max(1, Math.round(height));
+        if(canvasEl.width !== dw || canvasEl.height !== dh){
+            canvasEl.width = dw;
+            canvasEl.height = dh;
+        }
+        canvasEl.style.width = `${width}px`;
+        canvasEl.style.height = `${height}px`;
+        paintNovelViewArrow();
+    }
+    if(stage) positionImageExpandDock(stage, imageNovelViewEl);
+}
+async function openImageNovelView(target){
+    if(!target?.node || !target.url || !board) return;
+    if(isImageEditOpen()) closeImageEditor();
+    closeImageExpand({ restoreViewport: false, syncBar: false });
+    closeImageCutout({ restoreViewport: false, syncBar: false });
+    closeImageUpscale({ restoreViewport: false, syncBar: false });
+    closeImageMaskRepaint({ restoreViewport: false, syncBar: false });
+    closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
+    closeImageNovelView({ restoreViewport: false, syncBar: false });
+    closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
+    wireImageNovelViewUi();
+    const node = target.node;
+    if(!target.url || isMissingAssetUrl(target.url)){
+        softAlert(langIsEn() ? 'No image for a new view' : '没有可变换视角的图片');
+        return;
+    }
+    const hostInfo = findImageEditHost(node.id, target.url);
+    imageNovelViewState = {
+        nodeId: node.id,
+        url: target.url,
+        name: target.histItem?.name || node.name || outputImageName(target.url),
+        srcW: 0,
+        srcH: 0,
+        arrowStart: null,
+        arrowEnd: null,
+        widthFrac: NOVEL_VIEW_DEFAULT_WIDTH,
+        depthDir: 'into',
+        model: NOVEL_VIEW_DEFAULT_MODEL,
+        size: '1k',
+        quality: 'medium',
+        running: false,
+    };
+    const host = document.createElement('div');
+    host.className = 'image-expand-host is-opening image-novel-view-host';
+    host.innerHTML = buildImageNovelViewHtml(imageNovelViewState);
+    const keep = host.querySelector('.image-expand-keep');
+    if(keep){
+        if(shouldUseCrossOriginImage(target.url)) keep.crossOrigin = 'anonymous';
+        keep.src = target.url;
+    }
+    bindImageNovelViewChrome(host);
+    removeImageActionBar();
+    board.appendChild(host);
+    imageNovelViewEl = host;
+    refreshIcons(host);
+    const keepReady = (!keep || (keep.complete && keep.naturalWidth))
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            keep.onload = () => resolve();
+            keep.onerror = () => resolve();
+        });
+    positionImageNovelViewOverlay();
+    await keepReady;
+    if(imageNovelViewState) applyImageEditKeepNaturalSize(imageNovelViewState, keep);
+    const sourceNodeEl = hostInfo?.host?.closest?.('.node');
+    beginImageExpandOpenFade(host, sourceNodeEl);
+    await prepareImageEditCanvasFocus(node.id, 'novel-view');
+    if(!imageNovelViewState || imageNovelViewState.nodeId !== node.id) return;
+    if(!board || !imageNovelViewEl) return;
+    positionImageNovelViewOverlay();
+    finishImageExpandOpenFade(host);
+    syncNovelViewHud();
+}
+function spawnNovelViewPendingImageNode(sourceNode, job, origin = 'novel-view'){
+    if(!sourceNode || !job) return null;
+    const siblings = connections
+        .filter(c => c.from === sourceNode.id)
+        .map(c => nodes.find(n => n.id === c.to))
+        .filter(n => n?.type === 'image')
+        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
+    let offsetX = 0;
+    siblings.forEach(sib => {
+        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
+    });
+    const orbit = origin === 'novel-view-orbit';
+    const suffix = orbit ? '_novel_orbit' : '_novel_view';
+    const baseName = String(job.name || 'image').replace(/\.[^.]+$/, '');
+    const next = addGeneratedImageNode({ url: '', name: `${baseName}${suffix}` }, sourceNode, suffix, offsetX);
+    next.editOrigin = orbit ? 'novel-view-orbit' : 'novel-view';
+    next._editSourceUrl = String(job.url || '').trim();
+    const src = nodeEditSpawnLayoutSize(sourceNode);
+    if(src.w > 0){
+        next.w = src.w;
+        next.h = src.h;
+        next._displayW = src.w;
+        next._displayH = src.h;
+    }
+    if(canConnect(sourceNode.id, next.id) && !connections.some(c => c.from === sourceNode.id && c.to === next.id)){
+        connections.push({id:uid('c'), from:sourceNode.id, to:next.id});
+    }
+    pendingImageEditRefreshIds.add(sourceNode.id);
+    pendingImageEditRefreshIds.add(next.id);
+    return next;
+}
+async function composeNovelViewInput(st){
+    const orig = await loadImageBitmapForExport(st.url);
+    const w = orig.naturalWidth || orig.width || st.srcW || 0;
+    const h = orig.naturalHeight || orig.height || st.srcH || 0;
+    if(!w || !h) throw new Error(langIsEn() ? 'Image not loaded yet.' : '图片尚未加载完成');
+    const canvasEl = document.createElement('canvas');
+    canvasEl.width = w;
+    canvasEl.height = h;
+    const ctx = canvasEl.getContext('2d');
+    if(!ctx) throw new Error(langIsEn() ? 'Could not composite arrow' : '无法合成箭头');
+    ctx.drawImage(orig, 0, 0, w, h);
+    drawNovelViewArrow(ctx, w, h, st.arrowStart, st.arrowEnd, st.widthFrac);
+    const blob = await canvasToPngBlob(canvasEl);
+    if(!blob) throw new Error(langIsEn() ? 'Could not export annotated image' : '无法导出标注图');
+    const uploaded = await uploadCroppedBlob(blob, 'scene-with-arrow.png');
+    const url = String(uploaded?.url || '').trim();
+    if(!url) throw new Error(langIsEn() ? 'Upload failed' : '上传失败');
+    return { url, w, h };
+}
+function runImageNovelViewFromPanel(){
+    const st = imageNovelViewState;
+    if(!st || st.running) return;
+    const node = nodes.find(n => n.id === st.nodeId);
+    if(!node || !st.url || isMissingAssetUrl(st.url)) return;
+    if(!hasNovelViewArrow(st.arrowStart, st.arrowEnd)){
+        softAlert(langIsEn() ? 'Draw a camera arrow first.' : '请先画出机位箭头');
+        return;
+    }
+    const view = novelViewFromArrow(st.arrowStart, st.arrowEnd, st.widthFrac, st.depthDir);
+    const job = {
+        url: st.url,
+        name: st.name,
+        arrowStart: { ...st.arrowStart },
+        arrowEnd: { ...st.arrowEnd },
+        widthFrac: st.widthFrac,
+        depthDir: st.depthDir,
+        model: String(st.model || NOVEL_VIEW_DEFAULT_MODEL),
+        size: st.size || '1k',
+        quality: st.quality || 'medium',
+        prompt: view.prompt,
+        srcW: st.srcW,
+        srcH: st.srcH,
+    };
+    closeImageNovelView({ restoreViewport: false });
+    clearImageEditViewportSession();
+    pushUndo();
+    const spawned = spawnNovelViewPendingImageNode(node, job);
+    if(!spawned){
+        softAlert(langIsEn() ? 'Could not create image node.' : '未能创建图片节点');
+        return;
+    }
+    const pendingId = uid('p');
+    const run = {
+        node: { id: node.id },
+        prompt: job.prompt,
+        taskLabel: langIsEn() ? 'New view' : '新视角',
+    };
+    pushExpandImagePending(spawned, makePending(pendingId, run, {
+        stageLabel: langIsEn() ? 'Generating new view…' : '新视角生成中…',
+    }));
+    selected.clear();
+    selected.add(spawned.id);
+    commitStructureDomPatch({ addedIds: [spawned.id], refreshIds: [node.id, spawned.id] });
+    void focusExpandResultNode(spawned.id);
+    scheduleSaveNow();
+    setStatus(langIsEn() ? 'New view queued on new node' : '新视角已开始，新节点生成中');
+    void runImageNovelViewJob(job, spawned, node, pendingId);
+}
+async function runImageNovelViewJob(job, targetNode, source, pendingId){
+    const node = () => nodes.find(n => n.id === targetNode?.id);
+    const run = {
+        node: { id: source.id },
+        prompt: job.prompt,
+        taskLabel: langIsEn() ? 'New view' : '新视角',
+    };
+    try {
+        if(!node()) throw new Error(langIsEn() ? 'New-view node missing' : '新视角节点已丢失');
+        const composed = await composeNovelViewInput(job);
+        const model = String(job.model || NOVEL_VIEW_DEFAULT_MODEL).trim() || NOVEL_VIEW_DEFAULT_MODEL;
+        const w = composed.w || job.srcW || 1;
+        const h = composed.h || job.srcH || 1;
+        const payload = {
+            prompt: job.prompt,
+            provider_id: resolveImageProviderId('runninghub'),
+            model,
+            size: `${w}x${h}`,
+            canvas_resolution: job.size || '1k',
+            canvas_ratio: nearestAspectRatio(w, h, novelViewRatioKeys(model)),
+            reference_images: [
+                { url: composed.url, name: 'scene-with-arrow.png', role: 'source' },
+            ],
+            canvas_id: canvas?.id || '',
+            node_id: targetNode.id || '',
+        };
+        if(isGptImage2Model(model)){
+            payload.quality = normalizedImageQuality(job.quality) || 'medium';
+        }
+        const task = await createCanvasImageTask(payload);
+        const cur = node();
+        if(!cur) throw new Error(langIsEn() ? 'New-view node missing' : '新视角节点已丢失');
+        const pending = (cur._pending || []).find(p => p.id === pendingId);
+        if(pending){
+            pending.canvasTaskId = String(task.task_id || '');
+            pending.canvasTaskType = 'online-image';
+            pending.run = run;
+            registerCanvasTaskLedger(task.task_id, {
+                canvasId: canvas?.id || '',
+                hostNodeId: targetNode.id || '',
+                genNodeId: targetNode.id || '',
+                pendingId,
+                run,
+                appendGenerated: false,
+                startedAt: Number(pending.startedAt || nowMs()),
+                canvasTaskType: 'online-image',
+            });
+        } else {
+            pushExpandImagePending(cur, makePending(pendingId, run, {
+                canvasTaskId: task.task_id,
+                canvasTaskType: 'online-image',
+                stageLabel: langIsEn() ? 'Generating new view…' : '新视角生成中…',
+            }));
+        }
+        refreshNodes([targetNode.id, source.id]);
+        scheduleSaveNow();
+        void pollCanvasImageTask(task.task_id);
+    } catch(err){
+        console.warn('[runImageNovelViewJob]', err);
+        const cur = node();
+        if(cur) markExpandPendingFailed(cur, pendingId, err?.message);
+        softAlert(err?.message || (langIsEn() ? 'New view failed' : '新视角失败'));
+        setStatus('');
+        scheduleSaveNow();
+    }
+}
+function isImageNovelOrbitOpen(){
+    return Boolean(imageNovelOrbitState && imageNovelOrbitEl?.isConnected);
+}
+function closeNovelOrbitMenus(except){
+    imageNovelOrbitEl?.querySelectorAll('.image-expand-menu').forEach(menu => {
+        if(menu !== except) menu.hidden = true;
+    });
+    imageNovelOrbitEl?.querySelectorAll('[data-novel-orbit-menu]').forEach(btn => {
+        const key = btn.getAttribute('data-novel-orbit-menu');
+        const menu = imageNovelOrbitEl?.querySelector(`[data-novel-orbit-panel="${key}"]`);
+        btn.setAttribute('aria-expanded', menu && !menu.hidden ? 'true' : 'false');
+        btn.classList.toggle('is-open', Boolean(menu && !menu.hidden));
+    });
+}
+function syncNovelOrbitHud(host = imageNovelOrbitEl){
+    const st = imageNovelOrbitState;
+    const hud = host?.querySelector?.('.image-novel-view-hud');
+    if(!st || !hud) return;
+    const cam = imageNovelOrbitView?.getCamera?.() || clampOrbitCamera(st.camera);
+    st.camera = cam;
+    const en = langIsEn();
+    const chips = orbitHudChips(cam, en);
+    if(st.depthStatus === 'loading'){
+        chips.push(en ? (st.depthNote || 'Loading Depth Anything…') : (st.depthNote || 'Depth Anything 加载中…'));
+    } else if(st.depthStatus === 'ready'){
+        chips.push(en ? 'Depth Anything' : 'Depth Anything');
+    } else if(st.depthStatus === 'flat'){
+        chips.push(en ? (st.depthNote || 'Flat plane') : (st.depthNote || '平面预览'));
+    }
+    hud.innerHTML = chips.map((label, i) => `<span class="image-novel-view-chip${i === 0 ? ' is-accent' : ''}">${escapeHtml(label)}</span>`).join('');
+    const send = host.querySelector('[data-novel-orbit-act="run"]');
+    if(send) send.disabled = Boolean(st.running);
+    const focalVal = host.querySelector('[data-novel-orbit-focal-val]');
+    if(focalVal) focalVal.textContent = `${cam.focalMm}mm`;
+    const focalInput = host.querySelector('[data-novel-orbit-focal]');
+    if(focalInput && Number(focalInput.value) !== cam.focalMm) focalInput.value = String(cam.focalMm);
+    const reliefVal = host.querySelector('[data-novel-orbit-relief-val]');
+    const relief = Math.round(clampDepthStrength(st.depthStrength) * 100);
+    if(reliefVal) reliefVal.textContent = `${relief}%`;
+    const reliefInput = host.querySelector('[data-novel-orbit-relief]');
+    if(reliefInput && Number(reliefInput.value) !== relief) reliefInput.value = String(relief);
+}
+function syncNovelOrbitModelUi(host = imageNovelOrbitEl){
+    const st = imageNovelOrbitState;
+    if(!st || !host) return;
+    const model = String(st.model || NOVEL_VIEW_DEFAULT_MODEL);
+    const label = host.querySelector('[data-novel-orbit-model-label]');
+    if(label) label.textContent = model;
+    host.querySelectorAll('[data-novel-orbit-model]').forEach(btn => {
+        btn.classList.toggle('is-active', btn.getAttribute('data-novel-orbit-model') === model);
+    });
+    const qualityDrop = host.querySelector('[data-novel-orbit-quality-drop]');
+    if(qualityDrop) qualityDrop.hidden = !isGptImage2Model(model);
+}
+function buildImageNovelOrbitHtml(st){
+    const en = langIsEn();
+    const model = String(st.model || NOVEL_VIEW_DEFAULT_MODEL);
+    const sizeLabel = st.size === '2k' ? '2K' : '1K';
+    const qualityLabel = st.quality === 'low' ? (en ? 'Low' : '低') : st.quality === 'high' ? (en ? 'High' : '高') : (en ? 'Medium' : '中');
+    const modelItems = NOVEL_VIEW_MODELS.map(key => `<button type="button" class="image-expand-menu-item${model === key ? ' is-active' : ''}" data-novel-orbit-model="${escapeAttr(key)}">${escapeHtml(key)}</button>`).join('');
+    const sizeItems = [['1k', '1K'], ['2k', '2K']].map(([key, label]) => `<button type="button" class="image-expand-menu-item${st.size === key ? ' is-active' : ''}" data-novel-orbit-size="${escapeAttr(key)}">${escapeHtml(label)}</button>`).join('');
+    const qualityItems = [['low', en ? 'Low' : '低'], ['medium', en ? 'Medium' : '中'], ['high', en ? 'High' : '高']].map(([key, label]) => `<button type="button" class="image-expand-menu-item${st.quality === key ? ' is-active' : ''}" data-novel-orbit-quality="${escapeAttr(key)}">${escapeHtml(label)}</button>`).join('');
+    const cam = clampOrbitCamera(st.camera);
+    return `
+        <div class="image-novel-view-hud"></div>
+        <div class="image-expand-stage">
+            <img class="image-expand-keep" alt="" draggable="false" />
+            <div class="image-novel-orbit-viewport" aria-label="${escapeAttr(en ? 'Orbit camera around the still' : '绕图旋转相机')}"></div>
+        </div>
+        <div class="image-expand-dock" role="toolbar">
+            <button type="button" class="image-expand-icon" data-novel-orbit-act="close" title="${escapeAttr(en ? 'Close' : '关闭')}" aria-label="close"><i data-lucide="x"></i></button>
+            <span class="image-expand-hint">${escapeHtml(en ? 'Drag to orbit · wheel=dolly · Depth Anything lifts the still' : '拖转相机 · 滚轮推拉 · Depth Anything 出起伏')}</span>
+            <label class="image-novel-orbit-focal">
+                <span>${escapeHtml(en ? 'Lens' : '焦段')}</span>
+                <input type="range" min="16" max="200" step="1" value="${cam.focalMm}" data-novel-orbit-focal />
+                <span data-novel-orbit-focal-val>${cam.focalMm}mm</span>
+            </label>
+            <label class="image-novel-orbit-focal">
+                <span>${escapeHtml(en ? 'Relief' : '起伏')}</span>
+                <input type="range" min="0" max="70" step="1" value="${Math.round(clampDepthStrength(st.depthStrength) * 100)}" data-novel-orbit-relief />
+                <span data-novel-orbit-relief-val>${Math.round(clampDepthStrength(st.depthStrength) * 100)}%</span>
+            </label>
+            <div class="image-expand-drop">
+                <button type="button" class="image-expand-drop-btn" data-novel-orbit-menu="model" aria-expanded="false">
+                    <span data-novel-orbit-model-label>${escapeHtml(model)}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-novel-orbit-panel="model" hidden>${modelItems}</div>
+            </div>
+            <div class="image-expand-drop">
+                <button type="button" class="image-expand-drop-btn" data-novel-orbit-menu="size" aria-expanded="false">
+                    <span data-novel-orbit-size-label>${escapeHtml(sizeLabel)}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-novel-orbit-panel="size" hidden>${sizeItems}</div>
+            </div>
+            <div class="image-expand-drop" data-novel-orbit-quality-drop ${isGptImage2Model(model) ? '' : 'hidden'}>
+                <button type="button" class="image-expand-drop-btn" data-novel-orbit-menu="quality" aria-expanded="false">
+                    <span data-novel-orbit-quality-label>${escapeHtml(qualityLabel)}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-novel-orbit-panel="quality" hidden>${qualityItems}</div>
+            </div>
+            <button type="button" class="gen-btn gen-dock-send" data-novel-orbit-act="run" title="${escapeAttr(en ? 'Generate new view' : '生成新视角')}" aria-label="run">
+                <i data-lucide="arrow-up" class="w-4 h-4"></i>
+            </button>
+        </div>`;
+}
+function bindImageNovelOrbitChrome(host){
+    host.onpointerdown = e => e.stopPropagation();
+    host.onmousedown = e => e.stopPropagation();
+    host.onclick = e => e.stopPropagation();
+    host.oncontextmenu = e => {
+        e.preventDefault();
+        e.stopPropagation();
+    };
+    host.addEventListener('wheel', e => {
+        e.preventDefault();
+        e.stopPropagation();
+    }, { passive: false });
+    host.querySelector('[data-novel-orbit-act="close"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        closeImageNovelOrbit();
+    });
+    host.querySelectorAll('[data-novel-orbit-menu]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            const key = btn.getAttribute('data-novel-orbit-menu');
+            const menu = host.querySelector(`[data-novel-orbit-panel="${key}"]`);
+            if(!menu) return;
+            const next = menu.hidden;
+            closeNovelOrbitMenus(menu);
+            menu.hidden = !next;
+            btn.setAttribute('aria-expanded', next ? 'true' : 'false');
+            btn.classList.toggle('is-open', next);
+        });
+    });
+    host.querySelectorAll('[data-novel-orbit-model]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            if(!imageNovelOrbitState) return;
+            imageNovelOrbitState.model = btn.getAttribute('data-novel-orbit-model') || NOVEL_VIEW_DEFAULT_MODEL;
+            syncNovelOrbitModelUi(host);
+            closeNovelOrbitMenus();
+        });
+    });
+    host.querySelectorAll('[data-novel-orbit-size]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            if(!imageNovelOrbitState) return;
+            imageNovelOrbitState.size = btn.getAttribute('data-novel-orbit-size') || '1k';
+            const label = host.querySelector('[data-novel-orbit-size-label]');
+            if(label) label.textContent = imageNovelOrbitState.size === '2k' ? '2K' : '1K';
+            host.querySelectorAll('[data-novel-orbit-size]').forEach(b => b.classList.toggle('is-active', b === btn));
+            closeNovelOrbitMenus();
+        });
+    });
+    host.querySelectorAll('[data-novel-orbit-quality]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            if(!imageNovelOrbitState) return;
+            imageNovelOrbitState.quality = btn.getAttribute('data-novel-orbit-quality') || 'medium';
+            const en = langIsEn();
+            const q = imageNovelOrbitState.quality;
+            const label = host.querySelector('[data-novel-orbit-quality-label]');
+            if(label) label.textContent = q === 'low' ? (en ? 'Low' : '低') : q === 'high' ? (en ? 'High' : '高') : (en ? 'Medium' : '中');
+            host.querySelectorAll('[data-novel-orbit-quality]').forEach(b => b.classList.toggle('is-active', b === btn));
+            closeNovelOrbitMenus();
+        });
+    });
+    host.querySelector('[data-novel-orbit-focal]')?.addEventListener('input', e => {
+        e.stopPropagation();
+        if(!imageNovelOrbitState || imageNovelOrbitState.running) return;
+        const next = clampOrbitCamera({
+            ...(imageNovelOrbitView?.getCamera?.() || imageNovelOrbitState.camera),
+            focalMm: Number(e.currentTarget.value),
+        });
+        imageNovelOrbitState.camera = next;
+        imageNovelOrbitView?.setCamera?.(next);
+        syncNovelOrbitHud(host);
+    });
+    host.querySelector('[data-novel-orbit-relief]')?.addEventListener('input', e => {
+        e.stopPropagation();
+        if(!imageNovelOrbitState) return;
+        imageNovelOrbitState.depthStrength = clampDepthStrength(Number(e.currentTarget.value) / 100);
+        imageNovelOrbitView?.setDepthStrength?.(imageNovelOrbitState.depthStrength);
+        syncNovelOrbitHud(host);
+    });
+    host.querySelector('[data-novel-orbit-act="run"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void runImageNovelOrbitFromPanel();
+    });
+    syncNovelOrbitHud(host);
+    syncNovelOrbitModelUi(host);
+}
+function closeImageNovelOrbit(opts={}){
+    imageNovelOrbitState?.depthAbort?.abort?.();
+    if(imageNovelOrbitState) imageNovelOrbitState.depthAbort = null;
+    imageNovelOrbitView?.dispose?.();
+    imageNovelOrbitView = null;
+    clearImageExpandDockPosition(imageNovelOrbitEl);
+    imageNovelOrbitEl?.remove();
+    imageNovelOrbitEl = null;
+    imageNovelOrbitState = null;
+    nodesEl?.querySelectorAll?.('.is-image-expand-source')?.forEach(el => el.classList.remove('is-image-expand-source'));
+    if(opts.restoreViewport !== false) restoreImageEditCanvasFocus();
+    if(opts.syncBar !== false) syncImageActionBar();
+}
+function wireImageNovelOrbitUi(){
+    if(imageNovelOrbitUiWired) return;
+    imageNovelOrbitUiWired = true;
+    on(document, 'keydown', event => {
+        if(!isImageNovelOrbitOpen()) return;
+        if(event.key === 'Escape'){
+            event.preventDefault();
+            closeImageNovelOrbit();
+            return;
+        }
+        if(event.key === 'Enter' && !event.repeat){
+            const t = event.target;
+            if(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+            event.preventDefault();
+            void runImageNovelOrbitFromPanel();
+        }
+    });
+}
+function positionImageNovelOrbitOverlay(){
+    const st = imageNovelOrbitState;
+    if(!st || !imageNovelOrbitEl || !board) return;
+    const hostInfo = findImageEditHost(st.nodeId, st.url);
+    const img = hostInfo?.img;
+    if(!img) return;
+    const imgRect = img.getBoundingClientRect();
+    const boardRect = board.getBoundingClientRect();
+    const width = Math.max(48, imgRect.width);
+    const height = Math.max(48, imgRect.height);
+    imageNovelOrbitEl.style.left = `${imgRect.left - boardRect.left}px`;
+    imageNovelOrbitEl.style.top = `${imgRect.top - boardRect.top}px`;
+    imageNovelOrbitEl.style.width = `${width}px`;
+    imageNovelOrbitEl.style.height = `${height}px`;
+    const stage = imageNovelOrbitEl.querySelector('.image-expand-stage');
+    if(stage){
+        stage.style.width = `${width}px`;
+        stage.style.height = `${height}px`;
+    }
+    const keep = imageNovelOrbitEl.querySelector('.image-expand-keep');
+    if(keep) applyImageEditKeepNaturalSize(st, keep);
+    imageNovelOrbitView?.resize?.();
+    if(stage) positionImageExpandDock(stage, imageNovelOrbitEl);
+}
+function mountNovelOrbitView(){
+    const st = imageNovelOrbitState;
+    const viewport = imageNovelOrbitEl?.querySelector?.('.image-novel-orbit-viewport');
+    if(!st || !viewport) return;
+    imageNovelOrbitView?.dispose?.();
+    imageNovelOrbitView = null;
+    const w = Math.max(1, st.srcW || 1);
+    const h = Math.max(1, st.srcH || 1);
+    try {
+        imageNovelOrbitView = createNovelViewOrbitView(viewport, {
+            url: st.url,
+            aspect: w / h,
+            camera: st.camera,
+            depthStrength: st.depthStrength,
+            crossOrigin: shouldUseCrossOriginImage(st.url),
+            onChange: cam => {
+                if(!imageNovelOrbitState) return;
+                imageNovelOrbitState.camera = clampOrbitCamera(cam);
+                syncNovelOrbitHud();
+            },
+        });
+        if(st.depthMap) imageNovelOrbitView.setDepth(st.depthMap);
+    } catch(err){
+        console.warn('[mountNovelOrbitView]', err);
+        softAlert(langIsEn() ? 'Could not start 3D preview' : '无法启动 3D 预览');
+        closeImageNovelOrbit();
+    }
+}
+async function kickNovelOrbitDepth(keep){
+    const st = imageNovelOrbitState;
+    if(!st || !keep) return;
+    st.depthAbort?.abort?.();
+    const ac = new AbortController();
+    st.depthAbort = ac;
+    st.depthStatus = 'loading';
+    st.depthNote = '';
+    syncNovelOrbitHud();
+    try {
+        const map = await estimateNovelViewDepth(keep, {
+            url: st.url,
+            onProgress: (p) => {
+                if(imageNovelOrbitState !== st || ac.signal.aborted) return;
+                if(p?.status === 'progress' && Number(p.total) > 0){
+                    const pct = Math.round((Number(p.loaded) / Number(p.total)) * 100);
+                    st.depthNote = `${novelViewDepthModelLabel()} ${pct}%`;
+                    syncNovelOrbitHud();
+                }
+            },
+        });
+        if(ac.signal.aborted || imageNovelOrbitState !== st) return;
+        st.depthMap = map;
+        st.depthStatus = 'ready';
+        st.depthNote = '';
+        imageNovelOrbitView?.setDepth?.(map);
+        imageNovelOrbitView?.setDepthStrength?.(st.depthStrength);
+        syncNovelOrbitHud();
+    } catch(err){
+        if(ac.signal.aborted || imageNovelOrbitState !== st) return;
+        console.warn('[kickNovelOrbitDepth]', err);
+        st.depthStatus = 'flat';
+        st.depthNote = langIsEn()
+            ? `No depth · ${shortNovelViewDepthError(err)}`
+            : `平面 · ${shortNovelViewDepthError(err)}`;
+        syncNovelOrbitHud();
+    }
+}
+async function openImageNovelOrbit(target){
+    if(!target?.node || !target.url || !board) return;
+    if(isImageEditOpen()) closeImageEditor();
+    closeImageExpand({ restoreViewport: false, syncBar: false });
+    closeImageCutout({ restoreViewport: false, syncBar: false });
+    closeImageUpscale({ restoreViewport: false, syncBar: false });
+    closeImageMaskRepaint({ restoreViewport: false, syncBar: false });
+    closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
+    closeImageNovelView({ restoreViewport: false, syncBar: false });
+    closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
+    wireImageNovelOrbitUi();
+    const node = target.node;
+    if(!target.url || isMissingAssetUrl(target.url)){
+        softAlert(langIsEn() ? 'No image for a new view' : '没有可变换视角的图片');
+        return;
+    }
+    const hostInfo = findImageEditHost(node.id, target.url);
+    imageNovelOrbitState = {
+        nodeId: node.id,
+        url: target.url,
+        name: target.histItem?.name || node.name || outputImageName(target.url),
+        srcW: 0,
+        srcH: 0,
+        camera: { ...NOVEL_VIEW_ORBIT_DEFAULT },
+        model: NOVEL_VIEW_DEFAULT_MODEL,
+        size: '1k',
+        quality: 'medium',
+        running: false,
+        depthStatus: 'loading',
+        depthNote: '',
+        depthStrength: NOVEL_VIEW_DEPTH_STRENGTH_DEFAULT,
+        depthAbort: null,
+    };
+    const host = document.createElement('div');
+    host.className = 'image-expand-host is-opening image-novel-orbit-host';
+    host.innerHTML = buildImageNovelOrbitHtml(imageNovelOrbitState);
+    const keep = host.querySelector('.image-expand-keep');
+    if(keep){
+        if(shouldUseCrossOriginImage(target.url)) keep.crossOrigin = 'anonymous';
+        keep.src = target.url;
+    }
+    bindImageNovelOrbitChrome(host);
+    removeImageActionBar();
+    board.appendChild(host);
+    imageNovelOrbitEl = host;
+    refreshIcons(host);
+    const keepReady = (!keep || (keep.complete && keep.naturalWidth))
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            keep.onload = () => resolve();
+            keep.onerror = () => resolve();
+        });
+    positionImageNovelOrbitOverlay();
+    await keepReady;
+    if(imageNovelOrbitState) applyImageEditKeepNaturalSize(imageNovelOrbitState, keep);
+    mountNovelOrbitView();
+    void kickNovelOrbitDepth(keep);
+    const sourceNodeEl = hostInfo?.host?.closest?.('.node');
+    beginImageExpandOpenFade(host, sourceNodeEl);
+    await prepareImageEditCanvasFocus(node.id, 'novel-view-orbit');
+    if(!imageNovelOrbitState || imageNovelOrbitState.nodeId !== node.id) return;
+    if(!board || !imageNovelOrbitEl) return;
+    positionImageNovelOrbitOverlay();
+    finishImageExpandOpenFade(host);
+    syncNovelOrbitHud();
+}
+async function captureNovelOrbitPreview(st){
+    const view = imageNovelOrbitView;
+    if(!st || !view?.captureStill) return '';
+    const size = orbitCaptureSize(st.srcW || 1024, st.srcH || 1024);
+    const blob = await view.captureStill(size);
+    if(!blob?.size) return '';
+    const uploaded = await uploadCroppedBlob(blob, 'orbit-preview.jpg');
+    return String(uploaded?.url || '').trim();
+}
+async function runImageNovelOrbitFromPanel(){
+    const st = imageNovelOrbitState;
+    if(!st || st.running) return;
+    const node = nodes.find(n => n.id === st.nodeId);
+    if(!node || !st.url || isMissingAssetUrl(st.url)) return;
+    const camera = clampOrbitCamera(imageNovelOrbitView?.getCamera?.() || st.camera);
+    st.running = true;
+    syncNovelOrbitHud();
+    let previewUrl = '';
+    try {
+        previewUrl = await captureNovelOrbitPreview(st);
+    } catch(err){
+        console.warn('[captureNovelOrbitPreview]', err);
+    }
+    if(imageNovelOrbitState !== st) return;
+    const job = {
+        url: st.url,
+        name: st.name,
+        camera,
+        previewUrl,
+        model: String(st.model || NOVEL_VIEW_DEFAULT_MODEL),
+        size: st.size || '1k',
+        quality: st.quality || 'medium',
+        prompt: buildNovelViewOrbitPrompt(camera),
+        srcW: st.srcW,
+        srcH: st.srcH,
+    };
+    closeImageNovelOrbit({ restoreViewport: false });
+    clearImageEditViewportSession();
+    pushUndo();
+    const spawned = spawnNovelViewPendingImageNode(node, job, 'novel-view-orbit');
+    if(!spawned){
+        softAlert(langIsEn() ? 'Could not create image node.' : '未能创建图片节点');
+        return;
+    }
+    const pendingId = uid('p');
+    const run = {
+        node: { id: node.id },
+        prompt: job.prompt,
+        taskLabel: langIsEn() ? '3D camera' : '3D机位',
+    };
+    pushExpandImagePending(spawned, makePending(pendingId, run, {
+        stageLabel: langIsEn() ? 'Generating new view…' : '新视角生成中…',
+    }));
+    selected.clear();
+    selected.add(spawned.id);
+    commitStructureDomPatch({ addedIds: [spawned.id], refreshIds: [node.id, spawned.id] });
+    void focusExpandResultNode(spawned.id);
+    scheduleSaveNow();
+    setStatus(langIsEn() ? 'New view queued on new node' : '新视角已开始，新节点生成中');
+    void runImageNovelOrbitJob(job, spawned, node, pendingId);
+}
+async function runImageNovelOrbitJob(job, targetNode, source, pendingId){
+    const node = () => nodes.find(n => n.id === targetNode?.id);
+    const run = {
+        node: { id: source.id },
+        prompt: job.prompt,
+        taskLabel: langIsEn() ? '3D camera' : '3D机位',
+    };
+    try {
+        if(!node()) throw new Error(langIsEn() ? 'New-view node missing' : '新视角节点已丢失');
+        const model = String(job.model || NOVEL_VIEW_DEFAULT_MODEL).trim() || NOVEL_VIEW_DEFAULT_MODEL;
+        const orig = await loadImageBitmapForExport(job.url);
+        const w = orig.naturalWidth || orig.width || job.srcW || 1;
+        const h = orig.naturalHeight || orig.height || job.srcH || 1;
+        const payload = {
+            prompt: job.prompt,
+            provider_id: resolveImageProviderId('runninghub'),
+            model,
+            size: `${w}x${h}`,
+            canvas_resolution: job.size || '1k',
+            canvas_ratio: nearestAspectRatio(w, h, novelViewRatioKeys(model)),
+            reference_images: [
+                { url: job.url, name: outputImageName(job.url) || 'source.png', role: 'source' },
+                ...(job.previewUrl ? [{ url: job.previewUrl, name: 'orbit-preview.jpg', role: 'pose' }] : []),
+            ],
+            canvas_id: canvas?.id || '',
+            node_id: targetNode.id || '',
+        };
+        if(isGptImage2Model(model)){
+            payload.quality = normalizedImageQuality(job.quality) || 'medium';
+        }
+        const task = await createCanvasImageTask(payload);
+        const cur = node();
+        if(!cur) throw new Error(langIsEn() ? 'New-view node missing' : '新视角节点已丢失');
+        const pending = (cur._pending || []).find(p => p.id === pendingId);
+        if(pending){
+            pending.canvasTaskId = String(task.task_id || '');
+            pending.canvasTaskType = 'online-image';
+            pending.run = run;
+            registerCanvasTaskLedger(task.task_id, {
+                canvasId: canvas?.id || '',
+                hostNodeId: targetNode.id || '',
+                genNodeId: targetNode.id || '',
+                pendingId,
+                run,
+                appendGenerated: false,
+                startedAt: Number(pending.startedAt || nowMs()),
+                canvasTaskType: 'online-image',
+            });
+        } else {
+            pushExpandImagePending(cur, makePending(pendingId, run, {
+                canvasTaskId: task.task_id,
+                canvasTaskType: 'online-image',
+                stageLabel: langIsEn() ? 'Generating new view…' : '新视角生成中…',
+            }));
+        }
+        refreshNodes([targetNode.id, source.id]);
+        scheduleSaveNow();
+        void pollCanvasImageTask(task.task_id);
+    } catch(err){
+        console.warn('[runImageNovelOrbitJob]', err);
+        const cur = node();
+        if(cur) markExpandPendingFailed(cur, pendingId, err?.message);
+        softAlert(err?.message || (langIsEn() ? 'New view failed' : '新视角失败'));
+        setStatus('');
+        scheduleSaveNow();
+    }
+}
 function syncImageActionBar(){
     if(isImageExpandOpen()){
         const onlyId = selected.size === 1 ? [...selected][0] : null;
@@ -27001,6 +29776,46 @@ function syncImageActionBar(){
         positionImageUpscaleOverlay();
         return;
     }
+    if(isImageMaskRepaintOpen()){
+        const onlyId = selected.size === 1 ? [...selected][0] : null;
+        if(onlyId !== imageMaskRepaintState.nodeId){
+            closeImageMaskRepaint();
+            return;
+        }
+        removeImageActionBar();
+        positionImageMaskRepaintOverlay();
+        return;
+    }
+    if(isImageBoxRepaintOpen()){
+        const onlyId = selected.size === 1 ? [...selected][0] : null;
+        if(onlyId !== imageBoxRepaintState.nodeId){
+            closeImageBoxRepaint();
+            return;
+        }
+        removeImageActionBar();
+        positionImageBoxRepaintOverlay();
+        return;
+    }
+    if(isImageNovelViewOpen()){
+        const onlyId = selected.size === 1 ? [...selected][0] : null;
+        if(onlyId !== imageNovelViewState.nodeId){
+            closeImageNovelView();
+            return;
+        }
+        removeImageActionBar();
+        positionImageNovelViewOverlay();
+        return;
+    }
+    if(isImageNovelOrbitOpen()){
+        const onlyId = selected.size === 1 ? [...selected][0] : null;
+        if(onlyId !== imageNovelOrbitState.nodeId){
+            closeImageNovelOrbit();
+            return;
+        }
+        removeImageActionBar();
+        positionImageNovelOrbitOverlay();
+        return;
+    }
     if(isImageEditOpen()){
         removeImageActionBar();
         return;
@@ -27019,6 +29834,11 @@ function syncImageActionBar(){
     }
     const onlyId = selected.size === 1 ? [...selected][0] : null;
     const only = onlyId ? nodes.find(n => n.id === onlyId) : null;
+    // 图台翻牌中：收回时等 finish 再挂动作条；展开网格时直接卸掉
+    if(only?._stageFlipping && isGenConsoleNode(only)){
+        if(only.historyOpen) removeImageActionBar();
+        return;
+    }
     // 禁用：与变灰同帧收起动作条（隐藏保留，恢复瞬间展开）
     if(only && isNodeDisabled(only) && imageActionBarNodeId === only.id && imageActionBarEl?.isConnected){
         imageActionBarEl.hidden = true;
@@ -34162,13 +36982,23 @@ function applyCompletedRhOutputs(ctx, outputs, meta, taskId){
         : nodes.find(n => n.id === (meta.run?.node?.id || pending.run?.node?.id) && n.type === 'rh');
     const runMs = Math.max(0, Number(meta.runMs || 0) || (nowMs() - Number(pending.startedAt || nowMs())));
     const run = meta.run || pending.run || {};
-    // 抠图结果宿主是「图片节点」而非 RH 节点：把第一张结果图写回该节点
+    // 抠图/框选重绘宿主是「图片节点」而非 RH 节点：把第一张结果图写回该节点
     if(!rhNode && out?.type === 'image'){
         const url = outputUrlValue(outputs[0]);
         if(url){
+            if(out.editOrigin === 'box-repaint' && out._boxRepaintBounds && out._editSourceUrl){
+                // 先不落裁切图；贴回完成后再写 URL，避免卡在「只有框选块」
+                setStatus(langIsEn() ? 'Blending colors & stitching…' : '正在融合校色并贴回…');
+                void finalizeBoxRepaintStitch(out, url, taskId, { ...meta, run }, outputs.map(o => (typeof o === 'string' ? o : o?.url)).filter(Boolean));
+                return;
+            }
             out.url = url;
             if(!nodeFloatTitleCustom(out)){
-                out.name = outputImageName(url) || String(out.name || out.editOrigin || 'image').replace(/_(cutout|upscale)$/, '') || out.editOrigin || 'image';
+                out.name = outputImageName(url) || String(out.name || out.editOrigin || 'image').replace(/_(cutout|upscale|repaint|box_repaint|novel_view|novel_orbit)$/, '') || out.editOrigin || 'image';
+            }
+            bindImageEditCompareSource(out, url);
+            if(out.editOrigin === 'repaint' && out._editSourceUrl){
+                void ensureMaskRepaintCompareBaseline(out);
             }
         }
         addGenerationLog({run, outputs: outputs.map(o => (typeof o === 'string' ? o : o?.url)).filter(Boolean), runMs});
@@ -34265,10 +37095,14 @@ function failRunningHubTask(taskId, message){
     const run = pending.run || raw?.run || {};
     const runMs = Math.max(0, nowMs() - Number(pending.startedAt || nowMs()));
     // 抠图结果宿主是「图片节点」：失败时在原位保留失败态，勿留空节点
-    if(out?.type === 'image' && !out.url && (out.editOrigin === 'cutout' || out.editOrigin === 'upscale')){
+    if(out?.type === 'image' && !out.url && (out.editOrigin === 'cutout' || out.editOrigin === 'upscale' || out.editOrigin === 'repaint' || out.editOrigin === 'box-repaint')){
         const failLabel = out.editOrigin === 'upscale'
             ? (langIsEn() ? 'Upscale failed' : '高清放大失败')
-            : (langIsEn() ? 'Cutout failed' : '抠图失败');
+            : out.editOrigin === 'box-repaint'
+                ? (langIsEn() ? 'Box repaint failed' : '框选重绘失败')
+            : out.editOrigin === 'repaint'
+                ? (langIsEn() ? 'Mask repaint failed' : '蒙版重绘失败')
+                : (langIsEn() ? 'Cutout failed' : '抠图失败');
         markExpandPendingFailed(out, pending.id, message || failLabel);
         showErrorModal(message || failLabel, failLabel);
         addGenerationLog({run, outputs:[], runMs, error:message || failLabel});
@@ -34351,9 +37185,19 @@ function applyCompletedCanvasImages(ctx, images, meta, taskId){
     if(out.type === 'image'){
         const url = outputUrlValue(images[0]);
         if(url){
+            if(out.editOrigin === 'box-repaint' && out._boxRepaintBounds && out._editSourceUrl){
+                // 先不落裁切图；贴回完成后再写 URL
+                setStatus(langIsEn() ? 'Blending colors & stitching…' : '正在融合校色并贴回…');
+                void finalizeBoxRepaintStitch(out, url, taskId, meta, images);
+                return;
+            }
             out.url = url;
             if(!nodeFloatTitleCustom(out)){
                 out.name = outputImageName(url) || String(out.name || 'expand').replace(/_expand$/, '') || 'expand';
+            }
+            bindImageEditCompareSource(out, url);
+            if(out.editOrigin === 'repaint' && out._editSourceUrl){
+                void ensureMaskRepaintCompareBaseline(out);
             }
         }
         addGenerationLog({run:meta.run, outputs:images, runMs:meta.runMs || 0});
@@ -34447,7 +37291,7 @@ function failCanvasImageTask(taskId, message){
     const run = pending.run || {};
     const runMs = nowMs() - Number(pending.startedAt || nowMs());
     if(out.type === 'image'){
-        if(!out.url && out.editOrigin === 'expand'){
+        if(!out.url && (out.editOrigin === 'expand' || out.editOrigin === 'repaint' || out.editOrigin === 'box-repaint' || out.editOrigin === 'novel-view' || out.editOrigin === 'novel-view-orbit')){
             markExpandPendingFailed(out, pending.id, message);
             softAlert(message || tr('canvas.generationFailed'));
             addGenerationLog({run, outputs:[], runMs, error:message || tr('canvas.generationFailed')});
@@ -34954,17 +37798,19 @@ function appendOutputImages(out, images, compareRef, metas=[], layout=null){
     }
 }
 function outputCompareUrlFor(url, out){
+    const node = out?.id ? nodes.find(n => n.id === out.id) || out : out;
+    const fromNode = resolveCompareOriginalSrc(url, node);
+    if(fromNode) return fromNode;
     const source = out?.imageComparisons?.[url];
-    if(typeof source === 'string' && source) return source;
-    if(source?.url) return source.url;
+    const mapped = typeof source === 'string' ? source : source?.url;
+    if(mapped && !sameImageAsset(mapped, url)) return mapped;
     const meta = outputMetaFor(url, out);
     const fromMeta = meta?.run?.refs?.find(ref => ref?.url)?.url || '';
-    if(fromMeta) return fromMeta;
-    // 旧历史缺 run.refs / imageComparisons 时，回退生图节点当前图1
-    const node = out?.id ? nodes.find(n => n.id === out.id) || out : out;
+    if(fromMeta && !sameImageAsset(fromMeta, url)) return fromMeta;
     if(!node || !CANVAS_GENERATOR_TYPES.includes(node.type)) return '';
     const first = orderedSources(node, generatorSources(node)).find(s => s?.refs?.some(r => r?.url));
-    return first?.refs?.find(r => r?.url)?.url || '';
+    const fromGen = first?.refs?.find(r => r?.url)?.url || '';
+    return fromGen && !sameImageAsset(fromGen, url) ? fromGen : '';
 }
 function markOutputViewed(out, url){
     if(!out || !url || !(out.images || []).length) return;
@@ -35086,20 +37932,213 @@ async function downloadUrl(url, filename){
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 function syncOutputCompareBtn(active){
+    refreshOutputCompareDom();
     if(!outputCompareBtn) return;
     const canCompare = !!currentOutputCompareUrl && !!currentOutputLightboxUrl && !isVideoUrl(currentOutputLightboxUrl);
     outputCompareBtn.hidden = !canCompare;
+    outputCompareBtn.onclick = canCompare ? toggleOutputCompareFromUi : null;
     const pressed = !!(active && canCompare);
     outputCompareBtn.classList.toggle('is-active', pressed);
     outputCompareBtn.setAttribute('aria-pressed', pressed ? 'true' : 'false');
 }
+function liveOutputLightboxEl(){
+    return document.body.querySelector(':scope > .output-lightbox.open')
+        || document.querySelector('.output-lightbox.open')
+        || document.body.querySelector(':scope > .output-lightbox')
+        || outputLightbox;
+}
+function refreshOutputCompareDom(){
+    const hosted = liveOutputLightboxEl();
+    if(hosted) outputLightbox = hosted;
+    const root = outputLightbox;
+    if(!root) return;
+    outputPreview = root.querySelector('#outputPreview') || outputPreview;
+    outputLightboxImg = root.querySelector('#outputLightboxImg') || outputLightboxImg;
+    outputCompareContainer = root.querySelector('#outputCompareContainer') || outputCompareContainer;
+    outputCompareLayer = root.querySelector('#outputCompareLayer') || outputCompareLayer;
+    outputCompareResult = root.querySelector('#outputCompareResult') || outputCompareResult;
+    outputCompareOriginal = root.querySelector('#outputCompareOriginal') || outputCompareOriginal;
+    outputCompareOriginalWrap = root.querySelector('#outputCompareOriginalWrap') || outputCompareOriginalWrap;
+    outputCompareSlider = root.querySelector('#outputCompareSlider') || outputCompareSlider;
+    outputCompareBtn = root.querySelector('#outputCompareBtn') || outputCompareBtn;
+}
+function assignCompareImageSrc(img, src){
+    if(!img) return;
+    const next = String(src || '').trim();
+    if(!next){
+        img.removeAttribute('src');
+        img.src = '';
+        return;
+    }
+    img.src = next;
+}
+function liveImageNodeForLightbox(){
+    const url = currentOutputLightboxUrl;
+    const out = currentOutputLightboxOutId ? nodes.find(n => n.id === currentOutputLightboxOutId) : null;
+    if(out?.type === 'image') return out;
+    if(out?.type === 'imageBatch'){
+        return imageBatchAllChildImages(out).find(n => sameImageAsset(n.url, url)) || null;
+    }
+    return nodes.find(n => n.type === 'image' && sameImageAsset(n.url, url)) || null;
+}
+function toggleOutputCompareFromUi(e){
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
+    const now = Date.now();
+    if(now - outputCompareToggleAt < 80) return;
+    outputCompareToggleAt = now;
+    refreshOutputCompareDom();
+    const live = liveImageNodeForLightbox();
+    const resolved = resolveCompareOriginalSrc(currentOutputLightboxUrl, live)
+        || outputCompareUrlFor(currentOutputLightboxUrl, live);
+    if(resolved && !sameImageAsset(resolved, currentOutputLightboxUrl)){
+        currentOutputCompareUrl = resolved;
+    }
+    if(!currentOutputCompareUrl || !currentOutputLightboxUrl || isVideoUrl(currentOutputLightboxUrl)) return;
+    if(!outputPreview) return;
+    setOutputCompareMode(!outputPreview.classList.contains('compare-mode'));
+}
 function setOutputCompareMode(active){
-    outputPreview.classList.toggle('compare-mode', active);
+    refreshOutputCompareDom();
     if(active){
-        outputCompareOriginalWrap.style.clipPath = 'inset(0 50% 0 0)';
-        outputCompareSlider.style.left = '50%';
+        const live = liveImageNodeForLightbox();
+        const resolved = resolveCompareOriginalSrc(currentOutputLightboxUrl, live)
+            || outputCompareUrlFor(currentOutputLightboxUrl, live);
+        if(resolved && !sameImageAsset(resolved, currentOutputLightboxUrl)){
+            currentOutputCompareUrl = resolved;
+        }
+        if(!currentOutputCompareUrl || sameImageAsset(currentOutputCompareUrl, currentOutputLightboxUrl)){
+            currentOutputCompareUrl = '';
+            syncOutputCompareBtn(false);
+            return;
+        }
+        const resultSrc = outputLightboxImg?.currentSrc || currentOutputLightboxUrl;
+        assignCompareImageSrc(outputCompareResult, resultSrc);
+        assignCompareImageSrc(outputCompareOriginal, currentOutputCompareUrl);
+        if(outputCompareOriginalWrap){
+            outputCompareOriginalWrap.style.background = '#0e0e0e';
+            outputCompareOriginalWrap.style.clipPath = 'none';
+        }
+    }
+    if(outputPreview) outputPreview.classList.toggle('compare-mode', active);
+    if(active){
+        outputComparePercent = 50;
+        layoutOutputCompareImages();
     }
     syncOutputCompareBtn(active);
+}
+/** 对比以结果图 contain 框为准铺原图；原图用裁切窗口而不是 clip-path，避免左边透出结果图 */
+function layoutOutputCompareImages(){
+    const layer = outputCompareLayer || outputCompareContainer;
+    const result = outputCompareResult;
+    const original = outputCompareOriginal;
+    const wrap = outputCompareOriginalWrap;
+    if(!layer || !result || !original) return;
+    const cw = layer.clientWidth;
+    const ch = layer.clientHeight;
+    const rw = result.naturalWidth || outputLightboxImg?.naturalWidth || 0;
+    const rh = result.naturalHeight || outputLightboxImg?.naturalHeight || 0;
+    if(!cw || !ch || !rw || !rh){
+        resetOutputCompareImageBox(result);
+        resetOutputCompareImageBox(original);
+        resetOutputCompareWrapBox();
+        return;
+    }
+    const scale = Math.min(cw / rw, ch / rh);
+    const dw = Math.max(1, rw * scale);
+    const dh = Math.max(1, rh * scale);
+    const left = (cw - dw) / 2;
+    const top = (ch - dh) / 2;
+    outputCompareBox = {left, top, w: dw, h: dh};
+    result.style.left = `${left}px`;
+    result.style.top = `${top}px`;
+    result.style.width = `${dw}px`;
+    result.style.height = `${dh}px`;
+    result.style.right = 'auto';
+    result.style.bottom = 'auto';
+    result.style.objectFit = 'fill';
+    if(wrap){
+        wrap.style.top = `${top}px`;
+        wrap.style.left = `${left}px`;
+        wrap.style.height = `${dh}px`;
+        wrap.style.right = 'auto';
+        wrap.style.bottom = 'auto';
+        wrap.style.inset = 'auto';
+        wrap.style.overflow = 'hidden';
+        wrap.style.clipPath = 'none';
+        wrap.style.background = '#0e0e0e';
+    }
+    original.style.left = '0';
+    original.style.top = '0';
+    original.style.width = `${dw}px`;
+    original.style.height = `${dh}px`;
+    original.style.right = 'auto';
+    original.style.bottom = 'auto';
+    original.style.objectFit = 'fill';
+    applyOutputCompareSliderPercent(outputComparePercent);
+}
+function resetOutputCompareWrapBox(){
+    const wrap = outputCompareOriginalWrap;
+    if(!wrap) return;
+    wrap.style.left = '';
+    wrap.style.top = '';
+    wrap.style.width = '';
+    wrap.style.height = '';
+    wrap.style.right = '';
+    wrap.style.bottom = '';
+    wrap.style.inset = '';
+    wrap.style.clipPath = '';
+    wrap.style.overflow = '';
+    if(outputCompareSlider){
+        outputCompareSlider.style.top = '';
+        outputCompareSlider.style.height = '';
+        outputCompareSlider.style.bottom = '';
+        outputCompareSlider.style.left = '50%';
+    }
+    outputCompareBox = {left:0, top:0, w:0, h:0};
+    outputComparePercent = 50;
+}
+function applyOutputCompareSliderPercent(percent){
+    const p = Math.max(0, Math.min(100, Number(percent) || 0));
+    outputComparePercent = p;
+    const wrap = outputCompareOriginalWrap;
+    const original = outputCompareOriginal;
+    const slider = outputCompareSlider;
+    const box = outputCompareBox;
+    if(wrap && box.w > 0){
+        const cut = Math.round(box.w * p / 100);
+        wrap.style.left = `${box.left}px`;
+        wrap.style.top = `${box.top}px`;
+        wrap.style.height = `${box.h}px`;
+        wrap.style.width = `${Math.min(box.w, Math.max(1, cut + 1))}px`;
+        wrap.style.overflow = 'hidden';
+        wrap.style.clipPath = 'none';
+        if(original){
+            original.style.left = '0';
+            original.style.top = '0';
+            original.style.width = `${box.w}px`;
+            original.style.height = `${box.h}px`;
+        }
+        if(slider){
+            slider.style.top = `${box.top}px`;
+            slider.style.height = `${box.h}px`;
+            slider.style.bottom = 'auto';
+            slider.style.left = `${box.left + cut}px`;
+        }
+        return;
+    }
+    if(wrap) wrap.style.clipPath = 'none';
+    if(slider) slider.style.left = `${p}%`;
+}
+function resetOutputCompareImageBox(img){
+    if(!img) return;
+    img.style.left = '';
+    img.style.top = '';
+    img.style.width = '';
+    img.style.height = '';
+    img.style.right = '';
+    img.style.bottom = '';
+    img.style.objectFit = '';
 }
 function outputResolutionText(text, meta=null){
     const parts = [text || '--'];
@@ -35154,18 +38193,32 @@ function rerunFromOutputMeta(meta){
     scheduleSave();
 }
 function updateOutputCompareSlider(clientX){
-    const rect = outputCompareContainer.getBoundingClientRect();
+    const layer = outputCompareLayer || outputCompareContainer;
+    if(!layer) return;
+    const rect = layer.getBoundingClientRect();
     if(!rect.width) return;
-    const percent = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
-    outputCompareOriginalWrap.style.clipPath = `inset(0 ${100 - percent}% 0 0)`;
-    outputCompareSlider.style.left = `${percent}%`;
+    const localX = (clientX - rect.left) * (layer.clientWidth / rect.width);
+    const box = outputCompareBox;
+    const imgLeft = box.w > 0 ? box.left : 0;
+    const imgW = box.w > 0 ? box.w : layer.clientWidth;
+    const percent = Math.max(0, Math.min(100, ((localX - imgLeft) / imgW) * 100));
+    applyOutputCompareSliderPercent(percent);
 }
 function applyOutputPreviewZoom(){
     const transform = `translate(${outputPreviewPan.x}px, ${outputPreviewPan.y}px) scale(${outputPreviewZoom})`;
-    [outputLightboxImg, outputCompareResult, outputCompareOriginal].forEach(img => {
-        img.style.transform = transform;
-        img.style.transformOrigin = '0 0';
-    });
+    outputLightboxImg.style.transform = transform;
+    outputLightboxImg.style.transformOrigin = '0 0';
+    const layer = outputCompareLayer;
+    if(layer){
+        layer.style.transform = transform;
+        layer.style.transformOrigin = '0 0';
+    } else {
+        [outputCompareResult, outputCompareOriginal].forEach(img => {
+            if(!img) return;
+            img.style.transform = transform;
+            img.style.transformOrigin = '0 0';
+        });
+    }
     outputPreview.classList.toggle('zoomed', outputPreviewZoom > 1.001);
 }
 function resetOutputPreviewZoom(){
@@ -35176,6 +38229,8 @@ function resetOutputPreviewZoom(){
     applyOutputPreviewZoom();
 }
 function initOutputPreviewZoomEvents(){
+    if(!outputPreview || outputPreview.dataset.zoomWired === '1') return;
+    outputPreview.dataset.zoomWired = '1';
     outputPreview.addEventListener('wheel', e => {
         if(outputLightboxVideo.style.display === 'block') return;
         e.preventDefault();
@@ -35224,42 +38279,56 @@ function initOutputPreviewZoomEvents(){
     });
 }
 function initOutputCompareEvents(){
-    if(!outputCompareContainer || !outputCompareSlider) return;
-    outputCompareContainer.addEventListener('mousedown', e => {
+    if(outputCompareDocDelegated) return;
+    outputCompareDocDelegated = true;
+    document.addEventListener('click', e => {
+        const btn = e.target.closest?.('#outputCompareBtn, .output-lightbox-compare');
+        if(!btn) return;
+        toggleOutputCompareFromUi(e);
+    }, true);
+    document.addEventListener('dblclick', e => {
+        if(e.target.closest?.('.output-preview-actions, .output-compare-slider')) return;
+        const preview = e.target.closest?.('.output-lightbox.open .output-preview');
+        if(!preview || !currentOutputCompareUrl) return;
+        toggleOutputCompareFromUi(e);
+    }, true);
+    document.addEventListener('mousedown', e => {
+        if(!e.target.closest?.('.output-lightbox.open .output-compare')) return;
+        if(e.target.closest?.('.output-preview-bar, .output-preview-actions')) return;
+        refreshOutputCompareDom();
+        const slider = outputCompareSlider;
+        const sl = slider?.getBoundingClientRect();
+        const nearSlider = sl && Math.abs(e.clientX - (sl.left + sl.width / 2)) < 24;
+        if(!nearSlider && !e.target.closest?.('.output-compare-slider')) return;
         outputCompareDrag = true;
         updateOutputCompareSlider(e.clientX);
         e.preventDefault();
         e.stopPropagation();
-    });
-    outputCompareSlider.addEventListener('mousedown', e => {
-        outputCompareDrag = true;
-        e.preventDefault();
-        e.stopPropagation();
-    });
-    on(window, 'mousemove', e => {
+    }, true);
+    window.addEventListener('mousemove', e => {
         if(outputCompareDrag) updateOutputCompareSlider(e.clientX);
     });
-    on(window, 'mouseup', () => { outputCompareDrag = false; });
-    outputCompareContainer.addEventListener('touchstart', e => {
+    window.addEventListener('mouseup', () => { outputCompareDrag = false; });
+    document.addEventListener('touchstart', e => {
+        if(!e.target.closest?.('.output-lightbox.open .output-compare') || !e.touches?.[0]) return;
+        if(e.target.closest?.('.output-preview-bar, .output-preview-actions')) return;
+        refreshOutputCompareDom();
+        const slider = outputCompareSlider;
+        const sl = slider?.getBoundingClientRect();
+        const nearSlider = sl && Math.abs(e.touches[0].clientX - (sl.left + sl.width / 2)) < 24;
+        if(!nearSlider && !e.target.closest?.('.output-compare-slider')) return;
         outputCompareDrag = true;
         updateOutputCompareSlider(e.touches[0].clientX);
         e.preventDefault();
         e.stopPropagation();
-    }, {passive:false});
-    on(window, 'touchmove', e => {
+    }, {passive:false, capture:true});
+    window.addEventListener('touchmove', e => {
         if(outputCompareDrag) {
             updateOutputCompareSlider(e.touches[0].clientX);
             e.preventDefault();
         }
     }, {passive:false});
-    on(window, 'touchend', () => { outputCompareDrag = false; });
-    if(outputCompareBtn){
-        on(outputCompareBtn, 'click', e => {
-            e.stopPropagation();
-            if(!currentOutputCompareUrl || !currentOutputLightboxUrl || isVideoUrl(currentOutputLightboxUrl)) return;
-            setOutputCompareMode(!outputPreview.classList.contains('compare-mode'));
-        });
-    }
+    window.addEventListener('touchend', () => { outputCompareDrag = false; });
 }
 function initOutputLightboxEvents(){
     if(!outputLightbox) return;
@@ -35340,6 +38409,7 @@ function decodedOriginalFor(url){
 }
 function openOutputLightbox(url, out, compareUrl){
     if(!url) return;
+    refreshOutputCompareDom();
     resetOutputPreviewZoom();
     currentOutputLightboxOutId = out?.id || '';
     currentOutputLightboxUrl = url;
@@ -35348,7 +38418,9 @@ function openOutputLightbox(url, out, compareUrl){
     setupOutputPromptPanel(meta);
     bindOutputLightboxFavorite(url, liveOut || out, meta);
     outputResolutionText('--', meta);
-    currentOutputCompareUrl = compareUrl || outputCompareUrlFor(url, liveOut || out);
+    currentOutputCompareUrl = resolveCompareOriginalSrc(url, liveOut)
+        || (compareUrl !== undefined ? String(compareUrl || '').trim() : outputCompareUrlFor(url, liveOut || out));
+    if(sameImageAsset(currentOutputCompareUrl, url)) currentOutputCompareUrl = '';
     setOutputCompareMode(false);
     const videoMode = outputLightboxIsVideo(url, liveOut || out);
     outputLightboxImg.style.display = videoMode ? 'none' : 'block';
@@ -35401,19 +38473,34 @@ function openOutputLightbox(url, out, compareUrl){
             outputLightboxImg.src = url;
         }
     }
-    outputCompareResult.src = url;
-    outputCompareOriginal.src = currentOutputCompareUrl || '';
-    outputPreview.ondblclick = e => {
-        e.stopPropagation();
-        if(!currentOutputCompareUrl) return;
-        setOutputCompareMode(!outputPreview.classList.contains('compare-mode'));
+    assignCompareImageSrc(outputCompareResult, url);
+    assignCompareImageSrc(outputCompareOriginal, currentOutputCompareUrl);
+    const layoutWhenReady = () => {
+        if(currentOutputLightboxUrl !== url) return;
+        layoutOutputCompareImages();
     };
+    outputCompareOriginal.onerror = () => {
+        if(currentOutputLightboxUrl !== url) return;
+        if(!outputCompareOriginal.isConnected) return;
+        console.warn('[output-compare] original failed', currentOutputCompareUrl);
+    };
+    if(outputCompareResult.complete && outputCompareResult.naturalWidth) layoutWhenReady();
+    else outputCompareResult.onload = layoutWhenReady;
+    if(outputCompareOriginal.complete && outputCompareOriginal.naturalWidth) layoutWhenReady();
+    else if(currentOutputCompareUrl) outputCompareOriginal.onload = layoutWhenReady;
+    outputPreview.ondblclick = null;
     outputDownloadBtn.onclick = e => {
         e.stopPropagation();
         downloadUrl(url, outputDownloadName(url)).catch(err => softAlert(err.message || '下载失败'));
     };
     syncOutputLightboxPortal(true);
-    outputLightbox.classList.add('open');
+    if(outputLightbox) outputLightbox.classList.add('open');
+    refreshOutputCompareDom();
+    assignCompareImageSrc(outputCompareResult, url);
+    assignCompareImageSrc(outputCompareOriginal, currentOutputCompareUrl);
+    if(outputCompareOriginalWrap) outputCompareOriginalWrap.style.background = '#0e0e0e';
+    syncOutputCompareBtn(false);
+    initOutputPreviewZoomEvents();
     refreshIcons();
 }
 function closeOutputLightbox(){
@@ -35429,6 +38516,12 @@ function closeOutputLightbox(){
     outputCompareOriginal.style.display = 'block';
     outputCompareResult.src = '';
     outputCompareOriginal.src = '';
+    outputCompareResult.onload = null;
+    outputCompareOriginal.onload = null;
+    outputCompareOriginal.onerror = null;
+    resetOutputCompareImageBox(outputCompareResult);
+    resetOutputCompareImageBox(outputCompareOriginal);
+    resetOutputCompareWrapBox();
     outputPreview.ondblclick = null;
     if(outputFavoriteBtn){
         outputFavoriteBtn.onclick = null;
@@ -35438,6 +38531,7 @@ function closeOutputLightbox(){
     }
     if(outputCompareBtn){
         outputCompareBtn.hidden = true;
+        outputCompareBtn.onclick = null;
         outputCompareBtn.classList.remove('is-active');
         outputCompareBtn.setAttribute('aria-pressed', 'false');
     }
@@ -38740,7 +41834,7 @@ function isLinkDeleteBlockedNearPort(from, to, hit){
 }
 function isPointerOverLinkUiChrome(el){
     return Boolean(el?.closest?.(
-        '.image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .text-format-bar-host, .text-node-dock-host, .gen-dock, .gen-history-panel, .node, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #selectionMenu, .minimap, .bottombar, .toolbar, .canvas-custom-select-panel'
+        '.image-gen-dock-host, .image-action-bar-host, .image-repaint-menu, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .text-format-bar-host, .text-node-dock-host, .gen-dock, .gen-history-panel, .node, .create-menu, #createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #selectionMenu, .minimap, .bottombar, .toolbar, .canvas-custom-select-panel'
     ));
 }
 /** 图片/成片等实心媒体：线从底下穿过时，指针或剪刀落点在其上则不响应删线 */
@@ -39302,6 +42396,30 @@ board.onmousedown = e => {
         closeImageUpscale();
         return;
     }
+    if(isImageMaskRepaintOpen()){
+        if(Date.now() - imageEditOpenedAt < 480) return;
+        if(e.target.closest?.('.image-expand-host, .image-repaint-top-dock')) return;
+        closeImageMaskRepaint();
+        return;
+    }
+    if(isImageBoxRepaintOpen()){
+        if(Date.now() - imageEditOpenedAt < 480) return;
+        if(e.target.closest?.('.image-expand-host, .image-repaint-top-dock')) return;
+        closeImageBoxRepaint();
+        return;
+    }
+    if(isImageNovelViewOpen()){
+        if(Date.now() - imageEditOpenedAt < 480) return;
+        if(e.target.closest?.('.image-expand-host')) return;
+        closeImageNovelView();
+        return;
+    }
+    if(isImageNovelOrbitOpen()){
+        if(Date.now() - imageEditOpenedAt < 480) return;
+        if(e.target.closest?.('.image-expand-host')) return;
+        closeImageNovelOrbit();
+        return;
+    }
     // 空白左键拖拽框选（单击空白=清选中，在 finishSelection 里判断位移）
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     closeCreateMenu();
@@ -39394,7 +42512,7 @@ on(board, "wheel", e => {
         e.preventDefault();
         return;
     }
-    if(e.target.closest?.('.image-gen-dock-host, .image-action-bar-host, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .gen-dock, .canvas-custom-select-panel, .canvas-custom-select-menu')) return;
+    if(e.target.closest?.('.image-gen-dock-host, .image-action-bar-host, .image-repaint-menu, .selection-action-bar-host, .selection-group-type-menu, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .gen-dock, .canvas-custom-select-panel, .canvas-custom-select-menu')) return;
     if(isOpenScrollableCanvasMenu(e.target)) return;
     if(e.target.closest('.error-message, .node-retry-msg')) return;
     e.preventDefault();

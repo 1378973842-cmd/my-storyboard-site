@@ -15,6 +15,10 @@ const checks = [
   [eng.includes('node._stageFlipping = true'), 'marks flipping before remount'],
   [eng.includes('if(node?._stageFlipping)'), 'defers natural aspect during flip'],
   [eng.includes('outputUrlValue(g.dataset.flipUrl)'), 'normalizes ghost url keys'],
+  [eng.includes('function softHideImageGenDockForCollapse'), 'dock soft-hides on collapse'],
+  [eng.includes('function finishImageGenDockAfterStageFlip'), 'dock fade-in after collapse flip'],
+  [eng.includes('playCanvasChromeExit'), 'chrome exit animation helper'],
+  [eng.includes('if(node._stageFlipping)') && eng.includes('scheduleImageActionBarFollow(node)'), 'skip dock snap-follow during flip'],
 ];
 
 let failed = 0;

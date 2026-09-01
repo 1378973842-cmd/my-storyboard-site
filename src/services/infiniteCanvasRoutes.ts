@@ -608,6 +608,127 @@ export function registerInfiniteCanvasRoutes(
     res.json({ files: uploaded });
   });
 
+  /** 框选重绘：仅贴选区 + 同管道对比底图（避免 JPEG vs canvas-PNG 框外假偏移） */
+  const boxRepaintUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 40 * 1024 * 1024, files: 1 },
+  });
+  app.post(
+    "/api/canvas/box-repaint-composite",
+    gate,
+    boxRepaintUpload.single("patch"),
+    async (req, res) => {
+      try {
+        if (!deps?.persistImage) {
+          res.status(500).json({ error: "persistImage 未配置" });
+          return;
+        }
+        const sourceUrl = String(req.body?.sourceUrl || "").trim();
+        if (!sourceUrl) {
+          res.status(400).json({ error: "缺少 sourceUrl" });
+          return;
+        }
+        let box: { x: number; y: number; w: number; h: number };
+        try {
+          box = typeof req.body?.box === "string" ? JSON.parse(req.body.box) : req.body?.box;
+        } catch {
+          res.status(400).json({ error: "box 无效" });
+          return;
+        }
+        if (!box || !(box.w > 0) || !(box.h > 0)) {
+          res.status(400).json({ error: "box 无效" });
+          return;
+        }
+        const patchFile = req.file;
+        if (!patchFile?.buffer?.length) {
+          res.status(400).json({ error: "缺少 patch PNG" });
+          return;
+        }
+        const { compositeBoxRepaintPatch } = await import("./boxRepaintComposite.js");
+        const composed = await compositeBoxRepaintPatch({
+          projectRoot,
+          sourceUrl,
+          patchPng: patchFile.buffer,
+          box,
+        });
+        const userId = req.authUser?.id;
+        const [url, compareUrl] = await Promise.all([
+          deps.persistImage(`data:image/png;base64,${composed.resultPng.toString("base64")}`, {
+            userId,
+          }),
+          deps.persistImage(`data:image/png;base64,${composed.comparePng.toString("base64")}`, {
+            userId,
+          }),
+        ]);
+        res.json({
+          url,
+          compareUrl,
+          width: composed.width,
+          height: composed.height,
+          box: composed.box,
+        });
+      } catch (err) {
+        console.warn("[box-repaint-composite]", err);
+        canvasError(res, err, "框选贴回失败");
+      }
+    }
+  );
+
+  /** 蒙版等：原图同管道 PNG 底图，供灯箱对比（消 JPEG↔结果 PNG 假偏移） */
+  app.post("/api/canvas/edit-compare-baseline", gate, async (req, res) => {
+    try {
+      if (!deps?.persistImage) {
+        res.status(500).json({ error: "persistImage 未配置" });
+        return;
+      }
+      const sourceUrl = String(req.body?.sourceUrl || "").trim();
+      if (!sourceUrl) {
+        res.status(400).json({ error: "缺少 sourceUrl" });
+        return;
+      }
+      const { encodeEditCompareBaseline } = await import("./boxRepaintComposite.js");
+      const encoded = await encodeEditCompareBaseline({ projectRoot, sourceUrl });
+      const userId = req.authUser?.id;
+      const compareUrl = await deps.persistImage(
+        `data:image/png;base64,${encoded.comparePng.toString("base64")}`,
+        { userId }
+      );
+      res.json({
+        compareUrl,
+        width: encoded.width,
+        height: encoded.height,
+      });
+    } catch (err) {
+      console.warn("[edit-compare-baseline]", err);
+      canvasError(res, err, "对比底图生成失败");
+    }
+  });
+
+  app.post("/api/canvas/novel-view-depth", gate, (req, res, next) => {
+    const ct = String(req.headers["content-type"] || "");
+    if (ct.includes("multipart/form-data")) return upload.single("image")(req, res, next);
+    next();
+  }, async (req, res) => {
+    try {
+      const sourceUrl = String(req.body?.sourceUrl || "").trim();
+      const fileBuf = req.file?.buffer;
+      if (!sourceUrl && !fileBuf?.length) {
+        res.status(400).json({ error: "缺少 sourceUrl 或 image" });
+        return;
+      }
+      const { estimateNovelViewDepthOnServer } = await import("./novelViewDepthServer.js");
+      const map = await estimateNovelViewDepthOnServer({
+        projectRoot,
+        sourceUrl: sourceUrl || undefined,
+        imageBuffer: fileBuf,
+      });
+      res.json(map);
+    } catch (err) {
+      console.warn("[novel-view-depth]", err);
+      canvasError(res, err, "深度估算失败");
+    }
+  });
+
   /** Comfy 等：尚未接入本站（视频已走 registerCanvasVideoRoutes） */
   const aiStub = (_req: Request, res: Response) => {
     res.status(501).json({
