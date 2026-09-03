@@ -2415,6 +2415,10 @@
   opacity:1;
   pointer-events:auto;
 }
+/* 全景节点右上角是进出预览，勿再叠一颗删节点叉 */
+.image-node.is-pano-node .node-head {
+  display:none !important;
+}
 .image-node .node-head-icon,
 .image-node .node-title,
 .image-node .node-run-status,
@@ -4643,6 +4647,20 @@ html.canvas-text-expand-open { overflow:hidden; }
 .image-action-bar-btn svg.image-action-bar-btn-hd {
   width:22px;
   height:22px;
+}
+.image-action-bar-btn-text {
+  width:auto;
+  gap:6px;
+  padding:0 14px 0 12px;
+  font-family:"Manrope",sans-serif;
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:.04em;
+  color:#e5e2e1;
+}
+.image-action-bar-btn-text svg {
+  width:16px;
+  height:16px;
 }
 .image-action-bar-btn:hover {
   /* 中心淡白光快速溶进透明，叠在胶囊栏上而非实心圆钮 */
@@ -9610,6 +9628,7 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 }
 .crop-canvas.is-canvas-inplace .edit-draw-canvas {
   border-radius:inherit;
+  inset:auto;
 }
 .node.is-image-edit-source {
   /* 保留类名兼容；原地模式不再藏节点 */
@@ -9643,7 +9662,42 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 .image-edit-modal.is-canvas-inline.is-brush-mode .image-edit-brush-dock.active,
 .image-edit-modal.is-canvas-inline.is-rotate-mode .image-edit-rotate-dock.active {
   display:inline-flex;
-  animation: image-edit-dock-in .28s cubic-bezier(.22,1,.36,1) both;
+  animation: image-edit-dock-in .28s cubic-bezier(.22,1,.36,1);
+  pointer-events:auto;
+  z-index:220;
+}
+.infinite-canvas-root.image-edit-open .canvas-float-title,
+.infinite-canvas-root.image-edit-open .gen-float-title,
+.infinite-canvas-root.image-edit-open .image-edit-origin-badge {
+  opacity:0;
+  pointer-events:none !important;
+}
+.image-edit-dock-notice {
+  max-width:220px;
+  margin-left:6px;
+  padding:0 8px;
+  color:#ffb866;
+  font-family:"Manrope",sans-serif;
+  font-size:11px;
+  font-weight:700;
+  line-height:1.3;
+  white-space:nowrap;
+}
+.image-edit-dock-notice[hidden] { display:none !important; }
+#imageEditBrushSaveBtn.image-edit-dock-save {
+  background:#f2f2f2;
+  color:#111;
+  font-weight:750;
+  padding:0 16px;
+  border-radius:12px;
+}
+#imageEditBrushSaveBtn.image-edit-dock-save:hover {
+  background:#fff;
+  color:#111;
+}
+#imageEditBrushSaveBtn.image-edit-dock-save:disabled {
+  opacity:.55;
+  cursor:wait;
 }
 @keyframes image-edit-dock-in {
   from { opacity:0; transform:translateX(-50%) translateY(10px); }
@@ -14739,7 +14793,8 @@ body[data-canvas-theme="light"] #canvas-topbar-slot .current-canvas-time { color
 .node.is-image-expand-source .gen-stage-hero,
 .node.is-image-expand-source .gen-stage-stack-hero,
 .node.is-image-expand-source .gen-stage-stack-peek,
-.node.is-image-expand-source .media-card { visibility:hidden; }
+.node.is-image-expand-source .media-card,
+.node.is-image-expand-source .image-preview-wrap img { visibility:hidden; }
 .infinite-canvas-root:not(.theme-dark) .image-expand-stage { background:#111827; }
 .infinite-canvas-root:not(.theme-dark) .image-expand-dock {
   background:rgba(255,255,255,.96);
@@ -14898,6 +14953,119 @@ body[data-canvas-theme="light"] #canvas-topbar-slot .current-canvas-time { color
 }
 .infinite-canvas-root:not(.theme-dark) .image-novel-orbit-focal input[type="range"] {
   background:rgba(15,23,42,.12);
+}
+
+/* 全景图：节点内 360 预览 + 全屏 */
+.image-preview-wrap.is-pano {
+  width:100%;
+  height:100%;
+  background:#0e0e0e;
+}
+.pano-stage {
+  position:relative;
+  width:100%;
+  height:100%;
+  min-height:0;
+  overflow:hidden;
+  border-radius:18px;
+  cursor:grab;
+  touch-action:none;
+}
+.pano-sphere-canvas {
+  display:block;
+  width:100%;
+  height:100%;
+  outline:none;
+}
+.pano-sphere-canvas.is-dragging,
+.pano-stage:active {
+  cursor:grabbing;
+}
+.pano-fs-host {
+  position:fixed;
+  inset:0;
+  z-index:120;
+  display:flex;
+  flex-direction:column;
+  background:rgba(14,14,14,.94);
+  backdrop-filter:blur(28px) saturate(1.06);
+}
+.pano-fs-stage {
+  flex:1;
+  min-height:0;
+  background:#0e0e0e;
+}
+.pano-fs-bar {
+  position:absolute;
+  left:50%;
+  top:24px;
+  transform:translateX(-50%);
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 10px;
+  border-radius:16px;
+  background:rgba(44,44,48,.88);
+  backdrop-filter:blur(28px) saturate(1.08);
+  outline:0.5px solid rgba(255,255,255,.12);
+  box-shadow:0 24px 64px -28px rgba(0,0,0,.55);
+  z-index:2;
+}
+.infinite-canvas-root:not(.theme-dark) .pano-fs-host {
+  background:rgba(248,250,252,.94);
+}
+.infinite-canvas-root:not(.theme-dark) .pano-fs-stage {
+  background:#eceae8;
+}
+.infinite-canvas-root:not(.theme-dark) .pano-fs-bar {
+  background:rgba(255,255,255,.86);
+  outline:0.5px solid rgba(15,23,42,.08);
+}
+.pano-corner {
+  position:absolute;
+  top:10px;
+  right:10px;
+  z-index:5;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:6px;
+  pointer-events:auto;
+}
+.pano-mode-btn {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  height:32px;
+  padding:0 12px;
+  border:0;
+  border-radius:999px;
+  background:rgba(14,14,14,.62);
+  backdrop-filter:blur(22px) saturate(1.08);
+  color:#e5e2e1;
+  font-family:"Manrope",sans-serif;
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:.04em;
+  cursor:pointer;
+  outline:0.5px solid rgba(229,226,225,.16);
+  outline-offset:-0.5px;
+  box-shadow:0 18px 40px -24px rgba(0,0,0,.55);
+  white-space:nowrap;
+}
+.pano-mode-btn svg {
+  width:14px;
+  height:14px;
+  flex:0 0 auto;
+  stroke-width:2;
+}
+.pano-mode-btn:hover {
+  background:rgba(24,24,26,.78);
+}
+.infinite-canvas-root:not(.theme-dark) .pano-mode-btn {
+  background:rgba(255,255,255,.86);
+  color:#1c1b1b;
+  outline-color:rgba(15,23,42,.1);
 }
 
 

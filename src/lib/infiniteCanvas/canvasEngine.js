@@ -62,6 +62,13 @@ import {
 } from './novelViewDepth.js';
 import { estimateNovelViewDepth, novelViewDepthModelLabel, shortNovelViewDepthError } from './novelViewDepthEstimate.js';
 import { createNovelViewOrbitView } from './novelViewOrbitView.js';
+import {
+    PANO_FOV_DEFAULT,
+    PANO_PREVIEW_ASPECT,
+    clampPanoCamera,
+    createPanoramaView,
+    panoAspectToCss,
+} from './panoramaSphereView.js';
 let canvasRoot = null;
 function apiFetch(url, options = {}) {
     return fetch(url, { credentials: 'same-origin', ...options });
@@ -104,7 +111,7 @@ function writeLastCanvasId(id){
 }
 function isCanvasInteracting(){
     // 裁剪/画笔/旋转聚焦中也算交互：禁止远程同步把视口打回旧比例
-    return Boolean(dragBoard || dragNode || pendingNodeDrag || resizeNode || minimapDrag || tempLink || selectDrag || isImageEditOpen() || isImageExpandOpen() || isImageCutoutOpen() || isImageUpscaleOpen() || isImageMaskRepaintOpen() || isImageBoxRepaintOpen() || isImageNovelViewOpen() || isImageNovelOrbitOpen() || imageEditViewportAnimActive);
+    return Boolean(dragBoard || dragNode || pendingNodeDrag || resizeNode || minimapDrag || tempLink || selectDrag || isImageEditOpen() || isImageExpandOpen() || isImageCutoutOpen() || isImageUpscaleOpen() || isImagePanoramaOpen() || isImageMaskRepaintOpen() || isImageBoxRepaintOpen() || isImageNovelViewOpen() || isImageNovelOrbitOpen() || imageEditViewportAnimActive);
 }
 /** 焦点在画布可编辑控件内时的上下文（节点表单 / gen-dock） */
 function editingFocusContext(){
@@ -434,6 +441,7 @@ function unmountNodeDom(id){
     if(textNodeDockNodeId === id) removeTextNodeDock();
     if(textFormatBarNodeId === id) removeTextFormatBar();
     if(imageActionBarNodeId === id) removeImageActionBar();
+    disposePanoramaView(id);
 }
 /**
  * 结构变更的局部 DOM 路径：只增删/刷新受影响节点 + 连线。
@@ -1664,6 +1672,13 @@ const RUNNINGHUB_UPSCALE_APP_PATH = '/openapi/v2/topazlabs/image-gigapixel-art-a
 const RUNNINGHUB_UPSCALE_SCALE_OPTIONS = ['1x', '2x', '4x'];
 const RUNNINGHUB_UPSCALE_FORMAT_OPTIONS = ['jpeg', 'png', 'tiff'];
 const RUNNINGHUB_UPSCALE_SUBJECT_OPTIONS = ['All', 'Foreground', 'Background'];
+/** 全景图：RunningHub v2 AI 应用（等距柱状 360，POST /openapi/v2/run/ai-app） */
+const RUNNINGHUB_PANORAMA_APP_ID = '2047927552609624065';
+const RUNNINGHUB_PANORAMA_IMAGE_FIELD = { nodeId: '4', fieldName: 'image' };
+const RUNNINGHUB_PANORAMA_ASPECT_OPTIONS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+const RUNNINGHUB_PANORAMA_QUALITY_OPTIONS = ['low', 'medium', 'high'];
+const RUNNINGHUB_PANORAMA_RESOLUTION_OPTIONS = ['1k', '2k', '4k'];
+const RUNNINGHUB_PANORAMA_DEFAULTS = { aspectRatio: '21:9', quality: 'medium', resolution: '4k' };
 let imageExpandState = null;
 let imageExpandEl = null;
 let imageExpandDrag = null;
@@ -1695,6 +1710,13 @@ let imageBoxRepaintDrag = null;
 let imageUpscaleState = null;
 let imageUpscaleEl = null;
 let imageUpscaleUiWired = false;
+/** 全景图：聚焦面板（复用扩图 dock 视觉 + 三个下拉） */
+let imagePanoramaState = null;
+let imagePanoramaEl = null;
+let imagePanoramaUiWired = false;
+const panoramaViews = new Map();
+let panoFullscreenEl = null;
+let panoFullscreenNodeId = '';
 /** 新视角：图上画箭头 → 视角指令 → 图片生成节点同一套 API */
 let imageNovelViewState = null;
 let imageNovelViewEl = null;
@@ -1721,6 +1743,8 @@ let editDrawUndoStack = [];
 let editDrawRedoStack = [];
 /** 画笔层是否有未应用笔迹（避免对大图全量 getImageData） */
 let editDrawDirty = false;
+let imageEditApplyLock = false;
+let imageEditNoticeTimer = 0;
 /** 文字工具：画布上变换框（PS 式拉伸/等比/旋转）；Enter 后仍保留为可点选对象，保存时才烙印 */
 let brushTextInline = null;
 let brushTextItems = [];
@@ -4139,6 +4163,7 @@ function applyViewport(){
     if(imageExpandState) positionImageExpandOverlay();
     if(imageCutoutState) positionImageCutoutOverlay();
     if(imageUpscaleState) positionImageUpscaleOverlay();
+    if(imagePanoramaState) positionImagePanoramaOverlay();
     if(imageMaskRepaintState) positionImageMaskRepaintOverlay();
     if(imageBoxRepaintState) positionImageBoxRepaintOverlay();
     if(imageNovelViewState) positionImageNovelViewOverlay();
@@ -4264,6 +4289,7 @@ const PORT_MAGNET_CHROME_SEL = [
     '.image-edit-rotate-dock',
     '.crop-aspect-menu',
     '.image-expand-host',
+    '.pano-fs-host',
 ].join(',');
 function isPortMagnetChrome(el){
     return Boolean(el?.closest?.(PORT_MAGNET_CHROME_SEL));
@@ -6885,6 +6911,7 @@ async function createCanvas(options = {}){
         }
         canvas = data.canvas;
         canvas.logs = canvas.logs || [];
+        disposeAllPanoramaViews();
         nodes = canvas.nodes || [];
         connections = canvas.connections || [];
         viewport = canvas.viewport || {x:0, y:0, scale:1};
@@ -7147,6 +7174,7 @@ async function openCanvas(id, options = {}){
             return;
         }
         canvas.logs = canvas.logs || [];
+        disposeAllPanoramaViews();
         nodes = canvas.nodes || [];
         connections = canvas.connections || [];
         undoStack = [];
@@ -7465,6 +7493,7 @@ async function returnToCanvasManager(){
     }
     writeLastCanvasId('');
     stopCanvasRemotePolling();
+    disposeAllPanoramaViews();
     canvas = null;
     nodes = [];
     connections = [];
@@ -7535,6 +7564,7 @@ async function deleteCanvas(id, event){
         pendingDeleteCanvasId = null;
         canvases = canvases.filter(item => item.id !== id);
         if(deletingCurrent){
+            disposeAllPanoramaViews();
             canvas = null;
             nodes = [];
             connections = [];
@@ -7721,6 +7751,13 @@ function ensureImageEditorUi(){
         if(event.target.closest('.brush-text-transform, .image-edit-head, .image-edit-tools, .image-edit-actions, .image-edit-mode, .image-edit-crop-dock, .image-edit-brush-dock, .crop-aspect-menu, #cropBox, #cropHandle')) return;
         if(!event.target.closest('.crop-canvas, #cropCanvas, #editDrawCanvas')) return;
         beginEditDraw(event);
+    }, true);
+    on(document, 'click', event => {
+        const btn = event.target.closest?.('#imageEditBrushSaveBtn, #imageEditApplyBtn, #imageEditRotateSaveBtn');
+        if(!btn || !isImageEditOpen()) return;
+        event.preventDefault();
+        event.stopPropagation();
+        applyImageEdit();
     }, true);
     on(document, 'pointermove', event => {
         syncEraserCursor(event);
@@ -12664,14 +12701,14 @@ function viewportTargetForNodeFocus(node, opts = {}){
     const w = Math.max(48, Number(nodeEl?.offsetWidth || node.w || 260));
     const h = Math.max(48, Number(nodeEl?.offsetHeight || node.h || 300));
     const boardRect = board.getBoundingClientRect();
-    const mode = opts.mode === 'brush' ? 'brush' : opts.mode === 'expand' ? 'expand' : opts.mode === 'cutout' ? 'cutout' : opts.mode === 'upscale' ? 'upscale' : opts.mode === 'repaint' ? 'repaint' : opts.mode === 'novel-view' || opts.mode === 'novel-view-orbit' ? 'novel-view' : 'crop';
+    const mode = opts.mode === 'brush' ? 'brush' : opts.mode === 'expand' ? 'expand' : opts.mode === 'cutout' ? 'cutout' : opts.mode === 'upscale' ? 'upscale' : opts.mode === 'panorama' ? 'panorama' : opts.mode === 'repaint' ? 'repaint' : opts.mode === 'novel-view' || opts.mode === 'novel-view-orbit' ? 'novel-view' : 'crop';
     let marginTop = mode === 'brush' ? 96 : 56;
     let marginBottom = mode === 'crop' ? 110 : 56;
     let marginX = 72;
     let focusW = w;
     let focusH = h;
     let fill = 0.92;
-    if(mode === 'cutout' || mode === 'upscale' || mode === 'repaint' || mode === 'novel-view'){
+    if(mode === 'cutout' || mode === 'upscale' || mode === 'panorama' || mode === 'repaint' || mode === 'novel-view'){
         marginTop = mode === 'repaint' ? 96 : 72;
         marginBottom = 96;
         marginX = 80;
@@ -12774,11 +12811,38 @@ function resizeEditDrawCanvas(){
     const w = Math.max(1, exportImg?.naturalWidth || display.naturalWidth || display.clientWidth || 1);
     const h = Math.max(1, exportImg?.naturalHeight || display.naturalHeight || display.clientHeight || 1);
     if(canvasEl.width !== w || canvasEl.height !== h){
+        // 改 width/height 会清空位图；聚焦放大时常从显示尺寸切到原图像素，必须把已画笔迹带过去
+        let backup = null;
+        if(canvasEl.width > 1 && canvasEl.height > 1){
+            try {
+                backup = document.createElement('canvas');
+                backup.width = canvasEl.width;
+                backup.height = canvasEl.height;
+                backup.getContext('2d').drawImage(canvasEl, 0, 0);
+            } catch(_){
+                backup = null;
+            }
+        }
         canvasEl.width = w;
         canvasEl.height = h;
+        if(backup){
+            try { canvasEl.getContext('2d').drawImage(backup, 0, 0, w, h); } catch(_){ /* ignore */ }
+        }
     }
+    const host = canvasEl.parentElement;
+    if(host && display.isConnected && host.contains(display)){
+        const hr = host.getBoundingClientRect();
+        const ir = display.getBoundingClientRect();
+        canvasEl.style.left = `${ir.left - hr.left}px`;
+        canvasEl.style.top = `${ir.top - hr.top}px`;
+        canvasEl.style.right = 'auto';
+        canvasEl.style.bottom = 'auto';
+        canvasEl.style.width = `${Math.max(1, ir.width)}px`;
+        canvasEl.style.height = `${Math.max(1, ir.height)}px`;
+    } else {
         canvasEl.style.width = `${display.clientWidth || 1}px`;
         canvasEl.style.height = `${display.clientHeight || 1}px`;
+    }
     brushTextItems.forEach(syncBrushTextItemBox);
 }
 function setImageEditMode(mode, userTouched=false){
@@ -14331,8 +14395,55 @@ function addGeneratedImageNode(file, sourceNode, suffix, offsetX=0, extra={}){
     return next;
 }
 function normalizeImageEditOrigin(kind){
-    if(kind === 'brush' || kind === 'rotate' || kind === 'crop' || kind === 'expand' || kind === 'cutout' || kind === 'upscale' || kind === 'repaint' || kind === 'box-repaint' || kind === 'novel-view' || kind === 'novel-view-orbit') return kind;
+    if(kind === 'brush' || kind === 'rotate' || kind === 'crop' || kind === 'expand' || kind === 'cutout' || kind === 'upscale' || kind === 'panorama' || kind === 'repaint' || kind === 'box-repaint' || kind === 'novel-view' || kind === 'novel-view-orbit') return kind;
     return '';
+}
+function isPanoramaImageNode(node){
+    return Boolean(node && node.type === 'image' && normalizeImageEditOrigin(node.editOrigin) === 'panorama');
+}
+function isPanoramaPreviewLive(node){
+    return isPanoramaImageNode(node) && node._panoPreview !== false;
+}
+function panoramaModeToggleHtml(node){
+    if(!isPanoramaImageNode(node) || !node.url) return '';
+    const live = isPanoramaPreviewLive(node);
+    const en = langIsEn();
+    const exitLabel = en ? 'Exit panorama preview' : '退出全景预览';
+    const enterLabel = en ? 'Enter panorama preview' : '进入全景预览';
+    const btn = live
+        ? `<button type="button" class="pano-mode-btn pano-mode-btn-corner" data-pano-mode="exit" title="${escapeAttr(exitLabel)}"><i data-lucide="image"></i><span>${escapeHtml(exitLabel)}</span></button>`
+        : `<button type="button" class="pano-mode-btn pano-mode-btn-corner" data-pano-mode="enter" title="${escapeAttr(enterLabel)}"><i data-lucide="globe"></i><span>${escapeHtml(enterLabel)}</span></button>`;
+    return `<div class="pano-corner">${btn}</div>`;
+}
+function bindPanoramaModeButtons(root, node){
+    root?.querySelectorAll?.('[data-pano-mode]').forEach(btn => {
+        btn.addEventListener('mousedown', e => e.stopPropagation());
+        btn.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            setPanoramaPreviewLive(node, btn.getAttribute('data-pano-mode') === 'enter');
+        });
+    });
+}
+function setPanoramaPreviewLive(node, live){
+    if(!isPanoramaImageNode(node) || !node.url) return;
+    const next = Boolean(live);
+    if(isPanoramaPreviewLive(node) === next) return;
+    pushUndo();
+    if(!next) disposePanoramaView(node.id);
+    node._panoPreview = next;
+    fitPanoramaNodeFrame(node, nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`));
+    refreshNodes([node.id]);
+    if(next){
+        const wrap = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"] .pano-stage`);
+        if(wrap) mountPanoramaPreview(wrap, node);
+    }
+    if(selected.has(node.id)) remountImageActionBar(node);
+    scheduleImageFitGeometry();
+    scheduleSaveNow();
+    setStatus(next
+        ? (langIsEn() ? 'Panorama preview · drag to look around' : '全景预览 · 拖动画面看四周')
+        : (langIsEn() ? 'Panorama still · 21:9' : '已退出预览 · 21:9 整图'));
 }
 function imageEditOriginLabel(kind){
     const k = normalizeImageEditOrigin(kind);
@@ -14342,6 +14453,7 @@ function imageEditOriginLabel(kind){
     if(k === 'expand') return langIsEn() ? 'Expand' : '扩图';
     if(k === 'cutout') return langIsEn() ? 'Cutout' : '抠图';
     if(k === 'upscale') return langIsEn() ? 'Upscale' : '高清放大';
+    if(k === 'panorama') return langIsEn() ? 'Panorama' : '全景图';
     if(k === 'repaint') return langIsEn() ? 'Mask repaint' : '蒙版重绘';
     if(k === 'box-repaint') return langIsEn() ? 'Box repaint' : '框选重绘';
     if(k === 'novel-view') return langIsEn() ? 'New view' : '新视角';
@@ -14380,7 +14492,7 @@ function imageEditOriginBadgeHtml(node){
     const fallback = imageEditOriginLabel(node?.editOrigin);
     if(!fallback) return '';
     const label = nodeFloatTitleCustom(node) || fallback;
-    const icon = node.editOrigin === 'box-repaint' ? 'square' : node.editOrigin === 'repaint' ? 'paintbrush' : (node.editOrigin === 'novel-view' || node.editOrigin === 'novel-view-orbit') ? 'move-3d' : 'image';
+    const icon = node.editOrigin === 'box-repaint' ? 'square' : node.editOrigin === 'repaint' ? 'paintbrush' : node.editOrigin === 'panorama' ? 'globe' : (node.editOrigin === 'novel-view' || node.editOrigin === 'novel-view-orbit') ? 'move-3d' : 'image';
     return `<span class="canvas-float-title image-edit-origin-badge" data-edit-origin="${escapeAttr(node.editOrigin)}" title="${escapeAttr(label)}"><i data-lucide="${icon}"></i><span class="float-title-label" data-float-rename="1">${escapeHtml(label)}</span></span>`;
 }
 /** 画布外导入的图片/视频：左上浮标显示文件名（无编辑来源说明时） */
@@ -14918,6 +15030,8 @@ function positionImageEditTopDock(dockId, mode){
         dock.style.bottom = '';
         dock.style.transform = '';
         dock.style.zIndex = '';
+        dock.style.visibility = '';
+        dock.style.pointerEvents = '';
         return;
     }
     const img = editDisplayImage();
@@ -14925,12 +15039,22 @@ function positionImageEditTopDock(dockId, mode){
     const rect = img.getBoundingClientRect();
     if(rect.width < 8 || rect.height < 8) return;
     const gap = 18;
+    const pad = 10;
     dock.style.position = 'fixed';
-    dock.style.left = `${rect.left + rect.width / 2}px`;
-    dock.style.top = 'auto';
-    dock.style.bottom = `${Math.max(0, window.innerHeight - rect.top + gap)}px`;
+    dock.style.pointerEvents = 'auto';
+    dock.style.bottom = 'auto';
     dock.style.transform = 'translateX(-50%)';
-    dock.style.zIndex = '40';
+    const dockH = Math.max(48, dock.offsetHeight || 48);
+    const dockW = Math.max(160, dock.offsetWidth || 160);
+    let top = rect.top - gap - dockH;
+    if(top < pad) top = rect.bottom + gap;
+    top = Math.max(pad, Math.min(top, window.innerHeight - dockH - pad));
+    let left = rect.left + rect.width / 2;
+    const half = dockW / 2;
+    left = Math.max(half + pad, Math.min(left, window.innerWidth - half - pad));
+    dock.style.left = `${left}px`;
+    dock.style.top = `${top}px`;
+    dock.style.zIndex = '220';
 }
 function positionImageEditBrushDock(){
     positionImageEditTopDock('imageEditBrushDock', 'brush');
@@ -15079,6 +15203,7 @@ async function openImageEditorCore({nodeId, url, name, saveTarget, mode='crop'})
     closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
     closeImageNovelView({ restoreViewport: false, syncBar: false });
     closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
+    closeImagePanorama({ restoreViewport: false, syncBar: false });
     ensureImageEditorUi();
     const focusId = nodeId || saveTarget?.ownerNodeId || saveTarget?.nodeId || '';
     const editMode = mode === 'brush' ? 'brush' : mode === 'rotate' ? 'rotate' : 'crop';
@@ -15158,7 +15283,11 @@ async function openImageEditorCore({nodeId, url, name, saveTarget, mode='crop'})
         renderCropBox();
         positionImageEditCropDock();
     }
-    if(editMode === 'rotate') syncImageEditRotatePreview();
+    if(editMode === 'brush') positionImageEditBrushDock();
+    if(editMode === 'rotate'){
+        syncImageEditRotatePreview();
+        positionImageEditRotateDock();
+    }
     requestAnimationFrame(() => {
         if(!cropState) return;
         resizeEditDrawCanvas();
@@ -15167,7 +15296,11 @@ async function openImageEditorCore({nodeId, url, name, saveTarget, mode='crop'})
             renderCropBox();
             positionImageEditCropDock();
         }
-        if(imageEditMode === 'rotate') syncImageEditRotatePreview();
+        if(imageEditMode === 'brush') positionImageEditBrushDock();
+        if(imageEditMode === 'rotate'){
+            syncImageEditRotatePreview();
+            positionImageEditRotateDock();
+        }
     });
 }
 function normalizeImageEditMode(mode){
@@ -15491,24 +15624,31 @@ async function canvasToPngBlob(canvasEl){
     });
 }
 async function applyImageBrush(){
-    if(!cropState) return;
-    flushBrushTextToCanvas();
+    if(imageEditApplyLock) return;
+    if(!cropState){
+        imageEditNotice(langIsEn() ? 'Brush editor is not open.' : '画笔编辑未打开。');
+        return;
+    }
+    try { flushBrushTextToCanvas(); } catch(_){ /* ignore */ }
     const exportImg = editExportImage();
     const draw = editDrawCanvas();
     if(!draw?.width || !draw?.height){
-        softAlert(langIsEn() ? 'Brush layer not ready. Close and reopen.' : '画笔层未就绪，请关闭后重新打开。');
+        imageEditNotice(langIsEn() ? 'Brush layer not ready. Close and reopen.' : '画笔层未就绪，请关闭后重新打开。');
         return;
     }
     if(!editDrawDirty && !editCanvasHasPixels()){
-        softAlert(langIsEn() ? 'Draw something before applying.' : '请先绘制内容再点应用。');
+        imageEditNotice(langIsEn() ? 'Draw something before applying.' : '请先绘制内容再点应用。');
         return;
     }
     const srcUrl = String(exportImg?.currentSrc || exportImg?.src || cropState.saveTarget?.url || '').trim();
     let baseImg = (exportImg?.naturalWidth && exportImg?.naturalHeight) ? exportImg : null;
+    const btn = domGet('imageEditBrushSaveBtn');
+    imageEditApplyLock = true;
+    if(btn) btn.disabled = true;
     try {
         if(!baseImg && srcUrl) baseImg = await loadImageBitmapForExport(srcUrl);
         if(!baseImg?.naturalWidth){
-            softAlert(langIsEn() ? 'Image not loaded yet. Close and reopen the editor.' : '图片尚未加载完成，请关闭后重新打开编辑。');
+            imageEditNotice(langIsEn() ? 'Image not loaded yet. Close and reopen the editor.' : '图片尚未加载完成，请关闭后重新打开编辑。');
             return;
         }
         const canvasEl = document.createElement('canvas');
@@ -15518,7 +15658,6 @@ async function applyImageBrush(){
         try {
             ctx.drawImage(baseImg, 0, 0, canvasEl.width, canvasEl.height);
         } catch(_){
-            // 跨域污染：改走 fetch blob 解码
             if(!srcUrl) throw new Error('draw failed');
             baseImg = await loadImageBitmapForExport(srcUrl);
             ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
@@ -15529,7 +15668,6 @@ async function applyImageBrush(){
         try {
             blob = await canvasToPngBlob(canvasEl);
         } catch(_){
-            // 仍污染时整图走 fetch 底图再叠画笔
             if(!srcUrl) throw new Error('export failed');
             baseImg = await loadImageBitmapForExport(srcUrl);
             canvasEl.width = baseImg.naturalWidth;
@@ -15544,20 +15682,23 @@ async function applyImageBrush(){
         const suffix = brushTool === 'label' ? '_mark' : '_paint';
         const file = await uploadCroppedBlob(blob, `${base}${suffix}.png`);
         if(!file?.url){
-            softAlert(langIsEn() ? 'Upload failed. Check network and try again.' : '上传失败，请检查网络后重试。');
+            imageEditNotice(langIsEn() ? 'Upload failed. Check network and try again.' : '上传失败，请检查网络后重试。');
             return;
         }
         if(await commitImageEditorFile(file)){
             editDrawDirty = false;
             closeImageEditor();
         } else {
-            softAlert(langIsEn() ? 'Could not write painted image back to the node.' : '画笔结果未能写回节点。');
+            imageEditNotice(langIsEn() ? 'Could not write painted image back to the node.' : '画笔结果未能写回节点。');
         }
     } catch(err){
         console.warn('[applyImageBrush]', err);
-        softAlert(langIsEn()
+        imageEditNotice(langIsEn()
             ? 'Apply brush failed. Re-upload a local image or try again.'
             : '应用画笔失败。可改用本地上传的图片，或关闭后重试。');
+    } finally {
+        imageEditApplyLock = false;
+        if(btn && btn.isConnected) btn.disabled = false;
     }
 }
 async function applyImageGridSplit(){
@@ -15593,7 +15734,25 @@ async function applyImageGridSplit(){
         scheduleSave();
     }
 }
+function imageEditNotice(message){
+    const text = String(message || '').trim();
+    if(!text) return;
+    softAlert(text);
+    const dock = domGet('imageEditBrushDock') || domGet('imageEditRotateDock') || domGet('imageEditCropDock');
+    if(!dock) return;
+    let n = dock.querySelector('.image-edit-dock-notice');
+    if(!n){
+        n = document.createElement('span');
+        n.className = 'image-edit-dock-notice';
+        dock.appendChild(n);
+    }
+    n.textContent = text;
+    n.hidden = false;
+    clearTimeout(imageEditNoticeTimer);
+    imageEditNoticeTimer = setTimeout(() => { n.hidden = true; }, 2800);
+}
 function applyImageEdit(){
+    if(imageEditApplyLock) return;
     if(imageEditMode === 'brush') return applyImageBrush();
     if(imageEditMode === 'rotate') return applyImageRotate();
     return applyImageCrop();
@@ -16048,13 +16207,13 @@ function restoreOutputScrolls(state){
     });
 }
 function isImageNodeFloatChromeTarget(target){
-    return Boolean(target?.closest?.('.canvas-float-title, .gen-float-title, .image-edit-origin-badge, .float-title-label, .float-title-input'));
+    return Boolean(target?.closest?.('.canvas-float-title, .gen-float-title, .image-edit-origin-badge, .float-title-label, .float-title-input, .pano-mode-btn'));
 }
 function isNodeControl(target){
     // 图台/轻量结果台主媒体：允许拖节点与 Alt 复制（含 video 结果）
     if(target?.closest?.('.gen-stage-hero, .gen-stage-frame, .agent-result-hero, .agent-result-frame')) return false;
     // 注意：.gen-stage / 图台主图不计入控件，单击需选中节点以唤出下方控制台
-    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .image-action-bar-host, .image-expand-host, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs, .gen-stage-tile, .gen-stage-tile-actions, .gen-stage-grid, .gen-stage-stack-expand, .gen-stage-grid-collapse, .gen-stage-stack, .float-title-label, .float-title-input, .canvas-float-title.is-renaming');
+    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .image-action-bar-host, .image-expand-host, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs, .gen-stage-tile, .gen-stage-tile-actions, .gen-stage-grid, .gen-stage-stack-expand, .gen-stage-grid-collapse, .gen-stage-stack, .float-title-label, .float-title-input, .canvas-float-title.is-renaming, .pano-stage, .pano-sphere-canvas, .pano-fs-host, .pano-mode-btn');
 }
 function destroyLTXEditor(node){
     if(!node?._ltxEditor) return;
@@ -16083,7 +16242,7 @@ function renderNode(node){
     const hasFixedSize = Boolean(node.h || size.h);
     const inGroup = nodes.some(g => (g.type === 'group' || g.type === 'promptGroup' || g.type === 'imageBatch') && (g.items || []).includes(node.id));
     // 视频反推挂 rh-node：复用 RH sized/scroll 壳，避免底栏被井区 min-height 裁掉
-    el.className = `node ${node.type}-node ${node.type === 'videoReverse' ? 'rh-node ' : ''}${node.type === 'frameStack' ? 'output-node ' : ''}${node.type === 'textOutput' && node.kind === 'mxShell' ? 'is-mxShell ' : ''}${node.type === 'textOutput' && node.kind === 'deepWhite' ? 'is-deepWhite ' : ''}${inGroup ? 'group-member ' : ''}${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''} ${isNodeDisabled(node) ? 'is-disabled' : ''}`;
+    el.className = `node ${node.type}-node ${node.type === 'videoReverse' ? 'rh-node ' : ''}${node.type === 'frameStack' ? 'output-node ' : ''}${node.type === 'textOutput' && node.kind === 'mxShell' ? 'is-mxShell ' : ''}${node.type === 'textOutput' && node.kind === 'deepWhite' ? 'is-deepWhite ' : ''}${inGroup ? 'group-member ' : ''}${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''} ${isNodeDisabled(node) ? 'is-disabled' : ''}${isPanoramaImageNode(node) ? ' is-pano-node' : ''}`;
     el.style.left = `${node.x}px`;
     el.style.top = `${node.y}px`;
     el.style.width = `${node.w || size.w}px`;
@@ -16174,10 +16333,12 @@ function renderNode(node){
                 startNodeDrag(e, node);
             };
             refreshOutputTimer();
+            if(isPanoramaImageNode(node)) fitPanoramaNodeFrame(node, el);
         } else if(node.url) {
             const missing = isMissingAssetUrl(node.url);
             const mediaKind = mediaKindForNode(node);
-            const isEditableImage = mediaKind === 'image' && !missing;
+            const isPanoLive = isPanoramaPreviewLive(node) && mediaKind === 'image' && !missing;
+            const isEditableImage = mediaKind === 'image' && !missing && !isPanoLive;
             // 静帧：无框纯图（无 caption）；音视频保留卡片+标题
             const stillCaption = missing
                 ? `<div class="image-caption text-[11px] text-gray-400 truncate">${escapeHtml(node.name || 'image')} · ${langIsEn() ? 'missing' : '文件缺失'}</div>`
@@ -16188,7 +16349,15 @@ function renderNode(node){
             const floatBadge = imageMediaFloatTitleHtml(node);
             if(floatBadge) el.classList.add('has-edit-origin');
             // 说明/文件名在预览框上方，不叠在画面内角标上
-            body.innerHTML = `${floatBadge}<div class="image-preview-wrap">${missing ? missingAssetHtml(node.url) : `<img src="${escapeAttr(canvasThumbUrl(node.url))}" data-full-src="${escapeAttr(node.url)}" draggable="false" alt="" loading="lazy" decoding="async">`}${skipBadge}</div>${stillCaption}`;
+            const previewInner = missing
+                ? missingAssetHtml(node.url)
+                : isPanoLive
+                    ? `<div class="pano-stage" data-pano-stage></div>`
+                    : `<img src="${escapeAttr(canvasThumbUrl(node.url))}" data-full-src="${escapeAttr(node.url)}" draggable="false" alt="" loading="lazy" decoding="async">`;
+            const panoCorner = isPanoramaImageNode(node) && !missing && mediaKind === 'image'
+                ? panoramaModeToggleHtml(node)
+                : '';
+            body.innerHTML = `${floatBadge}<div class="image-preview-wrap${isPanoLive ? ' is-pano' : ''}">${previewInner}${panoCorner}${skipBadge}</div>${stillCaption}`;
             if(!missing && mediaKind !== 'image'){
                 const mediaHtml = mediaKind === 'video'
                     ? `<div class="media-card video-card"><div class="video-player-wrap"><video src="${escapeAttr(node.url)}" data-url="${escapeAttr(node.url)}" controls preload="auto" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video><button type="button" class="btn-capture-frame">${langIsEn() ? 'Capture frame' : '截取当前帧'}</button></div></div>`
@@ -16215,7 +16384,7 @@ function renderNode(node){
             body.onmousedown = e => {
                 if(isImageEditOpen()) return;
                 if(isImageNodeFloatChromeTarget(e.target)) return;
-                if(e.target?.closest?.('#cropBox, #cropHandle, #editDrawCanvas, .crop-canvas.is-canvas-inplace')) return;
+                if(e.target?.closest?.('#cropBox, #cropHandle, #editDrawCanvas, .crop-canvas.is-canvas-inplace, .pano-stage, .pano-sphere-canvas')) return;
                 if(e.detail >= 2){
                     openPreview(e);
                     return;
@@ -16245,7 +16414,16 @@ function renderNode(node){
                 }, true);
             }
             if(isEditableImage) body.addEventListener('dblclick', openPreview);
-            if(loadedImg && loadedImg.complete && loadedImg.naturalHeight > 0){
+            bindPanoramaModeButtons(body, node);
+            if(isPanoLive){
+                fitPanoramaNodeFrame(node, el);
+                const panoStage = body.querySelector('.pano-stage');
+                if(panoStage) mountPanoramaPreview(panoStage, node);
+                scheduleImageFitGeometry();
+            } else if(isPanoramaImageNode(node) && mediaKind === 'image' && !missing){
+                fitPanoramaNodeFrame(node, el);
+                scheduleImageFitGeometry();
+            } else if(loadedImg && loadedImg.complete && loadedImg.naturalHeight > 0){
                 fitImageNodeToNaturalAspect(node, el, loadedImg);
                 scheduleImageFitGeometry();
             } else if(loadedImg) {
@@ -22611,6 +22789,7 @@ function markImageBatchLayoutDirty(batchId){
 }
 function fitImageNodeToNaturalAspect(node, el, img){
     if(!node || node.type !== 'image' || !img) return;
+    if(isPanoramaImageNode(node)) return;
     if(mediaKindForNode(node) !== 'image') return;
     const nw = img.naturalWidth || 0;
     const nh = img.naturalHeight || 0;
@@ -25630,6 +25809,23 @@ function bindImageActionBar(host, target){
         e.stopPropagation();
         void openImageUpscale(target);
     });
+    host.querySelector('[data-action="panorama"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void openImagePanorama(target);
+    });
+    host.querySelector('[data-action="pano-capture"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void capturePanoramaStill(target.node);
+    });
+    host.querySelector('[data-action="pano-reset"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        resetPanoramaView(target.node);
+    });
+    host.querySelector('[data-action="pano-fs"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        openPanoramaFullscreen(target.node);
+    });
+    bindPanoramaModeButtons(host, target.node);
     bindImageNovelViewMenu(host, target);
     bindImageRepaintMenu(host, target);
     host.querySelector('[data-action="edit"]')?.addEventListener('click', e => {
@@ -26038,6 +26234,7 @@ async function openImageMaskRepaint(target){
     closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
     closeImageNovelView({ restoreViewport: false, syncBar: false });
     closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
+    closeImagePanorama({ restoreViewport: false, syncBar: false });
     wireImageMaskRepaintUi();
     const node = target.node;
     if(!target.url || isMissingAssetUrl(target.url)){
@@ -26571,6 +26768,7 @@ async function openImageBoxRepaint(target){
     closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
     closeImageNovelView({ restoreViewport: false, syncBar: false });
     closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
+    closeImagePanorama({ restoreViewport: false, syncBar: false });
     wireImageBoxRepaintUi();
     const node = target.node;
     if(!target.url || isMissingAssetUrl(target.url)){
@@ -27117,6 +27315,17 @@ function imageActionBarHtmlForTarget(target){
             <button type="button" class="image-action-bar-btn" data-action="enlarge" title="${escapeAttr(en ? 'Enlarge' : '放大查看')}" aria-label="enlarge"><i data-lucide="maximize-2"></i></button>
         </div>`;
     }
+    if(isPanoramaPreviewLive(target?.node)){
+        const exitLabel = en ? 'Exit panorama preview' : '退出全景预览';
+        return `
+        <div class="image-action-bar" role="toolbar" aria-label="${escapeAttr(en ? 'Panorama actions' : '全景图操作')}">
+            <button type="button" class="image-action-bar-btn image-action-bar-btn-text" data-pano-mode="exit" title="${escapeAttr(exitLabel)}"><i data-lucide="image"></i><span>${escapeHtml(exitLabel)}</span></button>
+            <span class="image-action-bar-sep" aria-hidden="true"></span>
+            <button type="button" class="image-action-bar-btn" data-action="pano-capture" title="${escapeAttr(en ? 'Screenshot this view' : '截图')}" aria-label="pano-capture"><i data-lucide="camera"></i></button>
+            <button type="button" class="image-action-bar-btn" data-action="pano-reset" title="${escapeAttr(en ? 'Reset view' : '重置视角')}" aria-label="pano-reset"><i data-lucide="rotate-ccw"></i></button>
+            <button type="button" class="image-action-bar-btn" data-action="pano-fs" title="${escapeAttr(en ? 'Full-screen preview' : '全屏预览')}" aria-label="pano-fs"><i data-lucide="maximize-2"></i></button>
+        </div>`;
+    }
     const repaintMenu = `
             <span class="image-action-repaint-wrap">
                 <button type="button" class="image-action-bar-btn" data-action="repaint" title="${escapeAttr(en ? 'Repaint' : '重绘')}" aria-label="repaint" aria-haspopup="menu" aria-expanded="false"><i data-lucide="sparkles"></i></button>
@@ -27137,12 +27346,13 @@ function imageActionBarHtmlForTarget(target){
                     </button>
                 </div>
             </span>`;
-    return `
+    const imageBar = `
         <div class="image-action-bar" role="toolbar" aria-label="${escapeAttr(en ? 'Image actions' : '图片操作')}">
             <button type="button" class="image-action-bar-btn" data-action="crop" title="${escapeAttr(en ? 'Crop' : '裁剪')}" aria-label="crop"><i data-lucide="crop"></i></button>
             ${IMAGE_EXPAND_ENABLED ? `<button type="button" class="image-action-bar-btn" data-action="expand" title="${escapeAttr(en ? 'Expand / outpaint' : '扩图')}" aria-label="expand"><i data-lucide="expand"></i></button>` : ''}
             <button type="button" class="image-action-bar-btn" data-action="cutout" title="${escapeAttr(en ? 'Cutout / remove background' : '抠图')}" aria-label="cutout"><i data-lucide="wand-2"></i></button>
             <button type="button" class="image-action-bar-btn" data-action="upscale" title="${escapeAttr(en ? 'Upscale (HD)' : '高清放大')}" aria-label="upscale"><svg class="image-action-bar-btn-hd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="5.5" width="21" height="13" rx="2.5"></rect><text x="12" y="16.4" text-anchor="middle" font-family="Manrope, Inter, sans-serif" font-size="10.5" font-weight="800" letter-spacing="-0.2" fill="currentColor" stroke="none">HD</text></svg></button>
+            <button type="button" class="image-action-bar-btn" data-action="panorama" title="${escapeAttr(en ? '360° panorama' : '全景图')}" aria-label="panorama"><i data-lucide="globe"></i></button>
             <span class="image-action-novel-wrap">
                 <button type="button" class="image-action-bar-btn" data-action="novel-view" title="${escapeAttr(en ? 'New viewpoint' : '新视角')}" aria-label="novel-view" aria-haspopup="menu" aria-expanded="false"><i data-lucide="move-3d"></i></button>
                 <div class="image-repaint-menu" role="menu" hidden>
@@ -27171,6 +27381,7 @@ function imageActionBarHtmlForTarget(target){
             <button type="button" class="image-action-bar-btn" data-action="download" title="${escapeAttr(en ? 'Download' : '下载')}" aria-label="download"><i data-lucide="download"></i></button>
             <button type="button" class="image-action-bar-btn" data-action="enlarge" title="${escapeAttr(en ? 'Enlarge' : '放大查看')}" aria-label="enlarge"><i data-lucide="maximize-2"></i></button>
         </div>`;
+    return imageBar;
 }
 function remountImageActionBar(node){
     const shouldEnter = !(imageActionBarNodeId === node?.id && imageActionBarEl?.isConnected && !imageActionBarEl.hidden);
@@ -27746,6 +27957,7 @@ async function openImageExpand(target){
     closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
     closeImageNovelView({ restoreViewport: false, syncBar: false });
     closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
+    closeImagePanorama({ restoreViewport: false, syncBar: false });
     wireImageExpandUi();
     let srcW = 0;
     let srcH = 0;
@@ -28159,6 +28371,7 @@ async function openImageCutout(target){
     closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
     closeImageNovelView({ restoreViewport: false, syncBar: false });
     closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
+    closeImagePanorama({ restoreViewport: false, syncBar: false });
     wireImageCutoutUi();
     const node = target.node;
     if(!target.url || isMissingAssetUrl(target.url)){
@@ -28479,6 +28692,7 @@ async function openImageUpscale(target){
     closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
     closeImageNovelView({ restoreViewport: false, syncBar: false });
     closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
+    closeImagePanorama({ restoreViewport: false, syncBar: false });
     wireImageUpscaleUi();
     const node = target.node;
     if(!target.url || isMissingAssetUrl(target.url)){
@@ -28689,6 +28903,514 @@ async function runImageUpscaleJob(job, targetNode, source, pendingId){
         setStatus('');
         scheduleSaveNow();
     }
+}
+function isImagePanoramaOpen(){
+    return Boolean(imagePanoramaState && imagePanoramaEl?.isConnected);
+}
+function panoramaMenuItems(st, options, dataKey){
+    return options.map(opt => {
+        const active = String(st[dataKey]) === opt ? ' is-active' : '';
+        return `<button type="button" class="image-expand-menu-item${active}" data-pano-${dataKey}="${escapeAttr(opt)}">${escapeHtml(opt)}</button>`;
+    }).join('');
+}
+function buildImagePanoramaHtml(st){
+    const en = langIsEn();
+    return `
+        <div class="image-expand-stage">
+            <img class="image-expand-keep" alt="" draggable="false" />
+        </div>
+        <div class="image-expand-dock" role="toolbar">
+            <span class="image-expand-hint">${escapeHtml(en ? 'Panorama' : '全景图')}</span>
+            <div class="image-expand-drop">
+                <button type="button" class="image-expand-drop-btn" data-pano-menu="aspectRatio" aria-expanded="false">
+                    <span>${escapeHtml(en ? 'Ratio' : '比例')}</span>
+                    <span data-pano-aspect-label>${escapeHtml(st.aspectRatio || RUNNINGHUB_PANORAMA_DEFAULTS.aspectRatio)}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-pano-panel="aspectRatio" hidden>${panoramaMenuItems(st, RUNNINGHUB_PANORAMA_ASPECT_OPTIONS, 'aspectRatio')}</div>
+            </div>
+            <div class="image-expand-drop">
+                <button type="button" class="image-expand-drop-btn" data-pano-menu="quality" aria-expanded="false">
+                    <span>${escapeHtml(en ? 'Quality' : '质量')}</span>
+                    <span data-pano-quality-label>${escapeHtml(st.quality || RUNNINGHUB_PANORAMA_DEFAULTS.quality)}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-pano-panel="quality" hidden>${panoramaMenuItems(st, RUNNINGHUB_PANORAMA_QUALITY_OPTIONS, 'quality')}</div>
+            </div>
+            <div class="image-expand-drop">
+                <button type="button" class="image-expand-drop-btn" data-pano-menu="resolution" aria-expanded="false">
+                    <span>${escapeHtml(en ? 'Res' : '分辨率')}</span>
+                    <span data-pano-resolution-label>${escapeHtml(st.resolution || RUNNINGHUB_PANORAMA_DEFAULTS.resolution)}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-pano-panel="resolution" hidden>${panoramaMenuItems(st, RUNNINGHUB_PANORAMA_RESOLUTION_OPTIONS, 'resolution')}</div>
+            </div>
+            <button type="button" class="gen-btn gen-dock-send" data-pano-act="run" title="${escapeAttr(en ? 'Generate panorama' : '生成全景图')}" aria-label="run">
+                <i data-lucide="arrow-up" class="w-4 h-4"></i>
+            </button>
+        </div>`;
+}
+function closeImagePanoramaMenus(except){
+    imagePanoramaEl?.querySelectorAll('.image-expand-menu').forEach(menu => {
+        if(menu !== except) menu.hidden = true;
+    });
+    imagePanoramaEl?.querySelectorAll('[data-pano-menu]').forEach(btn => {
+        const key = btn.getAttribute('data-pano-menu');
+        const menu = imagePanoramaEl?.querySelector(`[data-pano-panel="${key}"]`);
+        btn.setAttribute('aria-expanded', menu && !menu.hidden ? 'true' : 'false');
+        btn.classList.toggle('is-open', Boolean(menu && !menu.hidden));
+    });
+}
+function bindImagePanoramaChrome(host){
+    host.onpointerdown = e => e.stopPropagation();
+    host.onmousedown = e => e.stopPropagation();
+    host.onclick = e => e.stopPropagation();
+    host.querySelector('[data-pano-act="close"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        closeImagePanorama();
+    });
+    host.querySelectorAll('[data-pano-menu]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            const key = btn.getAttribute('data-pano-menu');
+            const menu = host.querySelector(`[data-pano-panel="${key}"]`);
+            if(!menu) return;
+            const next = menu.hidden;
+            closeImagePanoramaMenus(menu);
+            menu.hidden = !next;
+            btn.setAttribute('aria-expanded', next ? 'true' : 'false');
+            btn.classList.toggle('is-open', next);
+        });
+    });
+    const bindSelect = (dataKey, labelSelector) => {
+        host.querySelectorAll(`[data-pano-${dataKey}]`).forEach(btn => {
+            btn.addEventListener('click', e => {
+                e.stopPropagation();
+                if(!imagePanoramaState) return;
+                imagePanoramaState[dataKey] = btn.getAttribute(`data-pano-${dataKey}`) || '';
+                host.querySelectorAll(`[data-pano-${dataKey}]`).forEach(b => b.classList.toggle('is-active', b === btn));
+                const label = host.querySelector(labelSelector);
+                if(label) label.textContent = imagePanoramaState[dataKey];
+                closeImagePanoramaMenus();
+            });
+        });
+    };
+    bindSelect('aspectRatio', '[data-pano-aspect-label]');
+    bindSelect('quality', '[data-pano-quality-label]');
+    bindSelect('resolution', '[data-pano-resolution-label]');
+    host.querySelector('[data-pano-act="run"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void runImagePanoramaFromPanel();
+    });
+}
+function closeImagePanorama(opts={}){
+    clearImageExpandDockPosition(imagePanoramaEl);
+    imagePanoramaEl?.remove();
+    imagePanoramaEl = null;
+    imagePanoramaState = null;
+    nodesEl?.querySelectorAll?.('.is-image-expand-source')?.forEach(el => el.classList.remove('is-image-expand-source'));
+    if(opts.restoreViewport !== false) restoreImageEditCanvasFocus();
+    if(opts.syncBar !== false) syncImageActionBar();
+}
+function wireImagePanoramaUi(){
+    if(imagePanoramaUiWired) return;
+    imagePanoramaUiWired = true;
+    on(document, 'keydown', event => {
+        if(event.key !== 'Escape') return;
+        if(panoFullscreenEl){
+            event.preventDefault();
+            closePanoramaFullscreen();
+            return;
+        }
+        if(!isImagePanoramaOpen()) return;
+        event.preventDefault();
+        closeImagePanorama();
+    });
+}
+function positionImagePanoramaOverlay(){
+    const st = imagePanoramaState;
+    if(!st || !imagePanoramaEl || !board) return;
+    const hostInfo = findImageEditHost(st.nodeId, st.url);
+    const img = hostInfo?.img;
+    if(!img) return;
+    const imgRect = img.getBoundingClientRect();
+    const boardRect = board.getBoundingClientRect();
+    const width = Math.max(48, imgRect.width);
+    const height = Math.max(48, imgRect.height);
+    imagePanoramaEl.style.left = `${imgRect.left - boardRect.left}px`;
+    imagePanoramaEl.style.top = `${imgRect.top - boardRect.top}px`;
+    imagePanoramaEl.style.width = `${width}px`;
+    imagePanoramaEl.style.height = `${height}px`;
+    const stage = imagePanoramaEl.querySelector('.image-expand-stage');
+    if(stage){
+        stage.style.width = `${width}px`;
+        stage.style.height = `${height}px`;
+    }
+    const keep = imagePanoramaEl.querySelector('.image-expand-keep');
+    if(keep){
+        keep.style.left = '0px';
+        keep.style.top = '0px';
+        keep.style.width = `${width}px`;
+        keep.style.height = `${height}px`;
+    }
+    if(stage) positionImageExpandDock(stage, imagePanoramaEl);
+}
+async function openImagePanorama(target){
+    if(!target?.node || !target.url || !board) return;
+    if(isImageEditOpen()) closeImageEditor();
+    closeImageExpand({ restoreViewport: false, syncBar: false });
+    closeImageCutout({ restoreViewport: false, syncBar: false });
+    closeImageUpscale({ restoreViewport: false, syncBar: false });
+    closeImageMaskRepaint({ restoreViewport: false, syncBar: false });
+    closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
+    closeImageNovelView({ restoreViewport: false, syncBar: false });
+    closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
+    closeImagePanorama({ restoreViewport: false, syncBar: false });
+    wireImagePanoramaUi();
+    const node = target.node;
+    if(!target.url || isMissingAssetUrl(target.url)){
+        softAlert(langIsEn() ? 'No image for panorama' : '没有可生成全景图的图片');
+        return;
+    }
+    imagePanoramaState = {
+        nodeId: node.id,
+        url: target.url,
+        name: target.histItem?.name || node.name || outputImageName(target.url),
+        aspectRatio: RUNNINGHUB_PANORAMA_DEFAULTS.aspectRatio,
+        quality: RUNNINGHUB_PANORAMA_DEFAULTS.quality,
+        resolution: RUNNINGHUB_PANORAMA_DEFAULTS.resolution,
+        running: false,
+    };
+    const host = document.createElement('div');
+    host.className = 'image-expand-host is-opening';
+    host.innerHTML = buildImagePanoramaHtml(imagePanoramaState);
+    const keep = host.querySelector('.image-expand-keep');
+    if(keep){
+        if(shouldUseCrossOriginImage(target.url)) keep.crossOrigin = 'anonymous';
+        keep.src = target.url;
+    }
+    bindImagePanoramaChrome(host);
+    removeImageActionBar();
+    board.appendChild(host);
+    imagePanoramaEl = host;
+    host.style.visibility = 'hidden';
+    refreshIcons(host);
+    const keepReady = (!keep || (keep.complete && keep.naturalWidth))
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            keep.onload = () => resolve();
+            keep.onerror = () => resolve();
+        });
+    positionImagePanoramaOverlay();
+    await keepReady;
+    const hostInfo = findImageEditHost(node.id, target.url);
+    const sourceNodeEl = hostInfo?.host?.closest?.('.node');
+    // 先弹簧放大，再淡入底栏：避免 dock 钉在旧小图屏幕坐标上
+    await prepareImageEditCanvasFocus(node.id, 'panorama');
+    if(!imagePanoramaState || imagePanoramaState.nodeId !== node.id) return;
+    if(!board || !imagePanoramaEl) return;
+    positionImagePanoramaOverlay();
+    sourceNodeEl?.classList?.add('is-image-expand-source');
+    host.style.visibility = '';
+    host.classList.remove('is-opening');
+    host.classList.add('is-open');
+}
+function panoramaLayoutSize(aspectKey){
+    return canvasFitFromAspect(panoAspectToCss(aspectKey));
+}
+function panoramaLiveLayoutSize(){
+    return canvasFitFromAspect(panoAspectToCss(PANO_PREVIEW_ASPECT));
+}
+function panoramaFlatLayoutSize(node){
+    return panoramaLayoutSize(node?._panoAspect || RUNNINGHUB_PANORAMA_DEFAULTS.aspectRatio);
+}
+function spawnPanoramaPendingImageNode(sourceNode, job){
+    if(!sourceNode || !job) return null;
+    const siblings = connections
+        .filter(c => c.from === sourceNode.id)
+        .map(c => nodes.find(n => n.id === c.to))
+        .filter(n => n?.type === 'image')
+        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
+    let offsetX = 0;
+    siblings.forEach(sib => {
+        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
+    });
+    const baseName = String(job.name || 'image').replace(/\.[^.]+$/, '');
+    const next = addGeneratedImageNode({ url: '', name: `${baseName}_panorama` }, sourceNode, '_panorama', offsetX);
+    next.editOrigin = 'panorama';
+    next._editSourceUrl = String(job.url || '').trim();
+    next._panoAspect = String(job.aspectRatio || RUNNINGHUB_PANORAMA_DEFAULTS.aspectRatio);
+    next._panoPreview = true;
+    next._panoCam = clampPanoCamera({ yaw: 0, pitch: 0, fov: PANO_FOV_DEFAULT });
+    const fitted = panoramaLiveLayoutSize();
+    next.w = fitted.w;
+    next.h = fitted.h;
+    next._displayW = fitted.w;
+    next._displayH = fitted.h;
+    if(canConnect(sourceNode.id, next.id) && !connections.some(c => c.from === sourceNode.id && c.to === next.id)){
+        connections.push({id:uid('c'), from:sourceNode.id, to:next.id});
+    }
+    pendingImageEditRefreshIds.add(sourceNode.id);
+    pendingImageEditRefreshIds.add(next.id);
+    return next;
+}
+function runImagePanoramaFromPanel(){
+    const st = imagePanoramaState;
+    if(!st || st.running) return;
+    const node = nodes.find(n => n.id === st.nodeId);
+    if(!node || !st.url || isMissingAssetUrl(st.url)) return;
+    const job = {
+        url: st.url,
+        name: st.name,
+        aspectRatio: st.aspectRatio || RUNNINGHUB_PANORAMA_DEFAULTS.aspectRatio,
+        quality: st.quality || RUNNINGHUB_PANORAMA_DEFAULTS.quality,
+        resolution: st.resolution || RUNNINGHUB_PANORAMA_DEFAULTS.resolution,
+    };
+    closeImagePanorama({ restoreViewport: false });
+    clearImageEditViewportSession();
+    pushUndo();
+    const spawned = spawnPanoramaPendingImageNode(node, job);
+    if(!spawned){
+        softAlert(langIsEn() ? 'Could not create image node.' : '未能创建图片节点');
+        return;
+    }
+    const pendingId = uid('p');
+    const run = {
+        node: { id: node.id },
+        prompt: langIsEn() ? '360° panorama' : '全景图',
+        taskLabel: langIsEn() ? 'Panorama' : '全景图',
+    };
+    pushExpandImagePending(spawned, makePending(pendingId, run, {
+        stageLabel: langIsEn() ? 'Generating panorama…' : '全景图生成中…',
+    }));
+    selected.clear();
+    selected.add(spawned.id);
+    commitStructureDomPatch({ addedIds: [spawned.id], refreshIds: [node.id, spawned.id] });
+    void focusExpandResultNode(spawned.id);
+    scheduleSaveNow();
+    setStatus(langIsEn() ? 'Panorama queued on new node' : '全景图已开始，新节点生成中');
+    void runImagePanoramaJob(job, spawned, node, pendingId);
+}
+async function runImagePanoramaJob(job, targetNode, source, pendingId){
+    const node = () => nodes.find(n => n.id === targetNode?.id);
+    const run = {
+        node: { id: source.id },
+        prompt: langIsEn() ? '360° panorama' : '全景图',
+        taskLabel: langIsEn() ? 'Panorama' : '全景图',
+    };
+    try {
+        if(!node()) throw new Error(langIsEn() ? 'Panorama node missing' : '全景图节点已丢失');
+        const keyFields = rhApiKeyRequestFields(null);
+        const fileName = await rhUploadValueIfNeeded(job.url, null, '2');
+        if(!fileName) throw new Error(langIsEn() ? 'Could not upload source image' : '原图上传失败');
+        const nodeInfoList = [
+            { nodeId: RUNNINGHUB_PANORAMA_IMAGE_FIELD.nodeId, fieldName: RUNNINGHUB_PANORAMA_IMAGE_FIELD.fieldName, fieldValue: fileName },
+            { nodeId: '7', fieldName: 'aspectRatio', fieldValue: job.aspectRatio || RUNNINGHUB_PANORAMA_DEFAULTS.aspectRatio },
+            { nodeId: '7', fieldName: 'quality', fieldValue: job.quality || RUNNINGHUB_PANORAMA_DEFAULTS.quality },
+            { nodeId: '7', fieldName: 'resolution', fieldValue: job.resolution || RUNNINGHUB_PANORAMA_DEFAULTS.resolution },
+        ];
+        const submit = await fetch('/api/runninghub/v2/run-ai-app', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                appId: RUNNINGHUB_PANORAMA_APP_ID,
+                nodeInfoList,
+                instanceType: 'default',
+                usePersonalQueue: 'false',
+                ...keyFields,
+            }),
+        }).then(async r => {
+            const data = await r.json();
+            if(!r.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhFailed'));
+            return data.data || data;
+        });
+        const taskId = submit.taskId;
+        if(!taskId) throw new Error(tr('canvas.rhNoTaskId'));
+        run.request = {
+            task_id: taskId,
+            webappId: RUNNINGHUB_PANORAMA_APP_ID,
+            backend: 'runninghub',
+            mode: 'app',
+            apiKeyId: keyFields.apiKeyId || '',
+            useWallet: Boolean(keyFields.useWallet),
+            version: '2',
+        };
+        const cur = node();
+        if(!cur) throw new Error(langIsEn() ? 'Panorama node missing' : '全景图节点已丢失');
+        const pending = (cur._pending || []).find(p => p.id === pendingId);
+        if(pending){
+            pending.canvasTaskId = String(taskId);
+            pending.canvasTaskType = 'runninghub';
+            pending.run = run;
+            registerCanvasTaskLedger(taskId, {
+                canvasId: canvas?.id || '',
+                hostNodeId: targetNode.id || '',
+                genNodeId: targetNode.id || '',
+                pendingId,
+                run,
+                appendGenerated: false,
+                startedAt: Number(pending.startedAt || nowMs()),
+                canvasTaskType: 'runninghub',
+            });
+        } else {
+            pushExpandImagePending(cur, makePending(pendingId, run, {
+                canvasTaskId: taskId,
+                canvasTaskType: 'runninghub',
+                stageLabel: langIsEn() ? 'Generating panorama…' : '全景图生成中…',
+            }));
+        }
+        refreshNodes([targetNode.id, source.id]);
+        scheduleSaveNow();
+        void pollRunningHubTask(taskId);
+    } catch(err){
+        console.warn('[runImagePanoramaJob]', err);
+        const cur = node();
+        if(cur) markExpandPendingFailed(cur, pendingId, err?.message);
+        softAlert(err?.message || (langIsEn() ? 'Panorama failed' : '全景图失败'));
+        setStatus('');
+        scheduleSaveNow();
+    }
+}
+function disposePanoramaView(nodeId){
+    const rec = panoramaViews.get(nodeId);
+    if(!rec) return;
+    try { rec.view?.dispose(); } catch(_){ /* ignore */ }
+    panoramaViews.delete(nodeId);
+    if(panoFullscreenNodeId === nodeId) closePanoramaFullscreen({ skipReattach: true });
+}
+function disposeAllPanoramaViews(){
+    [...panoramaViews.keys()].forEach(disposePanoramaView);
+    closePanoramaFullscreen({ skipReattach: true });
+}
+function persistPanoramaCamera(node, cam){
+    if(!node) return;
+    node._panoCam = clampPanoCamera(cam);
+}
+function mountPanoramaPreview(wrap, node){
+    if(!wrap || !node?.url) return null;
+    let rec = panoramaViews.get(node.id);
+    if(rec && rec.url === node.url && rec.view){
+        rec.view.attach(wrap);
+        rec.view.setCamera(node._panoCam);
+        return rec.view;
+    }
+    rec?.view?.dispose();
+    const view = createPanoramaView(wrap, {
+        url: node.url,
+        camera: node._panoCam,
+        crossOrigin: shouldUseCrossOriginImage(node.url),
+        onChange: cam => persistPanoramaCamera(node, cam),
+        onInteractStart: e => applyNodeSelection(node.id, e),
+        onDblClick: () => openPanoramaFullscreen(node),
+    });
+    panoramaViews.set(node.id, { url: node.url, view });
+    return view;
+}
+function panoramaViewFor(node){
+    return panoramaViews.get(node?.id)?.view || null;
+}
+function resetPanoramaView(node){
+    const view = panoramaViewFor(node);
+    if(view){
+        view.reset();
+        persistPanoramaCamera(node, view.getCamera());
+        return;
+    }
+    persistPanoramaCamera(node, { yaw: 0, pitch: 0, fov: PANO_FOV_DEFAULT });
+}
+function closePanoramaFullscreen(opts={}){
+    const nodeId = panoFullscreenNodeId;
+    const host = panoFullscreenEl;
+    panoFullscreenEl = null;
+    panoFullscreenNodeId = '';
+    host?.remove();
+    if(opts.skipReattach) return;
+    const node = nodes.find(n => n.id === nodeId);
+    const wrap = nodesEl?.querySelector(`.node[data-id="${CSS.escape(nodeId || '')}"] .pano-stage`);
+    if(node && wrap) mountPanoramaPreview(wrap, node);
+}
+function openPanoramaFullscreen(node){
+    if(!node?.url || !isPanoramaImageNode(node)) return;
+    wireImagePanoramaUi();
+    closePanoramaFullscreen({ skipReattach: true });
+    const en = langIsEn();
+    const host = document.createElement('div');
+    host.className = 'pano-fs-host';
+    host.innerHTML = `
+        <div class="pano-fs-stage"></div>
+        <div class="pano-fs-bar" role="toolbar">
+            <button type="button" class="image-action-bar-btn" data-pano-fs="capture" title="${escapeAttr(en ? 'Screenshot this view' : '截图')}"><i data-lucide="camera"></i></button>
+            <button type="button" class="image-action-bar-btn" data-pano-fs="reset" title="${escapeAttr(en ? 'Reset view' : '重置视角')}"><i data-lucide="rotate-ccw"></i></button>
+            <button type="button" class="image-action-bar-btn" data-pano-fs="close" title="${escapeAttr(en ? 'Close' : '关闭')}"><i data-lucide="x"></i></button>
+        </div>`;
+    host.onpointerdown = e => e.stopPropagation();
+    host.onmousedown = e => e.stopPropagation();
+    host.querySelector('[data-pano-fs="close"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        closePanoramaFullscreen();
+    });
+    host.querySelector('[data-pano-fs="reset"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        resetPanoramaView(node);
+    });
+    host.querySelector('[data-pano-fs="capture"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        void capturePanoramaStill(node);
+    });
+    (canvasRoot || document.body).appendChild(host);
+    panoFullscreenEl = host;
+    panoFullscreenNodeId = node.id;
+    refreshIcons(host);
+    const stage = host.querySelector('.pano-fs-stage');
+    mountPanoramaPreview(stage, node);
+}
+async function capturePanoramaStill(node){
+    if(!node || !isPanoramaImageNode(node)) return;
+    const view = panoramaViewFor(node) || mountPanoramaPreview(
+        nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"] .pano-stage`),
+        node,
+    );
+    if(!view?.captureStill){
+        softAlert(langIsEn() ? 'Panorama view is not ready' : '全景预览尚未就绪');
+        return;
+    }
+    try {
+        const blob = await view.captureStill({ width: 1920, height: 1080 });
+        const baseName = String(node.name || 'panorama').replace(/\.[^.]+$/, '') || 'panorama';
+        const filename = `${baseName}_view_${Date.now()}.jpg`;
+        const form = new FormData();
+        form.append('files', blob, filename);
+        const res = await apiFetch('/api/ai/upload', { method: 'POST', body: form });
+        if(!res.ok) throw new Error(await responseErrorMessage(res, langIsEn() ? 'Upload failed' : '上传失败'));
+        const data = await res.json();
+        const file = (data.files || [])[0];
+        if(!file?.url) throw new Error(langIsEn() ? 'Upload returned no image URL' : '上传未返回图片地址');
+        pushUndo();
+        const imgNode = placeCapturedFrameImageNode(node, file.url, file.name || `${baseName} · view`, { nw: 1920, nh: 1080 });
+        if(!imgNode) throw new Error(langIsEn() ? 'Failed to create image node' : '创建图片节点失败');
+        selected.clear();
+        selected.add(node.id);
+        render();
+        scheduleSave();
+        setStatus(langIsEn() ? 'Panorama screenshot → image node' : '已截取当前视角并连出图片节点');
+    } catch(err){
+        console.warn('[capturePanoramaStill]', err);
+        softAlert(err?.message || (langIsEn() ? 'Screenshot failed' : '截图失败'));
+    }
+}
+function fitPanoramaNodeFrame(node, el){
+    if(!node) return;
+    const fitted = (!node.url || isPanoramaPreviewLive(node))
+        ? panoramaLiveLayoutSize()
+        : panoramaFlatLayoutSize(node);
+    node.w = fitted.w;
+    node.h = fitted.h;
+    node._displayW = fitted.w;
+    node._displayH = fitted.h;
+    if(!el) return;
+    el.style.width = `${fitted.w}px`;
+    el.style.height = `${fitted.h}px`;
+    el.classList.add('sized');
 }
 function isImageNovelViewOpen(){
     return Boolean(imageNovelViewState && imageNovelViewEl?.isConnected);
@@ -29017,6 +29739,7 @@ async function openImageNovelView(target){
     closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
     closeImageNovelView({ restoreViewport: false, syncBar: false });
     closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
+    closeImagePanorama({ restoreViewport: false, syncBar: false });
     wireImageNovelViewUi();
     const node = target.node;
     if(!target.url || isMissingAssetUrl(target.url)){
@@ -29561,6 +30284,7 @@ async function openImageNovelOrbit(target){
     closeImageBoxRepaint({ restoreViewport: false, syncBar: false });
     closeImageNovelView({ restoreViewport: false, syncBar: false });
     closeImageNovelOrbit({ restoreViewport: false, syncBar: false });
+    closeImagePanorama({ restoreViewport: false, syncBar: false });
     wireImageNovelOrbitUi();
     const node = target.node;
     if(!target.url || isMissingAssetUrl(target.url)){
@@ -29774,6 +30498,16 @@ function syncImageActionBar(){
         }
         removeImageActionBar();
         positionImageUpscaleOverlay();
+        return;
+    }
+    if(isImagePanoramaOpen()){
+        const onlyId = selected.size === 1 ? [...selected][0] : null;
+        if(onlyId !== imagePanoramaState.nodeId){
+            closeImagePanorama();
+            return;
+        }
+        removeImageActionBar();
+        positionImagePanoramaOverlay();
         return;
     }
     if(isImageMaskRepaintOpen()){
@@ -36994,7 +37728,7 @@ function applyCompletedRhOutputs(ctx, outputs, meta, taskId){
             }
             out.url = url;
             if(!nodeFloatTitleCustom(out)){
-                out.name = outputImageName(url) || String(out.name || out.editOrigin || 'image').replace(/_(cutout|upscale|repaint|box_repaint|novel_view|novel_orbit)$/, '') || out.editOrigin || 'image';
+                out.name = outputImageName(url) || String(out.name || out.editOrigin || 'image').replace(/_(cutout|upscale|panorama|repaint|box_repaint|novel_view|novel_orbit)$/, '') || out.editOrigin || 'image';
             }
             bindImageEditCompareSource(out, url);
             if(out.editOrigin === 'repaint' && out._editSourceUrl){
@@ -37095,9 +37829,11 @@ function failRunningHubTask(taskId, message){
     const run = pending.run || raw?.run || {};
     const runMs = Math.max(0, nowMs() - Number(pending.startedAt || nowMs()));
     // 抠图结果宿主是「图片节点」：失败时在原位保留失败态，勿留空节点
-    if(out?.type === 'image' && !out.url && (out.editOrigin === 'cutout' || out.editOrigin === 'upscale' || out.editOrigin === 'repaint' || out.editOrigin === 'box-repaint')){
+    if(out?.type === 'image' && !out.url && (out.editOrigin === 'cutout' || out.editOrigin === 'upscale' || out.editOrigin === 'panorama' || out.editOrigin === 'repaint' || out.editOrigin === 'box-repaint')){
         const failLabel = out.editOrigin === 'upscale'
             ? (langIsEn() ? 'Upscale failed' : '高清放大失败')
+            : out.editOrigin === 'panorama'
+                ? (langIsEn() ? 'Panorama failed' : '全景图失败')
             : out.editOrigin === 'box-repaint'
                 ? (langIsEn() ? 'Box repaint failed' : '框选重绘失败')
             : out.editOrigin === 'repaint'
@@ -40593,6 +41329,9 @@ function onNodeDrag(e){
         if(barNode) positionImageActionBar(barNode);
     }
     if(imageExpandState && movingIds.has(imageExpandState.nodeId)) positionImageExpandOverlay();
+    if(imageCutoutState && movingIds.has(imageCutoutState.nodeId)) positionImageCutoutOverlay();
+    if(imageUpscaleState && movingIds.has(imageUpscaleState.nodeId)) positionImageUpscaleOverlay();
+    if(imagePanoramaState && movingIds.has(imagePanoramaState.nodeId)) positionImagePanoramaOverlay();
     if(textFormatBarNodeId && movingIds.has(textFormatBarNodeId) && textFormatBarEl){
         const tBar = nodes.find(n => n.id === textFormatBarNodeId);
         if(tBar) positionTextFormatBar(tBar);
@@ -43141,6 +43880,7 @@ export function disposeInfiniteCanvasEngine({ preserveEditor = false } = {}) {
   } catch(_) {}
   try { flushLiveCanvasDraftPersist(); } catch(_) {}
   try { flushCanvasSaveKeepalive(); } catch(_) {}
+  disposeAllPanoramaViews();
   stopCanvasRemotePolling();
   if(outputTimer){
     clearInterval(outputTimer);

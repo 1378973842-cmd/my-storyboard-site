@@ -1113,7 +1113,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                               <button type="button" className="image-edit-dock-tool" onClick={() => redoEditDrawing()} title="恢复"><i data-lucide="redo-2" className="w-4 h-4"></i></button>
                               <button id="annotationRestoreBtnInline" className="image-edit-dock-tool" type="button" onClick={() => restoreAnnotationBase()} title="恢复原图"><i data-lucide="rotate-ccw" className="w-4 h-4"></i></button>
                           </div>
-                          <button id="imageEditBrushSaveBtn" type="button" className="image-edit-dock-save" onClick={() => applyImageEdit()}><i data-lucide="save" className="w-4 h-4"></i><span>Save</span></button>
+                          <button id="imageEditBrushSaveBtn" type="button" className="image-edit-dock-save" onClick={(e) => { e.stopPropagation(); applyImageEdit(); }}><i data-lucide="save" className="w-4 h-4"></i><span>应用画笔</span></button>
                       </div>
 
                       {/* 旋转与镜像：图片上方工具栏（图2） */}
