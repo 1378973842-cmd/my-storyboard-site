@@ -490,7 +490,9 @@
         { "id": "AG256b", "desc": "修：线上 /uploads 不再 302 到 OSS 签名 URL（改为同源代理：本地 sendFile / OSS 读字节经本站发出），避免画笔/裁剪/旋转/宫格 canvas 跨域失败；素材存在检查与视觉参考图改为本地或 OSS 直读", "status": "done", "priority": 310 },
         { "id": "AG256c", "desc": "修：OSS 同源代理补洞——OSS 走流+Range（视频勿整文件进内存）；画笔/裁剪已 fetch 站内路径；视频截帧剪辑勿对 /uploads 设 crossOrigin=anonymous；九宫格切图 fetch+blob；素材库/缩略图/persist 缺盘时读 OSS", "status": "done", "priority": 311 },
         { "id": "AG256d", "desc": "修：应用画笔/裁剪/旋转不再等上传+OSS+缩略图——blob 先落板关编辑器，后台换 URL；/api/ai/upload 本地写完即返回；图片节点 img eager", "status": "done", "priority": 312 },
-        { "id": "AG256e", "desc": "修：画笔新节点灰底慢刷——节点只显示缩小 JPEG 预览；整图 PNG 后台编码上传；换正式 URL 不再 refreshNodes 重解码", "status": "done", "priority": 313 }
+        { "id": "AG256e", "desc": "修：画笔新节点灰底慢刷——节点只显示缩小 JPEG 预览；整图 PNG 后台编码上传；换正式 URL 不再 refreshNodes 重解码", "status": "done", "priority": 313 },
+        { "id": "AG256f", "desc": "修：灯箱预览走 OSS 签名直链（浏览器直连阿里云），先用节点已显示的图铺上；同源 /uploads 只留给画笔/裁剪 canvas", "status": "done", "priority": 314 },
+        { "id": "AG256g", "desc": "OSS：桶 CORS + 预签名 PUT 直传（拖入/画笔/视频优先打阿里云，失败回退本站）；缩略图 404 回退签名原图", "status": "done", "priority": 315 }
       ]
     }
   ]

@@ -169,9 +169,56 @@ export function signUploadsUrl(
   const key = mapUploadsPathToKey(internalPath);
   const ttl = Number(opts.ttlSeconds || process.env.OSS_SIGN_TTL_SECONDS || 3600);
   const c = getClient();
-  // signatureUrl 依赖 client 的 bucket/region，用默认 endpoint 生成签名 URL
   const url = c.signatureUrl(key, { expires: ttl });
   return url;
+}
+
+/** 浏览器直传：签名 PUT。Content-Type 必须与请求头一字不差。 */
+export function signUploadsPutUrl(
+  internalPath: string,
+  opts: { mime?: string; ttlSeconds?: number } = {}
+): string {
+  const key = mapUploadsPathToKey(internalPath);
+  const ttl = Number(opts.ttlSeconds || 600);
+  const mime = opts.mime || "application/octet-stream";
+  return getClient().signatureUrl(key, {
+    method: "PUT",
+    expires: ttl,
+    "Content-Type": mime,
+  });
+}
+
+function ossCorsOrigins(): string[] {
+  const extra = String(process.env.OSS_CORS_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return [
+    "https://dreamgrid.cn",
+    "https://www.dreamgrid.cn",
+    "http://localhost:3005",
+    "http://127.0.0.1:3005",
+    ...extra,
+  ];
+}
+
+/** 允许浏览器 GET 签名图 / PUT 直传。无 PutBucketCORS 权限时只打日志，不挡启动。 */
+export async function ensureOssBucketCors(): Promise<void> {
+  if (!isOssEnabled()) return;
+  const bucket = process.env.OSS_BUCKET || "";
+  try {
+    await getClient().putBucketCORS(bucket, [
+      {
+        allowedOrigin: ossCorsOrigins(),
+        allowedMethod: ["GET", "HEAD", "PUT", "POST"],
+        allowedHeader: ["*"],
+        exposeHeader: ["ETag", "Content-Length", "x-oss-request-id"],
+        maxAgeSeconds: "3600",
+      },
+    ]);
+  } catch (e) {
+    console.warn("[oss] putBucketCORS 失败（直传会回退本站上传）", (e as Error)?.message);
+  }
 }
 
 function headerVal(headers: Record<string, unknown>, name: string): string {

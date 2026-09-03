@@ -73,6 +73,89 @@ let canvasRoot = null;
 function apiFetch(url, options = {}) {
     return fetch(url, { credentials: 'same-origin', ...options });
 }
+const ossDisplayUrlCache = new Map();
+const ossDisplayUrlInflight = new Map();
+/** 灯箱/预热：有 OSS 时拿签名直链，浏览器不再经 2G 机拉原图。blob/data 原样返回。 */
+async function resolveDisplayMediaUrl(url){
+    const raw = String(url || '').trim();
+    if(!raw || raw.startsWith('blob:') || raw.startsWith('data:') || !raw.startsWith('/uploads/')) return raw;
+    const key = raw.split('?')[0];
+    const hit = ossDisplayUrlCache.get(key);
+    if(hit && hit.exp > Date.now() && hit.url) return hit.url;
+    const pending = ossDisplayUrlInflight.get(key);
+    if(pending) return pending;
+    const job = apiFetch(`/api/uploads/signed?path=${encodeURIComponent(key)}`)
+        .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+        .then(data => {
+            const signed = String(data?.url || key);
+            const ttl = data?.via === 'oss' ? 45 * 60 * 1000 : 8 * 1000;
+            ossDisplayUrlCache.set(key, { url: signed, exp: Date.now() + ttl });
+            return signed;
+        })
+        .catch(() => key)
+        .finally(() => { ossDisplayUrlInflight.delete(key); });
+    ossDisplayUrlInflight.set(key, job);
+    return job;
+}
+let ossDirectUploadBlocked = false;
+function uploadItemName(item){
+    if(item?.name) return String(item.name);
+    if(item?.blob?.name) return String(item.blob.name);
+    return 'file';
+}
+function uploadItemBlob(item){
+    if(item?.blob) return item.blob;
+    return item;
+}
+async function uploadOneViaServer(blob, name){
+    const form = new FormData();
+    form.append('files', blob, name);
+    const data = await apiFetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
+    return (data.files || [])[0] || null;
+}
+async function uploadOneDirectOss(blob, name){
+    const mime = blob.type || 'application/octet-stream';
+    const pre = await apiFetch('/api/uploads/presign', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ name, mime, size: blob.size || 0 }),
+    }).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))));
+    if(pre.via !== 'oss' || !pre.putUrl) throw new Error('presign local');
+    const put = await fetch(pre.putUrl, {
+        method:'PUT',
+        body: blob,
+        headers:{ 'Content-Type': pre.contentType || mime },
+    });
+    if(!put.ok) throw new Error(`oss put ${put.status}`);
+    const done = await apiFetch('/api/uploads/complete', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ path: pre.path, name }),
+    }).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))));
+    return {
+        url: done.url || pre.path,
+        name: done.name || name,
+        kind: done.kind || pre.kind || 'image',
+    };
+}
+/** 优先浏览器直传 OSS；CORS/未配 OSS 时回退 /api/ai/upload。 */
+async function uploadFilesToCanvas(files){
+    const items = [...(files || [])].map(item => ({ blob: uploadItemBlob(item), name: uploadItemName(item) })).filter(i => i.blob);
+    if(!items.length) return [];
+    const out = [];
+    for(const item of items){
+        try {
+            if(ossDirectUploadBlocked) throw new Error('blocked');
+            out.push(await uploadOneDirectOss(item.blob, item.name));
+        } catch(err){
+            console.warn('[uploadFilesToCanvas] fallback', err);
+            ossDirectUploadBlocked = true;
+            const file = await uploadOneViaServer(item.blob, item.name);
+            if(file) out.push(file);
+        }
+    }
+    return out;
+}
 function domGet(id) {
   if (!canvasRoot) return null;
   const key = String(id).replace(/^#/, '');
@@ -11007,15 +11090,10 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
     // 图片后台上传，完成后把占位 blob 换成真实 URL 再落盘
     if(imageFiles.length){
         const placeholderIds = imageFiles.map((_, i) => created[i]?.id).filter(Boolean);
-        const form = new FormData();
-        imageFiles.forEach(file => form.append('files', file));
-        void apiFetch('/api/ai/upload', {method:'POST', body:form})
-            .then(async r => {
-                if(!r.ok) throw new Error(await responseErrorMessage(r, langIsEn() ? 'Upload failed' : '上传失败'));
-                return r.json();
-            })
-            .then(data => {
-                (data.files || []).forEach((file, i) => {
+        void uploadFilesToCanvas(imageFiles)
+            .then(uploaded => {
+                if(!uploaded.length) throw new Error(langIsEn() ? 'Upload returned no image URL' : '上传未返回图片地址');
+                uploaded.forEach((file, i) => {
                     const node = nodes.find(n => n.id === placeholderIds[i]);
                     if(!node || !file?.url) return;
                     if(String(node.url).startsWith('blob:')) URL.revokeObjectURL(node.url);
@@ -11047,15 +11125,10 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
     // 视频后台上传，完成后把占位 blob 换成真实 URL 再落盘
     if(videoFiles.length){
         const placeholderIds = [...videoPlaceholderIds];
-        const form = new FormData();
-        videoFiles.forEach(file => form.append('files', file));
-        void apiFetch('/api/ai/upload', {method:'POST', body:form})
-            .then(async r => {
-                if(!r.ok) throw new Error(await responseErrorMessage(r, langIsEn() ? 'Upload failed' : '上传失败'));
-                return r.json();
-            })
-            .then(data => {
-                (data.files || []).forEach((file, i) => {
+        void uploadFilesToCanvas(videoFiles)
+            .then(uploaded => {
+                if(!uploaded.length) throw new Error(langIsEn() ? 'Upload returned no video URL' : '上传未返回视频地址');
+                uploaded.forEach((file, i) => {
                     const node = nodes.find(n => n.id === placeholderIds[i]);
                     if(!node || !file?.url) return;
                     replaceUploadedVideoNodeUrl(node, file.url, videoFiles[i]?.name);
@@ -12519,15 +12592,10 @@ async function fillImageNode(nodeId, files, opts={}){
     node.mediaKind = mediaKindForUpload(file);
     node.name = String(file?.name || '').trim() || outputImageName('');
     render({ force: true });
-    const form = new FormData();
-    form.append('files', file);
-    void apiFetch('/api/ai/upload', {method:'POST', body:form})
-        .then(async r => {
-            if(!r.ok) throw new Error(await responseErrorMessage(r, langIsEn() ? 'Upload failed' : '上传失败'));
-            return r.json();
-        })
-        .then(data => {
-            const up = data.files?.[0];
+    void uploadFilesToCanvas([file])
+        .then(uploaded => {
+            const up = uploaded[0];
+            if(!up?.url) throw new Error(langIsEn() ? 'Upload returned no image URL' : '上传未返回图片地址');
             const cur = nodes.find(n => n.id === nodeId);
             if(up && cur && String(cur.url).startsWith('blob:')){
                 URL.revokeObjectURL(cur.url);
@@ -15531,10 +15599,8 @@ on(window, 'mousemove', event => {
 });
 on(window, 'mouseup', () => { cropDrag = null; clearCropDragCursor(); });
 async function uploadCroppedBlob(blob, name){
-    const form = new FormData();
-    form.append('files', blob, name);
-    const data = await apiFetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
-    return data.files?.[0];
+    const files = await uploadFilesToCanvas([{ blob, name }]);
+    return files[0];
 }
 function revokeCanvasPreviewUrl(node){
     const urls = [node?._previewObjectUrl, node?.url].filter(u => String(u || '').startsWith('blob:'));
@@ -15620,10 +15686,7 @@ async function commitEditedCanvasAndUpload(canvasEl, name){
     return true;
 }
 async function uploadImageBlobs(blobs){
-    const form = new FormData();
-    blobs.forEach(item => form.append('files', item.blob, item.name));
-    const data = await apiFetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
-    return data.files || [];
+    return uploadFilesToCanvas(blobs);
 }
 function shouldUseCrossOriginImage(url){
     const raw = String(url || '').trim();
@@ -36463,7 +36526,12 @@ window.addEventListener('error', (e) => {
     if(!t || t.tagName !== 'IMG') return;
     const full = t.getAttribute && t.getAttribute('data-full-src');
     if(!full) return;
-    if(t.getAttribute('src') !== full) t.setAttribute('src', full);
+    if(t.dataset.ossFallback === '1') return;
+    t.dataset.ossFallback = '1';
+    void resolveDisplayMediaUrl(full).then(src => {
+        const next = String(src || full);
+        if(t.getAttribute('src') !== next) t.setAttribute('src', next);
+    });
 }, true);
 function mediaKindForOutputItem(item){
     const explicit = String(item?.kind || item?.mediaKind || '').toLowerCase();
@@ -39202,6 +39270,7 @@ function outputLightboxIsVideo(url, out){
 }
 /** 原图预加载缓存：悬停/生成完成即后台解码原图，点开灯箱直接复用（秒开原图）。 */
 const decodedOriginalCache = new Map(); // url -> HTMLImageElement（已解码）
+const decodedOriginalPrefetching = new Set();
 const DECODED_ORIGINAL_CACHE_MAX = 6;
 // 超大图（如 5504x3072）解出位图约 67MB，不入池只预热 HTTP 缓存；典型 1k/2k 图仍走解码复用
 const DECODED_ORIGINAL_MAX_PIXELS = 16 * 1024 * 1024;
@@ -39212,10 +39281,12 @@ function prefetchOutputOriginal(url){
     const key = decodedOriginalKey(url);
     if(!key || key.startsWith('blob:') || key.startsWith('data:')
         || isVideoUrl(key) || isAudioUrl(key) || isMissingAssetUrl(key)) return;
-    if(decodedOriginalCache.has(key)) return;
+    if(decodedOriginalCache.has(key) || decodedOriginalPrefetching.has(key)) return;
+    decodedOriginalPrefetching.add(key);
     const img = new Image();
     img.decoding = 'async';
     img.onload = () => {
+        decodedOriginalPrefetching.delete(key);
         const px = (img.naturalWidth || 0) * (img.naturalHeight || 0);
         if(px > 0 && px <= DECODED_ORIGINAL_MAX_PIXELS){
             decodedOriginalCache.set(key, img);
@@ -39224,14 +39295,27 @@ function prefetchOutputOriginal(url){
                 decodedOriginalCache.delete(oldest);
             }
         }
-        // 超大图不进解码池，但字节已写入浏览器 HTTP 缓存：点开时仅剩解码、几乎无网络等待
     };
-    img.onerror = () => { decodedOriginalCache.delete(key); };
-    img.src = key;
+    img.onerror = () => {
+        decodedOriginalPrefetching.delete(key);
+        decodedOriginalCache.delete(key);
+    };
+    void resolveDisplayMediaUrl(key).then(src => {
+        if(decodedOriginalCache.has(key)){
+            decodedOriginalPrefetching.delete(key);
+            return;
+        }
+        img.src = src;
+    });
 }
 function decodedOriginalFor(url){
     const img = decodedOriginalCache.get(decodedOriginalKey(url));
     return img && img.complete && img.naturalWidth > 0 ? img : null;
+}
+function liveNodePreviewSrc(out){
+    if(!out?.id || !nodesEl) return '';
+    const img = nodesEl.querySelector(`.node[data-id="${CSS.escape(out.id)}"] .image-preview-wrap > img, .node[data-id="${CSS.escape(out.id)}"] .gen-stage-hero img, .node[data-id="${CSS.escape(out.id)}"] .gen-stage-stack-hero img`);
+    return String(img?.currentSrc || img?.getAttribute('src') || out._previewObjectUrl || '').trim();
 }
 function openOutputLightbox(url, out, compareUrl){
     if(!url) return;
@@ -39262,7 +39346,11 @@ function openOutputLightbox(url, out, compareUrl){
                 ? `${outputLightboxVideo.videoWidth} x ${outputLightboxVideo.videoHeight}`
                 : 'Video', meta);
         };
-        outputLightboxVideo.src = url;
+        outputLightboxVideo.src = '';
+        void resolveDisplayMediaUrl(url).then(src => {
+            if(currentOutputLightboxUrl !== url) return;
+            outputLightboxVideo.src = src || url;
+        });
         outputPreview.ondblclick = null;
         outputDownloadBtn.onclick = e => {
             e.stopPropagation();
@@ -39278,29 +39366,39 @@ function openOutputLightbox(url, out, compareUrl){
     outputLightboxImg.draggable = false;
     outputCompareResult.draggable = false;
     outputCompareOriginal.draggable = false;
-    const urlPath = String(url).split('?')[0];
-    const alreadyFull = String(outputLightboxImg.getAttribute('src') || '').split('?')[0] === urlPath;
-    if(alreadyFull){
-        // 关闭时保留了解码位图，且就是这张原图：零延迟复用，不重设 src
-        outputResolutionText(`${outputLightboxImg.naturalWidth} x ${outputLightboxImg.naturalHeight}`, meta);
-    } else {
-        const cached = decodedOriginalFor(url);
-        if(cached){
-            // 悬停/生成完成时已预解码原图：直接换 src，命中浏览器解码缓存、近零延迟
-            outputLightboxImg.src = url;
-            outputResolutionText(`${cached.naturalWidth} x ${cached.naturalHeight}`, meta);
-        } else {
-            // 未预加载：直接加载原图（用户要的就是原图，不再走可能 404 的缩略图占位）
-            outputLightboxImg.onload = () => {
-                if(currentOutputLightboxUrl === url){
-                    outputResolutionText(`${outputLightboxImg.naturalWidth} x ${outputLightboxImg.naturalHeight}`, meta);
-                }
-            };
-            outputLightboxImg.src = url;
+    const cached = decodedOriginalFor(url);
+    const instant = (cached && cached.src) || liveNodePreviewSrc(liveOut) || (String(url).startsWith('blob:') ? url : canvasThumbUrl(url));
+    outputLightboxImg.onload = () => {
+        if(currentOutputLightboxUrl === url){
+            outputResolutionText(`${outputLightboxImg.naturalWidth} x ${outputLightboxImg.naturalHeight}`, meta);
         }
+    };
+    outputLightboxImg.onerror = () => {
+        if(currentOutputLightboxUrl !== url) return;
+        const cur = String(outputLightboxImg.getAttribute('src') || '');
+        if(url.startsWith('/uploads/') && cur !== url) outputLightboxImg.src = url;
+    };
+    if(instant) outputLightboxImg.src = instant;
+    else outputLightboxImg.src = url;
+    if(cached){
+        outputResolutionText(`${cached.naturalWidth} x ${cached.naturalHeight}`, meta);
     }
-    assignCompareImageSrc(outputCompareResult, url);
-    assignCompareImageSrc(outputCompareOriginal, currentOutputCompareUrl);
+    void resolveDisplayMediaUrl(url).then(full => {
+        if(currentOutputLightboxUrl !== url) return;
+        if(!full || full === outputLightboxImg.src) return;
+        outputLightboxImg.src = full;
+        if(outputCompareResult && currentOutputLightboxUrl === url) assignCompareImageSrc(outputCompareResult, full);
+    });
+    if(currentOutputCompareUrl){
+        assignCompareImageSrc(outputCompareOriginal, currentOutputCompareUrl);
+        void resolveDisplayMediaUrl(currentOutputCompareUrl).then(src => {
+            if(currentOutputLightboxUrl !== url) return;
+            assignCompareImageSrc(outputCompareOriginal, src || currentOutputCompareUrl);
+        });
+    } else {
+        assignCompareImageSrc(outputCompareOriginal, '');
+    }
+    assignCompareImageSrc(outputCompareResult, instant || url);
     const layoutWhenReady = () => {
         if(currentOutputLightboxUrl !== url) return;
         layoutOutputCompareImages();
@@ -39322,8 +39420,6 @@ function openOutputLightbox(url, out, compareUrl){
     syncOutputLightboxPortal(true);
     if(outputLightbox) outputLightbox.classList.add('open');
     refreshOutputCompareDom();
-    assignCompareImageSrc(outputCompareResult, url);
-    assignCompareImageSrc(outputCompareOriginal, currentOutputCompareUrl);
     if(outputCompareOriginalWrap) outputCompareOriginalWrap.style.background = '#0e0e0e';
     syncOutputCompareBtn(false);
     initOutputPreviewZoomEvents();

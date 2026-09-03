@@ -2,8 +2,16 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import type Database from "better-sqlite3";
 import { existsSync } from "fs";
 import path from "path";
-import { canAccessUploadPath } from "./canvasGenerations.js";
-import { headUploadsObject, isOssEnabled, streamUploadsObject } from "./ossStore.js";
+import { canAccessUploadPath, ensureGalleryThumbnail, recordFileOwnership } from "./canvasGenerations.js";
+import {
+  ensureOssBucketCors,
+  headUploadsObject,
+  isOssEnabled,
+  signUploadsPutUrl,
+  signUploadsUrl,
+  streamUploadsObject,
+} from "./ossStore.js";
+import { randomUUID } from "crypto";
 
 function uploadsAbsPath(projectRoot: string, webPath: string): string | null {
   const rel = String(webPath || "")
@@ -33,6 +41,21 @@ function guessContentType(filePath: string): string {
     ".m4a": "audio/mp4",
   };
   return map[ext] || "application/octet-stream";
+}
+
+const PRESIGN_MAX_BYTES = 80 * 1024 * 1024;
+
+function canvasUploadKind(mimeRaw: string, name: string): { kind: string; ext: string } {
+  const mime = String(mimeRaw || "").toLowerCase();
+  let ext = path.extname(name || "").toLowerCase();
+  if (mime.startsWith("video/") || [".mp4", ".webm", ".mov", ".m4v"].includes(ext)) {
+    return { kind: "video", ext: ext || ".mp4" };
+  }
+  if (mime.startsWith("audio/") || [".mp3", ".wav", ".m4a", ".aac", ".ogg"].includes(ext)) {
+    return { kind: "audio", ext: ext || ".mp3" };
+  }
+  if (!ext || ![".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(ext)) ext = ".png";
+  return { kind: "image", ext };
 }
 
 function serveProtectedUpload(
@@ -135,6 +158,86 @@ export function registerProtectedUploadRoutes(
   projectRoot: string,
   requireAuth: (req: Request, res: Response, next: NextFunction) => void
 ): void {
+  void ensureOssBucketCors();
+
+  /** 灯箱/预览用：签名直链让浏览器打阿里云，避免 2G ECS 转发整图。画笔/裁剪仍走同源 /uploads。 */
+  app.get("/api/uploads/signed", requireAuth, (req, res) => {
+    const raw = String(req.query.path || req.query.url || "").trim();
+    const webPath = raw.split("?")[0];
+    if (!webPath.startsWith("/uploads/") || webPath.includes("..")) {
+      res.status(400).json({ error: "bad path" });
+      return;
+    }
+    const userId = req.authUser?.id ?? null;
+    if (!canAccessUploadPath(db, webPath, userId)) {
+      res.status(403).json({ error: "无权访问该文件" });
+      return;
+    }
+    if (!isOssEnabled()) {
+      res.json({ url: webPath, via: "local" });
+      return;
+    }
+    try {
+      res.json({ url: signUploadsUrl(webPath), via: "oss" });
+    } catch (err) {
+      console.warn("[uploads/signed]", (err as Error)?.message);
+      res.json({ url: webPath, via: "local" });
+    }
+  });
+
+  app.post("/api/uploads/presign", requireAuth, (req, res) => {
+    const name = String(req.body?.name || "file").slice(0, 180);
+    const mime = String(req.body?.mime || "application/octet-stream").slice(0, 120);
+    const size = Number(req.body?.size || 0);
+    if (size > PRESIGN_MAX_BYTES) {
+      res.status(413).json({ error: "file too large" });
+      return;
+    }
+    const { kind, ext } = canvasUploadKind(mime, name);
+    const filename = `canvas_${randomUUID().replace(/-/g, "").slice(0, 12)}${ext}`;
+    const webPath = `/uploads/canvas/${filename}`;
+    const userId = req.authUser?.id;
+    if (userId) recordFileOwnership(db, webPath, userId);
+    if (!isOssEnabled()) {
+      res.json({ via: "local", path: webPath, kind });
+      return;
+    }
+    try {
+      const contentType = mime || guessContentType(webPath);
+      res.json({
+        via: "oss",
+        path: webPath,
+        kind,
+        contentType,
+        putUrl: signUploadsPutUrl(webPath, { mime: contentType }),
+      });
+    } catch (err) {
+      console.warn("[uploads/presign]", (err as Error)?.message);
+      res.json({ via: "local", path: webPath, kind });
+    }
+  });
+
+  app.post("/api/uploads/complete", requireAuth, (req, res) => {
+    const webPath = String(req.body?.path || "").split("?")[0];
+    const name = String(req.body?.name || "").slice(0, 180);
+    if (!webPath.startsWith("/uploads/canvas/") || webPath.includes("..")) {
+      res.status(400).json({ error: "bad path" });
+      return;
+    }
+    const userId = req.authUser?.id ?? null;
+    if (!canAccessUploadPath(db, webPath, userId)) {
+      res.status(403).json({ error: "无权访问该文件" });
+      return;
+    }
+    const { kind } = canvasUploadKind("", webPath);
+    if (kind === "image") {
+      void ensureGalleryThumbnail(projectRoot, webPath).catch((e) => {
+        console.warn("[uploads/complete] thumb", (e as Error)?.message);
+      });
+    }
+    res.json({ url: webPath, name: name || path.basename(webPath), kind });
+  });
+
   app.use((req, res, next) => {
     if (req.method !== "GET" && req.method !== "HEAD") return next();
     if (req.path !== "/uploads" && !req.path.startsWith("/uploads/")) return next();
