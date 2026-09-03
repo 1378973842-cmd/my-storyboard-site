@@ -8,6 +8,7 @@ import {
   resolveTextLlmEnv,
   textLlmConfigError,
 } from "./canvasTextLlmBridge.js";
+import { uploadsToDataUrl } from "./ossStore.js";
 
 export type MxShellMode = "one_shot" | "multi_cam";
 export type MxShellCameraIntensity = "restrained" | "standard" | "flashy";
@@ -204,28 +205,16 @@ function absoluteImageUrl(req: Request, url: string): string {
   return u;
 }
 
-function guessImageMime(filePath: string): string {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext === ".png") return "image/png";
-  if (ext === ".webp") return "image/webp";
-  if (ext === ".gif") return "image/gif";
-  return "image/jpeg";
-}
-
-function resolveImageForVision(req: Request, projectRoot: string, rawUrl: string): string {
+async function resolveImageForVision(req: Request, projectRoot: string, rawUrl: string): Promise<string> {
   const url = String(rawUrl || "").trim();
   if (!url) return "";
   if (url.startsWith("blob:")) {
     throw new Error("参考图为浏览器临时地址(blob)，请重新连接图片或先上传到画布");
   }
-  if (url.startsWith("data:") || /^https?:\/\//i.test(url)) return url;
-  if (url.startsWith("/uploads/")) {
-    const rel = url.replace(/^\/uploads\//, "").replace(/\\/g, "/");
-    const abs = path.join(projectRoot, "public", "uploads", rel);
-    if (!existsSync(abs)) return absoluteImageUrl(req, url);
-    const buf = readFileSync(abs);
-    return `data:${guessImageMime(abs)};base64,${buf.toString("base64")}`;
-  }
+  if (url.startsWith("data:")) return url;
+  const data = await uploadsToDataUrl(projectRoot, url);
+  if (data) return data;
+  if (/^https?:\/\//i.test(url)) return url;
   return absoluteImageUrl(req, url);
 }
 
@@ -823,7 +812,9 @@ export async function generateMxShellPromptOnServer(
   );
   // 润色节点不吃参考图：只润色正文
   const imageUrls = task === "polish" ? [] : normalizeImageUrls(body.imageUrls);
-  const imageDataUrls = imageUrls.map((url) => resolveImageForVision(req, projectRoot, url)).filter(Boolean);
+  const imageDataUrls = (await Promise.all(
+    imageUrls.map((url) => resolveImageForVision(req, projectRoot, url))
+  )).filter(Boolean);
   const bindings = normalizeImageBindings(body.imageBindings, imageDataUrls.length);
   const model =
     String(body.model || "").trim() ||

@@ -1,7 +1,7 @@
 import type { Express, Request, Response, RequestHandler } from "express";
 import multer from "multer";
 import path from "path";
-import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { mkdirSync, writeFileSync } from "fs";
 import { v4 as uuidv4 } from "uuid";
 import {
   createCanvas,
@@ -65,6 +65,7 @@ import {
   isOssEnabled,
   mapUploadsPathToKey,
   uploadBufferToOss,
+  uploadsAssetExists,
 } from "./ossStore.js";
 import { ensureGalleryThumbnail, recordCanvasGeneration, recordFileOwnership } from "./canvasGenerations.js";
 import {
@@ -545,15 +546,14 @@ export function registerInfiniteCanvasRoutes(
     res.json({ workflows: [] });
   });
 
-  app.post("/api/canvas-assets/check", gate, (req, res) => {
+  app.post("/api/canvas-assets/check", gate, async (req, res) => {
     const urls: string[] = Array.isArray(req.body?.urls) ? req.body.urls : [];
     const exists: Record<string, boolean> = {};
     for (const url of urls.slice(0, 3000)) {
       const text = String(url || "").trim();
       if (!text) continue;
       if (text.startsWith("/uploads/")) {
-        const rel = text.replace(/^\/uploads\//, "").replace(/\\/g, "/");
-        exists[text] = existsSync(path.join(projectRoot, "public", "uploads", rel));
+        exists[text] = await uploadsAssetExists(projectRoot, text);
       } else {
         exists[text] = true;
       }

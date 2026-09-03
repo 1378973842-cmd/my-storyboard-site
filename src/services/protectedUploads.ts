@@ -3,7 +3,7 @@ import type Database from "better-sqlite3";
 import { existsSync } from "fs";
 import path from "path";
 import { canAccessUploadPath } from "./canvasGenerations.js";
-import { ensureOssObjectUploaded, isOssEnabled, signUploadsUrl } from "./ossStore.js";
+import { headUploadsObject, isOssEnabled, streamUploadsObject } from "./ossStore.js";
 
 function uploadsAbsPath(projectRoot: string, webPath: string): string | null {
   const rel = String(webPath || "")
@@ -47,23 +47,67 @@ function serveProtectedUpload(
     res.status(403).json({ error: "无权访问该文件" });
     return;
   }
-  // OSS 私有读：对象已在 OSS（或从本地懒迁移补传）→ 302 到签名 URL，让浏览器直连 OSS 省服务器带宽
-  if (isOssEnabled()) {
-    void (async () => {
-      try {
-        const uploaded = await ensureOssObjectUploaded(projectRoot, webPath);
-        if (uploaded) {
-          res.redirect(302, signUploadsUrl(webPath));
-          return;
-        }
-      } catch (err) {
-        console.warn("[uploads] OSS 签名失败，回退本地", (err as Error)?.message);
-      }
-      serveLocalFallback(res, projectRoot, webPath);
-    })();
+  // 必须同源输出：302 到 OSS 签名 URL 会让 <img>/<video> 跨域，canvas toBlob/画笔/截帧全部失败。
+  // 本地有文件走 sendFile（支持 Range）；否则把 OSS 流经本站发出（同样支持 Range）。
+  const abs = uploadsAbsPath(projectRoot, webPath);
+  if (abs && existsSync(abs)) {
+    serveLocalFallback(res, projectRoot, webPath);
     return;
   }
-  serveLocalFallback(res, projectRoot, webPath);
+  if (!isOssEnabled()) {
+    res.status(404).json({ error: "文件不存在" });
+    return;
+  }
+  void serveOssProxy(req, res, projectRoot, webPath);
+}
+
+async function serveOssProxy(
+  req: Request,
+  res: Response,
+  projectRoot: string,
+  webPath: string
+): Promise<void> {
+  try {
+    if (req.method === "HEAD") {
+      const meta = await headUploadsObject(projectRoot, webPath);
+      if (!meta) {
+        res.status(404).json({ error: "文件不存在" });
+        return;
+      }
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Content-Type", meta.mime || guessContentType(webPath));
+      if (meta.size > 0) res.setHeader("Content-Length", String(meta.size));
+      res.status(200).end();
+      return;
+    }
+    const range = typeof req.headers.range === "string" ? req.headers.range : "";
+    const got = await streamUploadsObject(webPath, range ? { range } : undefined);
+    if (!got?.stream) {
+      res.status(404).json({ error: "文件不存在" });
+      return;
+    }
+    const mime = got.headers["content-type"] || got.headers["Content-Type"] || guessContentType(webPath);
+    const length = got.headers["content-length"] || got.headers["Content-Length"];
+    const contentRange = got.headers["content-range"] || got.headers["Content-Range"];
+    res.status(got.status === 206 || contentRange ? 206 : 200);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Content-Type", mime);
+    if (length) res.setHeader("Content-Length", length);
+    if (contentRange) res.setHeader("Content-Range", contentRange);
+    req.on("close", () => {
+      try {
+        (got.stream as { destroy?: () => void }).destroy?.();
+      } catch {
+        /* ignore */
+      }
+    });
+    got.stream.pipe(res);
+  } catch (err) {
+    console.warn("[uploads] OSS 读取失败", (err as Error)?.message);
+    if (!res.headersSent) res.status(404).json({ error: "文件不存在" });
+  }
 }
 
 function serveLocalFallback(

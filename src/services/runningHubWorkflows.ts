@@ -4,6 +4,7 @@ import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { FormData } from "undici";
 import { formatRhApiError } from "../lib/runningHubAdmin.js";
+import { parseUploadsPath, readUploadsBytes } from "./ossStore.js";
 
 /**
  * RunningHub 自定义工作流 / AI 应用：从旧版 Python 服务（canvas_source/main.py）1:1 移植的
@@ -678,38 +679,17 @@ function normalizeNodeInfoList(raw: unknown): { nodeId: string; fieldName: strin
     .filter(Boolean) as { nodeId: string; fieldName: string; fieldValue: string }[];
 }
 
-const ASSET_MIME_BY_EXT: Record<string, string> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-  ".bmp": "image/bmp",
-  ".mp4": "video/mp4",
-  ".webm": "video/webm",
-  ".mov": "video/quicktime",
-  ".mp3": "audio/mpeg",
-  ".wav": "audio/wav",
-  ".ogg": "audio/ogg",
-};
-
-/** 素材上传用：把 /uploads/… 本地路径或 http(s) 远程地址读成二进制 */
+/** 素材上传用：把 /uploads/…（本地或 OSS）或 http(s) 远程地址读成二进制 */
 async function readAssetBytes(
   url: string,
   projectRoot: string
 ): Promise<{ buffer: Buffer; mime: string; filename: string }> {
   const trimmed = url.trim();
-  if (trimmed.startsWith("/uploads/")) {
-    const rel = trimmed.replace(/^\/uploads\//, "").replace(/\\/g, "/");
-    if (rel.includes("..")) throw httpError(400, "非法素材路径");
-    const abs = path.join(projectRoot, "public", "uploads", rel);
-    if (!existsSync(abs)) throw httpError(400, `本地素材不存在：${trimmed}`);
-    const ext = path.extname(abs).toLowerCase();
-    return {
-      buffer: readFileSync(abs),
-      mime: ASSET_MIME_BY_EXT[ext] || "application/octet-stream",
-      filename: path.basename(abs),
-    };
+  const internal = parseUploadsPath(trimmed);
+  if (internal) {
+    const got = await readUploadsBytes(projectRoot, internal);
+    if (!got?.buffer?.length) throw httpError(400, `素材不存在：${trimmed}`);
+    return { buffer: got.buffer, mime: got.mime, filename: got.filename };
   }
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
     const resp = await fetch(trimmed);

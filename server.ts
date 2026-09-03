@@ -359,6 +359,14 @@ async function persistAiImageToLocalStorage(
     const uploadsRoot = path.join(projectRoot, "public", "uploads");
     const abs = path.join(uploadsRoot, relFile);
     if (abs.startsWith(uploadsRoot) && existsSync(abs)) return input;
+    try {
+      const oss = await import("./src/services/ossStore.js");
+      if (await oss.uploadsAssetExists(projectRoot, input.split("?")[0])) {
+        return input.split("?")[0];
+      }
+    } catch {
+      /* ignore */
+    }
   }
 
   let buffer: Buffer;

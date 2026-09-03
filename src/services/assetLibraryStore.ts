@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFil
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import type { CanvasAccessContext } from "./infiniteCanvasStore.js";
-import { isOssEnabled, mapUploadsPathToKey, uploadBufferToOss } from "./ossStore.js";
+import { isOssEnabled, mapUploadsPathToKey, readUploadsBytes, uploadBufferToOss } from "./ossStore.js";
 
 export type AssetLibraryItem = {
   id: string;
@@ -285,12 +285,14 @@ export async function addAssetItem(
   const lib = readLibrary(ownerId);
   const cat = findCategory(lib, payload.category_id);
   const src = resolveSourcePath(payload.url);
-  if (!src) throw new Error("只支持保存本站 /uploads/ 下的图片或视频");
-  const ext = guessExtFromPath(src);
-  const safeBase = sanitizeName(payload.name || path.basename(src, ext), "asset");
+  const ossSrc = src ? null : await readUploadsBytes(projectRoot, payload.url);
+  if (!src && !ossSrc?.buffer?.length) throw new Error("只支持保存本站 /uploads/ 下的图片或视频");
+  const ext = src ? guessExtFromPath(src) : guessExtFromPath(ossSrc?.filename || payload.url);
+  const safeBase = sanitizeName(payload.name || path.basename(src || ossSrc?.filename || "asset", ext), "asset");
   const destName = `lib_${uuidv4().replace(/-/g, "").slice(0, 12)}_${safeBase}${ext}`;
   const destAbs = path.join(ownerAssetDir(ownerId), destName);
-  copyFileSync(src, destAbs);
+  if (src) copyFileSync(src, destAbs);
+  else writeFileSync(destAbs, ossSrc!.buffer);
   // OSS 启用时把素材库目标对象也上传（源已在 OSS 或本地双写）
   if (isOssEnabled()) {
     try {

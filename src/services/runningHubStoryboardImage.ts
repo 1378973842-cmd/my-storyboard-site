@@ -244,7 +244,7 @@ async function readImageBytes(input: string, projectRoot: string): Promise<{ buf
   }
   if (trimmed.startsWith("/uploads/")) {
     const got = await readUploadsBytes(projectRoot, trimmed);
-    if (!got) throw new Error(`本地图片不存在：${trimmed}`);
+    if (!got) throw new Error(`图片不存在：${trimmed}`);
     return got;
   }
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {

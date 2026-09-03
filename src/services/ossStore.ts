@@ -1,5 +1,5 @@
 import path from "path";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, statSync } from "fs";
 import OSS from "ali-oss";
 
 type OssClient = OSS;
@@ -72,6 +72,52 @@ export async function readUploadsBytes(
   }
 }
 
+/** 相对路径或同源绝对 URL → 站内 `/uploads/...`；其它返回空。 */
+export function parseUploadsPath(raw: string): string {
+  const text = String(raw || "").trim();
+  if (!text) return "";
+  if (text.startsWith("/uploads/")) return normalizeInternalPath(text.split("?")[0]);
+  try {
+    const u = new URL(text);
+    if (u.pathname.startsWith("/uploads/")) return normalizeInternalPath(u.pathname);
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+export async function uploadsAssetExists(
+  projectRoot: string,
+  internalPath: string
+): Promise<boolean> {
+  const normalized = parseUploadsPath(internalPath) || normalizeInternalPath(internalPath);
+  if (!normalized) return false;
+  const rel = normalized.slice("/uploads/".length);
+  const abs = path.join(projectRoot, "public", "uploads", rel);
+  const root = path.join(projectRoot, "public", "uploads");
+  if (!abs.startsWith(root)) return false;
+  if (existsSync(abs)) return true;
+  if (!isOssEnabled()) return false;
+  try {
+    await getClient().head(mapUploadsPathToKey(normalized));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 视觉模型 / 上游 API 用：本地盘或 OSS 读成 data URL，避免把要登录的 /uploads 交给第三方。 */
+export async function uploadsToDataUrl(
+  projectRoot: string,
+  rawUrl: string
+): Promise<string | null> {
+  const internal = parseUploadsPath(rawUrl);
+  if (!internal) return null;
+  const got = await readUploadsBytes(projectRoot, internal);
+  if (!got?.buffer?.length) return null;
+  return `data:${got.mime};base64,${got.buffer.toString("base64")}`;
+}
+
 export function isOssEnabled(): boolean {
   return Boolean(
     process.env.OSS_BUCKET &&
@@ -112,7 +158,7 @@ export function keyToUploadsPath(key: string): string {
   return `/uploads/${stripped}`;
 }
 
-/** 生成一个用于私有读的签名 URL（默认 1 小时）。 */
+/** 生成一个用于私有读的签名 URL（默认 1 小时）。站内 /uploads 不要 302 到这里，否则 canvas 跨域污染。 */
 export function signUploadsUrl(
   internalPath: string,
   opts: { ttlSeconds?: number } = {}
@@ -126,6 +172,74 @@ export function signUploadsUrl(
   // signatureUrl 依赖 client 的 bucket/region，用默认 endpoint 生成签名 URL
   const url = c.signatureUrl(key, { expires: ttl });
   return url;
+}
+
+function headerVal(headers: Record<string, unknown>, name: string): string {
+  const lower = name.toLowerCase();
+  for (const [k, v] of Object.entries(headers || {})) {
+    if (k.toLowerCase() === lower && v != null) return String(v);
+  }
+  return "";
+}
+
+/** HEAD：本地优先，否则 OSS。给视频播放器 Length / Type，避免整文件入内存。 */
+export async function headUploadsObject(
+  projectRoot: string,
+  internalPath: string
+): Promise<{ mime: string; size: number } | null> {
+  const normalized = normalizeInternalPath(internalPath);
+  if (!normalized) return null;
+  const rel = normalized.slice("/uploads/".length);
+  const abs = path.join(projectRoot, "public", "uploads", rel);
+  const root = path.join(projectRoot, "public", "uploads");
+  if (abs.startsWith(root) && existsSync(abs)) {
+    try {
+      return { mime: mimeFromUploadsRel(rel), size: statSync(abs).size };
+    } catch {
+      /* fall through */
+    }
+  }
+  if (!isOssEnabled()) return null;
+  try {
+    const r = await getClient().head(mapUploadsPathToKey(normalized));
+    const headers = (r.res?.headers || {}) as Record<string, unknown>;
+    const size = Number(headerVal(headers, "content-length") || 0);
+    const mime = headerVal(headers, "content-type") || mimeFromUploadsRel(rel);
+    return { mime, size };
+  } catch {
+    return null;
+  }
+}
+
+/** 流式读 OSS（支持 Range）。站内代理用，禁止整段视频 load 进 2G ECS。 */
+export async function streamUploadsObject(
+  internalPath: string,
+  opts?: { range?: string }
+): Promise<{
+  stream: NodeJS.ReadableStream;
+  status: number;
+  headers: Record<string, string>;
+} | null> {
+  if (!isOssEnabled()) return null;
+  const normalized = normalizeInternalPath(internalPath);
+  if (!normalized) return null;
+  const key = mapUploadsPathToKey(normalized);
+  const options = opts?.range ? { headers: { Range: opts.range } } : undefined;
+  try {
+    const result = await getClient().getStream(key, options);
+    const raw = (result.res?.headers || {}) as Record<string, unknown>;
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      if (v != null) headers[k] = String(v);
+    }
+    return {
+      stream: result.stream as NodeJS.ReadableStream,
+      status: Number(result.res?.status || (opts?.range ? 206 : 200)),
+      headers,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** 上传 Buffer 到 OSS（私有对象）。返回内部站内路径 `/uploads/...`。 */

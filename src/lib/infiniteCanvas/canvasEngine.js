@@ -11693,7 +11693,9 @@ async function fillVideoTrimFilmstrip(host, url, duration){
     video.muted = true;
     video.playsInline = true;
     video.preload = 'auto';
-    try { video.crossOrigin = 'anonymous'; } catch(_){ /* ignore */ }
+    if(shouldUseCrossOriginImage(url)){
+        try { video.crossOrigin = 'anonymous'; } catch(_){ /* ignore */ }
+    }
     video.src = url;
     try {
         await waitForVideoFrameReady(video);
@@ -11756,7 +11758,9 @@ async function exportTrimmedVideoBlob(url, startSec, endSec){
     video.muted = true;
     video.playsInline = true;
     video.preload = 'auto';
-    try { video.crossOrigin = 'anonymous'; } catch(_){ /* ignore */ }
+    if(shouldUseCrossOriginImage(url)){
+        try { video.crossOrigin = 'anonymous'; } catch(_){ /* ignore */ }
+    }
     video.src = url;
     await waitForVideoFrameReady(video);
     const duration = Number.isFinite(video.duration) ? video.duration : 0;
@@ -15542,19 +15546,36 @@ function shouldUseCrossOriginImage(url){
         return false;
     }
 }
+/** 画笔/裁剪导出必须用站内 /uploads，不能用 img.currentSrc（OSS 302 后会变成阿里云域名）。 */
+function sameOriginMediaUrl(url){
+    const raw = String(url || '').trim();
+    if(!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
+    if(raw.startsWith('/uploads/')) return raw.split('?')[0];
+    try {
+        const parsed = new URL(raw, window.location.origin);
+        if(parsed.origin === window.location.origin && parsed.pathname.startsWith('/uploads/')){
+            return parsed.pathname;
+        }
+    } catch(_){ /* ignore */ }
+    return raw;
+}
+function editExportSourceUrl(){
+    const fromTarget = sameOriginMediaUrl(cropState?.saveTarget?.url);
+    if(fromTarget) return fromTarget;
+    const img = editExportImage();
+    return sameOriginMediaUrl(img?.src) || String(img?.src || '').trim();
+}
 async function applyImageCrop(){
     if(!cropState || imageEditMode !== 'crop') return;
     const exportImg = editExportImage();
     const display = editDisplayImage();
-    let drawImg = exportImg;
     const viewW = display?.clientWidth || exportImg?.clientWidth || 1;
     const viewH = display?.clientHeight || exportImg?.clientHeight || 1;
-    const srcUrl = String(exportImg?.currentSrc || exportImg?.src || cropState.saveTarget?.url || '').trim();
-    if(!drawImg?.naturalWidth || !drawImg?.naturalHeight){
-        try {
-            if(srcUrl) drawImg = await loadImageBitmapForExport(srcUrl);
-        } catch(_){ /* fall through */ }
-    }
+    const srcUrl = editExportSourceUrl();
+    let drawImg = null;
+    try {
+        if(srcUrl) drawImg = await loadImageBitmapForExport(srcUrl);
+    } catch(_){ /* fall through */ }
     if(!drawImg?.naturalWidth || !drawImg?.naturalHeight){
         softAlert(langIsEn() ? 'Image not loaded yet. Close and reopen the editor.' : '图片尚未加载完成，请关闭后重新打开编辑。');
         return;
@@ -15573,15 +15594,15 @@ async function applyImageCrop(){
     } catch(err){
         console.warn('[applyImageCrop]', err);
         softAlert(langIsEn()
-            ? 'Crop export failed. Re-upload the image or use a same-site file.'
-            : '裁剪导出失败。请用「替换」重新上传本地图片后再试。');
+            ? 'Crop export failed. Close and retry.'
+            : '裁剪导出失败。请关闭后重试。');
         return;
     }
     const blob = await new Promise(resolve => canvasEl.toBlob(resolve, 'image/png'));
     if(!blob){
         softAlert(langIsEn()
-            ? 'Crop export failed. Re-upload the image or use a same-site file.'
-            : '裁剪导出失败。请用「替换」重新上传本地图片后再试。');
+            ? 'Crop export failed. Close and retry.'
+            : '裁剪导出失败。请关闭后重试。');
         return;
     }
     const baseName = cropState.saveTarget?.name || cropState.saveTarget?.url || 'image';
@@ -15594,8 +15615,17 @@ async function applyImageCrop(){
 async function loadImageBitmapForExport(url){
     const raw = String(url || '').trim();
     if(!raw) throw new Error('empty url');
-    // 同源 / 可拉取的地址：走 blob，避免 crossOrigin 污染导致 toBlob 失败
-    const res = await fetch(raw, { credentials: 'include' });
+    if(raw.startsWith('data:')){
+        const im = new Image();
+        await new Promise((resolve, reject) => {
+            im.onload = () => resolve();
+            im.onerror = () => reject(new Error('decode failed'));
+            im.src = raw;
+        });
+        return im;
+    }
+    // 同源 fetch→blob，避免 OSS 跨域污染 toBlob
+    const res = await fetch(sameOriginMediaUrl(raw) || raw, { credentials: 'include' });
     if(!res.ok) throw new Error(`fetch ${res.status}`);
     const blob = await res.blob();
     const objUrl = URL.createObjectURL(blob);
@@ -15630,7 +15660,6 @@ async function applyImageBrush(){
         return;
     }
     try { flushBrushTextToCanvas(); } catch(_){ /* ignore */ }
-    const exportImg = editExportImage();
     const draw = editDrawCanvas();
     if(!draw?.width || !draw?.height){
         imageEditNotice(langIsEn() ? 'Brush layer not ready. Close and reopen.' : '画笔层未就绪，请关闭后重新打开。');
@@ -15640,13 +15669,12 @@ async function applyImageBrush(){
         imageEditNotice(langIsEn() ? 'Draw something before applying.' : '请先绘制内容再点应用。');
         return;
     }
-    const srcUrl = String(exportImg?.currentSrc || exportImg?.src || cropState.saveTarget?.url || '').trim();
-    let baseImg = (exportImg?.naturalWidth && exportImg?.naturalHeight) ? exportImg : null;
+    const srcUrl = editExportSourceUrl();
     const btn = domGet('imageEditBrushSaveBtn');
     imageEditApplyLock = true;
     if(btn) btn.disabled = true;
     try {
-        if(!baseImg && srcUrl) baseImg = await loadImageBitmapForExport(srcUrl);
+        const baseImg = srcUrl ? await loadImageBitmapForExport(srcUrl) : null;
         if(!baseImg?.naturalWidth){
             imageEditNotice(langIsEn() ? 'Image not loaded yet. Close and reopen the editor.' : '图片尚未加载完成，请关闭后重新打开编辑。');
             return;
@@ -15655,28 +15683,9 @@ async function applyImageBrush(){
         canvasEl.width = baseImg.naturalWidth;
         canvasEl.height = baseImg.naturalHeight;
         const ctx = canvasEl.getContext('2d');
-        try {
-            ctx.drawImage(baseImg, 0, 0, canvasEl.width, canvasEl.height);
-        } catch(_){
-            if(!srcUrl) throw new Error('draw failed');
-            baseImg = await loadImageBitmapForExport(srcUrl);
-            ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
-            ctx.drawImage(baseImg, 0, 0, canvasEl.width, canvasEl.height);
-        }
+        ctx.drawImage(baseImg, 0, 0, canvasEl.width, canvasEl.height);
         ctx.drawImage(draw, 0, 0, canvasEl.width, canvasEl.height);
-        let blob;
-        try {
-            blob = await canvasToPngBlob(canvasEl);
-        } catch(_){
-            if(!srcUrl) throw new Error('export failed');
-            baseImg = await loadImageBitmapForExport(srcUrl);
-            canvasEl.width = baseImg.naturalWidth;
-            canvasEl.height = baseImg.naturalHeight;
-            const ctx2 = canvasEl.getContext('2d');
-            ctx2.drawImage(baseImg, 0, 0, canvasEl.width, canvasEl.height);
-            ctx2.drawImage(draw, 0, 0, canvasEl.width, canvasEl.height);
-            blob = await canvasToPngBlob(canvasEl);
-        }
+        const blob = await canvasToPngBlob(canvasEl);
         const baseName = cropState.saveTarget?.name || cropState.saveTarget?.url || 'image';
         const base = String(baseName).replace(/\.[^.]+$/, '').split('/').pop() || 'image';
         const suffix = brushTool === 'label' ? '_mark' : '_paint';
@@ -15694,8 +15703,8 @@ async function applyImageBrush(){
     } catch(err){
         console.warn('[applyImageBrush]', err);
         imageEditNotice(langIsEn()
-            ? 'Apply brush failed. Re-upload a local image or try again.'
-            : '应用画笔失败。可改用本地上传的图片，或关闭后重试。');
+            ? 'Apply brush failed. Close and retry.'
+            : '应用画笔失败。请关闭后重试。');
     } finally {
         imageEditApplyLock = false;
         if(btn && btn.isConnected) btn.disabled = false;
@@ -15704,8 +15713,12 @@ async function applyImageBrush(){
 async function applyImageGridSplit(){
     if(!cropState) return;
     const node = nodes.find(n => n.id === cropState.nodeId);
-    const img = domGet('cropImage');
-    if(!node || !img.naturalWidth || !img.naturalHeight) return;
+    const srcUrl = editExportSourceUrl() || node?.url;
+    let img = null;
+    try {
+        if(srcUrl) img = await loadImageBitmapForExport(srcUrl);
+    } catch(_){ /* ignore */ }
+    if(!node || !img?.naturalWidth || !img?.naturalHeight) return;
     const rects = gridSplitRects(img.naturalWidth, img.naturalHeight);
     if(!rects.length) return;
     const base = (node.name || 'image').replace(/\.[^.]+$/, '');
@@ -15764,11 +15777,9 @@ async function applyImageRotate(){
         softAlert(langIsEn() ? 'Rotate or flip before saving.' : '请先旋转或镜像再保存');
         return;
     }
-    const exportImg = editExportImage();
-    const srcUrl = String(exportImg?.currentSrc || exportImg?.src || cropState.saveTarget?.url || '').trim();
-    let baseImg = (exportImg?.naturalWidth && exportImg?.naturalHeight) ? exportImg : null;
+    const srcUrl = editExportSourceUrl();
     try {
-        if(!baseImg && srcUrl) baseImg = await loadImageBitmapForExport(srcUrl);
+        const baseImg = srcUrl ? await loadImageBitmapForExport(srcUrl) : null;
         if(!baseImg?.naturalWidth){
             softAlert(langIsEn() ? 'Image not loaded yet. Close and reopen the editor.' : '图片尚未加载完成，请关闭后重新打开编辑。');
             return;

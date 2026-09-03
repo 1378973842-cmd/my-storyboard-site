@@ -1,6 +1,7 @@
 import type { Express, Request, RequestHandler } from "express";
 import { existsSync, readFileSync } from "fs";
 import path from "path";
+import { uploadsToDataUrl } from "./ossStore.js";
 import {
   augmentChatCompletionsBody,
   extractTextLlmMessageContent,
@@ -178,28 +179,16 @@ function absoluteImageUrl(req: Request, url: string): string {
   return u;
 }
 
-function guessImageMime(filePath: string): string {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext === ".png") return "image/png";
-  if (ext === ".webp") return "image/webp";
-  if (ext === ".gif") return "image/gif";
-  return "image/jpeg";
-}
-
-function resolveSlotsImageForVision(req: Request, projectRoot: string, rawUrl: string): string {
+async function resolveSlotsImageForVision(req: Request, projectRoot: string, rawUrl: string): Promise<string> {
   const url = String(rawUrl || "").trim();
   if (!url) return "";
   if (url.startsWith("blob:")) {
     throw new Error("参考图为浏览器临时地址(blob)，请重新连接图片或先上传到画布");
   }
-  if (url.startsWith("data:") || /^https?:\/\//i.test(url)) return url;
-  if (url.startsWith("/uploads/")) {
-    const rel = url.replace(/^\/uploads\//, "").replace(/\\/g, "/");
-    const abs = path.join(projectRoot, "public", "uploads", rel);
-    if (!existsSync(abs)) return absoluteImageUrl(req, url);
-    const buf = readFileSync(abs);
-    return `data:${guessImageMime(abs)};base64,${buf.toString("base64")}`;
-  }
+  if (url.startsWith("data:")) return url;
+  const data = await uploadsToDataUrl(projectRoot, url);
+  if (data) return data;
+  if (/^https?:\/\//i.test(url)) return url;
   return absoluteImageUrl(req, url);
 }
 
@@ -384,7 +373,7 @@ export async function generateSlotsLoopVideoPromptOnServer(
 ): Promise<SlotsLoopVideoResult> {
   const imageUrl = String(body.imageUrl || "").trim();
   if (!imageUrl) throw new Error("缺少 imageUrl");
-  const imageDataUrl = resolveSlotsImageForVision(req, projectRoot, imageUrl);
+  const imageDataUrl = await resolveSlotsImageForVision(req, projectRoot, imageUrl);
   if (!imageDataUrl) throw new Error("无法读取 Slots 静态图");
   const phases = computeSlotsLoopPhases(body.durationSec);
   const creativeIdea = String(body.creativeIdea || "").trim().slice(0, 500);

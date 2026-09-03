@@ -1,11 +1,12 @@
 import type { Express, Request, Response } from "express";
 import type Database from "better-sqlite3";
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
 import path from "path";
 import sharp from "sharp";
 import { v4 as uuidv4 } from "uuid";
 import { createRequireAuth } from "./userAuth.js";
 import { stripReferenceCostumeLockFromPrompt } from "../lib/nineGrid/nineGridCore.js";
+import { isOssEnabled, mapUploadsPathToKey, readUploadsBytes, uploadBufferToOss, uploadsAssetExists } from "./ossStore.js";
 
 export type PersistImageMeta = {
   userId?: string;
@@ -200,21 +201,34 @@ export async function ensureGalleryThumbnail(
   const normalized = normalizeUploadPath(sourcePath);
   if (!normalized) return sourcePath;
   const abs = path.join(projectRoot, "public", normalized.replace(/^\/uploads\//, "uploads/"));
-  if (!existsSync(abs)) return normalized;
-
-  const galleryDir = path.join(projectRoot, "public", "uploads", "gallery");
-  mkdirSync(galleryDir, { recursive: true });
   const base = path.basename(abs, path.extname(abs));
   const thumbRel = `/uploads/gallery/${base}_thumb.webp`;
+  const galleryDir = path.join(projectRoot, "public", "uploads", "gallery");
   const thumbAbs = path.join(galleryDir, `${base}_thumb.webp`);
-  if (existsSync(thumbAbs)) return thumbRel;
+  if (existsSync(thumbAbs) || (await uploadsAssetExists(projectRoot, thumbRel))) return thumbRel;
 
+  const source = existsSync(abs) ? abs : await readUploadsBytes(projectRoot, normalized);
+  if (!source) return normalized;
+
+  mkdirSync(galleryDir, { recursive: true });
   try {
-    await sharp(abs)
+    const buf = await sharp(typeof source === "string" ? source : source.buffer)
       .rotate()
       .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
       .webp({ quality: 82 })
-      .toFile(thumbAbs);
+      .toBuffer();
+    writeFileSync(thumbAbs, buf);
+    if (isOssEnabled()) {
+      try {
+        await uploadBufferToOss({
+          key: mapUploadsPathToKey(thumbRel),
+          buffer: buf,
+          mime: "image/webp",
+        });
+      } catch (e) {
+        console.warn("[thumb] OSS 上传失败，保留本地", (e as Error)?.message);
+      }
+    }
     return thumbRel;
   } catch {
     return normalized;

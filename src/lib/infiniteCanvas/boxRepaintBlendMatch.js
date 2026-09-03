@@ -653,7 +653,18 @@ export function compositeBoxRepaint(originalImageData, correctedPatch, box, feat
 export async function loadRgbaSampleFromUrl(url, targetW, targetH) {
   const raw = String(url || '').trim();
   if (!raw) throw new Error('empty url');
-  const res = await fetch(raw, { credentials: 'include' });
+  const fetchUrl = (() => {
+    if (!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
+    if (raw.startsWith('/uploads/')) return raw.split('?')[0];
+    try {
+      const parsed = new URL(raw, window.location.origin);
+      if (parsed.origin === window.location.origin && parsed.pathname.startsWith('/uploads/')) {
+        return parsed.pathname;
+      }
+    } catch (_) { /* ignore */ }
+    return raw;
+  })();
+  const res = await fetch(fetchUrl, { credentials: 'include' });
   if (!res.ok) throw new Error(`fetch ${res.status}`);
   const blob = await res.blob();
   const objUrl = URL.createObjectURL(blob);

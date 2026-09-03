@@ -1,6 +1,5 @@
 import type { Express, Request, RequestHandler } from "express";
-import { existsSync, readFileSync } from "fs";
-import path from "path";
+import { parseUploadsPath, readUploadsBytes } from "./ossStore.js";
 import {
   augmentChatCompletionsBody,
   extractTextLlmMessageContent,
@@ -37,41 +36,32 @@ function absoluteUrl(req: Request, url: string): string {
   return u;
 }
 
-function guessMimeFromPath(filePath: string): string {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext === ".webm") return "video/webm";
-  if (ext === ".mov") return "video/quicktime";
-  if (ext === ".m4v") return "video/x-m4v";
-  if (ext === ".mp4") return "video/mp4";
-  if (ext === ".png") return "image/png";
-  if (ext === ".webp") return "image/webp";
-  if (ext === ".gif") return "image/gif";
-  return "image/jpeg";
-}
-
-/** 本地 /uploads 资源：图片转 data URL；视频在体积限制内也转 data URL，便于 Comfly/Gemini 读取 */
-function resolveMediaUrlForUpstream(req: Request, projectRoot: string, rawUrl: string): string {
+/** /uploads 转 data URL（本地盘或 OSS）；视频超限仍给站内绝对地址。 */
+async function resolveMediaUrlForUpstream(
+  req: Request,
+  projectRoot: string,
+  rawUrl: string
+): Promise<string> {
   const url = String(rawUrl || "").trim();
   if (!url) return "";
-  if (url.startsWith("data:") || /^https?:\/\//i.test(url)) return url;
-
-  if (url.startsWith("/uploads/")) {
-    const rel = url.replace(/^\/uploads\//, "").replace(/\\/g, "/");
-    const abs = path.join(projectRoot, "public", "uploads", rel);
-    if (!existsSync(abs)) return absoluteUrl(req, url);
-    const buf = readFileSync(abs);
-    const mime = guessMimeFromPath(abs);
-    if (mime.startsWith("video/") && buf.length > MAX_LOCAL_VIDEO_BYTES) {
-      console.warn("[canvas-llm] video too large for inline upload, using absolute URL", {
-        url,
-        bytes: buf.length,
-        max: MAX_LOCAL_VIDEO_BYTES,
-      });
-      return absoluteUrl(req, url);
+  if (url.startsWith("data:")) return url;
+  const internal = parseUploadsPath(url);
+  if (internal) {
+    const got = await readUploadsBytes(projectRoot, internal);
+    if (got?.buffer?.length) {
+      if (got.mime.startsWith("video/") && got.buffer.length > MAX_LOCAL_VIDEO_BYTES) {
+        console.warn("[canvas-llm] video too large for inline upload, using absolute URL", {
+          url: internal,
+          bytes: got.buffer.length,
+          max: MAX_LOCAL_VIDEO_BYTES,
+        });
+        return absoluteUrl(req, internal);
+      }
+      return `data:${got.mime};base64,${got.buffer.toString("base64")}`;
     }
-    return `data:${mime};base64,${buf.toString("base64")}`;
+    return absoluteUrl(req, internal);
   }
-
+  if (/^https?:\/\//i.test(url)) return url;
   return absoluteUrl(req, url);
 }
 
@@ -108,7 +98,7 @@ export function registerCanvasLlmRoutes(app: Express, projectRoot: string, gate?
     ];
 
     for (const raw of mediaUrls.slice(0, 8)) {
-      const resolved = resolveMediaUrlForUpstream(req, projectRoot, raw);
+      const resolved = await resolveMediaUrlForUpstream(req, projectRoot, raw);
       if (!resolved) continue;
       contentParts.push({ type: "image_url", image_url: { url: resolved } });
     }

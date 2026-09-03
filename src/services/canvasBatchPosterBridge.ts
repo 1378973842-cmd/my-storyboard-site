@@ -11,6 +11,7 @@ import {
 } from "./canvasTextLlmBridge.js";
 import { existsSync, readFileSync } from "fs";
 import path from "path";
+import { uploadsToDataUrl } from "./ossStore.js";
 import {
   BATCH_POSTER_THEME_BY_ID,
   BATCH_POSTER_THEME_CLUSTERS,
@@ -904,28 +905,16 @@ function absolutePosterUrl(req: Request, url: string): string {
   return u;
 }
 
-function guessPosterMime(filePath: string): string {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext === ".png") return "image/png";
-  if (ext === ".webp") return "image/webp";
-  if (ext === ".gif") return "image/gif";
-  return "image/jpeg";
-}
-
-function resolvePosterImageForVision(req: Request, projectRoot: string, rawUrl: string): string {
+async function resolvePosterImageForVision(req: Request, projectRoot: string, rawUrl: string): Promise<string> {
   const url = String(rawUrl || "").trim();
   if (!url) return "";
   if (url.startsWith("blob:")) {
     throw new Error("参考图为浏览器临时地址(blob)，请重新连接图片或先上传到画布");
   }
-  if (url.startsWith("data:") || /^https?:\/\//i.test(url)) return url;
-  if (url.startsWith("/uploads/")) {
-    const rel = url.replace(/^\/uploads\//, "").replace(/\\/g, "/");
-    const abs = path.join(projectRoot, "public", "uploads", rel);
-    if (!existsSync(abs)) return absolutePosterUrl(req, url);
-    const buf = readFileSync(abs);
-    return `data:${guessPosterMime(abs)};base64,${buf.toString("base64")}`;
-  }
+  if (url.startsWith("data:")) return url;
+  const data = await uploadsToDataUrl(projectRoot, url);
+  if (data) return data;
+  if (/^https?:\/\//i.test(url)) return url;
   return absolutePosterUrl(req, url);
 }
 
@@ -1127,7 +1116,7 @@ export async function extractBatchPosterTitleCopyOnServer(
 ): Promise<BatchPosterTitleCopyLayers> {
   const posterUrl = String(body.posterUrl || "").trim();
   if (!posterUrl) throw new Error("缺少 posterUrl");
-  const imageDataUrl = resolvePosterImageForVision(req, projectRoot, posterUrl);
+  const imageDataUrl = await resolvePosterImageForVision(req, projectRoot, posterUrl);
   if (!imageDataUrl) throw new Error("无法读取参考海报");
   const model =
     String(body.model || "").trim() ||

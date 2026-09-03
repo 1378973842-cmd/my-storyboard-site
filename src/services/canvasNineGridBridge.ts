@@ -1,6 +1,5 @@
 import type { Request } from "express";
-import { existsSync, readFileSync } from "fs";
-import path from "path";
+import { uploadsToDataUrl } from "./ossStore.js";
 import {
   augmentChatCompletionsBody,
   extractTextLlmMessageContent,
@@ -69,29 +68,17 @@ function absoluteRefUrl(req: Request, url: string): string {
   return u;
 }
 
-function guessImageMime(filePath: string): string {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext === ".png") return "image/png";
-  if (ext === ".webp") return "image/webp";
-  if (ext === ".gif") return "image/gif";
-  return "image/jpeg";
-}
-
-export function resolveNineGridRefImageForVision(
+export async function resolveNineGridRefImageForVision(
   req: Request,
   projectRoot: string,
   rawUrl: string
-): string {
+): Promise<string> {
   const url = String(rawUrl || "").trim();
   if (!url) return "";
-  if (url.startsWith("data:") || /^https?:\/\//i.test(url)) return url;
-  if (url.startsWith("/uploads/")) {
-    const rel = url.replace(/^\/uploads\//, "").replace(/\\/g, "/");
-    const abs = path.join(projectRoot, "public", "uploads", rel);
-    if (!existsSync(abs)) return absoluteRefUrl(req, url);
-    const buf = readFileSync(abs);
-    return `data:${guessImageMime(abs)};base64,${buf.toString("base64")}`;
-  }
+  if (url.startsWith("data:")) return url;
+  const data = await uploadsToDataUrl(projectRoot, url);
+  if (data) return data;
+  if (/^https?:\/\//i.test(url)) return url;
   return absoluteRefUrl(req, url);
 }
 
@@ -248,7 +235,7 @@ export async function analyzeNineGridReferenceLooks(
     const ref = refs[idx];
     const index = idx + 1;
     const name = String(ref.name || "").trim() || `角色${String(index).padStart(2, "0")}`;
-    const imageDataUrl = resolveNineGridRefImageForVision(req, projectRoot, ref.url);
+    const imageDataUrl = await resolveNineGridRefImageForVision(req, projectRoot, ref.url);
     if (!imageDataUrl) {
       console.warn("[9grid] ref vision skipped: empty image url", { index, name });
       out.push(fallbackRefLook(index, name));

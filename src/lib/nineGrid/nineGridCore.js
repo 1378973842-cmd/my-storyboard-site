@@ -211,14 +211,27 @@ export function buildNineGridImagePrompt(shots, refs, opts = {}) {
   return augmentImagePromptWithReferenceCostumeLock(base, refs, refLooks);
 }
 
-export function loadNineGridImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
+export async function loadNineGridImage(src) {
+  const raw = String(src || '').trim();
+  if (!raw) throw new Error('图片加载失败（可能跨域或链接已失效）');
+  const img = new Image();
+  let objectUrl = '';
+  const load = (url) => new Promise((resolve, reject) => {
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('图片加载失败（可能跨域或链接已失效）'));
-    img.src = src;
+    img.src = url;
   });
+  try {
+    if (raw.startsWith('data:') || raw.startsWith('blob:')) {
+      return await load(raw);
+    }
+    const res = await fetch(raw, { credentials: 'include' });
+    if (!res.ok) throw new Error('图片加载失败（可能跨域或链接已失效）');
+    objectUrl = URL.createObjectURL(await res.blob());
+    return await load(objectUrl);
+  } finally {
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+  }
 }
 
 export async function splitNineGridToNine(src, pad = 0, gap = 0) {
