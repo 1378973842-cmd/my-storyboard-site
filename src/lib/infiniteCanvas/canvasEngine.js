@@ -1781,6 +1781,8 @@ let imageEditInplaceHost = null;
 let imageEditInplaceImg = null;
 /** 编辑中 commit 的节点：关闭编辑器后再 refresh，避免 keepWholeNode 卡住旧图 */
 let pendingImageEditRefreshIds = new Set();
+/** 画笔/裁剪导出图缓存，避免点应用时再拉一遍原图 */
+let editExportBitmapCache = { url: '', img: null, objectUrl: '' };
 let textSelectionGuard = null;
 const PROMPT_TEXT_MAX_LENGTH = 20000;
 const CLIENT_ID = 'canvas_' + Math.random().toString(36).slice(2);
@@ -14715,6 +14717,7 @@ function spawnEditedImageNodeFromSource(file, sourceNode, opts={}){
     }
     pendingImageEditRefreshIds.add(sourceNode.id);
     pendingImageEditRefreshIds.add(next.id);
+    commitStructureDomPatch({ addedIds: [next.id], refreshIds: [sourceNode.id] });
     return next;
 }
 function resetImageEditRotateState(){
@@ -15138,7 +15141,7 @@ async function commitImageEditorFile(file){
         queueRefresh(owner.id);
         // 编辑焦点会挡住 refreshNodes；关闭编辑器后再刷
         if(!(cropState && imageEditFocusNodeId === owner.id)) refreshNodes([owner.id]);
-        scheduleSaveNow();
+        if(!String(file.url).startsWith('blob:')) scheduleSaveNow();
         return true;
     }
     if(target.type === 'generator'){
@@ -15148,7 +15151,7 @@ async function commitImageEditorFile(file){
         // 裁剪/画笔/旋转：不改写生图台原图，右侧连出新图片节点
         const spawned = spawnEditedImageNodeFromSource(file, owner, {editOrigin: imageEditMode, sourceUrl: target.url});
         if(!spawned) return false;
-        scheduleSaveNow();
+        if(!String(file.url).startsWith('blob:')) scheduleSaveNow();
         return true;
     }
     const node = nodes.find(n => n.id === (target.nodeId || cropState.nodeId));
@@ -15157,7 +15160,7 @@ async function commitImageEditorFile(file){
     // 图片节点同样：保存后连出新图，保留原节点
     const spawned = spawnEditedImageNodeFromSource(file, node, {editOrigin: imageEditMode, sourceUrl: node.url});
     if(!spawned) return false;
-    scheduleSaveNow();
+    if(!String(file.url).startsWith('blob:')) scheduleSaveNow();
     return true;
 }
 function syncBrushApplyLabel(){
@@ -15252,6 +15255,7 @@ async function openImageEditorCore({nodeId, url, name, saveTarget, mode='crop'})
             if(exportImg.src !== url) exportImg.src = url;
             else if(exportImg.complete) resolve();
         });
+    void loadImageBitmapForExport(url).catch(() => {});
     // 先记焦点节点，防止缩放前 refresh 拆掉即将挂上的编辑层
     if(focusId) imageEditFocusNodeId = focusId;
     imageEditOpenedAt = Date.now();
@@ -15417,6 +15421,7 @@ function closeImageEditor(){
     const backup = imageEditViewportBackup;
     imageEditViewportBackup = null;
     forceClearImageEditChrome({ keepViewportAnim: true });
+    clearEditExportBitmapCache();
     domGet('imageEditStage')?.classList.remove('overflowing', 'overflow-x', 'overflow-y');
     const cropCanvasEl = domGet('cropCanvas');
     if(cropCanvasEl){
@@ -15530,6 +15535,40 @@ async function uploadCroppedBlob(blob, name){
     const data = await apiFetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
     return data.files?.[0];
 }
+function swapCanvasBlobMediaUrl(blobUrl, realUrl){
+    const from = String(blobUrl || '');
+    const to = String(realUrl || '');
+    if(!from.startsWith('blob:') || !to) return;
+    const ids = [];
+    nodes.forEach(n => {
+        if(n?.url === from){
+            n.url = to;
+            ids.push(n.id);
+        }
+    });
+    try { URL.revokeObjectURL(from); } catch(_){ /* ignore */ }
+    if(ids.length) refreshNodes(ids);
+    scheduleSaveNow();
+}
+async function commitEditedBlobAndUpload(blob, name){
+    if(!blob) return false;
+    const blobUrl = URL.createObjectURL(blob);
+    const ok = await commitImageEditorFile({ url: blobUrl, name });
+    if(!ok){
+        try { URL.revokeObjectURL(blobUrl); } catch(_){ /* ignore */ }
+        return false;
+    }
+    void uploadCroppedBlob(blob, name).then(up => {
+        if(!up?.url) throw new Error('upload empty');
+        swapCanvasBlobMediaUrl(blobUrl, up.url);
+    }).catch(err => {
+        console.warn('[commitEditedBlobAndUpload]', err);
+        softAlert(langIsEn()
+            ? 'Background upload failed. The preview is only on this tab.'
+            : '后台上传失败，预览仅在当前标签有效，请再点一次应用。');
+    });
+    return true;
+}
 async function uploadImageBlobs(blobs){
     const form = new FormData();
     blobs.forEach(item => form.append('files', item.blob, item.name));
@@ -15607,14 +15646,23 @@ async function applyImageCrop(){
     }
     const baseName = cropState.saveTarget?.name || cropState.saveTarget?.url || 'image';
     const base = String(baseName).replace(/\.[^.]+$/, '').split('/').pop() || 'image';
-    const file = await uploadCroppedBlob(blob, `${base}_crop.png`);
-    if(file && await commitImageEditorFile(file)){
+    if(await commitEditedBlobAndUpload(blob, `${base}_crop.png`)){
         closeImageEditor();
     }
+}
+function clearEditExportBitmapCache(){
+    if(editExportBitmapCache.objectUrl){
+        try { URL.revokeObjectURL(editExportBitmapCache.objectUrl); } catch(_){ /* ignore */ }
+    }
+    editExportBitmapCache = { url: '', img: null, objectUrl: '' };
 }
 async function loadImageBitmapForExport(url){
     const raw = String(url || '').trim();
     if(!raw) throw new Error('empty url');
+    const key = raw.startsWith('data:') || raw.startsWith('blob:') ? raw : (sameOriginMediaUrl(raw) || raw);
+    if(editExportBitmapCache.url === key && editExportBitmapCache.img?.naturalWidth){
+        return editExportBitmapCache.img;
+    }
     if(raw.startsWith('data:')){
         const im = new Image();
         await new Promise((resolve, reject) => {
@@ -15625,21 +15673,19 @@ async function loadImageBitmapForExport(url){
         return im;
     }
     // 同源 fetch→blob，避免 OSS 跨域污染 toBlob
-    const res = await fetch(sameOriginMediaUrl(raw) || raw, { credentials: 'include' });
+    const res = await fetch(key, { credentials: 'include' });
     if(!res.ok) throw new Error(`fetch ${res.status}`);
     const blob = await res.blob();
     const objUrl = URL.createObjectURL(blob);
-    try {
-        const im = new Image();
-        await new Promise((resolve, reject) => {
-            im.onload = () => resolve();
-            im.onerror = () => reject(new Error('decode failed'));
-            im.src = objUrl;
-        });
-        return im;
-    } finally {
-        URL.revokeObjectURL(objUrl);
-    }
+    const im = new Image();
+    await new Promise((resolve, reject) => {
+        im.onload = () => resolve();
+        im.onerror = () => reject(new Error('decode failed'));
+        im.src = objUrl;
+    });
+    clearEditExportBitmapCache();
+    editExportBitmapCache = { url: key, img: im, objectUrl: objUrl };
+    return im;
 }
 async function canvasToPngBlob(canvasEl){
     return new Promise((resolve, reject) => {
@@ -15689,12 +15735,7 @@ async function applyImageBrush(){
         const baseName = cropState.saveTarget?.name || cropState.saveTarget?.url || 'image';
         const base = String(baseName).replace(/\.[^.]+$/, '').split('/').pop() || 'image';
         const suffix = brushTool === 'label' ? '_mark' : '_paint';
-        const file = await uploadCroppedBlob(blob, `${base}${suffix}.png`);
-        if(!file?.url){
-            imageEditNotice(langIsEn() ? 'Upload failed. Check network and try again.' : '上传失败，请检查网络后重试。');
-            return;
-        }
-        if(await commitImageEditorFile(file)){
+        if(await commitEditedBlobAndUpload(blob, `${base}${suffix}.png`)){
             editDrawDirty = false;
             closeImageEditor();
         } else {
@@ -15798,12 +15839,7 @@ async function applyImageRotate(){
         const blob = await canvasToPngBlob(canvasEl);
         const baseName = cropState.saveTarget?.name || cropState.saveTarget?.url || 'image';
         const base = String(baseName).replace(/\.[^.]+$/, '').split('/').pop() || 'image';
-        const file = await uploadCroppedBlob(blob, `${base}_rotate.png`);
-        if(!file?.url){
-            softAlert(langIsEn() ? 'Upload failed. Check network and try again.' : '上传失败，请检查网络后重试。');
-            return;
-        }
-        if(await commitImageEditorFile(file)){
+        if(await commitEditedBlobAndUpload(blob, `${base}_rotate.png`)){
             closeImageEditor();
             setStatus(langIsEn() ? 'Saved as new image node' : '已连出新图片节点');
         } else {
@@ -16364,7 +16400,7 @@ function renderNode(node){
                 ? missingAssetHtml(node.url)
                 : isPanoLive
                     ? `<div class="pano-stage" data-pano-stage></div>`
-                    : `<img src="${escapeAttr(canvasThumbUrl(node.url))}" data-full-src="${escapeAttr(node.url)}" draggable="false" alt="" loading="lazy" decoding="async">`;
+                    : `<img src="${escapeAttr(canvasThumbUrl(node.url))}" data-full-src="${escapeAttr(node.url)}" draggable="false" alt="" loading="eager" decoding="sync">`;
             const panoCorner = isPanoramaImageNode(node) && !missing && mediaKind === 'image'
                 ? panoramaModeToggleHtml(node)
                 : '';

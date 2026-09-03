@@ -488,7 +488,8 @@
         { "desc": "AG256：懒迁移——旧 public/uploads 文件首次请求时 ensureOssObjectUploaded 自动补传 OSS", "status": "done" },
         { "desc": "AG256：验证 node init.mjs（typecheck+build）通过；未配置 OSS 时服务/页面正常（本地兜底）；ossStore 纯逻辑自检通过", "status": "done" },
         { "id": "AG256b", "desc": "修：线上 /uploads 不再 302 到 OSS 签名 URL（改为同源代理：本地 sendFile / OSS 读字节经本站发出），避免画笔/裁剪/旋转/宫格 canvas 跨域失败；素材存在检查与视觉参考图改为本地或 OSS 直读", "status": "done", "priority": 310 },
-        { "id": "AG256c", "desc": "修：OSS 同源代理补洞——OSS 走流+Range（视频勿整文件进内存）；画笔/裁剪已 fetch 站内路径；视频截帧剪辑勿对 /uploads 设 crossOrigin=anonymous；九宫格切图 fetch+blob；素材库/缩略图/persist 缺盘时读 OSS", "status": "done", "priority": 311 }
+        { "id": "AG256c", "desc": "修：OSS 同源代理补洞——OSS 走流+Range（视频勿整文件进内存）；画笔/裁剪已 fetch 站内路径；视频截帧剪辑勿对 /uploads 设 crossOrigin=anonymous；九宫格切图 fetch+blob；素材库/缩略图/persist 缺盘时读 OSS", "status": "done", "priority": 311 },
+        { "id": "AG256d", "desc": "修：应用画笔/裁剪/旋转不再等上传+OSS+缩略图——blob 先落板关编辑器，后台换 URL；/api/ai/upload 本地写完即返回；图片节点 img eager", "status": "done", "priority": 312 }
       ]
     }
   ]

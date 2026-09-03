@@ -583,22 +583,27 @@ export function registerInfiniteCanvasRoutes(
       const filename = `canvas_${uuidv4().replace(/-/g, "").slice(0, 12)}${ext}`;
       const url = `/uploads/canvas/${filename}`;
       const abs = path.join(uploadsDir, filename);
-      if (isOssEnabled()) {
-        try {
-          await uploadBufferToOss({
-            key: mapUploadsPathToKey(url),
-            buffer: file.buffer,
-            mime: file.mimetype || mime,
-            meta: userId ? { owner: userId } : undefined,
-          });
-        } catch (e) {
-          console.warn("[ai/upload] OSS 上传失败，仍写本地", mapUploadsPathToKey(url), (e as Error)?.message);
-        }
-      }
       mkdirSync(path.dirname(abs), { recursive: true });
       writeFileSync(abs, file.buffer);
       if (userId && deps?.db) recordFileOwnership(deps.db, url, userId);
-      if (kind === "image") await ensureGalleryThumbnail(projectRoot, url);
+      if (isOssEnabled()) {
+        const ossBuf = file.buffer;
+        const ossMime = file.mimetype || mime;
+        const ossMeta = userId ? { owner: userId } : undefined;
+        void uploadBufferToOss({
+          key: mapUploadsPathToKey(url),
+          buffer: ossBuf,
+          mime: ossMime,
+          meta: ossMeta,
+        }).catch((e) => {
+          console.warn("[ai/upload] OSS 上传失败，保留本地", mapUploadsPathToKey(url), (e as Error)?.message);
+        });
+      }
+      if (kind === "image") {
+        void ensureGalleryThumbnail(projectRoot, url).catch((e) => {
+          console.warn("[ai/upload] thumb 失败", (e as Error)?.message);
+        });
+      }
       uploaded.push({
         url,
         name: displayName || filename,
