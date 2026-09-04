@@ -9589,6 +9589,7 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
   z-index:6;
 }
 .crop-canvas.is-canvas-inplace.brush-mode {
+  /* 文字框手柄会探出图沿；笔迹层本身已按图内容盒对齐，不会铺到灰底 */
   overflow:visible !important;
 }
 .crop-canvas.is-canvas-inplace .crop-box {

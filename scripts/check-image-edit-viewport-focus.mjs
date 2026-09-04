@@ -36,6 +36,7 @@ const checks = [
   [/keepLocalViewport\s*=\s*isImageEditOpen\(\)/.test(eng), 'remote sync keeps viewport while editing'],
   [/stiffness\s*=\s*320/.test(animate) && /maxMs\s*=\s*780/.test(animate), 'focus spring tightened'],
   [/cancelImageEditViewportAnim[\s\S]{0,120}imageEditViewportAnimActive\s*=\s*false/.test(eng), 'cancel clears anim active'],
+  [/if\(mode === 'rotate'\) return/.test(prepare), 'rotate skips entrance viewport zoom'],
 ];
 
 let failed = 0;

@@ -7835,7 +7835,8 @@ function ensureImageEditorUi(){
             setBrushTextSelection(null, false);
         }
         if(event.target.closest('.brush-text-transform, .image-edit-head, .image-edit-tools, .image-edit-actions, .image-edit-mode, .image-edit-crop-dock, .image-edit-brush-dock, .crop-aspect-menu, #cropBox, #cropHandle')) return;
-        if(!event.target.closest('.crop-canvas, #cropCanvas, #editDrawCanvas')) return;
+        // 只在笔迹层上起笔：宿主 wrap 常比图大（灰底/letterbox），点那里不应开画
+        if(!event.target.closest('#editDrawCanvas')) return;
         beginEditDraw(event);
     }, true);
     on(document, 'click', event => {
@@ -12856,14 +12857,16 @@ async function prepareImageEditCanvasFocus(nodeId, mode){
     if(!node || !board) return;
     touchBoardInteraction();
     imageEditOpenedAt = Date.now();
-    if(!imageEditViewportBackup){
-        imageEditViewportBackup = { x: viewport.x, y: viewport.y, scale: viewport.scale };
-    }
     imageEditFocusNodeId = nodeId;
     // 放大过程中保持原节点可见，避免闪黑
     setImageEditSourceHidden('', false);
     removeImageActionBar();
     removeImageGenDock();
+    // 旋转 90° 会互换宽高；入场放大后图台装不下，故原地编辑、不飞镜
+    if(mode === 'rotate') return;
+    if(!imageEditViewportBackup){
+        imageEditViewportBackup = { x: viewport.x, y: viewport.y, scale: viewport.scale };
+    }
     const target = viewportTargetForNodeFocus(node, { mode });
     if(target) await animateViewportTo(target);
 }
@@ -12877,6 +12880,35 @@ function restoreImageEditCanvasFocus(){
 }
 function editDrawCanvas(){
     return domGet('editDrawCanvas');
+}
+/** 屏幕矩形 → 宿主本地 CSS 像素（#world 有 scale()，getBoundingClientRect 不能直接当 left/width） */
+function clientRectToHostLocal(host, rect){
+    const hr = host.getBoundingClientRect();
+    const sx = hr.width / Math.max(1, host.offsetWidth);
+    const sy = hr.height / Math.max(1, host.offsetHeight);
+    return {
+        left: (rect.left - hr.left) / sx,
+        top: (rect.top - hr.top) / sy,
+        width: rect.width / sx,
+        height: rect.height / sy,
+    };
+}
+/** img/video 在 element box 里真正画出的区域（object-fit:contain 会留 letterbox） */
+function replacedObjectFitBox(el){
+    const nw = Math.max(1, el.naturalWidth || el.videoWidth || 0);
+    const nh = Math.max(1, el.naturalHeight || el.videoHeight || 0);
+    const cw = el.clientWidth || 0;
+    const ch = el.clientHeight || 0;
+    if(nw < 2 || nh < 2 || cw < 1 || ch < 1) return { left: 0, top: 0, width: cw, height: ch };
+    let fit = 'fill';
+    try { fit = getComputedStyle(el).objectFit || 'fill'; } catch(_){ /* ignore */ }
+    if(fit === 'contain' || fit === 'scale-down'){
+        const scale = Math.min(cw / nw, ch / nh);
+        const w = nw * scale;
+        const h = nh * scale;
+        return { left: (cw - w) / 2, top: (ch - h) / 2, width: w, height: h };
+    }
+    return { left: 0, top: 0, width: cw, height: ch };
 }
 function resizeEditDrawCanvas(){
     const display = editDisplayImage();
@@ -12906,14 +12938,14 @@ function resizeEditDrawCanvas(){
     }
     const host = canvasEl.parentElement;
     if(host && display.isConnected && host.contains(display)){
-        const hr = host.getBoundingClientRect();
-        const ir = display.getBoundingClientRect();
-        canvasEl.style.left = `${ir.left - hr.left}px`;
-        canvasEl.style.top = `${ir.top - hr.top}px`;
+        const box = clientRectToHostLocal(host, display.getBoundingClientRect());
+        const fit = replacedObjectFitBox(display);
+        canvasEl.style.left = `${box.left + fit.left}px`;
+        canvasEl.style.top = `${box.top + fit.top}px`;
         canvasEl.style.right = 'auto';
         canvasEl.style.bottom = 'auto';
-        canvasEl.style.width = `${Math.max(1, ir.width)}px`;
-        canvasEl.style.height = `${Math.max(1, ir.height)}px`;
+        canvasEl.style.width = `${Math.max(1, fit.width)}px`;
+        canvasEl.style.height = `${Math.max(1, fit.height)}px`;
     } else {
         canvasEl.style.width = `${display.clientWidth || 1}px`;
         canvasEl.style.height = `${display.clientHeight || 1}px`;
@@ -14425,14 +14457,16 @@ function refreshGridSplitPreview(){
     }
     ctx.restore();
 }
-/** 编辑派生物落点用展示宽高（生图台 node.w 常为 260，真实显示是 _displayW≈496） */
+/** 工具栏派生物相对源图台右侧间距（world px）；只留端口空隙 */
+const IMAGE_DERIVED_NODE_GAP_X = 24;
+/** 编辑派生物落点用可见壳宽高（生图台 node.w 常为 260，真实显示是 DOM/_displayW≈496） */
 function nodeEditSpawnLayoutSize(node){
     if(!node) return {w: GENERATOR_BASE_W, h: GENERATOR_BASE_W};
     const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`);
-    let w = Number(node._displayW) || 0;
-    let h = Number(node._displayH) || 0;
+    let w = Number(el?.offsetWidth) || Number(node._layoutW) || 0;
+    let h = Number(el?.offsetHeight) || Number(node._layoutH) || 0;
     if((!w || !h) && isGenConsoleNode(node)){
-        w = w || genStageDisplayWidth(node);
+        w = w || Number(node._displayW) || genStageDisplayWidth(node);
         if(!h && w){
             const arCss = String(genStageTileAspectCss(node) || '1');
             const parts = arCss.split('/').map(Number);
@@ -14440,15 +14474,32 @@ function nodeEditSpawnLayoutSize(node){
             h = Math.max(96, Math.round(w / Math.max(0.05, ar)));
         }
     }
-    w = Math.max(48, w || Number(el?.offsetWidth) || Number(node.w) || GENERATOR_BASE_W);
-    h = Math.max(48, h || Number(el?.offsetHeight) || Number(node.h) || w);
+    w = Math.max(48, w || Number(node._displayW) || Number(node.w) || GENERATOR_BASE_W);
+    h = Math.max(48, h || Number(node._displayH) || Number(node.h) || w);
     return {w: Math.round(w), h: Math.round(h)};
 }
 function imageEditorOutputPoint(node, offsetX=0){
     const {w} = nodeEditSpawnLayoutSize(node);
-    const gap = 56;
-    // 与源节点顶边平齐，落在展示宽度右侧；多张派生时横向右移错开（避免叠在生图台上）
-    return {x:(node.x || 0) + w + gap + offsetX, y:(node.y || 0)};
+    return {x:(node.x || 0) + w + IMAGE_DERIVED_NODE_GAP_X + offsetX, y:(node.y || 0)};
+}
+/** 多张派生：只跟同一行、已在右侧的图错开；跑到别处的旧结果不把新节点往右挤 */
+function imageEditSpawnOffsetX(sourceNode){
+    if(!sourceNode) return 0;
+    const gap = IMAGE_DERIVED_NODE_GAP_X;
+    const src = nodeEditSpawnLayoutSize(sourceNode);
+    const packedLeft = (sourceNode.x || 0) + src.w + gap;
+    let nextX = packedLeft;
+    const srcY = Number(sourceNode.y || 0);
+    const rowSlop = Math.max(48, src.h * 0.7);
+    connections.filter(c => c.from === sourceNode.id)
+        .map(c => nodes.find(n => n.id === c.to))
+        .filter(n => n?.type === 'image')
+        .forEach(sib => {
+            if(Math.abs(Number(sib.y || 0) - srcY) > rowSlop) return;
+            const sw = nodeEditSpawnLayoutSize(sib);
+            nextX = Math.max(nextX, Number(sib.x || 0) + sw.w + gap);
+        });
+    return Math.max(0, nextX - packedLeft);
 }
 function imageEditorOutputNode(sourceNode){
     let out = connections.filter(c => c.from === sourceNode.id)
@@ -14757,16 +14808,7 @@ function generatorFloatTitleHtml(node){
 /** 裁剪/画笔/旋转保存：源节点右侧连出新图片节点（不改写原图） */
 function spawnEditedImageNodeFromSource(file, sourceNode, opts={}){
     if(!file?.url || !sourceNode) return null;
-    const siblings = connections
-        .filter(c => c.from === sourceNode.id)
-        .map(c => nodes.find(n => n.id === c.to))
-        .filter(n => n?.type === 'image')
-        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
-    // 多张派生物横向右移错开；首张与源顶边平齐
-    let offsetX = 0;
-    siblings.forEach(sib => {
-        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
-    });
+    const offsetX = imageEditSpawnOffsetX(sourceNode);
     const next = addGeneratedImageNode(file, sourceNode, file.name || 'edit.png', offsetX);
     // 初始尺寸贴近源展示高度，避免未解码前缩成小方块看起来「叠」在一起
     const src = nodeEditSpawnLayoutSize(sourceNode);
@@ -26457,15 +26499,7 @@ async function openImageMaskRepaint(target){
 }
 function spawnMaskRepaintPendingImageNode(sourceNode, job){
     if(!sourceNode || !job) return null;
-    const siblings = connections
-        .filter(c => c.from === sourceNode.id)
-        .map(c => nodes.find(n => n.id === c.to))
-        .filter(n => n?.type === 'image')
-        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
-    let offsetX = 0;
-    siblings.forEach(sib => {
-        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
-    });
+    const offsetX = imageEditSpawnOffsetX(sourceNode);
     const baseName = String(job.name || 'image').replace(/\.[^.]+$/, '');
     const next = addGeneratedImageNode({ url: '', name: `${baseName}_repaint` }, sourceNode, '_repaint', offsetX);
     next.editOrigin = 'repaint';
@@ -26989,15 +27023,7 @@ async function openImageBoxRepaint(target){
 }
 function spawnBoxRepaintPendingImageNode(sourceNode, job){
     if(!sourceNode || !job) return null;
-    const siblings = connections
-        .filter(c => c.from === sourceNode.id)
-        .map(c => nodes.find(n => n.id === c.to))
-        .filter(n => n?.type === 'image')
-        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
-    let offsetX = 0;
-    siblings.forEach(sib => {
-        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
-    });
+    const offsetX = imageEditSpawnOffsetX(sourceNode);
     const baseName = String(job.name || 'image').replace(/\.[^.]+$/, '');
     const next = addGeneratedImageNode({ url: '', name: `${baseName}_box_repaint` }, sourceNode, '_box_repaint', offsetX);
     next.editOrigin = 'box-repaint';
@@ -28191,15 +28217,7 @@ function expandPromptText(userText){
 }
 function spawnExpandPendingImageNode(sourceNode, st){
     if(!sourceNode || !st) return null;
-    const siblings = connections
-        .filter(c => c.from === sourceNode.id)
-        .map(c => nodes.find(n => n.id === c.to))
-        .filter(n => n?.type === 'image')
-        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
-    let offsetX = 0;
-    siblings.forEach(sib => {
-        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
-    });
+    const offsetX = imageEditSpawnOffsetX(sourceNode);
     const baseName = String(st.name || 'image').replace(/\.[^.]+$/, '');
     const next = addGeneratedImageNode({ url: '', name: `${baseName}_expand` }, sourceNode, '_expand', offsetX);
     next.editOrigin = 'expand';
@@ -28401,15 +28419,7 @@ async function runImageExpand(){
 /** 抠图：把选中图片上传到 RunningHub 抠图应用，结果生成一张透明底新图片节点（插在原图下方并自动连线） */
 function spawnCutoutPendingImageNode(sourceNode, job){
     if(!sourceNode || !job) return null;
-    const siblings = connections
-        .filter(c => c.from === sourceNode.id)
-        .map(c => nodes.find(n => n.id === c.to))
-        .filter(n => n?.type === 'image')
-        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
-    let offsetX = 0;
-    siblings.forEach(sib => {
-        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
-    });
+    const offsetX = imageEditSpawnOffsetX(sourceNode);
     const baseName = String(job.name || 'image').replace(/\.[^.]+$/, '');
     const next = addGeneratedImageNode({ url: '', name: `${baseName}_cutout` }, sourceNode, '_cutout', offsetX);
     next.editOrigin = 'cutout';
@@ -28908,15 +28918,7 @@ async function openImageUpscale(target){
 /** 高清放大：把选中图片上传到 RunningHub v2 超分应用，结果生成一张新图片节点（插在原图下方并自动连线） */
 function spawnUpscalePendingImageNode(sourceNode, job){
     if(!sourceNode || !job) return null;
-    const siblings = connections
-        .filter(c => c.from === sourceNode.id)
-        .map(c => nodes.find(n => n.id === c.to))
-        .filter(n => n?.type === 'image')
-        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
-    let offsetX = 0;
-    siblings.forEach(sib => {
-        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
-    });
+    const offsetX = imageEditSpawnOffsetX(sourceNode);
     const baseName = String(job.name || 'image').replace(/\.[^.]+$/, '');
     const next = addGeneratedImageNode({ url: '', name: `${baseName}_upscale` }, sourceNode, '_upscale', offsetX);
     next.editOrigin = 'upscale';
@@ -29277,15 +29279,7 @@ function panoramaFlatLayoutSize(node){
 }
 function spawnPanoramaPendingImageNode(sourceNode, job){
     if(!sourceNode || !job) return null;
-    const siblings = connections
-        .filter(c => c.from === sourceNode.id)
-        .map(c => nodes.find(n => n.id === c.to))
-        .filter(n => n?.type === 'image')
-        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
-    let offsetX = 0;
-    siblings.forEach(sib => {
-        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
-    });
+    const offsetX = imageEditSpawnOffsetX(sourceNode);
     const baseName = String(job.name || 'image').replace(/\.[^.]+$/, '');
     const next = addGeneratedImageNode({ url: '', name: `${baseName}_panorama` }, sourceNode, '_panorama', offsetX);
     next.editOrigin = 'panorama';
@@ -29946,15 +29940,7 @@ async function openImageNovelView(target){
 }
 function spawnNovelViewPendingImageNode(sourceNode, job, origin = 'novel-view'){
     if(!sourceNode || !job) return null;
-    const siblings = connections
-        .filter(c => c.from === sourceNode.id)
-        .map(c => nodes.find(n => n.id === c.to))
-        .filter(n => n?.type === 'image')
-        .sort((a, b) => (a.x - b.x) || (a.y - b.y));
-    let offsetX = 0;
-    siblings.forEach(sib => {
-        offsetX += nodeEditSpawnLayoutSize(sib).w + 36;
-    });
+    const offsetX = imageEditSpawnOffsetX(sourceNode);
     const orbit = origin === 'novel-view-orbit';
     const suffix = orbit ? '_novel_orbit' : '_novel_view';
     const baseName = String(job.name || 'image').replace(/\.[^.]+$/, '');
