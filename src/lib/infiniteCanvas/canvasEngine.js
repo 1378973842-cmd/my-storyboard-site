@@ -97,6 +97,47 @@ async function resolveDisplayMediaUrl(url){
     ossDisplayUrlInflight.set(key, job);
     return job;
 }
+/** 封面卡 / Output 格：缩略图改走 OSS 签名直链，不经 2G 机中转。画笔/裁剪仍读同源 /uploads。 */
+function bindOssDirectImg(img){
+    if(!img) return;
+    const src = String(img.getAttribute('src') || '').split('?')[0];
+    if(!src.startsWith('/uploads/')) return;
+    void resolveDisplayMediaUrl(src).then(signed => {
+        if(!signed || signed === src) return;
+        if(img.dataset.ossFallback === '1') return;
+        img.setAttribute('src', signed);
+    });
+}
+/** 复制/下载：优先节点上还在的本地 blob，否则 OSS 签名直链；失败再回同源 /uploads。 */
+function livePreviewBlobUrl(url){
+    const raw = String(url || '').trim();
+    if(!raw) return '';
+    if(raw.startsWith('blob:') || raw.startsWith('data:')) return raw;
+    const hit = (nodes || []).find(n => (
+        n?.url === raw || String(n?._previewObjectUrl || '') === raw
+    ) && String(n?._previewObjectUrl || '').startsWith('blob:'));
+    return hit ? String(hit._previewObjectUrl) : '';
+}
+async function fetchDisplayMediaBlob(url){
+    const raw = String(url || '').trim();
+    const source = livePreviewBlobUrl(raw) || raw;
+    if(!source) throw new Error('empty');
+    if(source.startsWith('blob:') || source.startsWith('data:')){
+        const res = await fetch(source);
+        if(!res.ok) throw new Error(String(res.status));
+        return res.blob();
+    }
+    const signed = await resolveDisplayMediaUrl(source);
+    try {
+        const res = await fetch(signed);
+        if(res.ok) return res.blob();
+    } catch(_){ /* OSS CORS / 断网 */ }
+    if(source.startsWith('/uploads/')){
+        const res = await fetch(source);
+        if(res.ok) return res.blob();
+    }
+    throw new Error('fetch');
+}
 let ossDirectUploadBlocked = false;
 function uploadItemName(item){
     if(item?.name) return String(item.name);
@@ -6777,7 +6818,7 @@ function buildCanvasItemElement(item, { collectionId = '' } = {}){
     row.innerHTML = `
             <div class="canvas-open" role="button" tabindex="${trashMode ? '-1' : '0'}">
                 <div class="canvas-card-preview${hasPreview ? ' has-preview' : ''}">
-                    <div class="canvas-card-preview-bg" aria-hidden="true">${hasPreview ? `<img class="canvas-card-preview-img" src="${escapeAttr(previewUrl)}" alt="" loading="lazy" draggable="false">` : ''}</div>
+                    <div class="canvas-card-preview-bg" aria-hidden="true">${hasPreview ? `<img class="canvas-card-preview-img" src="${escapeAttr(canvasThumbUrl(previewUrl))}" data-full-src="${escapeAttr(previewUrl)}" alt="" loading="lazy" decoding="async" draggable="false">` : ''}</div>
                     <span class="canvas-preview-mark" role="button" tabindex="0" title="${trashMode ? tr('canvas.deletedCanvas') : tr('canvas.changeIcon')}">${renderCanvasIcon(isSmartCanvas && /[^\x00-\x7F]/.test(item.icon || '') ? 'sparkles' : item.icon, 18)}</span>
                     ${isSmartCanvas ? `<span class="canvas-kind-chip">${tr('canvas.smartCanvasShort')}</span>` : ''}
                 </div>
@@ -6834,6 +6875,7 @@ function buildCanvasItemElement(item, { collectionId = '' } = {}){
                 </div>
             ` : ''}
         `;
+    row.querySelectorAll('img.canvas-card-preview-img').forEach(bindOssDirectImg);
     if(!trashMode) row.querySelector('.canvas-open').onclick = () => openCanvas(item.id);
     const titleEl = row.querySelector('.canvas-card-title');
     const editBtn = row.querySelector('.canvas-card-edit');
@@ -6933,6 +6975,8 @@ function bindGateCollectionsIntegration(){
         renderCanvasList,
         renderCanvasListInto,
         buildCanvasItemElement,
+        canvasThumbUrl,
+        bindOssDirectImg,
         refreshGateViewControls,
         refreshIcons,
         setStatus,
@@ -10027,14 +10071,11 @@ async function uploadImagesToImageBatch(batchId, files){
         if(!uploaded.length) throw new Error(langIsEn() ? 'Upload returned no image URL' : '上传未返回图片地址');
         uploaded.forEach((file, i) => {
             const node = nodes.find(n => n.id === placeholderIds[i]);
-            if(!node) return;
-            if(String(node.url).startsWith('blob:')) URL.revokeObjectURL(node.url);
-            node.url = file.url;
+            if(!node || !file?.url) return;
             node.name = String(imgs[i]?.name || file.name || '').trim() || outputImageName(file.url);
+            swapCanvasBlobMediaUrl(node.url, file.url);
         });
-        refreshNodes([batch.id]);
         scheduleImageBatchRelayout(batch.id, 'auto');
-        scheduleSave();
     } catch(err) {
         const ids = new Set(placeholderIds);
         placeholderIds.forEach(id => {
@@ -11097,13 +11138,11 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
                 uploaded.forEach((file, i) => {
                     const node = nodes.find(n => n.id === placeholderIds[i]);
                     if(!node || !file?.url) return;
-                    if(String(node.url).startsWith('blob:')) URL.revokeObjectURL(node.url);
-                    node.url = file.url;
                     node.mediaKind = file.kind || 'image';
                     node.name = String(imageFiles[i]?.name || file.name || '').trim() || outputImageName(file.url);
+                    // 板上 blob 不动，只换落盘地址（对齐画笔，避免再拉一遍原图）
+                    swapCanvasBlobMediaUrl(node.url, file.url);
                 });
-                refreshNodes(placeholderIds);
-                scheduleSave();
             })
             .catch(err => {
                 const ids = new Set(placeholderIds);
@@ -12599,12 +12638,9 @@ async function fillImageNode(nodeId, files, opts={}){
             if(!up?.url) throw new Error(langIsEn() ? 'Upload returned no image URL' : '上传未返回图片地址');
             const cur = nodes.find(n => n.id === nodeId);
             if(up && cur && String(cur.url).startsWith('blob:')){
-                URL.revokeObjectURL(cur.url);
-                cur.url = up.url;
                 cur.name = String(file?.name || up.name || '').trim() || outputImageName(up.url);
                 cur.mediaKind = up.kind || mediaKindForUpload(file);
-                refreshNodes([nodeId]);
-                scheduleSave();
+                swapCanvasBlobMediaUrl(cur.url, up.url);
             }
         })
         .catch(err => {
@@ -17142,6 +17178,7 @@ function bindOutputWrap(wrap, node){
     const del = wrap.querySelector('.output-del');
     const fav = wrap.querySelector('.output-fav-btn');
     if(img){
+        bindOssDirectImg(img);
         img.draggable = true;
         img.ondragstart = e => {
             e.stopPropagation();
@@ -24432,26 +24469,27 @@ function refreshGenStage(root, node, opts={}){
         if(isGenBatchPicking(node)) syncGenBatchPickBar();
     });
 }
+function blobAsClipboardPng(blob){
+    const type = String(blob?.type || 'image/png');
+    if(type === 'image/png') return blob;
+    return blobToPngClipboardBlob(blob);
+}
 /** 把图片写入系统剪贴板（优先 PNG）；失败则退回复制 URL */
 async function copyImageUrlToClipboard(url){
     const target = String(url || '').trim();
     if(!target) throw new Error(langIsEn() ? 'No image' : '没有图片');
-    const res = await fetch(target);
-    if(!res.ok) throw new Error(langIsEn() ? 'Fetch image failed' : '读取图片失败');
-    const blob = await res.blob();
+    const pngPromise = fetchDisplayMediaBlob(target)
+        .then(blobAsClipboardPng)
+        .catch(() => { throw new Error(langIsEn() ? 'Fetch image failed' : '读取图片失败'); });
     if(navigator.clipboard?.write && typeof ClipboardItem !== 'undefined'){
-        let itemBlob = blob;
-        const type = String(blob.type || 'image/png');
-        if(type !== 'image/png'){
-            try {
-                await navigator.clipboard.write([new ClipboardItem({ [type]: blob })]);
-                return;
-            } catch(_){
-                itemBlob = await blobToPngClipboardBlob(blob);
-            }
+        try {
+            await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngPromise })]);
+            return;
+        } catch(_){
+            const itemBlob = await pngPromise;
+            await navigator.clipboard.write([new ClipboardItem({ 'image/png': itemBlob })]);
+            return;
         }
-        await navigator.clipboard.write([new ClipboardItem({ 'image/png': itemBlob })]);
-        return;
     }
     await copyTextToClipboard(target);
 }
@@ -38338,7 +38376,7 @@ function renderOutputMedia(item, useGridLayout=false, renderOpts={}){
         const inner = `<div class="output-img-wrap output-file-wrap" data-output-url="${safe}"${wrapStyle}><div class="output-file-card"><i data-lucide="${icon}" class="w-7 h-7"></i><span>${escapeHtml(meta.name || outputImageName(url))}</span><small>${label}</small></div>${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
         return wrapOutputMediaCard(inner, meta, cardOpts);
     }
-    const inner = `<div class="output-img-wrap" data-output-url="${safe}"${wrapStyle}><img src="${safe}" data-url="${safe}" alt="generated output">${favBtn}${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
+    const inner = `<div class="output-img-wrap" data-output-url="${safe}"${wrapStyle}><img src="${escapeAttr(canvasThumbUrl(url))}" data-full-src="${safe}" data-url="${safe}" alt="generated output">${favBtn}${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
     return wrapOutputMediaCard(inner, meta, cardOpts);
 }
 function outputGridLayout(node){
@@ -38800,9 +38838,7 @@ function createImageCardFromOutput(url, point){
     scheduleSave();
 }
 async function downloadUrl(url, filename){
-    const res = await fetch(url);
-    if(!res.ok) throw new Error('下载失败');
-    const blob = await res.blob();
+    const blob = await fetchDisplayMediaBlob(url).catch(() => { throw new Error('下载失败'); });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = filename;

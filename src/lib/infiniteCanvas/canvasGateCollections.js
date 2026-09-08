@@ -82,6 +82,10 @@ function escapeAttr(value) {
     .replace(/</g, '&lt;');
 }
 
+function gatePreviewSrc(url) {
+  return typeof h().canvasThumbUrl === 'function' ? h().canvasThumbUrl(url) : url;
+}
+
 function isPreviewableCanvas(item) {
   const url = String(item?.preview_url || item?.previewUrl || '').trim();
   return Boolean(url) && !/\.(mp4|webm|mov|m4v|mp3|wav|ogg)(\?|$)/i.test(url);
@@ -92,8 +96,9 @@ function buildCollectionPreviewHtml(items) {
   const fileMark = '<span class="gate-collection-file-mark" aria-hidden="true"><i data-lucide="link-2" class="w-3 h-3"></i></span>';
   const slots = [0, 1, 2].map((index) => {
     const item = previews[index];
-    const img = item
-      ? `<img src="${escapeAttr(item.preview_url || item.previewUrl)}" alt="" loading="lazy" draggable="false">`
+    const raw = String(item?.preview_url || item?.previewUrl || '').trim();
+    const img = item && raw
+      ? `<img src="${escapeAttr(gatePreviewSrc(raw))}" data-full-src="${escapeAttr(raw)}" alt="" loading="lazy" decoding="async" draggable="false">`
       : '';
     return `<div class="gate-collection-file gate-collection-file-${index + 1}">${fileMark}${img}</div>`;
   });
@@ -538,6 +543,7 @@ function buildCollectionCardElement(collection) {
         </div>
       </div>` : ''}
   `;
+  row.querySelectorAll('img[data-full-src]').forEach((img) => h().bindOssDirectImg?.(img));
   const head = row.querySelector('.gate-collection-head');
   head?.addEventListener('click', (e) => {
     if (e.target.closest('.gate-collection-delete-confirm')) return;
