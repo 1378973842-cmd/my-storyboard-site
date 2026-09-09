@@ -25,6 +25,7 @@ const imgThen = imgThenStart >= 0 && videoThenStart > imgThenStart
 
 const checks = [
   [Boolean(fetchBlob) && fetchBlob.includes('resolveDisplayMediaUrl'), 'fetchDisplayMediaBlob uses signed URL'],
+  [!fetchBlob.includes('_previewObjectUrl') && !fetchBlob.includes('livePreviewBlobUrl'), 'copy/download ignore display JPEG preview blob'],
   [copy.includes('fetchDisplayMediaBlob') && copy.includes("ClipboardItem({ 'image/png': pngPromise })"), 'copy writes ClipboardItem promise via signed/blob fetch'],
   [download.includes('fetchDisplayMediaBlob'), 'downloadUrl uses fetchDisplayMediaBlob'],
   [!download.includes('await fetch(url)'), 'downloadUrl no longer fetch(raw url)'],

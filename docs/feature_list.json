@@ -318,6 +318,8 @@
         { "id": "AG272c", "desc": "check：display-thumbs-oss", "status": "done", "priority": 307 },
         { "id": "AG273", "desc": "修：复制/下载走 OSS 签名直链（有本地 blob 则直接用）；拖入/粘贴/图片组上传完只换落盘 URL，板上预览不 refresh 再拉原图", "status": "done", "priority": 308 },
         { "id": "AG273c", "desc": "check：copy-download-keep-blob", "status": "done", "priority": 308 },
+        { "id": "AG274", "desc": "修：复制/下载勿用工具栏缩小 JPEG 预览——正式 url 已是 /uploads 时走 OSS 原图；仅地址本身仍是 blob 时才用本地文件", "status": "done", "priority": 309 },
+        { "id": "AG274c", "desc": "check：copy-download-keep-blob（忽略 _previewObjectUrl）", "status": "done", "priority": 309 },
         { "id": "AG263f", "desc": "修：框选/蒙版坐标勿用画布 _thumb naturalWidth——keep 原图尺寸 + crop 时缩略→原图换算，避免裁到左上角白边/错人错位", "status": "done", "priority": 297 },
         { "id": "AG206c", "desc": "check：image-edit-viewport-focus", "status": "done", "priority": 240 },
         { "id": "AG199c", "desc": "check：rh-output-layout（含 RH skip stage / 去框）", "status": "done", "priority": 233 },

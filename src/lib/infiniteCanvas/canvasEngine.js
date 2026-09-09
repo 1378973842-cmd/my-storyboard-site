@@ -108,32 +108,23 @@ function bindOssDirectImg(img){
         img.setAttribute('src', signed);
     });
 }
-/** 复制/下载：优先节点上还在的本地 blob，否则 OSS 签名直链；失败再回同源 /uploads。 */
-function livePreviewBlobUrl(url){
-    const raw = String(url || '').trim();
-    if(!raw) return '';
-    if(raw.startsWith('blob:') || raw.startsWith('data:')) return raw;
-    const hit = (nodes || []).find(n => (
-        n?.url === raw || String(n?._previewObjectUrl || '') === raw
-    ) && String(n?._previewObjectUrl || '').startsWith('blob:'));
-    return hit ? String(hit._previewObjectUrl) : '';
-}
+/** 复制/下载认正式 url。仅当地址本身仍是 blob/data（还在上传）才读本地文件；
+ *  工具栏裁剪/画笔/旋转的显示预览是缩小 JPEG，不能当原图。 */
 async function fetchDisplayMediaBlob(url){
     const raw = String(url || '').trim();
-    const source = livePreviewBlobUrl(raw) || raw;
-    if(!source) throw new Error('empty');
-    if(source.startsWith('blob:') || source.startsWith('data:')){
-        const res = await fetch(source);
+    if(!raw) throw new Error('empty');
+    if(raw.startsWith('blob:') || raw.startsWith('data:')){
+        const res = await fetch(raw);
         if(!res.ok) throw new Error(String(res.status));
         return res.blob();
     }
-    const signed = await resolveDisplayMediaUrl(source);
+    const signed = await resolveDisplayMediaUrl(raw);
     try {
         const res = await fetch(signed);
         if(res.ok) return res.blob();
     } catch(_){ /* OSS CORS / 断网 */ }
-    if(source.startsWith('/uploads/')){
-        const res = await fetch(source);
+    if(raw.startsWith('/uploads/')){
+        const res = await fetch(raw);
         if(res.ok) return res.blob();
     }
     throw new Error('fetch');
