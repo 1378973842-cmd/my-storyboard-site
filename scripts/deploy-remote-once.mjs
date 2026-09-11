@@ -95,7 +95,8 @@ async function main() {
   console.log('>>> SSH 已连接，拉取代码并安装依赖…');
   await sshExec(
     conn,
-    `cd ${REMOTE} && git fetch origin deploy && git reset --hard origin/deploy && npm ci && npm rebuild better-sqlite3`
+    // 2G ECS：不要装 transformers/onnxruntime（GitHub 302 + OOM）。从 package.json/lock 卸掉再装其余依赖。
+    `cd ${REMOTE} && git fetch origin deploy && git reset --hard origin/deploy && npm uninstall @huggingface/transformers --save --no-audit --no-fund && npm install --no-audit --no-fund && npm rebuild better-sqlite3`
   );
 
   const sftp = await new Promise((resolve, reject) => {
@@ -130,7 +131,7 @@ async function main() {
   console.log('>>> 重启 PM2 …');
   await sshExec(
     conn,
-    `cd ${REMOTE} && pm2 restart gemini-deploy --update-env && pm2 save && sleep 3 && curl -s -o /dev/null -w "%{http_code}\\n" http://127.0.0.1:3000`
+    `cd ${REMOTE} && (pm2 describe gemini-deploy >/dev/null 2>&1 && pm2 restart gemini-deploy --update-env || pm2 start ecosystem.config.cjs --env production) && pm2 save && sleep 3 && curl -s -o /dev/null -w "%{http_code}\\n" http://127.0.0.1:3000`
   );
 
   conn.end();
