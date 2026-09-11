@@ -1281,7 +1281,7 @@ let remoteSyncInterval = null;
 let remoteSyncBusy = false;
 let lastCanvasUpdatedAt = 0;
 let models = {gpt:'gpt-image-2', nano:'nano-banana-pro'};
-let imageModels = ['gpt-image-2', 'gpt-image-2-稳定', 'nano-banana-pro', 'nano-banana-2'];
+let imageModels = ['gpt-image-2', 'gpt-image-2-稳定', 'gpt-image-2.5', 'nano-banana-pro', 'nano-banana-2'];
 const BATCH_POSTER_BASE_PROMPT = '【标题文字规则 — 结构锁定 / 视觉随主题 / 分层配色】必须完全保留参考海报上所有标题的字面文案（逐字一致，不得增删改字、不得翻译、不得改大小写或标点）；必须完全保留标题在画面中的位置、行数、对齐方式与排版层级（不得移动、合并或拆分标题区域）；必须重新设计标题的字体风格与配色，使其与下方场景主题的世界观和主色系统一；同一海报内主标题、促销高亮词/数字（FREE/TRILLION/BONUS/JACKPOT/%/纯数字）、副文案（如 up to）、CTA 按钮文字须使用不同配色层级，至少 3 种可区分的填充/发光色，禁止所有标题区块同一渐变色；含数字或 FREE 类促销词须用最高对比度高亮色；禁止照搬参考图标题的字体外观与颜色；参考图仅用于标题文案与排版参考，不复制参考图的背景、角色或整体配色。\n\n博弈游戏美术风格，老虎机手游广告，2D美式卡通风格，粗黑的闭合轮廓线，矢量插画，平涂赛璐璐风格，高饱和度，鲜艳的色彩，高对比度。\n\n场景：{theme_prompt}\n\n{title_style}';
 const BATCH_POSTER_PLAN_B_SCENE_BASE = '博弈游戏美术风格，老虎机手游广告，2D美式卡通风格，粗黑的闭合轮廓线，矢量插画，平涂赛璐璐风格，高饱和度，鲜艳的色彩，高对比度。';
 const BATCH_POSTER_DEFAULT_TITLE_STYLE_LAYERS = {
@@ -1946,10 +1946,16 @@ const QUICK_TOOLBAR_COLLAPSED_KEY = 'canvas_quick_toolbar_collapsed';
 const DEFAULT_VIDEO_MODELS = [
     // RunningHub 标准模型（本站已接入）
     'hailuo-h3',
+    'seedance-2.0',
 ];
+const VIDEO_ASPECT_LIST = ['adaptive','21:9','16:9','4:3','1:1','3:4','9:16'];
 function isHailuoH3VideoModel(model){
     const m = String(model || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
     return m === 'hailuo-h3' || m === 'minimax-hailuo-h3' || m.includes('hailuo-h3');
+}
+function isSparkVideo20Model(model){
+    const m = String(model || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+    return m === 'seedance-2.0' || m === 'seedance-2' || m === 'seedance2.0' || m === 'sparkvideo-2.0' || m === 'spark-video-2.0' || m.includes('sparkvideo-2') || m.includes('seedance-2');
 }
 function applyHailuoVideoDefaults(node){
     if(!node || !isHailuoH3VideoModel(node.model)) return;
@@ -1958,8 +1964,31 @@ function applyHailuoVideoDefaults(node){
     const res = String(node.resolution || '').trim().toUpperCase();
     if(res !== '2K' && res !== '768P') node.resolution = '768P';
     const ratio = String(node.aspectRatio || '').trim();
-    const allowed = new Set(['adaptive','21:9','16:9','4:3','1:1','3:4','9:16']);
-    if(!allowed.has(ratio)) node.aspectRatio = 'adaptive';
+    if(!VIDEO_ASPECT_LIST.includes(ratio)) node.aspectRatio = 'adaptive';
+}
+function applySparkVideoDefaults(node){
+    if(!node || !isSparkVideo20Model(node.model)) return;
+    const dur = Math.round(Number(node.duration || 5));
+    node.duration = Number.isFinite(dur) ? Math.max(4, Math.min(15, dur)) : 5;
+    const res = String(node.resolution || '').trim().toLowerCase().replace(/\s+/g, '');
+    const allowedRes = new Set(['480p','720p','native1080p','native4k','1080p','2k','4k']);
+    if(res === '768p' || res === '768') node.resolution = '720p';
+    else if(res === '2kp' || res === '1440p') node.resolution = '2k';
+    else if(allowedRes.has(res)) node.resolution = res;
+    else node.resolution = '720p';
+    const ratio = String(node.aspectRatio || '').trim();
+    if(!VIDEO_ASPECT_LIST.includes(ratio)) node.aspectRatio = 'adaptive';
+    if(node.realPersonMode == null) node.realPersonMode = true;
+}
+function applyVideoModelDefaults(node){
+    if(!node) return;
+    if(isSparkVideo20Model(node.model)) applySparkVideoDefaults(node);
+    else applyHailuoVideoDefaults(node);
+}
+function videoDurationBounds(model){
+    if(isSparkVideo20Model(model)) return {min:4, max:15};
+    if(isHailuoH3VideoModel(model)) return {min:5, max:15};
+    return {min:1, max:60};
 }
 
 function uid(prefix='n'){ return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`; }
@@ -2696,6 +2725,10 @@ function ensureYouchuanNodeDefaults(node){
 function isGptImage2Model(model){
     return /^gpt-image-2(-稳定)?$/i.test(String(resolveImageModel(model) || '').trim());
 }
+function isGptImage25Model(model){
+    const m = String(resolveImageModel(model) || '').trim().toLowerCase().replace(/_/g, '-');
+    return m === 'gpt-image-2.5' || m === 'gpt-image-2-5';
+}
 function isNanoBananaModel(model){
     const m = String(normalizeLegacyImageModelId(resolveImageModel(model) || '')).trim();
     // nano-banana-pro / nano-banana-pro-稳定 / nano-banana-2
@@ -2749,6 +2782,18 @@ function generatorModelCaps(model){
             showWeird: true,
             showSvSelect: true,
             iwMax: 2,
+            qualityValues: null,
+            defaultQuality: '',
+        };
+    }
+    if(isGptImage25Model(model)){
+        return {
+            profile: 'gpt-image-2.5',
+            ratioKeys: GENERATOR_G2_RATIO_KEYS,
+            resolutionKeys: ['1k','2k','4k'],
+            showQuality: false,
+            showYouchuanPanel: false,
+            showMjQuality: false,
             qualityValues: null,
             defaultQuality: '',
         };
@@ -2952,6 +2997,7 @@ function canvasFitFromAspect(ar, minEdge = CANVAS_MEDIA_MIN_EDGE){
 }
 let imageGenDockEl = null;
 let imageGenDockNodeId = null;
+let sparkAtPickerState = null;
 /** 单选图片 / Gen 结果台上方浮动动作条 */
 let imageActionBarEl = null;
 let imageActionBarNodeId = null;
@@ -8943,7 +8989,7 @@ function addVideoNode(point, opts={}){
         running:false,
         floatTitleIndex:0,
     };
-    applyHailuoVideoDefaults(node);
+    applyVideoModelDefaults(node);
     const created = addNode(node);
     ensureNodeFloatIndex(created, 'video');
     return created;
@@ -8979,7 +9025,7 @@ function buildUploadedVideoNode(url, point, name=''){
         floatTitleIndex:0,
         noGenConsole:true,
     };
-    applyHailuoVideoDefaults(node);
+    applyVideoModelDefaults(node);
     return node;
 }
 /** 上传视频节点：收集 history / previewRoundUrls 里的媒体 URL（去重，供占位 blob 替换与释放） */
@@ -25079,6 +25125,7 @@ function purgeOrphanImageGenDocks(keepEl=null){
     });
 }
 function removeImageGenDock(opts={}){
+    closeSparkAtPicker();
     if(imageGenDockEl?.__sizeOutsideClose){
         document.removeEventListener('pointerdown', imageGenDockEl.__sizeOutsideClose, true);
         imageGenDockEl.__sizeOutsideClose = null;
@@ -31491,23 +31538,27 @@ function renderVideoBody(node){
 }
 /** 视频控制台：比例 / 分辨率 / 时长（对齐图片 dock 芯片条） */
 function videoDockSizePanelHtml(node){
+    applyVideoModelDefaults(node);
+    const spark = isSparkVideo20Model(node.model);
     const hailuo = isHailuoH3VideoModel(node.model);
-    if(hailuo) applyHailuoVideoDefaults(node);
-    const durationMin = hailuo ? 5 : 1;
-    const durationMax = hailuo ? 15 : 60;
-    const duration = Math.max(durationMin, Math.min(durationMax, Number(node.duration || 5)));
-    const aspect = node.aspectRatio || (hailuo ? 'adaptive' : '16:9');
-    const resolution = node.resolution || (hailuo ? '768P' : '');
-    const aspectList = hailuo
-        ? ['adaptive','21:9','16:9','4:3','1:1','3:4','9:16']
+    const b = videoDurationBounds(node.model);
+    const duration = Math.max(b.min, Math.min(b.max, Number(node.duration || 5)));
+    const aspect = node.aspectRatio || ((spark || hailuo) ? 'adaptive' : '16:9');
+    const resolution = node.resolution || (spark ? '720p' : hailuo ? '768P' : '');
+    const aspectList = (spark || hailuo)
+        ? VIDEO_ASPECT_LIST
         : ['16:9','9:16','1:1','4:3','3:4','21:9','9:21','keep_ratio','adaptive'];
     const aspectOpts = aspectList
         .map(v => `<option value="${v}" ${v === aspect ? 'selected' : ''}>${v === 'keep_ratio' ? 'keep' : v === 'adaptive' ? 'adapt' : v}</option>`)
         .join('');
-    const resOpts = (hailuo
-        ? [['768P', '768P'], ['2K', '2K']]
-        : [['', 'Auto'], ['480p', '480p'], ['720p', '720p'], ['1080p', '1080p'], ['780P', '780P']]
-    ).map(([v, label]) => `<option value="${escapeAttr(v)}" ${v === resolution ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
+    const resPairs = spark
+        ? [['480p','480p'],['720p','720p'],['native1080p','原生1080p'],['native4k','原生4K'],['1080p','1080p超分'],['2k','2K超分'],['4k','4K超分']]
+        : hailuo
+            ? [['768P','768P'],['2K','2K']]
+            : [['','Auto'],['480p','480p'],['720p','720p'],['1080p','1080p'],['780P','780P']];
+    const resOpts = resPairs
+        .map(([v, label]) => `<option value="${escapeAttr(v)}" ${v === resolution ? 'selected' : ''}>${escapeHtml(label)}</option>`)
+        .join('');
     return `
         <div class="gen-dock-size">
             <label class="gen-dock-chip gen-dock-chip-ratio" title="${escapeAttr(tr('canvas.videoAspect'))}">
@@ -31518,21 +31569,28 @@ function videoDockSizePanelHtml(node){
                 <select class="select-lite video-resolution compact-select gen-dock-select">${resOpts}</select>
             </label>
             <label class="gen-dock-chip gen-dock-chip-duration" title="${escapeAttr(tr('canvas.videoDuration'))}">
-                <input class="gen-dock-duration-input video-duration" type="number" min="${durationMin}" max="${durationMax}" step="1" value="${duration}" size="2" inputmode="numeric" aria-label="${escapeAttr(tr('canvas.videoDuration'))}">
+                <input class="gen-dock-duration-input video-duration" type="number" min="${b.min}" max="${b.max}" step="1" value="${duration}" size="2" inputmode="numeric" aria-label="${escapeAttr(tr('canvas.videoDuration'))}">
                 <span class="gen-dock-count-suffix">s</span>
             </label>
         </div>
     `;
 }
 function videoDockAdvancedHtml(node){
-    const toggles = [
-        ['enhancePrompt', tr('canvas.videoEnhancePrompt')],
-        ['enableUpsample', tr('canvas.videoUpsample')],
-        ['watermark', tr('canvas.videoWatermark')],
-        ['cameraFixed', tr('canvas.videoCameraFixed')],
-        ['generateAudio', tr('canvas.videoGenerateAudio')],
-        ['useFrameRoles', tr('canvas.videoFirstLastFrames')],
-    ];
+    const spark = isSparkVideo20Model(node.model);
+    const toggles = spark
+        ? [
+            ['generateAudio', tr('canvas.videoGenerateAudio')],
+            ['realPersonMode', tr('canvas.videoRealPersonMode')],
+            ['watermark', tr('canvas.videoWatermark')],
+        ]
+        : [
+            ['enhancePrompt', tr('canvas.videoEnhancePrompt')],
+            ['enableUpsample', tr('canvas.videoUpsample')],
+            ['watermark', tr('canvas.videoWatermark')],
+            ['cameraFixed', tr('canvas.videoCameraFixed')],
+            ['generateAudio', tr('canvas.videoGenerateAudio')],
+            ['useFrameRoles', tr('canvas.videoFirstLastFrames')],
+        ];
     return `
         <div class="gen-settings gen-dock-advanced" hidden>
             <div class="gen-dock-advanced-title">${langIsEn() ? 'More settings' : '更多设置'}</div>
@@ -31548,7 +31606,7 @@ function videoDockAdvancedHtml(node){
 function videoDockShellHtml(node){
     node.apiProvider = resolveVideoProviderId(node.apiProvider || 'runninghub');
     node.model = node.model || providerVideoModels(node.apiProvider)[0] || 'hailuo-h3';
-    applyHailuoVideoDefaults(node);
+    applyVideoModelDefaults(node);
     if(node.prompt == null) node.prompt = '';
     if(node.count == null) node.count = 1;
     const countVal = Math.max(1, Math.min(8, Number(node.count || 1)));
@@ -31561,7 +31619,7 @@ function videoDockShellHtml(node){
     return `
         <div class="gen-dock is-floating video-dock">
             <div class="gen-dock-refs"></div>
-            <textarea class="gen-dock-prompt" placeholder="${escapeAttr(langIsEn() ? 'Describe the video you want…' : '描述你想生成的视频…')}" rows="3">${escapeHtml(node.prompt || '')}</textarea>
+            <textarea class="gen-dock-prompt" placeholder="${escapeAttr(isSparkVideo20Model(node.model) ? tr('canvas.videoPromptAtHint') : (langIsEn() ? 'Describe the video you want…' : '描述你想生成的视频…'))}" rows="3">${escapeHtml(node.prompt || '')}</textarea>
             <div class="gen-dock-bar">
                 <div class="gen-dock-group gen-dock-group-source">
                     <label class="gen-dock-chip gen-dock-chip-provider">
@@ -31598,6 +31656,172 @@ function videoDockShellHtml(node){
         </div>
     `;
 }
+/** Seedance @ 引用：编号与 runVideoNode 的 imageUrls / videoUrls / audioUrls 一致 */
+function sparkVideoMentionItems(node){
+    const sources = orderedSources(node, generatorSources(node));
+    const packed = sources.flatMap(src => (src.refs || []).map(ref => ({
+        url: ref.url,
+        kind: mediaKindForRef(ref),
+        preview: src.preview || ref.url,
+        sourceId: src.id,
+    }))).filter(item => item.url);
+    const byKind = {image: [], video: [], audio: []};
+    packed.forEach(item => {
+        if(byKind[item.kind]) byKind[item.kind].push(item);
+    });
+    const labelKey = {image: 'canvas.videoAtImage', video: 'canvas.videoAtVideo', audio: 'canvas.videoAtAudio'};
+    const tokenHead = {image: '@Image', video: '@Video', audio: '@Audio'};
+    const out = [];
+    ['image', 'video', 'audio'].forEach(kind => {
+        byKind[kind].forEach((item, i) => {
+            const n = i + 1;
+            out.push({
+                kind,
+                index: n,
+                token: `${tokenHead[kind]} ${n}`,
+                label: trf(labelKey[kind], {n}),
+                url: item.url,
+                preview: item.preview,
+                sourceId: item.sourceId,
+            });
+        });
+    });
+    return out;
+}
+function sparkAtQueryAtCursor(ta){
+    if(!ta) return null;
+    const pos = Number(ta.selectionStart || 0);
+    const before = String(ta.value || '').slice(0, pos);
+    const at = before.lastIndexOf('@');
+    if(at < 0) return null;
+    const query = before.slice(at + 1);
+    if(/[\s\n]/.test(query)) return null;
+    return {start: at, query};
+}
+function filterSparkAtMentions(items, query){
+    const q = String(query || '').trim().toLowerCase().replace(/^@/, '').replace(/\s+/g, '');
+    if(!q) return items;
+    return items.filter(item => {
+        const hay = `${item.token} ${item.label} ${item.kind} ${item.index}`.toLowerCase().replace(/\s+/g, '');
+        return hay.includes(q) || String(item.index) === q;
+    });
+}
+function closeSparkAtPicker(){
+    if(sparkAtPickerState?.onDoc){
+        document.removeEventListener('pointerdown', sparkAtPickerState.onDoc, true);
+    }
+    sparkAtPickerState?.el?.remove();
+    sparkAtPickerState = null;
+}
+function insertSparkAtToken(ta, node, item, range){
+    if(!ta || !item) return;
+    const start = range?.start ?? sparkAtQueryAtCursor(ta)?.start ?? ta.selectionStart;
+    const end = ta.selectionStart;
+    const before = ta.value.slice(0, start);
+    const after = ta.value.slice(end);
+    const token = `${item.token} `;
+    ta.value = `${before}${token}${after}`;
+    const caret = before.length + token.length;
+    ta.setSelectionRange(caret, caret);
+    node.prompt = ta.value;
+    closeSparkAtPicker();
+    ta.focus();
+    touchBoardInteraction();
+    scheduleSave();
+}
+function renderSparkAtPicker(wrap, ta, node, range){
+    const all = sparkVideoMentionItems(node);
+    const items = filterSparkAtMentions(all, range.query);
+    const prevActive = sparkAtPickerState?.active || 0;
+    const wasOpen = Boolean(sparkAtPickerState?.el);
+    closeSparkAtPicker();
+    wrap.querySelector('.spark-at-picker')?.remove();
+    const picker = document.createElement('div');
+    picker.className = wasOpen ? 'spark-at-picker is-refresh' : 'spark-at-picker';
+    picker.setAttribute('role', 'listbox');
+    const title = `<div class="spark-at-picker-title">${escapeHtml(tr('canvas.videoAtPickerTitle'))}</div>`;
+    let body = '';
+    if(!all.length){
+        body = `<div class="spark-at-picker-empty">${escapeHtml(tr('canvas.videoAtEmpty'))}</div>`;
+    } else if(!items.length){
+        body = `<div class="spark-at-picker-empty">${escapeHtml(tr('canvas.videoAtNoMatch'))}</div>`;
+    } else {
+        body = items.map((item, i) => {
+            const thumb = item.kind === 'video'
+                ? `<video src="${escapeAttr(item.url)}" muted playsinline preload="metadata"></video>`
+                : `<img src="${escapeAttr(canvasThumbUrl(item.preview || item.url))}" data-full-src="${escapeAttr(item.url)}" alt="">`;
+            return `<button type="button" class="spark-at-option${i === 0 ? ' is-active' : ''}" data-spark-at-index="${i}" role="option">
+                <span class="spark-at-option-thumb">${thumb}</span>
+                <span class="spark-at-option-label">${escapeHtml(item.label)}</span>
+            </button>`;
+        }).join('');
+    }
+    picker.innerHTML = `${title}${body}`;
+    const taTop = ta.offsetTop;
+    picker.style.bottom = `${wrap.offsetHeight - taTop + 6}px`;
+    wrap.appendChild(picker);
+    const onDoc = (e) => {
+        if(picker.contains(e.target) || e.target === ta) return;
+        closeSparkAtPicker();
+    };
+    document.addEventListener('pointerdown', onDoc, true);
+    sparkAtPickerState = {el: picker, ta, node, items, range, active: Math.min(prevActive, Math.max(0, items.length - 1)), onDoc};
+    picker.onmousedown = e => e.preventDefault();
+    picker.querySelectorAll('[data-spark-at-index]').forEach(btn => {
+        btn.onmouseenter = () => {
+            sparkAtPickerState.active = Number(btn.dataset.sparkAtIndex);
+            picker.querySelectorAll('.spark-at-option').forEach((el, i) => el.classList.toggle('is-active', i === sparkAtPickerState.active));
+        };
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            insertSparkAtToken(ta, node, items[Number(btn.dataset.sparkAtIndex)], range);
+        };
+    });
+}
+function syncSparkAtPicker(wrap, ta, node){
+    if(!isSparkVideo20Model(node?.model)){
+        closeSparkAtPicker();
+        return;
+    }
+    const range = sparkAtQueryAtCursor(ta);
+    if(!range){
+        closeSparkAtPicker();
+        return;
+    }
+    renderSparkAtPicker(wrap, ta, node, range);
+}
+function bindSparkVideoAtMentions(wrap, node, ta){
+    if(!ta || !isSparkVideo20Model(node.model)) return;
+    let composing = false;
+    ta.addEventListener('compositionstart', () => { composing = true; });
+    ta.addEventListener('compositionend', () => {
+        composing = false;
+        node.prompt = ta.value;
+        syncSparkAtPicker(wrap, ta, node);
+    });
+    ta.addEventListener('keydown', e => {
+        if(!sparkAtPickerState?.el || sparkAtPickerState.ta !== ta) return;
+        const items = sparkAtPickerState.items || [];
+        if(e.key === 'Escape'){
+            e.preventDefault();
+            closeSparkAtPicker();
+            return;
+        }
+        if(!items.length) return;
+        if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+            e.preventDefault();
+            const delta = e.key === 'ArrowDown' ? 1 : -1;
+            sparkAtPickerState.active = (sparkAtPickerState.active + delta + items.length) % items.length;
+            sparkAtPickerState.el.querySelectorAll('.spark-at-option').forEach((el, i) => el.classList.toggle('is-active', i === sparkAtPickerState.active));
+            return;
+        }
+        if(e.key === 'Enter' || e.key === 'Tab'){
+            e.preventDefault();
+            insertSparkAtToken(ta, node, items[sparkAtPickerState.active] || items[0], sparkAtPickerState.range);
+        }
+    });
+}
 function bindVideoDockControls(wrap, node){
     if(!wrap || !node || node.type !== 'video') return;
     const inputSources = generatorSources(node);
@@ -31606,10 +31830,9 @@ function bindVideoDockControls(wrap, node){
     const promptInputs = ordered.filter(src => src.prompt && !src.refs?.length);
     node.apiProvider = resolveVideoProviderId(node.apiProvider || 'runninghub');
     node.model = node.model || providerVideoModels(node.apiProvider)[0] || 'hailuo-h3';
-    applyHailuoVideoDefaults(node);
+    applyVideoModelDefaults(node);
     if(node.prompt == null) node.prompt = '';
-    const hailuo = () => isHailuoH3VideoModel(node.model);
-    const durationBounds = () => hailuo() ? {min:5, max:15} : {min:1, max:60};
+    const durationBounds = () => videoDurationBounds(node.model);
 
     const localPrompt = wrap.querySelector('.gen-dock-prompt');
     if(localPrompt){
@@ -31618,8 +31841,10 @@ function bindVideoDockControls(wrap, node){
             node.prompt = e.target.value;
             touchBoardInteraction();
             scheduleSave();
+            if(isSparkVideo20Model(node.model) && !e.isComposing) syncSparkAtPicker(wrap, localPrompt, node);
         };
         localPrompt.onfocus = () => touchBoardInteraction();
+        bindSparkVideoAtMentions(wrap, node, localPrompt);
     }
 
     const gearBtn = wrap.querySelector('.gen-dock-gear');
@@ -31642,8 +31867,8 @@ function bindVideoDockControls(wrap, node){
         const b = durationBounds();
         if(durationInput) durationInput.value = String(Math.max(b.min, Math.min(b.max, Number(node.duration || 5))));
     }
-    if(aspectSelect) aspectSelect.value = node.aspectRatio || (hailuo() ? 'adaptive' : '16:9');
-    if(resolutionSelect) resolutionSelect.value = node.resolution || (hailuo() ? '768P' : '');
+    if(aspectSelect) aspectSelect.value = node.aspectRatio || ((isSparkVideo20Model(node.model) || isHailuoH3VideoModel(node.model)) ? 'adaptive' : '16:9');
+    if(resolutionSelect) resolutionSelect.value = node.resolution || (isSparkVideo20Model(node.model) ? '720p' : isHailuoH3VideoModel(node.model) ? '768P' : '');
     [providerSelect, modelSelect, durationInput, aspectSelect, resolutionSelect].forEach(input => {
         if(!input) return;
         input.onmousedown = e => e.stopPropagation();
@@ -31655,20 +31880,25 @@ function bindVideoDockControls(wrap, node){
             node.apiProvider = e.target.value;
             const models = providerVideoModels(node.apiProvider);
             if(!models.includes(node.model)) node.model = models[0] || node.model;
-            applyHailuoVideoDefaults(node);
+            applyVideoModelDefaults(node);
             if(modelSelect) modelSelect.innerHTML = videoModelOptions(node.model, node.apiProvider);
             mountCanvasCustomSelects(wrap);
             scheduleSave();
-            if(imageGenDockNodeId === node.id) syncImageGenDock();
+            if(imageGenDockNodeId === node.id) remountImageGenDock(node);
         };
     }
     if(modelSelect){
         modelSelect.onchange = e => {
             e.stopPropagation();
+            const prev = node.model;
             node.model = e.target.value;
-            applyHailuoVideoDefaults(node);
+            if(isSparkVideo20Model(node.model) && !isSparkVideo20Model(prev)){
+                node.generateAudio = true;
+                if(node.realPersonMode == null) node.realPersonMode = true;
+            }
+            applyVideoModelDefaults(node);
             scheduleSave();
-            if(imageGenDockNodeId === node.id) syncImageGenDock();
+            if(imageGenDockNodeId === node.id) remountImageGenDock(node);
         };
     }
     if(durationInput){
@@ -35131,8 +35361,8 @@ async function runVideoNode(nodeId, opts={}){
         provider_id:resolveVideoProviderId(node.apiProvider || 'comfly'),
         model:node.model || 'hailuo-h3',
         duration:Number(node.duration || 5),
-        aspect_ratio:node.aspectRatio || (isHailuoH3VideoModel(node.model) ? 'adaptive' : '16:9'),
-        resolution:node.resolution || (isHailuoH3VideoModel(node.model) ? '768P' : ''),
+        aspect_ratio:node.aspectRatio || ((isSparkVideo20Model(node.model) || isHailuoH3VideoModel(node.model)) ? 'adaptive' : '16:9'),
+        resolution:node.resolution || (isSparkVideo20Model(node.model) ? '720p' : isHailuoH3VideoModel(node.model) ? '768P' : ''),
         images:refs,
         videos:videoRefs.map(ref => ref.url),
         enhance_prompt:Boolean(node.enhancePrompt),
@@ -35140,6 +35370,7 @@ async function runVideoNode(nodeId, opts={}){
         watermark:Boolean(node.watermark),
         camerafixed:Boolean(node.cameraFixed),
         generate_audio:Boolean(node.generateAudio),
+        real_person_mode:node.realPersonMode !== false,
         canvas_id: canvas?.id || '',
         node_id: node.id || '',
     };

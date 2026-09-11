@@ -30,6 +30,7 @@ import { registerCanvasImageRepairAgentRoutes } from "./canvasImageRepairAgentBr
 import { registerCanvasVideoRoutes } from "./canvasVideoBridge.js";
 import { decodeUploadFilename } from "../lib/decodeUploadFilename.js";
 import { HAILUO_H3_MODEL_ID } from "./runningHubHailuoVideo.js";
+import { SEEDANCE_2_MODEL_ID } from "./runningHubSparkVideo.js";
 import {
   deleteUserWorkflowTemplate,
   getWorkflowTemplate,
@@ -491,6 +492,7 @@ export function registerInfiniteCanvasRoutes(
         editModel,
         "gpt-image-2",
         "gpt-image-2-稳定",
+        "gpt-image-2.5",
         "nano-banana-pro",
         "nano-banana-pro-稳定",
         "nano-banana-2",
@@ -510,7 +512,7 @@ export function registerInfiniteCanvasRoutes(
         ].filter(Boolean)
       )
     );
-    const videoModels = [HAILUO_H3_MODEL_ID];
+    const videoModels = [HAILUO_H3_MODEL_ID, SEEDANCE_2_MODEL_ID];
     res.json({
       base_url: process.env.THIRD_PARTY_API_BASE || "",
       chat_model: chatModels[0],

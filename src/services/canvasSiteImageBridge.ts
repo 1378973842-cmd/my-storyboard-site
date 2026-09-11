@@ -7,11 +7,13 @@ import {
   getNanoBanana2T2IPath,
   getNineGridG2Path,
   getStoryboardImageEnv,
+  isGptImage25Model,
   isMidjourneyV81Model,
   isNanoBanana2Model,
   isNiji7Model,
   RUNNINGHUB_G2_OFFICIAL_I2I_PATH,
   RUNNINGHUB_G2_RATIOS,
+  runStoryboardRunningHubG25Job,
   runStoryboardRunningHubG2Job,
   runStoryboardRunningHubG2TextJob,
   runStoryboardRunningHubGenerateJob,
@@ -395,7 +397,7 @@ async function executeCanvasGeneration(
     ? augmentImagePromptWithReferenceCostumeLock(prompt, refItems)
     : prompt;
   const image_size = canvasResolutionToImageSize(payload.canvas_resolution);
-  const aspect_ratio = isGptImage2(model)
+  const aspect_ratio = isGptImage2(model) || isGptImage25Model(model)
     ? gpt2AspectRatioFromPayload(payload)
     : canvasRatioToAspectRatio(payload);
   const rhEnv = getStoryboardImageEnv();
@@ -455,6 +457,28 @@ async function executeCanvasGeneration(
       sv: mj.sv,
       imageUrl: imageUrls[0] || null,
       sref: imageUrls[1] || null,
+      projectRoot: deps.projectRoot,
+    });
+    const localUrl = await deps.persistImage(upstreamUrl, persistMeta);
+    return { images: [localUrl], url: localUrl };
+  }
+
+  if (isGptImage25Model(model)) {
+    if (!rhEnv) throw new Error("未配置 STORYBOARD_IMAGE_API_KEY，无法使用 gpt-image-2.5");
+    const g25Images = refItems
+      .filter((r) => r.role !== "mask" && !/mask/i.test(r.name))
+      .map((r) => absoluteUrl(req, r.url))
+      .filter(Boolean);
+    console.log("[canvas-image/runninghub-g25]", {
+      resolution: gpt2ImageSizeFromPayload(payload),
+      aspect_ratio,
+      images: g25Images.length,
+    });
+    const upstreamUrl = await runStoryboardRunningHubG25Job({
+      prompt,
+      images: g25Images,
+      image_size: gpt2ImageSizeFromPayload(payload),
+      aspect_ratio,
       projectRoot: deps.projectRoot,
     });
     const localUrl = await deps.persistImage(upstreamUrl, persistMeta);

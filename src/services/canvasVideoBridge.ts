@@ -2,7 +2,12 @@ import type { Express, Request, RequestHandler, Response } from "express";
 import { mkdirSync, writeFileSync } from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
-import { isHailuoH3Model, runHailuoH3VideoJob } from "./runningHubHailuoVideo.js";
+import { HAILUO_H3_MODEL_ID, isHailuoH3Model, runHailuoH3VideoJob } from "./runningHubHailuoVideo.js";
+import {
+  SEEDANCE_2_MODEL_ID,
+  isSparkVideo20Model,
+  runSparkVideo20Job,
+} from "./runningHubSparkVideo.js";
 
 export type CanvasVideoPayload = {
   prompt?: string;
@@ -19,6 +24,8 @@ export type CanvasVideoPayload = {
   watermark?: boolean;
   camerafixed?: boolean;
   generate_audio?: boolean;
+  real_person_mode?: boolean;
+  seed?: number;
 };
 
 type CanvasVideoPersistMeta = {
@@ -128,10 +135,10 @@ function validateVideoPayload(payload: CanvasVideoPayload): { prompt: string; mo
   const prompt = String(payload.prompt || "").trim();
   const model = String(payload.model || "").trim();
   if (!prompt) throw Object.assign(new Error("缺少 prompt"), { status: 400 });
-  if (!isHailuoH3Model(model)) {
+  if (!isHailuoH3Model(model) && !isSparkVideo20Model(model)) {
     throw Object.assign(
       new Error(
-        `视频模型「${model || "(空)"}」尚未接入本站。当前已支持：hailuo-h3（RunningHub 海螺 H3）。`
+        `视频模型「${model || "(空)"}」尚未接入本站。当前已支持：hailuo-h3（海螺 H3）、seedance-2.0（Seedance 2.0）。`
       ),
       { status: 501 }
     );
@@ -144,7 +151,7 @@ async function executeCanvasVideoJob(
   payload: CanvasVideoPayload,
   deps: CanvasVideoBridgeDeps
 ): Promise<CanvasVideoResult> {
-  const { prompt } = validateVideoPayload(payload);
+  const { prompt, model } = validateVideoPayload(payload);
   const images = collectUrls(payload.images);
   const videos = Array.isArray(payload.videos)
     ? payload.videos.map((v) => String(v || "").trim()).filter(Boolean)
@@ -152,37 +159,56 @@ async function executeCanvasVideoJob(
   const audios = Array.isArray(payload.audios)
     ? payload.audios.map((v) => String(v || "").trim()).filter(Boolean)
     : [];
+  const spark = isSparkVideo20Model(model);
+  const resolvedModel = spark ? SEEDANCE_2_MODEL_ID : HAILUO_H3_MODEL_ID;
+  const logTag = spark ? "canvas-video/seedance-2.0" : "canvas-video/hailuo-h3";
 
-  console.log("[canvas-video/hailuo-h3]", {
+  console.log(`[${logTag}]`, {
     images: images.length,
     videos: videos.length,
     audios: audios.length,
     resolution: payload.resolution,
     duration: payload.duration,
     ratio: payload.aspect_ratio,
+    generateAudio: payload.generate_audio,
   });
 
-  const upstreamUrl = await runHailuoH3VideoJob({
-    prompt,
-    images,
-    videos,
-    audios,
-    resolution: payload.resolution,
-    duration: payload.duration,
-    ratio: payload.aspect_ratio,
-    projectRoot: deps.projectRoot,
-  });
+  const upstreamUrl = spark
+    ? await runSparkVideo20Job({
+        prompt,
+        images,
+        videos,
+        audios,
+        resolution: payload.resolution,
+        duration: payload.duration,
+        ratio: payload.aspect_ratio,
+        generateAudio: payload.generate_audio,
+        realPersonMode: payload.real_person_mode,
+        watermark: payload.watermark,
+        seed: payload.seed,
+        projectRoot: deps.projectRoot,
+      })
+    : await runHailuoH3VideoJob({
+        prompt,
+        images,
+        videos,
+        audios,
+        resolution: payload.resolution,
+        duration: payload.duration,
+        ratio: payload.aspect_ratio,
+        projectRoot: deps.projectRoot,
+      });
 
   const localUrl = await persistRemoteVideo(upstreamUrl, deps.projectRoot);
   deps.onPersisted?.(localUrl, req, {
     prompt,
-    model: "hailuo-h3",
+    model: resolvedModel,
     duration: payload.duration,
     aspect_ratio: payload.aspect_ratio,
     resolution: payload.resolution,
   });
 
-  console.log("[canvas-video/hailuo-h3] done", {
+  console.log(`[${logTag}] done`, {
     localUrl,
     upstream: String(upstreamUrl || "").slice(0, 120),
   });
@@ -190,7 +216,7 @@ async function executeCanvasVideoJob(
   return {
     videos: [{ url: localUrl, kind: "video" }],
     url: localUrl,
-    model: "hailuo-h3",
+    model: resolvedModel,
     upstream_url: upstreamUrl,
   };
 }

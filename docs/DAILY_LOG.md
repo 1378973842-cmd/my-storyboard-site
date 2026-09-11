@@ -567,3 +567,11 @@
 
 ### 记录 / 说明
 - 复制/下载改走正式原图，不再误用工具栏缩小 JPEG 预览
+- 生产 v1.0.116 @ 56d1d19 已上线；备份 studio-20260909-140909.tar.gz（11G）；PM2 HTTP 200
+- 视频节点接入 Seedance 2.0（sparkvideo-2.0），未提交未部署
+- Seedance 提示词 @ 参考选择器，未提交未部署
+
+## 2026-09-10
+
+### 记录 / 说明
+- 本地接入图片节点 gpt-image-2.5（RunningHub sunburst/image-to-image），未部署

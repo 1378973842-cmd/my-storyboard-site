@@ -47,7 +47,7 @@ export function getHailuoH3SubmitPath(): string {
   );
 }
 
-function getRunningHubEnv(): StoryboardImageEnv {
+export function getRunningHubEnv(): StoryboardImageEnv {
   const env = getStoryboardImageEnv();
   if (env) return env;
   let apiKey = (process.env.RUNNINGHUB_API_KEY ?? "").trim();
@@ -170,7 +170,7 @@ async function uploadMediaToRunningHub(
   throw new Error(`RunningHub 上传未返回 download_url：${JSON.stringify(raw).slice(0, 500)}`);
 }
 
-async function resolveMediaUrls(
+export async function resolveMediaUrls(
   inputs: string[],
   projectRoot: string,
   env: StoryboardImageEnv,
