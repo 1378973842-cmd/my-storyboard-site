@@ -1,8 +1,8 @@
 # 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  0. **本地：图片节点 gpt-image-2.5**：RunningHub `rhart-image-g-2.5/sunburst/image-to-image` 已接入下拉；比例/分辨率同 gpt-image-2，无 quality；文生图也走同一接口（`imageUrls=[]`）。扩图/重绘/复刻未接。未部署。
-  0. **本地：视频节点 Seedance 2.0**：RunningHub `sparkvideo-2.0/multimodal-video` 已接入下拉；提示词输入 `@` 弹出参考选择器，插入 `@Image N` / `@Video N`。默认模型仍是海螺 H3。未部署。
+  0. **本地：九宫格 nano 对齐图片节点**：九宫格 Agent 选/默认 nano 现为 `nano-banana-pro`（与图片生成节点同一条），旧板 `nano-banana-pro-稳定` 打开时迁过去。gpt-image-2 仍走九宫格官方通道。未部署。
+  0. **已上线 v1.0.119（deploy @ 0a23f7e）**：图片节点 gpt-image-2.5；视频节点 Seedance 2.0（提示词 `@` 引用 `@Image N` / `@Video N`）。备份 `studio-20260911-100330.tar.gz`（11G）。PM2 HTTP 200。2G ECS 部署跳过 transformers。
   0. **已上线 v1.0.116（deploy @ 56d1d19）**：复制/下载走正式原图，不再误用工具栏缩小 JPEG 预览。备份 `studio-20260909-140909.tar.gz`（11G）。PM2 HTTP 200。
   0. **已上线 v1.0.115（deploy @ cd273c4）**：工作区封面/Output 九宫格走缩略图+OSS 直链；复制/下载走签名直链；拖入/粘贴上传完板上图不换 src。画笔裁到图内；旋转取消入场放大；工具栏新节点贴原图右侧。备份 `studio-20260908-183436.tar.gz`（10G）。PM2 HTTP 200。
   0. **已上线 v1.0.113（deploy @ d7436d5）**：灯箱/悬停预览走 OSS 签名直链；拖入与画笔上传预签名直传阿里云（失败回退本站）；画笔/裁剪/旋转节点用缩小 JPEG 立刻铺满。备份 `studio-20260903-192508.tar.gz`（8.5G）。PM2 HTTP 200。
@@ -16,16 +16,16 @@
   0. **阿里云 OSS 素材私有存储（已上线并启用）**：Bucket `dreamgrid-media` @ `oss-cn-guangzhou`。看图/上传走签名直链；画笔/裁剪 canvas 仍同源代理。
   0. **切换项目卡顿优化（已随 v1.0.105 上线）**：骨架屏 + 开板分帧渲染视口外节点。
   1. **画布五项 / 高清放大 / 抠图 / RH 输出预览（已随此前版本上线）**：高清放大/抠图仍待导演实测 RunningHub 真实返回。
-  5. **线上**：`deploy` @ `56d1d19`（v1.0.116）。用户入口 `https://dreamgrid.cn`（Caddy 反代 127.0.0.1:3000）。
+  5. **线上**：`deploy` @ `0a23f7e`（v1.0.119）。用户入口 `https://dreamgrid.cn`（Caddy 反代 127.0.0.1:3000）。
   6. **拖入/粘贴占位（已上线）**：blob 占位后只换落盘 URL，板上预览不重拉。
-  7. **部署版本号（已上线）**：线上 `v1.0.116`。
+  7. **部署版本号（已上线）**：线上 `v1.0.119`。
   8. **扩图已开（只用 RunningHub）**：gpt-image-2 透明通道；待实测生成式边界。
-  9. 远端备份：最新 `/root/studio-backups/studio-20260909-140909.tar.gz`（11G）；策略留 3 份。
-- **验证状态**：生产 v1.0.116 @ 56d1d19，PM2 HTTP 200。请导演硬刷新后：工具栏裁剪/画笔/旋转新节点 → 右键下载，核对是原图像素。
+  9. 远端备份：最新 `/root/studio-backups/studio-20260911-100330.tar.gz`（11G）；策略留 3 份。
+- **验证状态**：生产 v1.0.119 @ 0a23f7e，PM2 HTTP 200。请导演硬刷新后：图片节点选 gpt-image-2.5 出图；视频节点选 Seedance 2.0，提示词 `@` 引用参考。
 - **本地网站**：`http://localhost:3005`。
 - **访问**：`https://dreamgrid.cn`（勿用 `http://8.163.127.198:3000`）。
 - **流程**：生产部署成功后写 DreamGrid 系统消息体例报告；导演点头后再发站内公告。
-- **待办**：图片节点 gpt-image-2.5 待导演本地实测（选模型、有/无参考图）。视频节点 Seedance 2.0 待导演本地实测（选模型、连参考、提示词 @ 引用）。硬刷新实测工具栏新节点下载原图。框选/蒙版/3D机位；日间选中色是否改钴蓝待拍板；高清放大/抠图仍待实测。本地未提交：部署脚本卸 transformers + `package.json` 将其改为 optional。+ Seedance 2.0 接入与 @ 选择器。+ gpt-image-2.5。
+- **待办**：硬刷新实测 gpt-image-2.5 / Seedance 2.0（含 @ 引用）。硬刷新实测工具栏新节点下载原图。框选/蒙版/3D机位；日间选中色是否改钴蓝待拍板；高清放大/抠图仍待实测。gpt-image-2.5 未接扩图/重绘/复刻。
 - **已知未覆盖（需导演决定是否继续）**：
   1. 画布「选择画布」入口页（`.canvas-gate`）仍是炭黑。
   2. Loop 节点内部少数浅色文字白底下略淡。
@@ -41,7 +41,7 @@
 
 ```
 继续 gemini-deploy。先读 docs/HANDOFF.md。
-线上已是 v1.0.116（deploy @ 56d1d19）：复制/下载走工具栏新节点的正式原图，不再下到缩小 JPEG。
+线上已是 v1.0.119（deploy @ 0a23f7e）：图片节点 gpt-image-2.5；视频节点 Seedance 2.0（@ 引用参考）。
 2G ECS 未装 transformers。框选仍缺 stretch/local-mesh。
 按导演下一条继续。
 ```

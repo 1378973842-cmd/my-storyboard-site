@@ -2739,6 +2739,12 @@ function normalizeLegacyImageModelId(value){
     if(v === 'nano-banana-pro-2k') return 'nano-banana-pro-稳定';
     return v;
 }
+/** 图片生成节点的 nano-banana-pro（不含 稳定 / nano-banana-2） */
+function generatorNanoBananaProModel(providerId){
+    const all = allImageModels(providerId || managedProviderId);
+    const exact = all.find(m => /^nano-banana-pro$/i.test(String(m || '').trim()));
+    return exact || 'nano-banana-pro';
+}
 /** 把旧 square/wide 键迁到当前模型的 aspect 枚举 */
 function resolveRatioForCaps(ratio, caps){
     const keys = caps?.ratioKeys || [];
@@ -21090,9 +21096,12 @@ function normalizeNineGridAgentNode(node){
     if(typeof node.autoCrop !== 'boolean') node.autoCrop = true;
     if(!node.promptSource) node.promptSource = '';
     const legacy = String(node.imageModel || node.model || '').trim();
-    if(/^nano-banana-pro-4k$/i.test(legacy) || legacy === 'nano') node.model = models.nano || 'nano-banana-pro';
-    else if(legacy) node.model = resolveImageModel(legacy);
-    else if(!node.model) node.model = models.nano || 'nano-banana-pro';
+    const resolved = legacy && legacy !== 'nano' ? normalizeLegacyImageModelId(legacy) : '';
+    if(!resolved || /^nano-banana-pro-稳定$/i.test(resolved) || /^nano-banana-pro-4k$/i.test(resolved) || legacy === 'nano'){
+        node.model = generatorNanoBananaProModel(node.apiProvider);
+    } else {
+        node.model = resolveImageModel(resolved);
+    }
     if(node.imageModel) delete node.imageModel;
     if(isGptImage2Model(node.model) && node.quality === 'auto') node.quality = 'medium';
     if(!node.textModel || !CANVAS_AGENT_TEXT_MODELS.includes(String(node.textModel || '').trim())){
@@ -21106,7 +21115,7 @@ function resolveNineGridAgentTextModel(node){
 function nineGridImageModelOptions(node){
     const providerId = resolveImageProviderId(node.apiProvider || managedProviderId);
     const all = allImageModels(providerId);
-    const nano = all.find(m => /^nano-banana-pro$/i.test(String(m || '').trim())) || models.nano || 'nano-banana-pro';
+    const nano = generatorNanoBananaProModel(providerId);
     const gpt = all.find(m => /^gpt-image-2$/i.test(String(m || '').trim())) || models.gpt || 'gpt-image-2';
     const list = uniqueModels([nano, gpt]);
     const selected = resolveImageModel(node.model);
@@ -21162,7 +21171,7 @@ function addNineGridAgentNode(point){
         autoCrop:true,
         promptSource:'',
         apiProvider:providerId,
-        model:models.nano || 'nano-banana-pro',
+        model:generatorNanoBananaProModel(providerId),
         resolution:'4k',
         ratio:'wide',
         quality:'medium',

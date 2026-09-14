@@ -575,3 +575,13 @@
 
 ### 记录 / 说明
 - 本地接入图片节点 gpt-image-2.5（RunningHub sunburst/image-to-image），未部署
+
+## 2026-09-11
+
+### 记录 / 说明
+- 生产 v1.0.119 @ 0a23f7e 已上线；备份 studio-20260911-100330.tar.gz（11G）；PM2 HTTP 200
+
+## 2026-09-14
+
+### 记录 / 说明
+- 九宫格 Agent nano 对齐图片生成节点 nano-banana-pro（不再默认 稳定）
