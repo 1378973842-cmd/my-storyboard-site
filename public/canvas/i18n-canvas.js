@@ -124,6 +124,7 @@
         "canvas.genDockFigureHint": { zh: "提示词：图1=队列当前张；共享参考从第2张起（图2、图3…）", en: "Prompt: Image 1 = current queue item; shared refs start at Image 2" },
         "canvas.genDockPickRef": { zh: "从画布选择参考", en: "Select reference from canvas" },
         "canvas.figureIndex": { zh: "图{n}", en: "Img {n}" },
+        "canvas.comparePickRef": { zh: "对比参考 图{n}", en: "Compare with image {n}" },
         "canvas.promptGroupNode": { zh: "提示词组", en: "Prompt group" },
         "canvas.trashSubtitle": { zh: "已删除画布可恢复，30 天后自动清理。", en: "Deleted canvases can be restored and are cleaned after 30 days." },
         "canvas.refresh": { zh: "刷新列表", en: "Refresh list" },

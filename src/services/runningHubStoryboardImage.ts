@@ -22,8 +22,10 @@ export const RUNNINGHUB_G2_OFFICIAL_T2I_PATH = "/openapi/v2/rhart-image-g-2-offi
 export const RUNNINGHUB_NANO2_I2I_PATH = "/openapi/v2/rhart-image-n-g31-flash/image-to-image";
 /** nano-banana-2 文生图（与 I2I 同渠道） */
 export const RUNNINGHUB_NANO2_T2I_PATH = "/openapi/v2/rhart-image-n-g31-flash/text-to-image";
-/** gpt-image-2.5：文生/图生同一 sunburst 接口（无参考时 imageUrls=[]，无 quality） */
+/** gpt-image-2.5 图生图（有参考） */
 export const RUNNINGHUB_G25_I2I_PATH = "/openapi/v2/rhart-image-g-2.5/sunburst/image-to-image";
+/** gpt-image-2.5 文生图（无参考） */
+export const RUNNINGHUB_G25_T2I_PATH = "/openapi/v2/rhart-image-g-2.5/sunburst/text-to-image";
 
 export function isNanoBanana2Model(model?: string): boolean {
   return /^nano-banana-2$/i.test(String(model || "").trim());
@@ -40,6 +42,12 @@ export function isGptImage25Model(model?: string): boolean {
 export function getG25I2IPath(): string {
   return (
     (process.env.STORYBOARD_IMAGE_GPT25_PATH ?? RUNNINGHUB_G25_I2I_PATH).trim() || RUNNINGHUB_G25_I2I_PATH
+  );
+}
+
+export function getG25T2IPath(): string {
+  return (
+    (process.env.STORYBOARD_IMAGE_GPT25_T2I_PATH ?? RUNNINGHUB_G25_T2I_PATH).trim() || RUNNINGHUB_G25_T2I_PATH
   );
 }
 
@@ -557,7 +565,7 @@ export async function runStoryboardRunningHubG2TextJob(opts: {
   return submitAndPollRunningHub(env, path, body, "generate-image/runninghub-g2-t2i");
 }
 
-/** gpt-image-2.5：有无参考图都走 sunburst/image-to-image，不传 quality */
+/** gpt-image-2.5：有参考走 I2I，无参考走 T2I。不传 quality */
 export async function runStoryboardRunningHubG25Job(opts: {
   prompt: string;
   images?: string[];
@@ -574,13 +582,20 @@ export async function runStoryboardRunningHubG25Job(opts: {
     flattenAlpha: true,
   });
   const g2 = mapRunningHubG2OutputParams(opts.image_size, opts.aspect_ratio);
-  const body = {
-    prompt,
-    imageUrls,
-    resolution: g2.resolution,
-    aspectRatio: g2.aspectRatio,
-  };
-  return submitAndPollRunningHub(env, getG25I2IPath(), body, "canvas-image/gpt-image-2.5");
+  if (!imageUrls.length) {
+    return submitAndPollRunningHub(
+      env,
+      getG25T2IPath(),
+      { prompt, resolution: g2.resolution, aspectRatio: g2.aspectRatio },
+      "canvas-image/gpt-image-2.5-t2i",
+    );
+  }
+  return submitAndPollRunningHub(
+    env,
+    getG25I2IPath(),
+    { prompt, imageUrls, resolution: g2.resolution, aspectRatio: g2.aspectRatio },
+    "canvas-image/gpt-image-2.5",
+  );
 }
 
 export function extractCitedReferenceIndices(text: string, maxReferences: number): number[] {

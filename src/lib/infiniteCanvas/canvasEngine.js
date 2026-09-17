@@ -775,7 +775,7 @@ let gateSortOrder = 'desc';
 let gateViewMode = 'grid';
 let workflowTemplateModal, workflowTemplateList, workflowTemplateBtn, saveWorkflowTemplateBtn;
 let outputLightbox, outputPreview, outputLightboxImg, outputCompareContainer, outputCompareLayer, outputCompareResult;
-let outputCompareOriginal, outputCompareOriginalWrap, outputCompareSlider, outputResolution;
+let outputCompareOriginal, outputCompareOriginalWrap, outputCompareSlider, outputCompareRefPicker, outputResolution;
 let outputDownloadBtn, outputFavoriteBtn, outputCompareBtn, outputLightboxVideo, outputPromptPanel, outputPromptText, outputCopyPromptBtn;
 let outputRerunBtn, logModal, logList, logSearchInput, logModalCount, logClearBar, logClearBtn, logClearCancel, logClearConfirm, errorModal, errorTitle, errorMessage;
 let historyLibraryPane, historyLibraryList, historyLibrarySearch, historyHubTitle;
@@ -976,6 +976,7 @@ function bindDomElements(root) {
   outputCompareOriginal = g('outputCompareOriginal');
   outputCompareOriginalWrap = g('outputCompareOriginalWrap');
   outputCompareSlider = g('outputCompareSlider');
+  outputCompareRefPicker = g('outputCompareRefPicker');
   outputResolution = g('outputResolution');
   outputDownloadBtn = g('outputDownloadBtn');
   outputFavoriteBtn = g('outputFavoriteBtn');
@@ -1733,6 +1734,8 @@ let outputPreviewZoom = 1;
 let outputPreviewPan = {x: 0, y: 0};
 let outputPreviewPanDrag = null;
 let currentOutputCompareUrl = '';
+let currentOutputCompareRefs = [];
+let currentOutputCompareIndex = 0;
 let outputCompareDocDelegated = false;
 let outputCompareToggleAt = 0;
 let currentOutputMeta = null;
@@ -38961,6 +38964,64 @@ function outputCompareUrlFor(url, out){
     const fromGen = first?.refs?.find(r => r?.url)?.url || '';
     return fromGen && !sameImageAsset(fromGen, url) ? fromGen : '';
 }
+function generatorHistoryHasUrl(node, url){
+    if(!node || !url) return false;
+    const hist = isGenConsoleNode(node)
+        ? generatorHistoryItems(node)
+        : [...(node.images || []), ...(node.generatedOutputs || [])];
+    return hist.some(item => sameImageAsset(outputUrlValue(item), url));
+}
+function generatorForCompare(url, out){
+    if(out && CANVAS_GENERATOR_TYPES.includes(out.type)) return out;
+    const live = out?.type === 'image' ? out : null;
+    if(live?.id){
+        const inbound = connections
+            .filter(c => c.to === live.id)
+            .map(c => nodes.find(n => n.id === c.from))
+            .find(n => n && CANVAS_GENERATOR_TYPES.includes(n.type));
+        if(inbound) return inbound;
+    }
+    return nodes.find(n => CANVAS_GENERATOR_TYPES.includes(n.type) && generatorHistoryHasUrl(n, url)) || null;
+}
+function outputCompareRefListFor(url, out){
+    const result = String(url || '').trim();
+    const node = out?.id ? nodes.find(n => n.id === out.id) || out : out;
+    const live = node?.type === 'image'
+        ? node
+        : (nodes.find(n => n.type === 'image' && sameImageAsset(n.url, result)) || null);
+    const gen = generatorForCompare(result, node) || generatorForCompare(result, live);
+    const list = [];
+    const push = (raw, name) => {
+        const u = String(raw || '').trim();
+        if(!u || sameImageAsset(u, result)) return;
+        if(mediaKindForRef({url:u}) !== 'image') return;
+        if(list.some(r => sameImageAsset(r.url, u))) return;
+        list.push({url:u, name:name || ''});
+    };
+    if(live){
+        push(live._editSourceUrl);
+        push(live._cutoutSourceUrl);
+        push(live._expandSourceUrl);
+    }
+    for(const host of [live, node, gen]){
+        if(!host?.imageComparisons) continue;
+        const mapped = host.imageComparisons[result];
+        push(typeof mapped === 'string' ? mapped : mapped?.url);
+        for(const [key, value] of Object.entries(host.imageComparisons)){
+            if(!sameImageAsset(key, result)) continue;
+            push(typeof value === 'string' ? value : value?.url);
+        }
+    }
+    const meta = outputMetaFor(result, gen || node);
+    imageRefsOnly(meta?.run?.refs).forEach(ref => push(ref.url, ref.name));
+    if(gen && CANVAS_GENERATOR_TYPES.includes(gen.type)){
+        for(const s of orderedSources(gen, generatorSources(gen))){
+            imageRefsOnly(s?.refs).forEach(ref => push(ref.url, ref.name));
+        }
+    }
+    if(live) push(imageNodeSourceUrl(live));
+    return list;
+}
 function markOutputViewed(out, url){
     if(!out || !url || !(out.images || []).length) return;
     let changed = false;
@@ -39107,6 +39168,7 @@ function refreshOutputCompareDom(){
     outputCompareOriginal = root.querySelector('#outputCompareOriginal') || outputCompareOriginal;
     outputCompareOriginalWrap = root.querySelector('#outputCompareOriginalWrap') || outputCompareOriginalWrap;
     outputCompareSlider = root.querySelector('#outputCompareSlider') || outputCompareSlider;
+    outputCompareRefPicker = root.querySelector('#outputCompareRefPicker') || outputCompareRefPicker;
     outputCompareBtn = root.querySelector('#outputCompareBtn') || outputCompareBtn;
 }
 function assignCompareImageSrc(img, src){
@@ -39128,6 +39190,78 @@ function liveImageNodeForLightbox(){
     }
     return nodes.find(n => n.type === 'image' && sameImageAsset(n.url, url)) || null;
 }
+function hideOutputCompareRefPicker(){
+    if(!outputCompareRefPicker) return;
+    outputCompareRefPicker.hidden = true;
+    outputCompareRefPicker.innerHTML = '';
+}
+function primeOutputCompareRefs(){
+    const url = currentOutputLightboxUrl;
+    const out = currentOutputLightboxOutId ? nodes.find(n => n.id === currentOutputLightboxOutId) : null;
+    const live = liveImageNodeForLightbox();
+    const gen = generatorForCompare(url, out) || generatorForCompare(url, live);
+    const list = outputCompareRefListFor(url, gen || live || out);
+    if(currentOutputCompareUrl && !list.some(r => sameImageAsset(r.url, currentOutputCompareUrl))){
+        list.unshift({url: currentOutputCompareUrl, name: ''});
+    }
+    currentOutputCompareRefs = list;
+    const idx = list.findIndex(r => sameImageAsset(r.url, currentOutputCompareUrl));
+    currentOutputCompareIndex = idx >= 0 ? idx : 0;
+    if(!currentOutputCompareUrl && list[0]){
+        currentOutputCompareUrl = list[0].url;
+        currentOutputCompareIndex = 0;
+    }
+    list.forEach(ref => prefetchOutputOriginal(ref.url));
+}
+function renderOutputCompareRefPicker(){
+    refreshOutputCompareDom();
+    const picker = outputCompareRefPicker;
+    if(!picker) return;
+    const comparing = outputPreview?.classList.contains('compare-mode');
+    const refs = currentOutputCompareRefs || [];
+    if(!comparing || refs.length < 2){
+        hideOutputCompareRefPicker();
+        return;
+    }
+    picker.hidden = false;
+    picker.innerHTML = refs.map((ref, i) => {
+        const n = i + 1;
+        const active = sameImageAsset(ref.url, currentOutputCompareUrl) || i === currentOutputCompareIndex;
+        const label = trf('canvas.figureIndex', {n});
+        const title = trf('canvas.comparePickRef', {n});
+        return `<button type="button" class="output-compare-ref-chip${active ? ' is-active' : ''}" data-compare-ref-index="${i}" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}" aria-pressed="${active ? 'true' : 'false'}">
+            <img src="${escapeAttr(canvasThumbUrl(ref.url))}" alt="${escapeAttr(label)}" draggable="false">
+            <span class="output-compare-ref-chip-label">${escapeHtml(label)}</span>
+        </button>`;
+    }).join('');
+    picker.querySelectorAll('.output-compare-ref-chip').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            selectOutputCompareRef(Number(btn.getAttribute('data-compare-ref-index')));
+        };
+    });
+}
+function selectOutputCompareRef(index){
+    const ref = currentOutputCompareRefs[index];
+    if(!ref?.url || sameImageAsset(ref.url, currentOutputLightboxUrl)) return;
+    currentOutputCompareIndex = index;
+    currentOutputCompareUrl = ref.url;
+    assignCompareImageSrc(outputCompareOriginal, ref.url);
+    const layout = () => {
+        if(currentOutputCompareUrl !== ref.url) return;
+        layoutOutputCompareImages();
+    };
+    outputCompareOriginal.onload = layout;
+    if(outputCompareOriginal.complete && outputCompareOriginal.naturalWidth) layout();
+    void resolveDisplayMediaUrl(ref.url).then(src => {
+        if(currentOutputCompareUrl !== ref.url) return;
+        assignCompareImageSrc(outputCompareOriginal, src || ref.url);
+        layout();
+    });
+    prefetchOutputOriginal(ref.url);
+    renderOutputCompareRefPicker();
+}
 function toggleOutputCompareFromUi(e){
     e?.preventDefault?.();
     e?.stopPropagation?.();
@@ -39141,6 +39275,7 @@ function toggleOutputCompareFromUi(e){
     if(resolved && !sameImageAsset(resolved, currentOutputLightboxUrl)){
         currentOutputCompareUrl = resolved;
     }
+    primeOutputCompareRefs();
     if(!currentOutputCompareUrl || !currentOutputLightboxUrl || isVideoUrl(currentOutputLightboxUrl)) return;
     if(!outputPreview) return;
     setOutputCompareMode(!outputPreview.classList.contains('compare-mode'));
@@ -39154,8 +39289,10 @@ function setOutputCompareMode(active){
         if(resolved && !sameImageAsset(resolved, currentOutputLightboxUrl)){
             currentOutputCompareUrl = resolved;
         }
+        primeOutputCompareRefs();
         if(!currentOutputCompareUrl || sameImageAsset(currentOutputCompareUrl, currentOutputLightboxUrl)){
             currentOutputCompareUrl = '';
+            hideOutputCompareRefPicker();
             syncOutputCompareBtn(false);
             return;
         }
@@ -39171,6 +39308,9 @@ function setOutputCompareMode(active){
     if(active){
         outputComparePercent = 50;
         layoutOutputCompareImages();
+        renderOutputCompareRefPicker();
+    } else {
+        hideOutputCompareRefPicker();
     }
     syncOutputCompareBtn(active);
 }
@@ -39401,7 +39541,7 @@ function initOutputPreviewZoomEvents(){
     outputPreview.addEventListener('mousedown', e => {
         if(outputLightboxVideo.style.display === 'block') return;
         if(e.button !== 0 || outputPreviewZoom <= 1.001) return;
-        if(e.target.closest('.output-preview-actions, .output-resolution, .output-compare-slider')) return;
+        if(e.target.closest('.output-preview-actions, .output-resolution, .output-compare-slider, .output-compare-ref-picker')) return;
         outputPreviewPanDrag = {
             sx:e.clientX,
             sy:e.clientY,
@@ -39434,14 +39574,14 @@ function initOutputCompareEvents(){
         toggleOutputCompareFromUi(e);
     }, true);
     document.addEventListener('dblclick', e => {
-        if(e.target.closest?.('.output-preview-actions, .output-compare-slider')) return;
+        if(e.target.closest?.('.output-preview-actions, .output-compare-slider, .output-compare-ref-picker')) return;
         const preview = e.target.closest?.('.output-lightbox.open .output-preview');
         if(!preview || !currentOutputCompareUrl) return;
         toggleOutputCompareFromUi(e);
     }, true);
     document.addEventListener('mousedown', e => {
         if(!e.target.closest?.('.output-lightbox.open .output-compare')) return;
-        if(e.target.closest?.('.output-preview-bar, .output-preview-actions')) return;
+        if(e.target.closest?.('.output-preview-bar, .output-preview-actions, .output-compare-ref-picker')) return;
         refreshOutputCompareDom();
         const slider = outputCompareSlider;
         const sl = slider?.getBoundingClientRect();
@@ -39458,7 +39598,7 @@ function initOutputCompareEvents(){
     window.addEventListener('mouseup', () => { outputCompareDrag = false; });
     document.addEventListener('touchstart', e => {
         if(!e.target.closest?.('.output-lightbox.open .output-compare') || !e.touches?.[0]) return;
-        if(e.target.closest?.('.output-preview-bar, .output-preview-actions')) return;
+        if(e.target.closest?.('.output-preview-bar, .output-preview-actions, .output-compare-ref-picker')) return;
         refreshOutputCompareDom();
         const slider = outputCompareSlider;
         const sl = slider?.getBoundingClientRect();
@@ -39584,6 +39724,7 @@ function openOutputLightbox(url, out, compareUrl){
     currentOutputCompareUrl = resolveCompareOriginalSrc(url, liveOut)
         || (compareUrl !== undefined ? String(compareUrl || '').trim() : outputCompareUrlFor(url, liveOut || out));
     if(sameImageAsset(currentOutputCompareUrl, url)) currentOutputCompareUrl = '';
+    primeOutputCompareRefs();
     setOutputCompareMode(false);
     const videoMode = outputLightboxIsVideo(url, liveOut || out);
     outputLightboxImg.style.display = videoMode ? 'none' : 'block';
@@ -39711,7 +39852,10 @@ function closeOutputLightbox(){
         outputCompareBtn.setAttribute('aria-pressed', 'false');
     }
     resetOutputPreviewZoom();
+    hideOutputCompareRefPicker();
     currentOutputCompareUrl = '';
+    currentOutputCompareRefs = [];
+    currentOutputCompareIndex = 0;
     currentOutputMeta = null;
     currentOutputLightboxOutId = '';
     currentOutputLightboxUrl = '';

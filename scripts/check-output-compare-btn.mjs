@@ -28,7 +28,13 @@ assert(engine.includes('generatorSources(node)'), 'Engine missing generatorSourc
 assert(engine.includes('outputCompareBtn.hidden = !canCompare'), 'Engine missing show/hide by canCompare');
 assert(engine.includes('isVideoUrl(currentOutputLightboxUrl)'), 'Engine must hide compare for video');
 assert(engine.includes('ondblclick'), 'Engine must keep dblclick toggle');
-
+assert(engine.includes('function outputCompareRefListFor'), 'Engine missing outputCompareRefListFor');
+assert(engine.includes('function renderOutputCompareRefPicker'), 'Engine missing renderOutputCompareRefPicker');
+assert(engine.includes('function selectOutputCompareRef'), 'Engine missing selectOutputCompareRef');
+assert(engine.includes('output-compare-ref-picker'), 'Engine must exclude picker from slider drag');
+assert(shell.includes('id="outputCompareRefPicker"'), 'Shell missing #outputCompareRefPicker');
+assert(css.includes('.output-compare-ref-picker'), 'CSS missing ref picker');
+assert(css.includes('.output-compare-ref-chip'), 'CSS missing ref chips');
 assert(css.includes('.output-lightbox-compare.is-active'), 'CSS missing compare active style');
 
 /** 纯逻辑镜像：meta refs → comparisons → sources 首图 */
@@ -81,5 +87,38 @@ function canShowCompareBtn({ compareUrl, lightboxUrl, isVideo }) {
 assert(canShowCompareBtn({ compareUrl: 'a.png', lightboxUrl: 'b.png', isVideo: false }) === true, 'image+ref shows');
 assert(canShowCompareBtn({ compareUrl: '', lightboxUrl: 'b.png', isVideo: false }) === false, 'no ref hides');
 assert(canShowCompareBtn({ compareUrl: 'a.png', lightboxUrl: 'v.mp4', isVideo: true }) === false, 'video hides');
+
+/** 多参考：去重、跳过结果自身与视频，保留顺序 */
+function uniqueCompareRefs({ resultUrl, metaRefs, sourceRefs }) {
+  const list = [];
+  const push = (raw) => {
+    const u = String(raw || '').trim();
+    if (!u || u === resultUrl) return;
+    if (/\.(mp4|webm|mov|m4v|mkv)(\?|$)/i.test(u.split('?')[0])) return;
+    if (list.includes(u)) return;
+    list.push(u);
+  };
+  (metaRefs || []).forEach((r) => push(r?.url));
+  (sourceRefs || []).forEach((r) => push(r?.url));
+  return list;
+}
+
+assert(
+  uniqueCompareRefs({
+    resultUrl: 'out.png',
+    metaRefs: [{ url: 'a.png' }, { url: 'b.png' }, { url: 'a.png' }, { url: 'clip.mp4' }, { url: 'out.png' }],
+    sourceRefs: [{ url: 'b.png' }, { url: 'c.png' }],
+  }).join(',') === 'a.png,b.png,c.png',
+  'multi-ref list unique + skip video/result',
+);
+
+assert(
+  uniqueCompareRefs({
+    resultUrl: 'out.png',
+    metaRefs: [{ url: 'only.png' }],
+    sourceRefs: [],
+  }).length === 1,
+  'single ref stays one item (picker hidden at <2)',
+);
 
 console.log('check-output-compare-btn: pass');

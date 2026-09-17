@@ -884,6 +884,7 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                                   <div className="output-compare-handle"><i data-lucide="move-horizontal" className="w-4 h-4"></i></div>
                               </div>
                           </div>
+                          <div id="outputCompareRefPicker" className="output-compare-ref-picker" hidden></div>
                       </div>
                       <img id="outputLightboxImg" className="output-single-img" src="" alt="output preview" />
                       <video id="outputLightboxVideo" className="output-single-video" src="" controls playsInline disablePictureInPicture controlsList="nodownload noplaybackrate noremoteplayback" style={{ display: "none" }}></video>

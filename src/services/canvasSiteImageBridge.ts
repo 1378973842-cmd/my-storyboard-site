@@ -473,6 +473,7 @@ async function executeCanvasGeneration(
       resolution: gpt2ImageSizeFromPayload(payload),
       aspect_ratio,
       images: g25Images.length,
+      mode: g25Images.length ? "i2i" : "t2i",
     });
     const upstreamUrl = await runStoryboardRunningHubG25Job({
       prompt,

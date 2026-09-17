@@ -30,6 +30,8 @@ const checks = [
   [/Math\.round\(box\.w \* p \/ 100\)/, engine, 'integer clip x'],
   [/id="outputCompareSlider"/, shell, 'compare slider'],
   [/outputCompareLayer[\s\S]*outputCompareSlider/, shell, 'slider inside zoom layer'],
+  [/id="outputCompareRefPicker"/, shell, 'ref picker outside zoom layer'],
+  [/output-compare-ref-picker/, css, 'ref picker css'],
 ];
 
 let failed = 0;

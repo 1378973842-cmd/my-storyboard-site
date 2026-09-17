@@ -5,7 +5,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const G25_PATH = "/openapi/v2/rhart-image-g-2.5/sunburst/image-to-image";
+const G25_I2I_PATH = "/openapi/v2/rhart-image-g-2.5/sunburst/image-to-image";
+const G25_T2I_PATH = "/openapi/v2/rhart-image-g-2.5/sunburst/text-to-image";
 
 function isGptImage2(model) {
   return /^gpt-image-2(-稳定)?$/i.test(String(model || "").trim());
@@ -19,13 +20,13 @@ function isGptImage25(model) {
 }
 
 function routeKind(model, refCount) {
-  if (isGptImage25(model)) return "g25-i2i";
+  if (isGptImage25(model)) return refCount > 0 ? "g25-i2i" : "g25-t2i";
   if (isGptImage2(model)) return refCount > 0 ? "g2-i2i" : "g2-t2i";
   return refCount > 0 ? "nano-i2i" : "nano-t2i";
 }
 
 const cases = [
-  ["gpt-image-2.5", 0, "g25-i2i"],
+  ["gpt-image-2.5", 0, "g25-t2i"],
   ["gpt-image-2.5", 3, "g25-i2i"],
   ["gpt-image-2-5", 1, "g25-i2i"],
   ["gpt-image-2", 0, "g2-t2i"],
@@ -59,11 +60,15 @@ const g25Fn = svc.slice(
   svc.indexOf("export function extractCitedReferenceIndices")
 );
 const fileChecks = [
-  [svc.includes(G25_PATH), "service sunburst path"],
+  [svc.includes(G25_I2I_PATH), "service sunburst i2i path"],
+  [svc.includes(G25_T2I_PATH), "service sunburst t2i path"],
   [svc.includes("export function isGptImage25Model"), "service detector"],
   [svc.includes("runStoryboardRunningHubG25Job"), "service job"],
+  [svc.includes("getG25T2IPath"), "service t2i path helper"],
   [g25Fn.includes("imageUrls") && !g25Fn.includes("quality:"), "g25 body has no quality"],
+  [g25Fn.includes("getG25T2IPath()") && g25Fn.includes("getG25I2IPath()"), "g25 job splits t2i/i2i"],
   [bridge.includes("isGptImage25Model") && bridge.includes("runStoryboardRunningHubG25Job"), "bridge dispatches g25"],
+  [bridge.includes('mode: g25Images.length ? "i2i" : "t2i"'), "bridge logs i2i vs t2i"],
   [routes.includes('"gpt-image-2.5"'), "config lists gpt-image-2.5"],
   [eng.includes("'gpt-image-2.5'"), "engine default models include gpt-image-2.5"],
   [eng.includes("function isGptImage25Model"), "engine detector"],

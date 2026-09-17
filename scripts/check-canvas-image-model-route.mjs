@@ -22,7 +22,7 @@ const NANO_PRO_I2I = "/openapi/v2/rhart-image-n-pro/edit";
 const NANO_PRO_T2I = "/openapi/v2/rhart-image-n-pro-official/text-to-image";
 
 function routeKind(model, refCount) {
-  if (isGptImage25(model)) return "g25-i2i";
+  if (isGptImage25(model)) return refCount > 0 ? "g25-i2i" : "g25-t2i";
   if (isGptImage2(model)) return refCount > 0 ? "g2-i2i" : "g2-t2i";
   if (isNanoBanana2Model(model)) return refCount > 0 ? "nano2-i2i" : "nano2-t2i";
   return refCount > 0 ? "nano-i2i" : "nano-t2i";
@@ -30,7 +30,8 @@ function routeKind(model, refCount) {
 
 function resolvePath(model, refCount) {
   const kind = routeKind(model, refCount);
-  if (kind === "g25-i2i") return G25_PATH;
+  if (kind === "g25-i2i") return G25_I2I_PATH;
+  if (kind === "g25-t2i") return G25_T2I_PATH;
   if (kind === "nano2-i2i") return NANO2_I2I;
   if (kind === "nano2-t2i") return NANO2_T2I;
   if (kind === "nano-i2i") return NANO_PRO_I2I;
@@ -38,14 +39,15 @@ function resolvePath(model, refCount) {
   return kind;
 }
 
-const G25_PATH = "/openapi/v2/rhart-image-g-2.5/sunburst/image-to-image";
+const G25_I2I_PATH = "/openapi/v2/rhart-image-g-2.5/sunburst/image-to-image";
+const G25_T2I_PATH = "/openapi/v2/rhart-image-g-2.5/sunburst/text-to-image";
 
 const cases = [
   ["gpt-image-2", 2, "g2-i2i"],
   ["gpt-image-2", 0, "g2-t2i"],
   ["gpt-image-2-稳定", 1, "g2-i2i"],
-  ["gpt-image-2.5", 0, "g25-i2i", G25_PATH],
-  ["gpt-image-2.5", 2, "g25-i2i", G25_PATH],
+  ["gpt-image-2.5", 0, "g25-t2i", G25_T2I_PATH],
+  ["gpt-image-2.5", 2, "g25-i2i", G25_I2I_PATH],
   ["nano-banana-pro-稳定", 1, "nano-i2i"],
   ["nano-banana-pro-稳定", 0, "nano-t2i"],
   ["nano-banana-2", 1, "nano2-i2i", NANO2_I2I],
