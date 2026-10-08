@@ -158,6 +158,17 @@ export function keyToUploadsPath(key: string): string {
   return `/uploads/${stripped}`;
 }
 
+/**
+ * 读链接的过期时刻对齐到整段 TTL（默认 1 小时）。
+ * 同一段内重复签名得到同一个 URL，浏览器才能在切画布时命中缓存。
+ */
+export function signedReadExpiryMs(ttlSeconds = 3600): number {
+  const bucket = Math.max(60, Math.floor(Number(ttlSeconds) || 3600));
+  const now = Math.floor(Date.now() / 1000);
+  const bucketEnd = (Math.floor(now / bucket) + 1) * bucket;
+  return bucketEnd * 1000;
+}
+
 /** 生成一个用于私有读的签名 URL（默认 1 小时）。站内 /uploads 不要 302 到这里，否则 canvas 跨域污染。 */
 export function signUploadsUrl(
   internalPath: string,
@@ -168,8 +179,11 @@ export function signUploadsUrl(
   }
   const key = mapUploadsPathToKey(internalPath);
   const ttl = Number(opts.ttlSeconds || process.env.OSS_SIGN_TTL_SECONDS || 3600);
+  const now = Math.floor(Date.now() / 1000);
+  const bucketEnd = Math.floor(signedReadExpiryMs(ttl) / 1000);
+  const expires = Math.max(30, bucketEnd - now);
   const c = getClient();
-  const url = c.signatureUrl(key, { expires: ttl });
+  const url = c.signatureUrl(key, { expires });
   return url;
 }
 

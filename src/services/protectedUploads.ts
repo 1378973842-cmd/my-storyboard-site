@@ -9,6 +9,7 @@ import {
   isOssEnabled,
   signUploadsPutUrl,
   signUploadsUrl,
+  signedReadExpiryMs,
   streamUploadsObject,
 } from "./ossStore.js";
 import { randomUUID } from "crypto";
@@ -97,7 +98,7 @@ async function serveOssProxy(
         res.status(404).json({ error: "文件不存在" });
         return;
       }
-      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.setHeader("Cache-Control", cacheControlForUpload(webPath));
       res.setHeader("Accept-Ranges", "bytes");
       res.setHeader("Content-Type", meta.mime || guessContentType(webPath));
       if (meta.size > 0) res.setHeader("Content-Length", String(meta.size));
@@ -114,7 +115,7 @@ async function serveOssProxy(
     const length = got.headers["content-length"] || got.headers["Content-Length"];
     const contentRange = got.headers["content-range"] || got.headers["Content-Range"];
     res.status(got.status === 206 || contentRange ? 206 : 200);
-    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("Cache-Control", cacheControlForUpload(webPath));
     res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Content-Type", mime);
     if (length) res.setHeader("Content-Length", length);
@@ -143,9 +144,29 @@ function serveLocalFallback(
     res.status(404).json({ error: "文件不存在" });
     return;
   }
-  res.setHeader("Cache-Control", "private, max-age=3600");
+  res.setHeader("Cache-Control", cacheControlForUpload(webPath));
   res.type(guessContentType(abs));
   res.sendFile(abs);
+}
+
+/** 缩略图文件名稳定，可以缓存一周；其它素材仍 1 小时。 */
+function cacheControlForUpload(webPath: string): string {
+  if (webPath.includes("/gallery/") && webPath.endsWith("_thumb.webp")) {
+    return "private, max-age=604800";
+  }
+  return "private, max-age=3600";
+}
+
+function signedReadForPath(webPath: string): { url: string; via: "oss" | "local"; exp: number } {
+  if (!isOssEnabled()) {
+    return { url: webPath, via: "local", exp: Date.now() + 8 * 1000 };
+  }
+  try {
+    return { url: signUploadsUrl(webPath), via: "oss", exp: signedReadExpiryMs() };
+  } catch (err) {
+    console.warn("[uploads/signed]", (err as Error)?.message);
+    return { url: webPath, via: "local", exp: Date.now() + 8 * 1000 };
+  }
 }
 
 /**
@@ -173,16 +194,27 @@ export function registerProtectedUploadRoutes(
       res.status(403).json({ error: "无权访问该文件" });
       return;
     }
-    if (!isOssEnabled()) {
-      res.json({ url: webPath, via: "local" });
-      return;
+    const signed = signedReadForPath(webPath);
+    res.json({ url: signed.url, via: signed.via, exp: signed.exp });
+  });
+
+  /** 开板：视口内缩略图一次签名，避免每张图各打一趟。 */
+  app.post("/api/uploads/signed-batch", requireAuth, (req, res) => {
+    const rawPaths = Array.isArray(req.body?.paths) ? req.body.paths : [];
+    const userId = req.authUser?.id ?? null;
+    const urls: Record<string, string> = {};
+    let exp = Date.now() + 8 * 1000;
+    let via: "oss" | "local" = "local";
+    for (const raw of rawPaths.slice(0, 80)) {
+      const webPath = String(raw || "").trim().split("?")[0];
+      if (!webPath.startsWith("/uploads/") || webPath.includes("..")) continue;
+      if (!canAccessUploadPath(db, webPath, userId)) continue;
+      const signed = signedReadForPath(webPath);
+      urls[webPath] = signed.url;
+      via = signed.via;
+      exp = signed.exp;
     }
-    try {
-      res.json({ url: signUploadsUrl(webPath), via: "oss" });
-    } catch (err) {
-      console.warn("[uploads/signed]", (err as Error)?.message);
-      res.json({ url: webPath, via: "local" });
-    }
+    res.json({ urls, via, exp });
   });
 
   app.post("/api/uploads/presign", requireAuth, (req, res) => {
