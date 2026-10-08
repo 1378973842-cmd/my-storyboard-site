@@ -517,7 +517,7 @@ export function PublishWorkModal({ open, onClose, onSaved, editing = null }: Pro
                           <button
                             type="button"
                             onClick={() => fileRef.current?.click()}
-                            className="flex aspect-square flex-col items-center justify-center gap-1 rounded-xl bg-[#1c1b1b] text-[#e5e2e1]/7 transition-colors hover:bg-[#242424] hover:text-[#e5e2e1]"
+                            className="flex aspect-square flex-col items-center justify-center gap-1 rounded-xl bg-[#1c1b1b] text-[#e5e2e1]/70 transition-colors hover:bg-[#242424] hover:text-[#e5e2e1]"
                             style={{ outline: '0.5px solid rgba(255,255,255,0.1)', outlineOffset: '-0.5px' }}
                           >
                             <Plus className="h-5 w-5" strokeWidth={1.75} />
@@ -661,7 +661,7 @@ export function PublishWorkModal({ open, onClose, onSaved, editing = null }: Pro
               {/* 创作过程：轻量节点流（比表单卡更直观） */}
               <div className="mt-6 rounded-[18px] bg-[#121212] p-4 md:p-5" style={{ outline: '0.5px solid rgba(255,255,255,0.08)', outlineOffset: '-0.5px' }}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-[13.5px] font-medium text-[#e5e2e1]/9">
+                  <p className="text-[13.5px] font-medium text-[#e5e2e1]/90">
                     创作过程（可选）
                     <span className="ml-2 text-[12px] font-normal text-[#e5e2e1]/55">
                       节点从左到右 · 点节点加图
@@ -775,7 +775,7 @@ export function PublishWorkModal({ open, onClose, onSaved, editing = null }: Pro
                                   <button
                                     type="button"
                                     onClick={() => removeStep(step.key)}
-                                    className="absolute right-5 top-0 z-[3] flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-[#e5e2e1]/8 hover:text-[#e5e2e1]"
+                                    className="absolute right-5 top-0 z-[3] flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-[#e5e2e1]/80 hover:text-[#e5e2e1]"
                                     aria-label={`删除步骤 ${idx + 1}`}
                                   >
                                     <X className="h-3 w-3" strokeWidth={2} />
@@ -807,7 +807,7 @@ export function PublishWorkModal({ open, onClose, onSaved, editing = null }: Pro
                                             stepImageTargetRef.current = step.key;
                                             stepFileRef.current?.click();
                                           }}
-                                          className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1a1919] text-[#e5e2e1]/7"
+                                          className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1a1919] text-[#e5e2e1]/70"
                                           style={{ outline: '0.5px solid rgba(255,255,255,0.12)', outlineOffset: '-0.5px' }}
                                         >
                                           <Plus className="h-3 w-3" />
@@ -856,7 +856,7 @@ export function PublishWorkModal({ open, onClose, onSaved, editing = null }: Pro
                                     }}
                                     placeholder="这一步的提示词…"
                                     rows={3}
-                                    className="w-full resize-none overflow-hidden rounded-xl bg-[#1a1919] px-2.5 py-2 text-[11.5px] leading-relaxed text-[#e5e2e1] placeholder:text-[#e5e2e1]/4 outline-none"
+                                    className="w-full resize-none overflow-hidden rounded-xl bg-[#1a1919] px-2.5 py-2 text-[11.5px] leading-relaxed text-[#e5e2e1] placeholder:text-[#e5e2e1]/40 outline-none"
                                     style={{ outline: '0.5px solid rgba(255,255,255,0.08)', outlineOffset: '-0.5px' }}
                                   />
                                 </div>

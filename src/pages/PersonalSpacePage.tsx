@@ -543,7 +543,7 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
 
                   {workTab === 'works' ? (
                     worksLoading ? (
-                      <div className="flex min-h-[180px] items-center justify-center text-[#e5e2e1]/5">
+                      <div className="flex min-h-[180px] items-center justify-center text-[#e5e2e1]/55">
                         <Loader2 className="h-7 w-7 animate-spin" aria-hidden />
                       </div>
                     ) : (
@@ -557,7 +557,7 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
                           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#2a2a2a] text-[#e5e2e1]/75 transition-colors group-hover:text-[#e5e2e1]">
                             <Plus className="h-5 w-5" strokeWidth={1.75} aria-hidden />
                           </span>
-                          <span className="text-[13.5px] font-medium text-[#e5e2e1]/55 group-hover:text-[#e5e2e1]/8">
+                          <span className="text-[13.5px] font-medium text-[#e5e2e1]/55 group-hover:text-[#e5e2e1]/85">
                             发布作品
                           </span>
                         </button>
@@ -687,7 +687,7 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
                 </div>
 
                 {favLoading ? (
-                  <div className="flex min-h-[240px] items-center justify-center text-[#e5e2e1]/5">
+                  <div className="flex min-h-[240px] items-center justify-center text-[#e5e2e1]/55">
                     <Loader2 className="h-7 w-7 animate-spin" aria-hidden />
                   </div>
                 ) : favorites.length === 0 && galleryFavorites.length === 0 ? (
@@ -837,7 +837,7 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
                                       取消收藏
                                     </button>
                                     {!canLocate ? (
-                                      <p className="px-3 pb-2 text-[11px] leading-relaxed text-[#e5e2e1]/4">
+                                      <p className="px-3 pb-2 text-[11px] leading-relaxed text-[#e5e2e1]/45">
                                         旧收藏无定位信息，请在画布中重新收藏
                                       </p>
                                     ) : null}
@@ -851,7 +851,7 @@ export const PersonalSpacePage = memo(function PersonalSpacePage({
                                 <p className="font-[Manrope,sans-serif] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#e5e2e1]/42">
                                   {item.model || '未知模型'}
                                 </p>
-                                <p className="text-[11.5px] text-[#e5e2e1]/4">来自 我的创作</p>
+                                <p className="text-[11.5px] text-[#e5e2e1]/45">来自 我的创作</p>
                               </div>
                             </div>
                           </article>

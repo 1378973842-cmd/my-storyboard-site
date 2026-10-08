@@ -917,7 +917,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
           aria-label={`${BRAND_NAME} navigation`}
         >
           {/* 左占位：与品牌同宽区，避免右栏被挤；品牌仍绝对定位叠在上面 */}
-          <div className="h-10 w-[min(200px,28vw)] shrink-0" aria-hidden />
+          <div className="h-10 w-[10.5rem] shrink-0 md:w-[min(200px,28vw)]" aria-hidden />
 
           <div
             className={cn(
@@ -930,14 +930,14 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
             ))}
           </div>
 
-          <div className="pointer-events-auto ml-auto flex h-10 items-center gap-1.5">
-            <div className="flex h-10 items-center gap-2.5 overflow-x-auto custom-scrollbar md:hidden">
+          <div className="pointer-events-auto ml-auto flex h-10 min-w-0 items-center gap-1.5">
+            <div className="flex h-10 min-w-0 items-center gap-2.5 overflow-x-auto custom-scrollbar md:hidden">
               {coverCenterItems.map((item) => (
                 <CoverCenterLink key={item.id} item={item} />
               ))}
             </div>
             {user ? (
-              <div className="hidden h-10 shrink-0 items-center gap-1.5 md:flex">
+              <div className="flex h-10 shrink-0 items-center gap-1.5">
                 <StudioAnnouncementsBell isAdmin={isAdmin} heroTone />
                 <StudioUserMenu
                   user={user}
@@ -984,7 +984,7 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
           </div>
 
           {user ? (
-            <div className="hidden shrink-0 items-center gap-1.5 md:flex">
+            <div className="flex shrink-0 items-center gap-1.5">
               <StudioAnnouncementsBell isAdmin={isAdmin} heroTone={isOverlayNav} />
               <StudioUserMenu
                 user={user}
@@ -1001,6 +1001,23 @@ export const StudioTopNav: React.FC<StudioTopNavProps> = ({
           ) : null}
         </div>
       </nav>
+      ) : null}
+
+      {user && isOverlayNav && screen === 'infinite-canvas' && canvasBoardOpen ? (
+        <div className="pointer-events-auto absolute right-3 top-5 z-[4] flex h-11 items-center gap-1.5 md:right-5 md:top-6">
+          <StudioAnnouncementsBell isAdmin={isAdmin} heroTone />
+          <StudioUserMenu
+            user={user}
+            isAdmin={isAdmin}
+            heroTone
+            onPersonal={openPersonal}
+            onAdminUsers={openAdminUsers}
+            onAdminRhWorkflows={openAdminRhWorkflows}
+            onAdminHomeCarousel={openAdminHomeCarousel}
+            onAdminAnnouncements={openAdminAnnouncements}
+            onAdminPlatformErrors={openAdminPlatformErrors}
+          />
+        </div>
       ) : null}
     </header>
   );

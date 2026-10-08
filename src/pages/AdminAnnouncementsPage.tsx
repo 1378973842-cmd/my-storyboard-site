@@ -120,11 +120,11 @@ export const AdminAnnouncementsPage = memo(function AdminAnnouncementsPage({
                       <h2 className="truncate text-[15px] font-semibold tracking-[-0.01em] text-[#e5e2e1]">
                         {item.title}
                       </h2>
-                      <p className="mt-1 text-[12px] text-[#e5e2e1]/4">
+                      <p className="mt-1 text-[12px] text-[#e5e2e1]/45">
                         {formatAnnouncementTime(item.created_at)}
-                        <span className="mx-1.5 text-[#e5e2e1]/2">·</span>
+                        <span className="mx-1.5 text-[#e5e2e1]/35">·</span>
                         {item.author_name || '管理员'}
-                        <span className="mx-1.5 text-[#e5e2e1]/2">·</span>
+                        <span className="mx-1.5 text-[#e5e2e1]/35">·</span>
                         {Number(item.read_count) || 0} 人已读
                       </p>
                       <p className="mt-2.5 line-clamp-2 text-[13px] leading-relaxed text-[#e5e2e1]/55">

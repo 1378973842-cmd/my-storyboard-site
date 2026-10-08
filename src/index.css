@@ -836,7 +836,7 @@ html[data-theme="light"] body {
     display: inline-flex;
     align-items: center;
     min-width: 0;
-    max-width: min(520px, calc(100vw - 1.5rem));
+    max-width: min(520px, calc(100vw - 9.5rem));
     min-height: 44px;
     padding: 4px 6px 4px 4px;
     border-radius: 999px;

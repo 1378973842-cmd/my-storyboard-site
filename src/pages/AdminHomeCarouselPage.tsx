@@ -175,7 +175,7 @@ export const AdminHomeCarouselPage = memo(function AdminHomeCarouselPage({
               if (e.dataTransfer.files?.length) appendFiles(e.dataTransfer.files);
             }}
             className={cn(
-              'mt-8 flex min-h-[160px] cursor-pointer flex-col items-center justify-center gap-3 rounded-[1.5rem] bg-[#131313]/9 px-6 py-10 text-center transition-colors',
+              'mt-8 flex min-h-[160px] cursor-pointer flex-col items-center justify-center gap-3 rounded-[1.5rem] bg-[#131313] px-6 py-10 text-center transition-colors',
               dragOver ? 'bg-[#1c1b1b]' : 'hover:bg-[#161616]',
             )}
             style={{ outline: '0.5px solid rgba(69,70,77,0.28)', outlineOffset: '-0.5px' }}
@@ -184,7 +184,7 @@ export const AdminHomeCarouselPage = memo(function AdminHomeCarouselPage({
               <ImagePlus className="h-5 w-5" />
             </span>
             <p className="text-[14px] font-medium text-[#e5e2e1]/85">拖拽图片到这里，或点击选择</p>
-            <p className="text-[12px] text-[#e5e2e1]/4">JPG / PNG / WebP，可多选</p>
+            <p className="text-[12px] text-[#e5e2e1]/45">JPG / PNG / WebP，可多选</p>
             <input
               ref={inputRef}
               type="file"
@@ -217,7 +217,7 @@ export const AdminHomeCarouselPage = memo(function AdminHomeCarouselPage({
                 加载中…
               </div>
             ) : draft.length === 0 ? (
-              <p className="col-span-full text-[13px] text-[#e5e2e1]/4">暂无图片，拖入后点更新即可在主页轮播</p>
+              <p className="col-span-full text-[13px] text-[#e5e2e1]/45">暂无图片，拖入后点更新即可在主页轮播</p>
             ) : (
               draft.map((item, index) => (
                 <div

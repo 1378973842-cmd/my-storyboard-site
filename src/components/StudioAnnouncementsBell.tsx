@@ -288,7 +288,7 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
                                     'block w-full px-3 py-2 text-left text-[12.5px]',
                                     listFilter === id
                                       ? 'text-[#ffb866]'
-                                      : 'text-[#e5e2e1]/7 hover:bg-white/[0.04]',
+                                      : 'text-[#e5e2e1]/72 hover:bg-white/[0.04]',
                                   )}
                                 >
                                   {label}
@@ -319,11 +319,11 @@ export const StudioAnnouncementsBell: React.FC<StudioAnnouncementsBellProps> = (
                             <p className="text-[12.5px] text-[#e5e2e1]/35">先看看官方通知吧</p>
                           </div>
                         ) : loading && !items.length ? (
-                          <p className="px-2 py-16 text-center text-[13px] text-[#e5e2e1]/4">加载中…</p>
+                          <p className="px-2 py-16 text-center text-[13px] text-[#e5e2e1]/55">加载中…</p>
                         ) : error ? (
                           <p className="px-2 py-10 text-center text-[13px] text-red-400/90">{error}</p>
                         ) : visibleItems.length === 0 ? (
-                          <p className="px-2 py-16 text-center text-[13px] text-[#e5e2e1]/4">
+                          <p className="px-2 py-16 text-center text-[13px] text-[#e5e2e1]/45">
                             {listFilter === 'unread' ? '没有未读通知' : '暂无官方通知'}
                           </p>
                         ) : (

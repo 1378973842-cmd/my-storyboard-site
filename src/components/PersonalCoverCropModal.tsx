@@ -364,7 +364,7 @@ export function PersonalCoverCropModal({ open, file, busy = false, onClose, onCo
                   </>
                 ) : null}
               </div>
-              <p className="mt-2.5 text-[12px] text-[#e5e2e1]/4">
+              <p className="mt-2.5 text-[12px] text-[#e5e2e1]/45">
                 拖动选区调整位置，右下角可缩放。比例与个人主页横幅一致。
               </p>
               {error ? (

@@ -190,8 +190,8 @@ export function LoginGate({ children }: { children: React.ReactNode }) {
           >
             登录 DreamGrid
           </h1>
-          <p className="max-w-[300px] text-sm leading-relaxed text-[#e5e2e1]/68">
-            使用管理员分配的邮箱与密码登录，即可使用分镜、画布与生图等功能。
+          <p className="max-w-full text-sm leading-relaxed text-[#e5e2e1]/68">
+            使用管理员分配的邮箱与密码登录，即可使用<span className="whitespace-nowrap">分镜</span>、画布与生图等功能。
           </p>
         </div>
 

@@ -217,7 +217,7 @@ export function HomeCarouselStrip() {
     >
       <div className="cover-home-carousel-shell">
         <div className="mb-3 flex items-end justify-between md:mb-3.5">
-          <h2 className="font-headline text-[1.05rem] tracking-[-0.02em] text-[#e5e2e1]/9 md:text-[1.2rem]">
+          <h2 className="font-headline text-[1.05rem] tracking-[-0.02em] text-[#e5e2e1]/90 md:text-[1.2rem]">
             精选推荐
           </h2>
         </div>

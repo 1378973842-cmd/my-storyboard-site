@@ -215,7 +215,7 @@ export const GalleryPage = memo(function GalleryPage({ shellActive }: { shellAct
                     'shrink-0 rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition-colors',
                     active
                       ? 'bg-[#2a2a2a] text-[#e5e2e1] outline outline-[0.5px] outline-offset-[-0.5px] outline-white/22'
-                      : 'text-[#e5e2e1]/48 hover:text-[#e5e2e1]/8',
+                      : 'text-[#e5e2e1]/48 hover:text-[#e5e2e1]/80',
                   )}
                 >
                   {cat.label}

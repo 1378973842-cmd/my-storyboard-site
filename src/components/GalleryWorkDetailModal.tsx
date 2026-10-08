@@ -154,7 +154,7 @@ export function GalleryWorkDetailModal({ work, onClose, onEdit, onToggleFavorite
                       </span>
                     ) : null}
                     {images.length > 1 ? (
-                      <p className="mt-2 text-[12px] text-[#e5e2e1]/4">
+                      <p className="mt-2 text-[12px] text-[#e5e2e1]/45">
                         {activeIdx + 1} / {images.length}
                       </p>
                     ) : null}
@@ -248,7 +248,7 @@ export function GalleryWorkDetailModal({ work, onClose, onEdit, onToggleFavorite
                                 步骤 {idx + 1}
                               </span>
                               {imgs.length > 1 ? (
-                                <span className="text-[12px] text-[#e5e2e1]/4">
+                                <span className="text-[12px] text-[#e5e2e1]/45">
                                   {imgs.length} 张图
                                 </span>
                               ) : null}
