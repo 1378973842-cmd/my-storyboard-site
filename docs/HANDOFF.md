@@ -1,9 +1,11 @@
 # 跨会话交接报告 (Handoff)
 
 - **当前进度**：
-  0. **本地：gpt-image-2.5 文生图**：无参考走 `sunburst/text-to-image`；有参考仍走 `sunburst/image-to-image`。未部署。
-  0. **本地：灯箱对比多参考切换**：结果对比时若有多张参考，底部出现图1/图2…缩略图，一次仍只跟一张滑块对比。未部署。
-  0. **本地：九宫格 nano 对齐图片节点**：九宫格 Agent 选/默认 nano 现为 `nano-banana-pro`（与图片生成节点同一条），旧板 `nano-banana-pro-稳定` 打开时迁过去。gpt-image-2 仍走九宫格官方通道。未部署。
+  0. **本次会话（本地已提交，未 push、未上线）**：全景图已从画布引擎去掉（动作条入口、RunningHub 生成、节点内 360 预览）。画布上已有的全景结果按普通图片显示。箭头指向：尾部是站位，尖端是脸朝方向，层次默认中景，一次可出 1–4 张；灰块只作摆位，不画进成图。自定义视角取代菜单里的 3D机位，走视角 Agent + nano-banana-pro。图片生成下拉含 `nano-banana-2.1`。线上 v1.0.123 仍是旧引擎。网站在 `http://localhost:3005`。
+
+  0. **上一会话**：切画布只给视口内的图发请求。这些图一次 `POST /api/uploads/signed-batch`，签名对齐到整小时，同一小时内 URL 不变，浏览器可缓存。视口外的节点仍在，但图片不设 src。画笔/裁剪仍走同源原图。
+
+  0. **已上线 v1.0.121（deploy @ e2a69d9）**：gpt-image-2.5 无参考文生图 / 有参考改图；灯箱对比可切图1/图2；九宫格 nano 对齐图片节点 `nano-banana-pro`。备份 `studio-20260917-194334.tar.gz`（12G）。PM2 HTTP 200。2G ECS 部署跳过 transformers。
   0. **已上线 v1.0.119（deploy @ 0a23f7e）**：图片节点 gpt-image-2.5；视频节点 Seedance 2.0（提示词 `@` 引用 `@Image N` / `@Video N`）。备份 `studio-20260911-100330.tar.gz`（11G）。PM2 HTTP 200。2G ECS 部署跳过 transformers。
   0. **已上线 v1.0.116（deploy @ 56d1d19）**：复制/下载走正式原图，不再误用工具栏缩小 JPEG 预览。备份 `studio-20260909-140909.tar.gz`（11G）。PM2 HTTP 200。
   0. **已上线 v1.0.115（deploy @ cd273c4）**：工作区封面/Output 九宫格走缩略图+OSS 直链；复制/下载走签名直链；拖入/粘贴上传完板上图不换 src。画笔裁到图内；旋转取消入场放大；工具栏新节点贴原图右侧。备份 `studio-20260908-183436.tar.gz`（10G）。PM2 HTTP 200。
@@ -18,12 +20,12 @@
   0. **阿里云 OSS 素材私有存储（已上线并启用）**：Bucket `dreamgrid-media` @ `oss-cn-guangzhou`。看图/上传走签名直链；画笔/裁剪 canvas 仍同源代理。
   0. **切换项目卡顿优化（已随 v1.0.105 上线）**：骨架屏 + 开板分帧渲染视口外节点。
   1. **画布五项 / 高清放大 / 抠图 / RH 输出预览（已随此前版本上线）**：高清放大/抠图仍待导演实测 RunningHub 真实返回。
-  5. **线上**：`deploy` @ `0a23f7e`（v1.0.119）。用户入口 `https://dreamgrid.cn`（Caddy 反代 127.0.0.1:3000）。
+  5. **线上**：`deploy` @ `0924a9e`（v1.0.123）。用户入口 `https://dreamgrid.cn`（Caddy 反代 127.0.0.1:3000）。
   6. **拖入/粘贴占位（已上线）**：blob 占位后只换落盘 URL，板上预览不重拉。
-  7. **部署版本号（已上线）**：线上 `v1.0.119`。
+  7. **部署版本号（已上线）**：线上 `v1.0.123`。
   8. **扩图已开（只用 RunningHub）**：gpt-image-2 透明通道；待实测生成式边界。
-  9. 远端备份：最新 `/root/studio-backups/studio-20260911-100330.tar.gz`（11G）；策略留 3 份。
-- **验证状态**：生产 v1.0.119 @ 0a23f7e，PM2 HTTP 200。请导演硬刷新后：图片节点选 gpt-image-2.5 出图；视频节点选 Seedance 2.0，提示词 `@` 引用参考。
+  9. 远端备份：最新 `/root/studio-backups/studio-20261008-113549.tar.gz`（16G）；同日另有 `studio-20261008-113209.tar.gz`（16G）；策略留 3 份。
+- **验证状态**：`node scripts/check-novel-view.mjs`、`check-custom-viewpoint.mjs`、`check-canvas-image-model-route.mjs` 与 `node init.mjs` 通过。生产仍是 v1.0.123 @ 0924a9e，还没部署。画布要登录，这次没在浏览器里点到生成。
 - **本地网站**：`http://localhost:3005`。
 - **访问**：`https://dreamgrid.cn`（勿用 `http://8.163.127.198:3000`）。
 - **流程**：生产部署成功后写 DreamGrid 系统消息体例报告；导演点头后再发站内公告。
@@ -35,15 +37,15 @@
   4. 旧画布 JSON 里的本板 logs 不再展示。
   5. 大板仍无视口虚拟化。
   6. 框选融合未移植 PixelRunner stretch + local-mesh。
-  7. 线上 3D 机位无服务端 Depth Anything（2G 装不下 onnx）；预览多为平面。
+  7. 3D 机位环绕预览代码仍在文件里，菜单已改走自定义视角；线上在部署前仍是旧的 3D机位和全景图。2G 机没有 Depth Anything。
   8. 删除素材/头像只清本地盘，OSS 对象可能残留（不挡功能）。
-- **Blockers**：视频剪辑无服务端 ffmpeg；关标签后任务归属仍依赖 sessionStorage；扩图/抠图/高清放大/全景图待实测。
+- **Blockers**：视频剪辑无服务端 ffmpeg；关标签后任务归属仍依赖 sessionStorage；扩图/抠图/高清放大待实测。
 
 ## 新对话开场白（复制给 Agent）
 
 ```
 继续 gemini-deploy。先读 docs/HANDOFF.md。
-线上已是 v1.0.119（deploy @ 0a23f7e）：图片节点 gpt-image-2.5；视频节点 Seedance 2.0（@ 引用参考）。
+线上已是 v1.0.123（deploy @ 0924a9e）。本地已提交、未 push：全景图已删除（线上仍有）。自定义视角已接上（取代 3D机位菜单，箭头指向保留，模型 nano-banana-pro）。图片模型含 nano-banana-2.1。
 2G ECS 未装 transformers。框选仍缺 stretch/local-mesh。
-按导演下一条继续。
+按导演下一条继续。未说提交或部署就不要发。
 ```

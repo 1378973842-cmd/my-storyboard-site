@@ -15,7 +15,8 @@
       "name": "主页「电影炼金术士」视觉合规（DESIGN.md）",
       "tasks": [
         { "desc": "分镜列表 StoryboardCard：无边框色阶、spring 悬浮、Noto Serif / Inter 分工", "status": "done" },
-        { "desc": "封面页 Navbar / Hero / Features / Footer：无边框准则、非对称布局、幽灵轮廓与 spring", "status": "done" }
+        { "desc": "封面页 Navbar / Hero / Features / Footer：无边框准则、非对称布局、幽灵轮廓与 spring", "status": "done" },
+        { "id": "AG257", "desc": "可读性：个位数透明度改成能读的浓度；登录说明「分镜」不从中间断开；窄屏与画布内顶栏保留通知和头像", "status": "done", "priority": 318 }
       ]
     },
     {
@@ -307,6 +308,7 @@
         { "id": "AG268c", "desc": "check：image-panorama-runninghub（appId、v2 run-ai-app、默认参数、VR 工具栏、overlay 跟视口）", "status": "done", "priority": 303 },
         { "id": "AG268d", "desc": "修：全景图控制台等镜头放大完再出现，并随 applyViewport 重贴，避免钉在旧小图成幽灵", "status": "done", "priority": 303 },
         { "id": "AG268e", "desc": "修：全景结果默认 16:9 预览；只显示当前能切的按钮；右上角不再叠删节点叉", "status": "done", "priority": 303 },
+        { "id": "AG268x", "desc": "删除全景图：动作条入口、RunningHub 生成、节点内 360 预览与检查脚本一并去掉；已有全景结果按普通图片显示", "status": "done", "priority": 330 },
         { "id": "AG269", "desc": "修：画笔应用——引擎捕获点击；提示挂工具条（不再进隐藏状态栏）；笔迹层对齐预览图", "status": "done", "priority": 304 },
         { "id": "AG269b", "desc": "修：画笔不能画到图外——笔迹层按 world scale 换算宿主本地像素 + object-fit contain 内容盒；只在 #editDrawCanvas 起笔", "status": "done", "priority": 304 },
         { "id": "AG269bc", "desc": "check：brush-clip-to-image", "status": "done", "priority": 304 },
@@ -332,6 +334,8 @@
         { "id": "AG281c", "desc": "check：output-compare-btn（含多参考去重/跳过视频）", "status": "done", "priority": 320 },
         { "id": "AG282", "desc": "gpt-image-2.5 无参考走 sunburst/text-to-image 文生图；有参考仍走 sunburst/image-to-image", "status": "done", "priority": 321 },
         { "id": "AG282c", "desc": "check：gpt-image-2.5 / canvas-image-model-route（0 参考=t2i）", "status": "done", "priority": 321 },
+        { "id": "AG283", "desc": "图片生成下拉新增 nano-banana-2.1：有参考走 rhart-image-n-nb21/image-to-image，无参考走同渠道 text-to-image；比例与分辨率对齐 nano（无 quality）", "status": "done", "priority": 329 },
+        { "id": "AG283c", "desc": "check：canvas-image-model-route（nano-banana-2.1 不掉进 nano-banana-2 / nano-pro）", "status": "done", "priority": 329 },
         { "id": "AG263f", "desc": "修：框选/蒙版坐标勿用画布 _thumb naturalWidth——keep 原图尺寸 + crop 时缩略→原图换算，避免裁到左上角白边/错人错位", "status": "done", "priority": 297 },
         { "id": "AG206c", "desc": "check：image-edit-viewport-focus", "status": "done", "priority": 240 },
         { "id": "AG199c", "desc": "check：rh-output-layout（含 RH skip stage / 去框）", "status": "done", "priority": 233 },
@@ -516,7 +520,24 @@
         { "id": "AG256d", "desc": "修：应用画笔/裁剪/旋转不再等上传+OSS+缩略图——blob 先落板关编辑器，后台换 URL；/api/ai/upload 本地写完即返回；图片节点 img eager", "status": "done", "priority": 312 },
         { "id": "AG256e", "desc": "修：画笔新节点灰底慢刷——节点只显示缩小 JPEG 预览；整图 PNG 后台编码上传；换正式 URL 不再 refreshNodes 重解码", "status": "done", "priority": 313 },
         { "id": "AG256f", "desc": "修：灯箱预览走 OSS 签名直链（浏览器直连阿里云），先用节点已显示的图铺上；同源 /uploads 只留给画笔/裁剪 canvas", "status": "done", "priority": 314 },
-        { "id": "AG256g", "desc": "OSS：桶 CORS + 预签名 PUT 直传（拖入/画笔/视频优先打阿里云，失败回退本站）；缩略图 404 回退签名原图", "status": "done", "priority": 315 }
+        { "id": "AG256g", "desc": "OSS：桶 CORS + 预签名 PUT 直传（拖入/画笔/视频优先打阿里云，失败回退本站）；缩略图 404 回退签名原图", "status": "done", "priority": 315 },
+        { "id": "AG256h", "desc": "点生成立刻占位；画布图片/生成台缩略图走 OSS 直链且 decoding=async；缩略图失败先重试两次再回退原图；跟随原图用已显示图的宽高比", "status": "done", "priority": 316 },
+        { "id": "AG256i", "desc": "切画布：视口外图片不下载；视口内缩略图一次批量签名，同一小时内 URL 不变以便浏览器缓存", "status": "done", "priority": 317 }
+      ]
+    },
+    {
+      "id": "F011",
+      "name": "视角 Agent",
+      "tasks": [
+        { "desc": "系统提示词 + RunningHub LLM（google/gemini-3.7-flash）返回 English Prompt 与空间映射速记", "status": "done" },
+        { "desc": "画布节点：机位/主体/背景/排除 + 参考图，结果写入文本输出", "status": "done" },
+        { "id": "F011b", "desc": "自定义视角取代 3D机位入口：选图后写角度，内部走视角 Agent 英文提示词，nano-banana-pro 以原图为参考出新图；添加菜单不再露出视角 Agent", "status": "done", "priority": 322 },
+        { "id": "F011c", "desc": "自定义视角底栏可选分辨率 1K/2K/4K（默认 2K）和张数 1-4；视角分析只跑一次，多张并排出在原图右侧", "status": "done", "priority": 323 },
+        { "id": "F011d", "desc": "箭头指向：尾部物体决定机位前后，尖端物体是看向；视角 Agent 看原图+箭头标注，nano-banana-pro 只用干净原图", "status": "done", "priority": 324 },
+        { "id": "F011e", "desc": "箭头指向的体块图由程序按视角 Agent 的 JSON 绘制；生图编辑提示词写明图1是原图、图2是灰块，Agent 英文不再写图号", "status": "done", "priority": 325 },
+        { "id": "F011f", "desc": "箭头指向底栏三选一前景/中景/背景（默认中景）。层次是硬性条件：写入视角 Agent 意图、强制灰块远近，并写进生图提示词。尾部只认物体，尖端只认看向", "status": "done", "priority": 326 },
+        { "id": "F011g", "desc": "箭头指向底栏可选生成张数 1-4（默认 1）。视角分析和灰块只做一次，多张并排出在原图右侧", "status": "done", "priority": 327 },
+        { "id": "F011h", "desc": "箭头尖端是脸朝的方向，不是必须留下的主体。镜头背后的原图内容可以不出现；生图提示词不再要求保留原图主体", "status": "done", "priority": 328 }
       ]
     }
   ]
