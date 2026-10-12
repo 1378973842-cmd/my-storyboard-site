@@ -117,8 +117,10 @@ export function buildViewpointUserMessage(opts: {
 }
 
 function extractFencedPrompt(raw: string): string {
-  const match = /```(?:text|txt)?\s*\n?([\s\S]*?)```/i.exec(raw);
-  return match ? match[1].trim() : "";
+  const tagged = /```(?:text|txt)\s*\n?([\s\S]*?)```/i.exec(raw);
+  if (tagged?.[1]?.trim()) return tagged[1].trim();
+  const other = /```(?!json\b)[a-z]*\s*\n?([\s\S]*?)```/i.exec(raw);
+  return other?.[1]?.trim() || "";
 }
 
 /** ponytail: naive title split; upgrade path = structured JSON from model */
@@ -126,7 +128,8 @@ export function splitViewpointAgentSections(text: string): Array<{ title: string
   const raw = String(text || "").trim();
   if (!raw) return [];
 
-  const fence = /```(?:text|txt)?\s*\n?([\s\S]*?)```/i.exec(raw);
+  const fence = /```(?:text|txt)\s*\n?([\s\S]*?)```/i.exec(raw)
+    || /```(?!json\b)[a-z]*\s*\n?([\s\S]*?)```/i.exec(raw);
   const zhMatch = /(?:^|\n)\s*(?:#{1,3}\s*)?(?:Part\s*2\s*[:：]\s*)?(?:\*?\*?空间映射速记\*?\*?)/i.exec(raw);
   if (fence) {
     const english = fence[1].trim();

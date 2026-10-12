@@ -79,7 +79,6 @@ const AGENT_FLYOUT_GROUPS: FlyoutGroup[] = [
       { icon: 'film', label: 'Mx-Shell 提示词', desc: '影壳提示词编排', action: () => canvasWin['addMxShellPromptAgentNode']?.() },
       { icon: 'file-text', label: 'Mx-Shell 展示', desc: '提示词结果展示', action: () => canvasWin['addMxShellPromptViewNode']?.() },
       { icon: 'clapperboard', label: 'DeepWhite 分镜', desc: '导演分镜 Agent', action: () => canvasWin['addDeepWhiteShotAgentNode']?.() },
-      { icon: 'camera', label: '视角 Agent', desc: '一句话描述视角', action: () => canvasWin['addViewpointAgentNode']?.() },
       { icon: 'book-open', label: 'DeepWhite 文档', desc: '分镜文档输出', action: () => canvasWin['addDeepWhiteShotViewNode']?.() },
     ],
   },
@@ -835,13 +834,6 @@ export const InfiniteCanvasShell = memo(function InfiniteCanvasShell({
                           <span className="menu-btn-copy">
                               <span className="menu-btn-title">DeepWhite 导演分镜 Agent</span>
                               <span className="menu-btn-desc">导演分镜编排</span>
-                          </span>
-                      </button>
-                      <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('viewpointAgent')}>
-                          <span className="menu-btn-icon" aria-hidden="true"><i data-lucide="camera" className="w-4 h-4"></i></span>
-                          <span className="menu-btn-copy">
-                              <span className="menu-btn-title">视角 Agent</span>
-                              <span className="menu-btn-desc">一句话描述视角</span>
                           </span>
                       </button>
                       <button className="menu-btn" type="button" onClick={() => canvasWin["menuAdd"]?.('pixarAdScriptAgent')}>
