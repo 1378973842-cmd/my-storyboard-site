@@ -15,15 +15,21 @@ function isGptImage25(model) {
 function isNanoBanana2Model(model) {
   return /^nano-banana-2$/i.test(String(model || "").trim());
 }
+function isNanoBanana21Model(model) {
+  return /^nano-banana-2\.1$/i.test(String(model || "").trim());
+}
 
 const NANO2_I2I = "/openapi/v2/rhart-image-n-g31-flash/image-to-image";
 const NANO2_T2I = "/openapi/v2/rhart-image-n-g31-flash/text-to-image";
+const NANO21_I2I = "/openapi/v2/rhart-image-n-nb21/image-to-image";
+const NANO21_T2I = "/openapi/v2/rhart-image-n-nb21/text-to-image";
 const NANO_PRO_I2I = "/openapi/v2/rhart-image-n-pro/edit";
 const NANO_PRO_T2I = "/openapi/v2/rhart-image-n-pro-official/text-to-image";
 
 function routeKind(model, refCount) {
   if (isGptImage25(model)) return refCount > 0 ? "g25-i2i" : "g25-t2i";
   if (isGptImage2(model)) return refCount > 0 ? "g2-i2i" : "g2-t2i";
+  if (isNanoBanana21Model(model)) return refCount > 0 ? "nano21-i2i" : "nano21-t2i";
   if (isNanoBanana2Model(model)) return refCount > 0 ? "nano2-i2i" : "nano2-t2i";
   return refCount > 0 ? "nano-i2i" : "nano-t2i";
 }
@@ -32,6 +38,8 @@ function resolvePath(model, refCount) {
   const kind = routeKind(model, refCount);
   if (kind === "g25-i2i") return G25_I2I_PATH;
   if (kind === "g25-t2i") return G25_T2I_PATH;
+  if (kind === "nano21-i2i") return NANO21_I2I;
+  if (kind === "nano21-t2i") return NANO21_T2I;
   if (kind === "nano2-i2i") return NANO2_I2I;
   if (kind === "nano2-t2i") return NANO2_T2I;
   if (kind === "nano-i2i") return NANO_PRO_I2I;
@@ -52,6 +60,8 @@ const cases = [
   ["nano-banana-pro-稳定", 0, "nano-t2i"],
   ["nano-banana-2", 1, "nano2-i2i", NANO2_I2I],
   ["nano-banana-2", 0, "nano2-t2i", NANO2_T2I],
+  ["nano-banana-2.1", 1, "nano21-i2i", NANO21_I2I],
+  ["nano-banana-2.1", 0, "nano21-t2i", NANO21_T2I],
   ["nano-banana-pro", 1, "nano-i2i", NANO_PRO_I2I],
 ];
 
@@ -72,6 +82,28 @@ for (const [model, refs, expect, expectPath] of cases) {
     }
   }
   console.log("ok", { model, refs, got, path: expectPath || resolvePath(model, refs) });
+}
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const svc = fs.readFileSync(path.join(root, "src/services/runningHubStoryboardImage.ts"), "utf8");
+const bridge = fs.readFileSync(path.join(root, "src/services/canvasSiteImageBridge.ts"), "utf8");
+const routes = fs.readFileSync(path.join(root, "src/services/infiniteCanvasRoutes.ts"), "utf8");
+const eng = fs.readFileSync(path.join(root, "src/lib/infiniteCanvas/canvasEngine.js"), "utf8");
+const fileChecks = [
+  [svc.includes(NANO21_I2I) && svc.includes(NANO21_T2I), "service nb21 paths"],
+  [svc.includes("export function isNanoBanana21Model"), "service detector"],
+  [bridge.includes("getNanoBanana21I2IPath()") && bridge.includes("getNanoBanana21T2IPath()"), "bridge dispatches nb21"],
+  [routes.includes('"nano-banana-2.1"'), "config lists nano-banana-2.1"],
+  [eng.includes("'nano-banana-2.1'"), "engine default models include nano-banana-2.1"],
+];
+for (const [ok, label] of fileChecks) {
+  if (!ok) {
+    console.error("FAIL:", label);
+    failed += 1;
+  } else console.log("ok", label);
 }
 if (failed) process.exit(1);
 console.log("check-canvas-image-model-route: pass");
