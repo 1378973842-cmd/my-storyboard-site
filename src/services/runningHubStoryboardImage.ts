@@ -22,6 +22,10 @@ export const RUNNINGHUB_G2_OFFICIAL_T2I_PATH = "/openapi/v2/rhart-image-g-2-offi
 export const RUNNINGHUB_NANO2_I2I_PATH = "/openapi/v2/rhart-image-n-g31-flash/image-to-image";
 /** nano-banana-2 文生图（与 I2I 同渠道） */
 export const RUNNINGHUB_NANO2_T2I_PATH = "/openapi/v2/rhart-image-n-g31-flash/text-to-image";
+/** nano-banana-2.1 图生图 */
+export const RUNNINGHUB_NANO21_I2I_PATH = "/openapi/v2/rhart-image-n-nb21/image-to-image";
+/** nano-banana-2.1 文生图（与 I2I 同渠道） */
+export const RUNNINGHUB_NANO21_T2I_PATH = "/openapi/v2/rhart-image-n-nb21/text-to-image";
 /** gpt-image-2.5 图生图（有参考） */
 export const RUNNINGHUB_G25_I2I_PATH = "/openapi/v2/rhart-image-g-2.5/sunburst/image-to-image";
 /** gpt-image-2.5 文生图（无参考） */
@@ -29,6 +33,10 @@ export const RUNNINGHUB_G25_T2I_PATH = "/openapi/v2/rhart-image-g-2.5/sunburst/t
 
 export function isNanoBanana2Model(model?: string): boolean {
   return /^nano-banana-2$/i.test(String(model || "").trim());
+}
+
+export function isNanoBanana21Model(model?: string): boolean {
+  return /^nano-banana-2\.1$/i.test(String(model || "").trim());
 }
 
 export function isGptImage25Model(model?: string): boolean {
@@ -62,6 +70,20 @@ export function getNanoBanana2T2IPath(): string {
   return (
     (process.env.STORYBOARD_IMAGE_NANO2_T2I_PATH ?? RUNNINGHUB_NANO2_T2I_PATH).trim() ||
     RUNNINGHUB_NANO2_T2I_PATH
+  );
+}
+
+export function getNanoBanana21I2IPath(): string {
+  return (
+    (process.env.STORYBOARD_IMAGE_NANO21_I2I_PATH ?? RUNNINGHUB_NANO21_I2I_PATH).trim() ||
+    RUNNINGHUB_NANO21_I2I_PATH
+  );
+}
+
+export function getNanoBanana21T2IPath(): string {
+  return (
+    (process.env.STORYBOARD_IMAGE_NANO21_T2I_PATH ?? RUNNINGHUB_NANO21_T2I_PATH).trim() ||
+    RUNNINGHUB_NANO21_T2I_PATH
   );
 }
 

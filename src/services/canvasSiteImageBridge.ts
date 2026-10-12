@@ -5,11 +5,14 @@ import {
   getG2TextToImagePath,
   getNanoBanana2I2IPath,
   getNanoBanana2T2IPath,
+  getNanoBanana21I2IPath,
+  getNanoBanana21T2IPath,
   getNineGridG2Path,
   getStoryboardImageEnv,
   isGptImage25Model,
   isMidjourneyV81Model,
   isNanoBanana2Model,
+  isNanoBanana21Model,
   isNiji7Model,
   RUNNINGHUB_G2_OFFICIAL_I2I_PATH,
   RUNNINGHUB_G2_RATIOS,
@@ -514,14 +517,17 @@ async function executeCanvasGeneration(
           flattenAlpha: !payload.expand_outpaint,
         });
       } else {
-        const nano2 = isNanoBanana2Model(model);
-        const nano2Path = nano2 ? getNanoBanana2I2IPath() : undefined;
+        const nanoPath = isNanoBanana21Model(model)
+          ? getNanoBanana21I2IPath()
+          : isNanoBanana2Model(model)
+            ? getNanoBanana2I2IPath()
+            : undefined;
         console.log("[canvas-image/runninghub]", {
           model,
           resolution: image_size,
           aspect_ratio,
           images: imageUrls.length,
-          path: nano2Path || rhEnv.editPath,
+          path: nanoPath || rhEnv.editPath,
         });
         upstreamUrl = await runStoryboardRunningHubJob({
           prompt: enrichedPrompt,
@@ -529,7 +535,7 @@ async function executeCanvasGeneration(
           image_size,
           aspect_ratio,
           projectRoot: deps.projectRoot,
-          pathOverride: nano2Path,
+          pathOverride: nanoPath,
         });
       }
     } else {
@@ -579,14 +585,15 @@ async function executeCanvasGeneration(
       const localUrl = await deps.persistImage(upstreamUrl, persistMeta);
       return { images: [localUrl], url: localUrl };
     }
-    const nano2 = isNanoBanana2Model(model);
-    const nano2T2i = nano2 ? getNanoBanana2T2IPath() : undefined;
-    const nano2I2i = nano2 ? getNanoBanana2I2IPath() : undefined;
+    const nano21 = isNanoBanana21Model(model);
+    const nano2 = !nano21 && isNanoBanana2Model(model);
+    const nanoT2i = nano21 ? getNanoBanana21T2IPath() : nano2 ? getNanoBanana2T2IPath() : undefined;
+    const nanoI2i = nano21 ? getNanoBanana21I2IPath() : nano2 ? getNanoBanana2I2IPath() : undefined;
     console.log("[canvas-image/runninghub-t2i]", {
       model,
       resolution: image_size,
       aspect_ratio,
-      path: nano2T2i || rhEnv.t2iPath,
+      path: nanoT2i || rhEnv.t2iPath,
     });
     const upstreamUrl = await runStoryboardRunningHubGenerateJob({
       prompt,
@@ -594,8 +601,8 @@ async function executeCanvasGeneration(
       aspect_ratio,
       references: [],
       projectRoot: deps.projectRoot,
-      pathOverride: nano2T2i,
-      pathOverrideI2I: nano2I2i,
+      pathOverride: nanoT2i,
+      pathOverrideI2I: nanoI2i,
     });
     const localUrl = await deps.persistImage(upstreamUrl, persistMeta);
     return { images: [localUrl], url: localUrl };
