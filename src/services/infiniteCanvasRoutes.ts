@@ -1,7 +1,7 @@
 import type { Express, Request, Response, RequestHandler } from "express";
 import multer from "multer";
 import path from "path";
-import { mkdirSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { v4 as uuidv4 } from "uuid";
 import {
   createCanvas,
@@ -18,9 +18,11 @@ import {
 } from "./infiniteCanvasStore.js";
 import { registerCanvasSiteImageRoutes } from "./canvasSiteImageBridge.js";
 import { registerCanvasLlmRoutes } from "./canvasLlmBridge.js";
+import { agentPlaybooks } from "../features/canvas-agent/tools/skillRegistry.js";
+import { registerCanvasAgentRoutes } from "../features/canvas-agent/server/registerCanvasAgentRoutes.js";
 import { registerCanvasBatchPosterRoutes } from "./canvasBatchPosterBridge.js";
 import { registerCanvasSlotsLoopVideoRoutes } from "./canvasSlotsLoopVideoBridge.js";
-import { registerCanvasMxShellPromptRoutes } from "./canvasMxShellPromptBridge.js";
+import { mxShellCameraMovesInjection, registerCanvasMxShellPromptRoutes } from "./canvasMxShellPromptBridge.js";
 import { registerCanvasViewpointAgentRoutes } from "./canvasViewpointAgentBridge.js";
 import { registerCanvasDeepWhiteShotRoutes } from "./canvasDeepWhiteShotBridge.js";
 import { registerCanvasDeepWhiteExportRoutes } from "./canvasDeepWhiteExportBridge.js";
@@ -77,6 +79,7 @@ import {
   registerRunningHubWorkflowRoutes,
 } from "./runningHubWorkflows.js";
 import type Database from "better-sqlite3";
+import { registerCanvasTaskLedgerRoutes } from "./canvasTaskLedger.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 80 * 1024 * 1024 } });
 
@@ -114,6 +117,30 @@ export type InfiniteCanvasRouteDeps = {
   db?: InstanceType<typeof Database>;
 };
 
+function readPromptFile(relativePath: string, baseDir: string): string {
+  try {
+    const full = path.join(baseDir, relativePath);
+    return readFileSync(full, "utf8");
+  } catch (e) {
+    return "";
+  }
+}
+
+export function readRegisteredPlaybookText(projectRoot: string, playbookId: string): string {
+  const id = String(playbookId || "").trim();
+  const item = agentPlaybooks.find((entry) => entry.id === id);
+  if (!item) return "";
+  return readPromptFile(item.path, projectRoot).trim();
+}
+
+// 正文先读完。词典是后接的基础设施，不写进 md，也不占正文上限。
+export function readPlaybookForAgent(projectRoot: string, playbookId: string): string {
+  const body = readRegisteredPlaybookText(projectRoot, playbookId);
+  if (!body) return "";
+  const cameraMoves = mxShellCameraMovesInjection(projectRoot);
+  return cameraMoves ? `${body}\n\n${cameraMoves}` : body;
+}
+
 export function registerInfiniteCanvasRoutes(
   app: Express,
   projectRoot: string,
@@ -124,6 +151,7 @@ export function registerInfiniteCanvasRoutes(
   initCanvasCollectionsStore(projectRoot);
   initAssetLibraryStore(projectRoot);
   const gate = deps?.requireGate ?? requireSiteGate;
+  if (deps?.db) registerCanvasTaskLedgerRoutes(app, deps.db, gate);
   console.log(
     "[infinite-canvas] routes ready: /api/canvases, /api/canvas-collections, /api/asset-library, /api/canvas-workflow-templates, /api/config (login required)"
   );
@@ -186,6 +214,7 @@ export function registerInfiniteCanvasRoutes(
           settings: body.settings,
           base_updated_at: body.base_updated_at,
           allow_empty_nodes: body.allow_empty_nodes === true,
+          intentional_delete: body.intentional_delete === true,
         },
         canvasAccessCtx(req)
       );
@@ -423,19 +452,27 @@ export function registerInfiniteCanvasRoutes(
 
   /** 画布 API 生成：与主页图片编辑（编辑模式 / GPT 编辑）同一套 /api/edit-image + RunningHub */
   if (deps?.persistImage) {
-    registerCanvasSiteImageRoutes(app, { projectRoot, persistImage: deps.persistImage, requireGate: gate });
+    registerCanvasSiteImageRoutes(app, {
+      projectRoot,
+      persistImage: deps.persistImage,
+      requireGate: gate,
+      db: deps.db,
+    });
   } else {
     registerCanvasSiteImageRoutes(app, {
       projectRoot,
       persistImage: async (url) => url,
       requireGate: gate,
+      db: deps?.db,
     });
   }
 
   registerCanvasLlmRoutes(app, projectRoot, gate);
+  registerCanvasAgentRoutes(app, gate, deps?.db, (playbookId) => readPlaybookForAgent(projectRoot, playbookId));
   registerCanvasVideoRoutes(app, {
     projectRoot,
     requireGate: gate,
+    db: deps?.db,
     onPersisted: (localUrl, req, meta) => {
       const userId = req.authUser?.id;
       if (!userId || !deps?.db) return;
@@ -523,7 +560,6 @@ export function registerInfiniteCanvasRoutes(
       chat_models: chatModels,
       image_models: imageModels,
       video_models: videoModels,
-      comfy_instances: [],
       api_providers: [
         {
           id: "runninghub",
@@ -545,10 +581,6 @@ export function registerInfiniteCanvasRoutes(
       ms_chat_models: [],
       has_ms_key: false,
     });
-  });
-
-  app.get("/api/workflows", gate, (_req, res) => {
-    res.json({ workflows: [] });
   });
 
   app.post("/api/canvas-assets/check", gate, async (req, res) => {

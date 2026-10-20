@@ -1,4 +1,5 @@
 import type { Express, Request, RequestHandler, Response } from "express";
+import type Database from "better-sqlite3";
 import { mkdirSync, writeFileSync } from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
@@ -8,6 +9,16 @@ import {
   isSparkVideo20Model,
   runSparkVideo20Job,
 } from "./runningHubSparkVideo.js";
+import {
+  initCanvasTaskLedger,
+  readCanvasTask,
+  saveCanvasTask,
+} from "./canvasTaskLedger.js";
+import {
+  checkCanvasContentFidelity,
+  type CanvasFidelityInput,
+  type FidelityIssue,
+} from "./canvasContentFidelity.js";
 
 export type CanvasVideoPayload = {
   prompt?: string;
@@ -26,6 +37,9 @@ export type CanvasVideoPayload = {
   generate_audio?: boolean;
   real_person_mode?: boolean;
   seed?: number;
+  canvas_id?: string;
+  node_id?: string;
+  fidelity?: CanvasFidelityInput;
 };
 
 type CanvasVideoPersistMeta = {
@@ -38,6 +52,7 @@ type CanvasVideoPersistMeta = {
 
 type CanvasVideoBridgeDeps = {
   projectRoot: string;
+  db?: InstanceType<typeof Database>;
   requireGate?: RequestHandler;
   /** 可选：登记文件归属 / 写入生成历史 */
   onPersisted?: (localUrl: string, req: Request, meta?: CanvasVideoPersistMeta) => void;
@@ -52,6 +67,10 @@ type CanvasVideoResult = {
 
 type CanvasVideoTask = {
   id: string;
+  userId: string;
+  canvasId: string;
+  nodeId: string;
+  payload: CanvasVideoPayload;
   status: "queued" | "running" | "succeeded" | "failed";
   created_at: number;
   updated_at: number;
@@ -60,6 +79,22 @@ type CanvasVideoTask = {
 };
 
 const tasks = new Map<string, CanvasVideoTask>();
+
+function persistVideoTask(task: CanvasVideoTask, deps: CanvasVideoBridgeDeps): void {
+  saveCanvasTask(deps.db, {
+    id: task.id,
+    userId: task.userId,
+    canvasId: task.canvasId,
+    nodeId: task.nodeId,
+    taskType: "canvas-video",
+    payload: task.payload,
+    status: task.status,
+    createdAt: task.created_at,
+    updatedAt: task.updated_at,
+    result: task.result,
+    error: task.error,
+  });
+}
 
 function collectUrls(list: CanvasVideoPayload["images"]): string[] {
   if (!Array.isArray(list)) return [];
@@ -142,6 +177,18 @@ function validateVideoPayload(payload: CanvasVideoPayload): { prompt: string; mo
       ),
       { status: 501 }
     );
+  }
+  if (payload.fidelity && payload.fidelity.strict !== false) {
+    const fidelityIssues = checkCanvasContentFidelity({
+      prompt,
+      durationSec: Number(payload.duration || 0),
+      fidelity: payload.fidelity,
+    });
+    if (fidelityIssues.length) {
+      throw Object.assign(new Error(
+        `内容保真门禁未通过：${fidelityIssues.map((item) => item.message).join("；")}`
+      ), { status: 422, fidelityIssues });
+    }
   }
   return { prompt, model };
 }
@@ -231,16 +278,19 @@ async function runCanvasVideoTask(
   if (!task) return;
   task.status = "running";
   task.updated_at = Date.now();
+  persistVideoTask(task, deps);
   try {
     const result = await executeCanvasVideoJob(req, payload, deps);
     task.status = "succeeded";
     task.result = result;
     task.error = "";
     task.updated_at = Date.now();
+    persistVideoTask(task, deps);
   } catch (e) {
     task.status = "failed";
     task.error = e instanceof Error ? e.message : String(e);
     task.updated_at = Date.now();
+    persistVideoTask(task, deps);
     console.error("[canvas-video-task] failed:", taskId, task.error);
   }
 }
@@ -256,16 +306,20 @@ async function handleCanvasVideoSync(
     const result = await executeCanvasVideoJob(req, payload, deps);
     res.json(result);
   } catch (e) {
-    const err = e as Error & { status?: number };
+    const err = e as Error & { status?: number; fidelityIssues?: FidelityIssue[] };
     const status = Number(err.status) || 502;
     const msg = err instanceof Error ? err.message : String(e);
     if (status >= 500) console.error("[canvas-video] failed:", msg);
-    res.status(status).json({ error: msg });
+    res.status(status).json({
+      error: msg,
+      ...(err.fidelityIssues ? { fidelity_issues: err.fidelityIssues } : {}),
+    });
   }
 }
 
 export function registerCanvasVideoRoutes(app: Express, deps: CanvasVideoBridgeDeps): void {
   const gate = deps.requireGate;
+  if (deps.db) initCanvasTaskLedger(deps.db);
 
   app.post("/api/canvas-video-tasks", ...(gate ? [gate] : []), (req, res) => {
     try {
@@ -275,24 +329,34 @@ export function registerCanvasVideoRoutes(app: Express, deps: CanvasVideoBridgeD
       const now = Date.now();
       tasks.set(taskId, {
         id: taskId,
+        userId: req.authUser?.id || "",
+        canvasId: String(payload.canvas_id || ""),
+        nodeId: String(payload.node_id || ""),
+        payload,
         status: "queued",
         created_at: now,
         updated_at: now,
         result: null,
         error: "",
       });
+      persistVideoTask(tasks.get(taskId)!, deps);
       void runCanvasVideoTask(taskId, req, payload, deps);
       res.json({ task_id: taskId, status: "queued" });
     } catch (e) {
-      const err = e as Error & { status?: number };
+      const err = e as Error & { status?: number; fidelityIssues?: FidelityIssue[] };
       res.status(Number(err.status) || 400).json({
         error: err instanceof Error ? err.message : String(e),
+        ...(err.fidelityIssues ? { fidelity_issues: err.fidelityIssues } : {}),
       });
     }
   });
 
   app.get("/api/canvas-video-tasks/:taskId", ...(gate ? [gate] : []), (req, res) => {
-    const task = tasks.get(req.params.taskId);
+    const userId = req.authUser?.id || "";
+    const memoryTask = tasks.get(req.params.taskId);
+    const task = memoryTask?.userId === userId
+      ? memoryTask
+      : readCanvasTask<CanvasVideoTask["result"]>(deps.db, req.params.taskId, userId);
     if (!task) {
       return res.status(404).json({
         error: "视频任务不存在，可能服务已重启或任务已过期",
@@ -304,7 +368,7 @@ export function registerCanvasVideoRoutes(app: Express, deps: CanvasVideoBridgeD
       status: task.status,
       result: task.status === "succeeded" ? task.result : null,
       error: task.error || undefined,
-      updated_at: task.updated_at,
+      updated_at: "updated_at" in task ? task.updated_at : task.updatedAt,
     });
   });
 

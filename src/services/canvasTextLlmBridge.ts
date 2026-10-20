@@ -1,5 +1,6 @@
 import { Resolver } from "node:dns/promises";
 import { Agent, fetch as undiciFetch } from "undici";
+import { createFakeTextLlmResponse } from "./fakeTextLlmProvider.js";
 
 /** RunningHub OpenAI-compatible text LLM (e.g. glm-5.1); supports multimodal via image_url content parts */
 export const RUNNINGHUB_LLM_DEFAULT_BASE = "https://llm.runninghub.cn";
@@ -61,6 +62,9 @@ export function buildTextLlmRequestBody(
 
 /** Route text LLM: glm-* → RunningHub; gemini-3.5-flash → APIMart; others → NINE_GRID_TEXT_* / THIRD_PARTY_* */
 export function resolveTextLlmEnv(model?: string): { apiBase: string; apiKey: string } {
+  if (String(process.env.TEXT_LLM_PROVIDER || "").trim().toLowerCase() === "fake") {
+    return { apiBase: "fixture://text-llm", apiKey: "fixture" };
+  }
   const m = String(model || "").trim();
   if (isRunningHubChatModel(m)) {
     const apiBase = normalizeOpenAiApiBase(
@@ -362,6 +366,19 @@ export async function postTextLlm(
   body: Record<string, unknown>,
   init?: RequestInit
 ): Promise<Response> {
+  if (String(process.env.TEXT_LLM_PROVIDER || "").trim().toLowerCase() === "fake") {
+    if (process.env.NODE_ENV === "production" && process.env.ALLOW_FAKE_PROVIDER !== "1") {
+      return new Response(
+        JSON.stringify({ error: { message: "Fake text provider is disabled in production" } }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return createFakeTextLlmResponse(
+      body,
+      process.env.TEXT_LLM_FAKE_SCENARIO || "direct",
+      init?.signal,
+    );
+  }
   const url = textLlmEndpointUrl(model, apiBase);
   const payload = buildTextLlmRequestBody(model, body);
   const requestInit: RequestInit = {

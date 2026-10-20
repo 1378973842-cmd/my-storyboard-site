@@ -1,0 +1,1119 @@
+.canvas-agent-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 48;
+  pointer-events: none;
+  font-family: Inter, "Noto Sans SC", sans-serif;
+  color: #e5e2e1;
+}
+
+.canvas-agent-panel,
+.canvas-agent-toggle {
+  pointer-events: auto;
+}
+
+html.canvas-image-edit-open .canvas-agent-layer {
+  display: none;
+}
+
+.canvas-agent-panel {
+  position: absolute;
+  top: 72px;
+  right: 16px;
+  bottom: 16px;
+  min-width: 360px;
+  max-width: min(680px, calc(100vw - 32px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border-radius: 22px;
+  background: color-mix(in srgb, #141414 92%, transparent);
+  outline: 0.5px solid rgba(229, 226, 225, 0.14);
+  box-shadow: 0 36px 80px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+}
+
+.canvas-agent-panel.is-expanded {
+  top: 72px;
+  right: 12px;
+  bottom: 16px;
+  width: min(640px, calc(100vw - 24px));
+}
+
+.canvas-agent-panel.is-floating,
+.canvas-agent-panel.is-expanded.is-floating {
+  right: auto;
+  bottom: auto;
+  max-height: calc(100% - 84px);
+  transition:
+    left 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    top 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    height 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.canvas-agent-panel.is-floating .canvas-agent-header {
+  cursor: grab;
+  touch-action: none;
+}
+
+.canvas-agent-panel.is-floating .canvas-agent-header:active {
+  cursor: grabbing;
+}
+
+.canvas-agent-panel.is-floating.is-dragging {
+  transition: none;
+  user-select: none;
+}
+
+.canvas-agent-resize {
+  position: absolute;
+  inset: 18px auto 18px -7px;
+  width: 14px;
+  cursor: ew-resize;
+  z-index: 2;
+}
+
+.canvas-agent-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 58px;
+  padding: 10px 12px;
+  z-index: 4;
+}
+
+.canvas-agent-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.canvas-agent-title > span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 14px;
+  color: var(--strong, #ffb866);
+  background: color-mix(in srgb, var(--strong, #ffb866) 12%, transparent);
+}
+
+.canvas-agent-title svg,
+.canvas-agent-header button svg,
+.canvas-agent-toggle svg {
+  width: 19px;
+  height: 19px;
+}
+
+.canvas-agent-title div {
+  display: grid;
+  gap: 3px;
+}
+
+.canvas-agent-title strong {
+  font-family: "Noto Serif SC", "Noto Serif", serif;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+}
+
+.canvas-agent-title small,
+.canvas-agent-message > span,
+.canvas-agent-proposal-head span,
+.canvas-agent-tool-logs small {
+  font-family: Manrope, Inter, sans-serif;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted, #a8a3a1);
+}
+
+.canvas-agent-header button,
+.canvas-agent-toggle,
+.canvas-agent-send,
+.canvas-agent-proposal-buttons button {
+  appearance: none;
+  outline: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+}
+
+.canvas-agent-header button,
+.canvas-agent-composer-bar button,
+.canvas-agent-message-tools button,
+.canvas-agent-processed > button,
+.canvas-agent-menu button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.canvas-agent-icon,
+.canvas-agent-header-actions button {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  color: #c8c4c2;
+}
+
+.canvas-agent-icon svg,
+.canvas-agent-header-actions svg,
+.canvas-agent-session svg {
+  width: 16px;
+  height: 16px;
+}
+
+.canvas-agent-session {
+  display: inline-flex;
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  align-items: center;
+  gap: 6px;
+  color: #e5e2e1;
+  font-size: 14px;
+}
+
+.canvas-agent-session span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-agent-title-input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #e5e2e1;
+  font: inherit;
+}
+
+.canvas-agent-header-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.canvas-agent-header-actions .canvas-agent-dock-toggle {
+  width: auto;
+  min-width: 0;
+  gap: 6px;
+  padding: 0 9px;
+  background: rgba(229, 226, 225, 0.06);
+  color: #c8c4c2;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.canvas-agent-header-actions .canvas-agent-dock-toggle:hover {
+  background: rgba(229, 226, 225, 0.1);
+  color: #e5e2e1;
+}
+
+.canvas-agent-header-actions .canvas-agent-dock-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+
+.canvas-agent-body {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 22px 18px 28px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(229, 226, 225, 0.16) transparent;
+}
+
+.canvas-agent-empty {
+  min-height: 220px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 28px;
+  text-align: center;
+  color: var(--muted, #a8a3a1);
+}
+
+.canvas-agent-empty svg {
+  width: 24px;
+  color: var(--strong, #ffb866);
+}
+
+.canvas-agent-empty h3 {
+  margin: 4px 0 0;
+  font-family: "Noto Serif SC", "Noto Serif", serif;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+  color: var(--text, #e5e2e1);
+}
+
+.canvas-agent-empty p {
+  max-width: 280px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.75;
+}
+
+.canvas-agent-message {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  margin-bottom: 18px;
+}
+
+.canvas-agent-message p {
+  max-width: 90%;
+  min-width: 0;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px 18px 18px 18px;
+  background: color-mix(in srgb, var(--card, #1c1b1b) 84%, transparent);
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.canvas-agent-message.is-user {
+  justify-items: end;
+}
+
+.canvas-agent-message.is-user p {
+  border-radius: 16px;
+  background: #2a2928;
+}
+
+.canvas-agent-message.is-assistant p {
+  max-width: 100%;
+  padding: 0;
+  background: transparent;
+}
+
+.canvas-agent-meta,
+.canvas-agent-message-tools,
+.canvas-agent-processed > button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #8d8886;
+  font-size: 11px;
+}
+
+.canvas-agent-message-tools button,
+.canvas-agent-processed > button {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+.canvas-agent-message-tools svg,
+.canvas-agent-processed svg {
+  width: 14px;
+  height: 14px;
+}
+
+.canvas-agent-message-tools .is-active {
+  color: var(--strong, #ffb866);
+}
+
+.canvas-agent-processed {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+  color: #8d8886;
+  font-size: 12px;
+}
+
+.canvas-agent-processed > button {
+  width: auto;
+  justify-content: flex-start;
+}
+
+.canvas-agent-processed svg.is-open {
+  transform: rotate(180deg);
+}
+
+.canvas-agent-tool-logs {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 18px;
+}
+
+.canvas-agent-tool-logs > div {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card, #1c1b1b) 60%, transparent);
+  color: var(--muted, #a8a3a1);
+  font-size: 11px;
+}
+
+.canvas-agent-tool-logs svg {
+  width: 13px;
+  height: 13px;
+  color: var(--strong, #ffb866);
+}
+
+.canvas-agent-proposal {
+  margin: 0 0 18px;
+  padding: 16px;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--card, #1c1b1b) 88%, transparent);
+  outline: 0.5px solid color-mix(in srgb, var(--strong, #ffb866) 28%, transparent);
+}
+
+.canvas-agent-proposal.is-pending,
+.canvas-agent-proposal.is-applying {
+  background: #2a2928;
+}
+
+.canvas-agent-proposal.is-pending .canvas-agent-proposal-state,
+.canvas-agent-proposal.is-applying .canvas-agent-proposal-state {
+  background: rgba(229, 226, 225, 0.16);
+  color: #e5e2e1;
+}
+
+.canvas-agent-proposal.is-expired {
+  background: #131313;
+  outline-color: transparent;
+}
+
+.canvas-agent-proposal.is-expired .canvas-agent-proposal-state,
+.canvas-agent-proposal.is-expired h4,
+.canvas-agent-proposal.is-expired .canvas-agent-proposal-time {
+  color: #8d8886;
+}
+
+.canvas-agent-proposal.is-expired .canvas-agent-proposal-state {
+  background: transparent;
+}
+
+.canvas-agent-proposal-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.canvas-agent-proposal-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.canvas-agent-proposal-head h4 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Noto Serif SC", "Noto Serif", serif;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+}
+
+.canvas-agent-proposal-time {
+  flex: none;
+  margin-left: auto;
+  font-family: Manrope, Inter, sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--muted, #a8a3a1);
+}
+
+.canvas-agent-proposal-state {
+  align-self: start;
+  padding: 5px 7px;
+  border-radius: 999px;
+  background: rgba(229, 226, 225, 0.07);
+  white-space: nowrap;
+}
+
+.canvas-agent-proposal-state.is-applied {
+  color: #9dd7b1;
+}
+
+.canvas-agent-proposal-state.is-partial,
+.canvas-agent-proposal-state.is-exec_failed {
+  color: #ffb866;
+}
+
+.canvas-agent-proposal-state.is-failed,
+.canvas-agent-proposal-error,
+.canvas-agent-error {
+  color: #f0a8a8;
+}
+
+.canvas-agent-proposal > p {
+  margin: 10px 0 12px;
+  color: var(--muted, #a8a3a1);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.canvas-agent-proposal-actions {
+  display: grid;
+  gap: 7px;
+}
+
+.canvas-agent-proposal-action {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 11px;
+}
+
+.canvas-agent-proposal-action svg {
+  width: 12px;
+  height: 12px;
+  color: var(--strong, #ffb866);
+}
+
+.canvas-agent-proposal-action-copy {
+  min-width: 0;
+}
+
+.canvas-agent-proposal-action span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-agent-proposal-action-copy small {
+  display: block;
+  margin-top: 2px;
+  color: #8d8886;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.canvas-agent-proposal-clamp {
+  color: #ffb866;
+}
+
+.canvas-agent-proposal-actions small {
+  color: var(--muted, #a8a3a1);
+}
+
+.canvas-agent-proposal-error,
+.canvas-agent-error {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(120, 35, 35, 0.2);
+  font-size: 11px;
+}
+
+.canvas-agent-proposal-buttons {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.canvas-agent-proposal-buttons button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 13px;
+  border-radius: 13px;
+  background: var(--strong, #ffb866);
+  color: #24170b;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.canvas-agent-proposal-buttons button:last-child {
+  background: rgba(229, 226, 225, 0.08);
+  color: var(--text, #e5e2e1);
+}
+
+.canvas-agent-proposal-buttons button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.canvas-agent-proposal-buttons svg {
+  width: 14px;
+  height: 14px;
+}
+
+.canvas-agent-dock {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.canvas-agent-apps-hint {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 8px;
+  margin: 0 auto;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: #242322;
+  color: #e5e2e1;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.canvas-agent-apps-hint svg {
+  width: 14px;
+  height: 14px;
+}
+
+.canvas-agent-composer {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 18px;
+  background: #1b1a1a;
+  outline: 0.5px solid rgba(229, 226, 225, 0.12);
+}
+
+.canvas-agent-field {
+  position: relative;
+  min-width: 0;
+}
+
+.canvas-agent-chip-row {
+  position: absolute;
+  z-index: 1;
+  top: 1px;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  pointer-events: none;
+}
+
+.canvas-agent-chip-row::-webkit-scrollbar {
+  display: none;
+}
+
+.canvas-agent-skill-chip {
+  position: static;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 18px;
+  padding: 0 2px 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: #242322;
+  color: #e5e2e1;
+  font-size: 12px;
+  line-height: 18px;
+  user-select: none;
+  pointer-events: none;
+}
+
+.canvas-agent-skill-chip button {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #ffb866;
+  font-size: 12px;
+  line-height: 1;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.canvas-agent-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.canvas-agent-composer-bar button {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  color: #c8c4c2;
+}
+
+.canvas-agent-composer-bar svg {
+  width: 16px;
+  height: 16px;
+}
+
+.canvas-agent-shortcut {
+  margin-left: auto;
+  color: #6f6b69;
+  font: 650 11px/1 Manrope, Inter, sans-serif;
+}
+
+.canvas-agent-menu {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  min-width: 220px;
+  padding: 6px;
+  border-radius: 14px;
+  background: #242322;
+  outline: 0.5px solid rgba(229, 226, 225, 0.12);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+}
+
+.canvas-agent-menu button {
+  display: flex;
+  min-height: 36px;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 10px;
+  color: #e5e2e1;
+  font-size: 13px;
+  text-align: left;
+}
+
+.canvas-agent-menu button:hover {
+  background: rgba(229, 226, 225, 0.06);
+}
+
+.canvas-agent-menu button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.canvas-agent-menu svg {
+  width: 15px;
+  height: 15px;
+}
+
+.canvas-agent-menu-plus,
+.canvas-agent-menu-mode {
+  left: 18px;
+  bottom: 72px;
+}
+
+.canvas-agent-menu-more {
+  top: 50px;
+  right: 12px;
+}
+
+.canvas-agent-menu-history {
+  top: 52px;
+  left: 52px;
+  right: 52px;
+  min-width: 0;
+  max-height: min(420px, calc(100vh - 160px));
+  overflow: hidden;
+}
+
+.canvas-agent-history-head {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  color: #a8a3a1;
+  font: 650 10px/1 Manrope, Inter, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.canvas-agent-history-head button {
+  width: auto;
+  min-height: 28px;
+  padding: 0 7px;
+  color: #e5e2e1;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.canvas-agent-history-list {
+  display: grid;
+  max-height: 330px;
+  overflow-y: auto;
+  gap: 2px;
+}
+
+.canvas-agent-history-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: center;
+  border-radius: 10px;
+}
+
+.canvas-agent-history-list > div.is-active {
+  background: rgba(255, 184, 102, 0.1);
+}
+
+.canvas-agent-history-list > div > button:first-child {
+  display: grid;
+  min-width: 0;
+  justify-items: start;
+  gap: 3px;
+}
+
+.canvas-agent-history-list button span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-agent-history-list button small,
+.canvas-agent-history-list > p {
+  margin: 0;
+  color: #8d8886;
+  font-size: 10px;
+}
+
+.canvas-agent-history-list > p {
+  padding: 18px 10px;
+  text-align: center;
+}
+
+.canvas-agent-history-list > div > button:last-child {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: #8d8886;
+}
+
+.canvas-agent-history-list > div > button:last-child:hover {
+  color: #f0a8a8;
+}
+
+.canvas-agent-menu-mode {
+  width: 280px;
+}
+
+.canvas-agent-menu-mode button {
+  align-items: flex-start;
+  padding: 10px;
+}
+
+.canvas-agent-menu-mode span {
+  display: grid;
+  gap: 3px;
+}
+
+.canvas-agent-menu-mode small {
+  color: #8d8886;
+  font-size: 11px;
+}
+
+.canvas-agent-submenu button span {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+
+.canvas-agent-submenu button small {
+  color: #8d8886;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.canvas-agent-notice {
+  color: #8d8886;
+  font-size: 12px;
+}
+
+.canvas-agent-composer:focus-within {
+  outline-color: color-mix(in srgb, var(--strong, #ffb866) 50%, transparent);
+}
+
+.canvas-agent-composer textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  max-height: 130px;
+  resize: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text, #e5e2e1);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.canvas-agent-composer textarea::placeholder {
+  color: var(--muted, #777371);
+}
+
+.canvas-agent-send {
+  width: 32px;
+  height: 32px;
+  margin-left: 4px;
+  border-radius: 999px;
+  background: #e5e2e1;
+  color: #171615;
+}
+
+.canvas-agent-send:disabled {
+  cursor: default;
+  opacity: 0.28;
+}
+
+.canvas-agent-send svg {
+  width: 16px;
+  height: 16px;
+}
+
+.canvas-agent-toggle {
+  position: absolute;
+  right: 22px;
+  bottom: 28px;
+  display: inline-flex;
+  height: 46px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 16px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--panel, #171717) 68%, transparent);
+  outline: 0.5px solid rgba(229, 226, 225, 0.18);
+  box-shadow: 0 28px 60px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  font: 650 11px/1 Manrope, Inter, sans-serif;
+  letter-spacing: 0.08em;
+}
+
+.canvas-agent-toggle svg {
+  color: var(--strong, #ffb866);
+}
+
+.infinite-canvas-root.canvas-agent-open .minimap {
+  right: calc(var(--canvas-agent-reserved-width) + 16px);
+}
+
+.infinite-canvas-root.canvas-agent-open .canvas-pin-hub {
+  left: calc((100% - var(--canvas-agent-reserved-width)) / 2);
+}
+
+.infinite-canvas-root.canvas-agent-open .hint {
+  left: calc((100% - var(--canvas-agent-reserved-width)) / 2);
+}
+
+.infinite-canvas-root.canvas-agent-open .minimap,
+.infinite-canvas-root.canvas-agent-open .canvas-pin-hub,
+.infinite-canvas-root.canvas-agent-open .hint {
+  transition: left 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    right 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.infinite-canvas-root:not(.theme-dark) .canvas-agent-panel,
+.infinite-canvas-root:not(.theme-dark) .canvas-agent-toggle {
+  color: #292726;
+  background: rgba(242, 240, 236, 0.72);
+  outline-color: rgba(45, 43, 41, 0.16);
+}
+
+.infinite-canvas-root:not(.theme-dark) .canvas-agent-proposal.is-pending,
+.infinite-canvas-root:not(.theme-dark) .canvas-agent-proposal.is-applying {
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.infinite-canvas-root:not(.theme-dark) .canvas-agent-proposal.is-expired {
+  background: rgba(41, 39, 38, 0.05);
+}
+
+@media (max-width: 720px) {
+  .canvas-agent-panel {
+    inset: 76px 10px 10px;
+    width: auto !important;
+    max-width: none;
+    border-radius: 24px;
+  }
+
+  .canvas-agent-resize {
+    display: none;
+  }
+
+  .canvas-agent-header-actions .canvas-agent-dock-toggle {
+    display: none;
+  }
+
+  .infinite-canvas-root.canvas-agent-open .minimap,
+  .infinite-canvas-root.canvas-agent-open .canvas-pin-hub,
+  .infinite-canvas-root.canvas-agent-open .canvas-side-dock,
+  .infinite-canvas-root.canvas-agent-open .canvas-left-dock {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .canvas-agent-menu-history {
+    left: 10px;
+    right: 10px;
+  }
+}
+
+.canvas-agent-impact {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: #1c1b1b;
+}
+
+.canvas-agent-impact h4 {
+  margin: 0;
+  color: #e5e2e1;
+  font-family: "Noto Serif", serif;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+}
+
+.canvas-agent-impact p,
+.canvas-agent-impact small {
+  margin: 0;
+  color: #a8a3a1;
+  font-size: 12px;
+}
+
+.canvas-agent-impact > div:not(.canvas-agent-proposal-buttons) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.canvas-agent-impact-skip {
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  color: #a8a3a1;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.canvas-agent-mentions {
+  position: absolute;
+  z-index: 4;
+  right: 12px;
+  bottom: calc(100% + 8px);
+  left: 12px;
+  display: grid;
+  max-height: 320px;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 16px;
+  background: #1c1b1b;
+  outline: 0.5px solid rgba(69, 70, 77, 0.35);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+}
+
+.canvas-agent-mentions section {
+  display: grid;
+}
+
+.canvas-agent-mentions h5 {
+  margin: 6px 10px 2px;
+  color: #8d8886;
+  font: 650 10px/1.4 Manrope, Inter, sans-serif;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.canvas-agent-mentions button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #e5e2e1;
+  cursor: pointer;
+  text-align: left;
+}
+
+.canvas-agent-mention-thumb {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #242322;
+  color: #a8a3a1;
+}
+
+.canvas-agent-mention-thumb img,
+.canvas-agent-mention-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.canvas-agent-mention-thumb svg {
+  width: 14px;
+  height: 14px;
+}
+
+.canvas-agent-mentions button > span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-agent-mentions button small {
+  margin-left: auto;
+}
+
+.canvas-agent-mentions button:hover {
+  background: #242322;
+}
+
+.canvas-agent-mentions small {
+  color: #a8a3a1;
+  font-size: 10px;
+}

@@ -249,6 +249,13 @@ function loadMxShellCameraMoves(projectRoot: string): string {
   return "";
 }
 
+/** 全文拼进系统提示。playbook 读完正文后接同一段，不在正文里写路径。 */
+export function mxShellCameraMovesInjection(projectRoot: string): string {
+  const cameraMoves = loadMxShellCameraMoves(projectRoot);
+  if (!cameraMoves) return "";
+  return `---\n\n## 运镜词典（强制参考）\n\n${cameraMoves}`;
+}
+
 const MX_SHELL_POLISH_API_OVERRIDE = `
 ---
 
@@ -266,15 +273,13 @@ function loadMxShellSystemPrompt(projectRoot: string, task: MxShellTask = "gener
     path.join(projectRoot, "prompts", "mx_shell_prompt_system.md"),
     path.join(projectRoot, "skills", "mx-shell-prompt", "Skill", "SKILL.md"),
   ];
-  const cameraMoves = loadMxShellCameraMoves(projectRoot);
+  const cameraMoves = mxShellCameraMovesInjection(projectRoot);
   for (const file of candidates) {
     if (!existsSync(file)) continue;
     const body = readFileSync(file, "utf8").trim();
     if (!body) continue;
     const parts = [body];
-    if (cameraMoves) {
-      parts.push(`---\n\n## 运镜词典（强制参考）\n\n${cameraMoves}`);
-    }
+    if (cameraMoves) parts.push(cameraMoves);
     parts.push(MX_SHELL_API_CONSTRAINT);
     if (task === "polish") parts.push(MX_SHELL_POLISH_API_OVERRIDE);
     return parts.join("\n\n");

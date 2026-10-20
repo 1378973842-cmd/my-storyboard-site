@@ -49,3 +49,53 @@ export function resetImageEditZoom(): void;
 export function placeImageUrlOnCanvas(url: string, name?: string): unknown;
 export function openCanvasLightboxForUrl(url: string): void;
 export function downloadCanvasMediaUrl(url: string, filename?: string): Promise<void>;
+
+export type CanvasAgentEngineAction =
+  | {
+      type: 'create_node';
+      tempId?: string;
+      nodeType: string;
+      initialParams?: Record<string, unknown>;
+      position?: { x: number; y: number };
+    }
+  | {
+      type: 'connect_nodes';
+      sourceNodeId: string;
+      targetNodeId: string;
+    }
+  | {
+      type: 'update_node_params';
+      nodeId: string;
+      patch: Record<string, unknown>;
+    };
+
+export type CanvasAgentEngineSnapshot = {
+  canvasId: string;
+  nodes: Array<Record<string, unknown> & { id: string; type: string; x?: number; y?: number }>;
+  connections: Array<{ id: string; from: string; to: string }>;
+  selectedNodeIds: string[];
+  viewport: { x: number; y: number; scale: number };
+  viewportCenter: { x: number; y: number };
+  settings: Record<string, unknown>;
+};
+
+export const CANVAS_GENERATOR_TYPES: readonly string[];
+export function getCanvasAgentSnapshot(): CanvasAgentEngineSnapshot;
+export function flattenCanvasAgentParameters(raw: unknown): unknown;
+export function applyCanvasAgentActions(
+  actions: CanvasAgentEngineAction[],
+  session?: { conversationId?: string },
+): {
+  createdNodeIds: string[];
+  idMap: Record<string, string>;
+};
+export function executeCanvasAgentNodeSkill(nodeId: string): Promise<unknown>;
+export function withCanvasAgentNode(
+  nodeId: string,
+  mutate: (node: Record<string, unknown> & { id: string }) => void,
+): void;
+export function flushCanvasAgentSave(): void;
+export function canvasAgentExecutionTimeoutMs(node: { type?: string; count?: number; batch_count?: number } | null | undefined): number;
+export function canvasAgentBatchTimeoutMs(nodes: Array<{ type?: string; count?: number; batch_count?: number } | null | undefined>): number;
+export function takeCanvasAgentOutputHost(nodeId: string): string;
+export function discardCanvasAgentOutputHost(nodeId: string): void;

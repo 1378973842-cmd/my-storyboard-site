@@ -12,6 +12,9 @@ try {
   console.log(">>> 3. 尝试构建项目以验证编译...");
   execSync('npm run build', { stdio: 'inherit' });
 
+  console.log(">>> 4. 运行关键可靠性验收门...");
+  execSync('npm run check:critical', { stdio: 'inherit' });
+
   console.log(">>> 🎉 环境就绪，应用健康。导演，可以开机了！");
 } catch (error) {
   console.error("\n❌ 检查失败！请先修复上述报错信息。");

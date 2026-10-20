@@ -1,4 +1,5 @@
 import type { Express, Request, Response, RequestHandler } from "express";
+import type Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
 import { augmentImagePromptWithReferenceCostumeLock } from "../lib/nineGrid/nineGridCore.js";
 import {
@@ -24,6 +25,11 @@ import {
   runStoryboardRunningHubMjV81Job,
   runStoryboardRunningHubNiji7Job,
 } from "./runningHubStoryboardImage.js";
+import {
+  initCanvasTaskLedger,
+  readCanvasTask,
+  saveCanvasTask,
+} from "./canvasTaskLedger.js";
 
 /** 与画布引擎 POST /api/canvas-image-tasks 请求体一致 */
 export type CanvasOnlineImagePayload = {
@@ -68,6 +74,10 @@ export type CanvasOnlineImagePayload = {
 
 type CanvasImageTask = {
   id: string;
+  userId: string;
+  canvasId: string;
+  nodeId: string;
+  payload: CanvasOnlineImagePayload;
   status: "queued" | "running" | "succeeded" | "failed";
   created_at: number;
   updated_at: number;
@@ -305,6 +315,7 @@ export function mapCanvasToEditorRequest(
 
 export type CanvasImageBridgeDeps = {
   projectRoot: string;
+  db?: InstanceType<typeof Database>;
   persistImage: (
     url: string,
     meta?: {
@@ -318,6 +329,22 @@ export type CanvasImageBridgeDeps = {
   ) => Promise<string>;
   requireGate?: RequestHandler;
 };
+
+function persistImageTask(task: CanvasImageTask, deps: CanvasImageBridgeDeps): void {
+  saveCanvasTask(deps.db, {
+    id: task.id,
+    userId: task.userId,
+    canvasId: task.canvasId,
+    nodeId: task.nodeId,
+    taskType: "canvas-image",
+    payload: task.payload,
+    status: task.status,
+    createdAt: task.created_at,
+    updatedAt: task.updated_at,
+    result: task.result,
+    error: task.error,
+  });
+}
 
 async function callSiteEditImage(
   req: Request,
@@ -643,6 +670,7 @@ async function runCanvasImageTask(
   if (!task) return;
   task.status = "running";
   task.updated_at = Date.now();
+  persistImageTask(task, deps);
 
   try {
     const result = await executeCanvasGeneration(req, payload, deps);
@@ -650,33 +678,45 @@ async function runCanvasImageTask(
     task.result = { ...result, model: String(payload.model || "") };
     task.error = "";
     task.updated_at = Date.now();
+    persistImageTask(task, deps);
   } catch (e) {
     task.status = "failed";
     task.error = e instanceof Error ? e.message : String(e);
     task.updated_at = Date.now();
+    persistImageTask(task, deps);
   }
 }
 
 export function registerCanvasSiteImageRoutes(app: Express, deps: CanvasImageBridgeDeps) {
   const gate = deps.requireGate;
+  if (deps.db) initCanvasTaskLedger(deps.db);
   app.post("/api/canvas-image-tasks", ...(gate ? [gate] : []), (req, res) => {
     const payload = (req.body || {}) as CanvasOnlineImagePayload;
     const taskId = `canvas_img_${uuidv4().replace(/-/g, "")}`;
     const now = Date.now();
     tasks.set(taskId, {
       id: taskId,
+      userId: req.authUser?.id || "",
+      canvasId: String(payload.canvas_id || ""),
+      nodeId: String(payload.node_id || ""),
+      payload,
       status: "queued",
       created_at: now,
       updated_at: now,
       result: null,
       error: "",
     });
+    persistImageTask(tasks.get(taskId)!, deps);
     void runCanvasImageTask(taskId, req, payload, deps);
     res.json({ task_id: taskId, status: "queued" });
   });
 
   app.get("/api/canvas-image-tasks/:taskId", ...(gate ? [gate] : []), (req, res) => {
-    const task = tasks.get(req.params.taskId);
+    const userId = req.authUser?.id || "";
+    const memoryTask = tasks.get(req.params.taskId);
+    const task = memoryTask?.userId === userId
+      ? memoryTask
+      : readCanvasTask<CanvasImageTask["result"]>(deps.db, req.params.taskId, userId);
     if (!task) {
       return res.status(404).json({
         error: "画布任务不存在，可能服务已重启或任务已过期",
@@ -688,7 +728,7 @@ export function registerCanvasSiteImageRoutes(app: Express, deps: CanvasImageBri
       status: task.status,
       result: task.status === "succeeded" ? task.result : null,
       error: task.error || undefined,
-      updated_at: task.updated_at,
+      updated_at: "updated_at" in task ? task.updated_at : task.updatedAt,
     });
   });
 

@@ -172,6 +172,26 @@ function countNodesWithUrl(nodes: unknown): number {
   return count;
 }
 
+function nodeIdSet(nodes: unknown): Set<string> {
+  const ids = new Set<string>();
+  if (!Array.isArray(nodes)) return ids;
+  for (const item of nodes) {
+    if (!item || typeof item !== "object") continue;
+    const id = String((item as { id?: unknown }).id || "").trim();
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+/** 两端都还在节点集合里才算一条活边。缺任一端就指向已不存在的节点。 */
+function edgeEndpointsLive(edge: unknown, ids: Set<string>): boolean {
+  if (!edge || typeof edge !== "object") return false;
+  const row = edge as { from?: unknown; to?: unknown };
+  const from = String(row.from || "").trim();
+  const to = String(row.to || "").trim();
+  return Boolean(from && to && ids.has(from) && ids.has(to));
+}
+
 /** 本板日志双向合并：任一侧独有记录都保留，避免刷新竞态把今日日志盖成昨天 */
 function mergeCanvasLogs(incoming: unknown, existing: unknown): unknown[] {
   const map = new Map<string, Record<string, unknown>>();
@@ -406,6 +426,8 @@ export function saveCanvas(
     settings?: Record<string, unknown>;
     base_updated_at?: number;
     allow_empty_nodes?: boolean;
+    /** 本次页面里用户删了节点或边。草稿重放不带这个标记。 */
+    intentional_delete?: boolean;
   },
   ctx?: CanvasAccessContext | null
 ) {
@@ -454,9 +476,10 @@ export function saveCanvas(
     const incomingUrlCount = countNodesWithUrl(incomingNodes);
     const nodeDrop = existingNodeCount - incomingCount;
     const urlDrop = existingUrlCount - incomingUrlCount;
-    // 刷新/多页竞态常见：用更瘦的内存稿覆盖磁盘。单次合法删除通常不会同时掉很多节点+图。
+    // 刷新/多页竞态常见：用更瘦的内存稿覆盖磁盘。显式删除带 intentional_delete，重放不带。
     if (
       payload.allow_empty_nodes !== true &&
+      payload.intentional_delete !== true &&
       existingNodeCount >= 8 &&
       nodeDrop >= 3 &&
       urlDrop >= 2 &&
@@ -469,19 +492,22 @@ export function saveCanvas(
       doc.nodes = incomingNodes;
     }
   }
-  const existingConnCount = Array.isArray(doc.connections) ? doc.connections.length : 0;
+  const keptNodeIds = nodeIdSet(doc.nodes);
+  const storedConnections = Array.isArray(doc.connections) ? doc.connections : [];
+  const storedLive = storedConnections.filter((edge) => edgeEndpointsLive(edge, keptNodeIds));
+  // 删节点后级联摘掉指向它的边。缺端点的边不是数据，不留给下一笔保存。
+  doc.connections = storedLive;
   const incomingConnections = payload.connections;
-  if (
-    Array.isArray(incomingConnections) &&
-    incomingConnections.length === 0 &&
-    existingConnCount > 0 &&
-    payload.allow_empty_nodes !== true
-  ) {
-    console.warn(
-      `[canvas-store] blocked empty connections overwrite for ${id} (existing ${existingConnCount} connections)`
-    );
-  } else if (incomingConnections !== undefined) {
-    doc.connections = incomingConnections;
+  if (Array.isArray(incomingConnections)) {
+    const incomingLive = incomingConnections.filter((edge) => edgeEndpointsLive(edge, keptNodeIds));
+    const wipingLiveEdges = incomingLive.length === 0 && storedLive.length > 0;
+    if (wipingLiveEdges && payload.allow_empty_nodes !== true && payload.intentional_delete !== true) {
+      console.warn(
+        `[canvas-store] blocked empty connections overwrite for ${id} (existing ${storedLive.length} live connections)`
+      );
+    } else {
+      doc.connections = incomingLive;
+    }
   }
   doc.viewport = payload.viewport ?? doc.viewport ?? { x: 0, y: 0, scale: 1 };
   if (payload.logs !== undefined) {

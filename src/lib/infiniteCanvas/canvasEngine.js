@@ -27,6 +27,12 @@ import {
 } from './canvasGateCollections.js';
 import { closeAllCanvasCustomSelects, mountCanvasCustomSelects } from './canvasCustomSelect.js';
 import {
+    bindCanvasAgentAssetCache,
+    readCanvasAgentAssets,
+    refreshCanvasAgentAssets,
+} from '../../features/canvas-agent/core/assetLibraryCache.ts';
+import { coerceReferenceImageModel } from '../../features/canvas-agent/core/referencePrompt.ts';
+import {
     enrichLiveNodesFromRemote,
     mergeCanvasConnectionLists,
 } from './canvasConflictMerge.js';
@@ -856,9 +862,7 @@ on(window, 'message', event => {
     if(event.data?.type === 'studio-lang') applyLanguage(event.data.lang);
     if(event.data?.type === 'canvas_updated') handleCanvasUpdatedMessage(event.data);
     if(event.data?.type === 'canvas-focus'){
-        // 从其他标签页切换回画布时，重新拉取工作流列表并刷新节点
         loadConfig().then(() => {
-            pruneMissingComfyWorkflows();
             if(typeof render === 'function') render();
         });
         if(canvas) syncRemoteCanvasNow();
@@ -1382,6 +1386,11 @@ let localCanvasDirty = false;
 let localStructureRevision = 0;
 /** 最近一次成功落盘时的结构版本；用于区分「用户删空」与「竞态空板误写」 */
 let structureRevisionAtLastSuccessfulSave = 0;
+/** 只在本次页面的显式删节点/删边时为 true。不写入草稿，服务恢复后的整板重放不带。 */
+let saveCarriesIntentionalDelete = false;
+function markIntentionalStructureDelete(){
+    saveCarriesIntentionalDelete = true;
+}
 /** 最近一次已知落盘的节点数，用于阻止误写空 nodes */
 let lastKnownSavedNodeCount = 0;
 let savingCanvasNow = false;
@@ -1822,16 +1831,16 @@ function refreshBatchPosterSpecificThemeSelect(wrap, node, catalog){
 }
 let chatModels = ['gpt-4o-mini'];
 let videoModels = [];
+// 诊断标记，只写入 availableModels.fromConfig。任何逻辑不得读取它。
+// 「标记 true 但视频内容仍是本地副本」在 cfg.video_models 为空时结构上可能，当前服务端总会下发两个规范 id，走不到。
+let canvasAgentModelsFromConfig = false;
 let msChatModels = [];
 let apiProviders = [];
-let comfyBackendCount = 1;
-let comfyWorkflows = [];
-let comfyWorkflowCache = {};
 let runningHubWorkflowCache = {};
 let managedProviderId = 'runninghub';
 let localImageModels = [];
 let localChatModels = [];
-const HIDDEN_CANVAS_NODE_TYPES = new Set(['comfy', 'ltxDirector', 'msgen', 'output', 'llm']);
+const HIDDEN_CANVAS_NODE_TYPES = new Set(['msgen', 'output', 'llm']);
 function filterCanvasNodeOptions(options){
     return (options || []).filter(opt => !HIDDEN_CANVAS_NODE_TYPES.has(opt.type));
 }
@@ -2010,10 +2019,6 @@ let editExportBitmapCache = { url: '', img: null, objectUrl: '' };
 let textSelectionGuard = null;
 const PROMPT_TEXT_MAX_LENGTH = 20000;
 const CLIENT_ID = 'canvas_' + Math.random().toString(36).slice(2);
-const LTX_DIRECTOR_WORKFLOW = 'LTXDirectorv2-API.json';
-const LTX_DIRECTOR_WF_NODE = '46';
-const LTX_DIRECTOR_SEED_NODE = '94:28';
-const LTX_SEGMENT_COLORS = ['#e07b3a', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#f59e0b'];
 const CANVAS_EMOJIS = ['layers','sparkles','image','palette','wand-2','star','heart','rocket','flame','moon','cloud','leaf','gem','compass','pin','flag','bookmark','crown'];
 function renderCanvasIcon(icon, size = 14) {
     // 旧的默认 emoji 或空值都映射为 layers
@@ -2054,6 +2059,7 @@ const CANVAS_THEME_KEY = 'canvas_theme';
 const QUICK_TOOLBAR_COLLAPSED_KEY = 'canvas_quick_toolbar_collapsed';
 const DEFAULT_VIDEO_MODELS = [
     // RunningHub 标准模型（本站已接入）
+    // config 未到时的回落。Agent 的 availableModels 在 config 到达前会拿到这份，而不是服务端配置。
     'hailuo-h3',
     'seedance-2.0',
 ];
@@ -2066,6 +2072,10 @@ function isSparkVideo20Model(model){
     const m = String(model || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
     return m === 'seedance-2.0' || m === 'seedance-2' || m === 'seedance2.0' || m === 'sparkvideo-2.0' || m === 'spark-video-2.0' || m.includes('sparkvideo-2') || m.includes('seedance-2');
 }
+// 人类路径 bindVideoDockControls 的时长输入用 videoDurationBounds() 拿范围，
+// 这里硬编码 Math.max(5, Math.min(15, …))。
+// 同一条海螺时长规则两份实现，今天数值一致。
+// 改 videoDurationBounds 时要同步这里。
 function applyHailuoVideoDefaults(node){
     if(!node || !isHailuoH3VideoModel(node.model)) return;
     const dur = Math.round(Number(node.duration || 5));
@@ -2098,6 +2108,36 @@ function videoDurationBounds(model){
     if(isSparkVideo20Model(model)) return {min:4, max:15};
     if(isHailuoH3VideoModel(model)) return {min:5, max:15};
     return {min:1, max:60};
+}
+const AGENT_VIDEO_PARAM_CLAMP_REASONS = {
+    duration:'该模型的时长范围',
+    resolution:'该模型支持的分辨率',
+    aspectRatio:'该模型支持的画幅',
+    realPersonMode:'该模型的默认人物模式',
+};
+function agentVideoParamClampRecords(node){
+    const keys = ['duration', 'resolution', 'aspectRatio', 'realPersonMode'];
+    const before = keys.map(key => node[key]);
+    applyVideoModelDefaults(node);
+    const clamped = [];
+    keys.forEach((key, index) => {
+        if(Object.is(before[index], node[key])) return;
+        clamped.push({
+            key,
+            from:before[index],
+            to:node[key],
+            reason:AGENT_VIDEO_PARAM_CLAMP_REASONS[key],
+        });
+    });
+    return clamped;
+}
+function commitAgentVideoParamClamp(node){
+    if(!node || node.type !== 'video') return false;
+    const clamped = agentVideoParamClampRecords(node);
+    if(!clamped.length) return false;
+    node.agentParamClamped = clamped;
+    flushCanvasAgentSave();
+    return true;
 }
 
 function uid(prefix='n'){ return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`; }
@@ -2853,6 +2893,17 @@ function generatorNanoBananaProModel(providerId){
     const all = allImageModels(providerId || managedProviderId);
     const exact = all.find(m => /^nano-banana-pro$/i.test(String(m || '').trim()));
     return exact || 'nano-banana-pro';
+}
+/** 箭头指向 / 自定义视角：与图片生成节点同一套模型 id。 */
+function viewpointImageModelChoices(){
+    const all = allImageModels('runninghub');
+    const pick = (id) => all.find(m => String(m || '').trim().toLowerCase() === id) || id;
+    return uniqueModels([generatorNanoBananaProModel('runninghub'), pick('nano-banana-2.1')]);
+}
+function viewpointImageModel(value){
+    const choices = viewpointImageModelChoices();
+    const v = String(value || '').trim().toLowerCase();
+    return choices.find(m => String(m).trim().toLowerCase() === v) || choices[0];
 }
 /** 把旧 square/wide 键迁到当前模型的 aspect 枚举 */
 function resolveRatioForCaps(ratio, caps){
@@ -4135,7 +4186,7 @@ function imageModelOptions(selectedModel, providerId){
     const selectedValue = resolveImageModel(selectedModel);
     const options = models.map(model => `<option value="${escapeHtml(model)}" ${model === selectedValue ? 'selected' : ''}>${escapeHtml(model)}</option>`).join('');
     const hasSelected = models.includes(selectedValue);
-    return `${hasSelected || !selectedValue ? '' : `<option value="${escapeHtml(selectedValue)}" selected>${escapeHtml(selectedValue)}</option>`}${options}`;
+    return `${hasSelected || !selectedValue ? '' : `<option value="${escapeHtml(selectedValue)}" selected>${escapeHtml(selectedValue)}（不在可选列表中）</option>`}${options}`;
 }
 function chatModelOptions(selectedModel, providerId=''){
     const models = providerId ? providerChatModels(providerId) : allChatModels();
@@ -4145,7 +4196,7 @@ function chatModelOptions(selectedModel, providerId=''){
     const selectedValue = resolveChatModel(selectedModel, providerId);
     const options = models.map(model => `<option value="${escapeHtml(model)}" ${model === selectedValue ? 'selected' : ''}>${escapeHtml(model)}</option>`).join('');
     const hasSelected = models.includes(selectedValue);
-    return `${hasSelected || !selectedValue ? '' : `<option value="${escapeHtml(selectedValue)}" selected>${escapeHtml(selectedValue)}</option>`}${options}`;
+    return `${hasSelected || !selectedValue ? '' : `<option value="${escapeHtml(selectedValue)}" selected>${escapeHtml(selectedValue)}（不在可选列表中）</option>`}${options}`;
 }
 function formatCanvasTime(value){
     if(!value) return '--';
@@ -5761,6 +5812,7 @@ function flushCanvasSaveKeepalive(){
             client_id:CLIENT_ID,
             base_updated_at:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
             allow_empty_nodes: intentionalEmpty || undefined,
+            intentional_delete: saveCarriesIntentionalDelete || undefined,
         });
         void fetch(`/api/canvases/${canvas.id}`, {
             method:'PUT',
@@ -6007,6 +6059,7 @@ async function saveCanvas(){
                 base_updated_at:savedBaseUpdatedAt,
                 // 用户主动删空时放行服务端空板保护
                 allow_empty_nodes: intentionalEmpty || undefined,
+                intentional_delete: saveCarriesIntentionalDelete || undefined,
             });
         } catch(serErr) {
             const msg = serErr instanceof Error ? serErr.message : String(serErr);
@@ -6096,6 +6149,7 @@ async function saveCanvas(){
         lastCanvasUpdatedAt = canvas.updated_at;
         lastKnownSavedNodeCount = nodes.length || nodePayload.length;
         markCanvasStructureSaved();
+        saveCarriesIntentionalDelete = false;
         canvasSaveConflictRetries = 0;
         localCanvasDirty = Boolean(saveCanvasAgain);
         if(!localCanvasDirty) clearLiveCanvasDraft(canvas.id);
@@ -6125,18 +6179,12 @@ async function loadConfig(){
         imageModels = cfg.image_models?.length ? cfg.image_models : imageModels;
         chatModels = cfg.chat_models?.length ? cfg.chat_models : chatModels;
         videoModels = cfg.video_models?.length ? cfg.video_models : DEFAULT_VIDEO_MODELS;
+        canvasAgentModelsFromConfig = true;
         msChatModels = cfg.ms_chat_models?.length ? cfg.ms_chat_models : msChatModels;
-        comfyBackendCount = Math.max(1, (cfg.comfy_instances || []).length || 1);
         apiProviders = normalizeLoadedProviders(cfg.api_providers);
         if(typeof render === 'function' && canvas) safeRender({ force: true });
         models.nano = imageModels.find(m => m.toLowerCase().includes('nano')) || 'nano-banana-pro';
         models.gpt = imageModels.find(m => !m.toLowerCase().includes('nano')) || cfg.image_model || 'gpt-image-2';
-        try {
-            const wf = await apiFetch('/api/workflows').then(r=>r.json());
-            comfyWorkflows = wf.workflows || [];
-        } catch(_) {
-            comfyWorkflows = [];
-        }
         runningHubWorkflowCache = {};
         const rhProvider = apiProviders.find(p => p.id === 'runninghub');
         const rhWorkflowIds = (rhProvider?.rh_workflows || []).map(item => String(item.workflowId || item.id || '').trim()).filter(Boolean);
@@ -6154,8 +6202,7 @@ try {
     apiChannel.onmessage = async (e) => {
         if(e.data?.type === 'providers-changed' || e.data?.type === 'workflows-changed'){
             await loadConfig();
-            pruneMissingComfyWorkflows();
-            if(typeof render === 'function') render();
+                        if(typeof render === 'function') render();
         }
     };
 } catch(e) { /* 不支持 BroadcastChannel 的旧浏览器忽略 */ }
@@ -7511,8 +7558,7 @@ async function openCanvas(id, options = {}){
         nodes.filter(n => isGenConsoleNode(n)).forEach(scrubGeneratorHistoryBloat);
         syncAllLoopImageBatchSizes();
         nodes.filter(n => n.type === 'replicaAgent').forEach(syncReplicaAgentRoles);
-        pruneMissingComfyWorkflows();
-        // 先画再查缺失资源/收藏：避免大板首屏被网络检查卡住
+                // 先画再查缺失资源/收藏：避免大板首屏被网络检查卡住
         applyCanvasTheme(canvasThemeMode);
         selected.clear();
         setCanvasMode(true);
@@ -7526,6 +7572,7 @@ async function openCanvas(id, options = {}){
         });
         resumeCanvasImageTasks();
         startCanvasRemotePolling();
+        void refreshCanvasAgentAssets();
         setStatus('Ready');
         void Promise.all([
             refreshMissingCanvasAssets(),
@@ -7665,8 +7712,7 @@ function applyRemoteCanvasData(remote, opts = {}){
         migratePromptGroupNodes();
         nodes.filter(n => isGenConsoleNode(n)).forEach(scrubGeneratorHistoryBloat);
         syncAllLoopImageBatchSizes();
-        pruneMissingComfyWorkflows();
-        // 保留仍存在的选中，避免远程同步把 gen-dock 拆掉（打字中尤其明显）
+                // 保留仍存在的选中，避免远程同步把 gen-dock 拆掉（打字中尤其明显）
         const kept = [...selected].filter(id => nodes.some(n => n.id === id));
         selected.clear();
         kept.forEach(id => selected.add(id));
@@ -8384,10 +8430,12 @@ function addLLMNode(point){
 function addGeneratorNode(point){
     const p = point || defaultPoint(120, 0);
     const providerId = imageApiProviders()[0]?.id || '';
-    const node = addNode({id:uid('gen'), type:'generator', x:p.x, y:p.y, w:260, apiProvider:providerId, model:allImageModels(providerId)[0] || '', prompt:'', previewRoundUrls:[], history:[], previewLayout:'time', ratio:'square', resolution:'1k', customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'', customWidth:'', customHeight:'', inputs:[], floatTitleIndex:0});
+    const node = addNode({id:uid('gen'), type:'generator', x:p.x, y:p.y, w:260, apiProvider:providerId, model:generatorNanoBananaProModel(providerId), prompt:'', previewRoundUrls:[], history:[], previewLayout:'time', ratio:'square', resolution:'1k', customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'', customWidth:'', customHeight:'', inputs:[], floatTitleIndex:0});
     ensureGeneratorFloatIndex(node);
     selected.clear();
     if(node?.id) selected.add(node.id);
+    // Agent 创建还要 Object.assign 参数；静默阶段先不挂 dock，避免下拉按默认模型画死。
+    if(silentAddNodeDepth > 0) return node;
     refreshSelectionVisuals();
     return node;
 }
@@ -9115,10 +9163,10 @@ async function runViewpointAgent(nodeId, opts={}){
     if(!node || node.type !== 'viewpointAgent' || isNodeDisabled(node)) return;
     const fields = viewpointAgentFields(node);
     if(!viewpointAgentTextReady(fields)){
-        node.runStatus = 'failed';
-        node.runError = langIsEn()
+        const msg = langIsEn()
             ? 'Describe the viewpoint in a short sentence.'
             : '请用一句话描述视角意向。';
+        rejectCanvasAgentPrecondition(node, msg, opts, true);
         refreshNodes([nodeId]);
         return;
     }
@@ -9159,9 +9207,11 @@ async function runViewpointAgent(nodeId, opts={}){
                 });
             }
         } catch(err) {
-            if(!opts.cascade) node.running = false;
-            node.runStatus = 'failed';
-            node.runError = err.message || String(err);
+            if(!opts.cascade){
+                node.running = false;
+                node.runStatus = 'failed';
+                node.runError = err.message || String(err);
+            }
             refreshNodes([nodeId]);
             if(opts.cascade) throw err;
             scheduleSave();
@@ -9424,49 +9474,6 @@ function addRhNode(point){
         rhWorkflowInfo:null,
         rhParams:{},
         generatedOutputs:[],
-        inputs:[],
-        running:false
-    });
-}
-function defaultLTXSegment(start=0, length=120){
-    return {
-        id:uid('ltxseg'),
-        type:'text',
-        prompt:'',
-        start,
-        length,
-        color:LTX_SEGMENT_COLORS[0],
-        strength:1,
-        imageRef:null
-    };
-}
-function addLTXDirectorNode(point){
-    const p = point || defaultPoint(200, 0);
-    return addNode({
-        id:uid('ltxdir'),
-        type:'ltxDirector',
-        x:p.x,
-        y:p.y,
-        w:1000,
-        h:800,
-        globalPrompt:'',
-        durationFrames:120,
-        durationSeconds:5,
-        frameRate:24,
-        customWidth:0,
-        customHeight:0,
-        displayMode:'seconds',
-        useCustomAudio:false,
-        imgCompression:18,
-        epsilon:0.001,
-        divisibleBy:32,
-        noiseSeed:12,
-        ltxTimelineData:'',
-        ltxLocalPrompts:'',
-        ltxSegmentLengths:'',
-        ltxGuideStrength:'',
-        ltxSegments:[],
-        ltxSelectedSegId:'',
         inputs:[],
         running:false
     });
@@ -9869,8 +9876,8 @@ async function runMsGenNode(nodeId, opts={}){
     const msModel = MS_GEN_MODELS[modelKey] || MS_GEN_MODELS.zimage;
     const msModelId = currentMsModelId(modelKey, node);
     const msLoras = modelscopeLorasForModel(msModelId);
-    if(!prompt){ softAlert(tr('canvas.needPrompt')); return; }
-    if(msModel.supportsImage && !refs.length){ softAlert(tr('canvas.needImage')); return; }
+    if(!prompt){ rejectCanvasAgentPrecondition(node, tr('canvas.needPrompt'), opts); return; }
+    if(msModel.supportsImage && !refs.length){ rejectCanvasAgentPrecondition(node, tr('canvas.needImage'), opts); return; }
     const count = Math.max(1, Math.min(8, Number(node.count || 1)));
     // 链路中间节点默认不创建 Output；链尾、手动开启或已有 Output 连接时才输出。
     const pendingIds = Array.from({length:count}, () => uid('p'));
@@ -9954,43 +9961,15 @@ async function runMsGenNode(nodeId, opts={}){
         clearNodePending(host, pendingIds);
         syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
         refreshRunNodes(node, host);
-        if(opts.cascade) throw err;
+        if(opts.cascade){
+            delete node.runStatus;
+            delete node.runError;
+            throw err;
+        }
     }
     };
     if(opts.cascade) await execute();
     else void execute();
-}
-function addComfyNode(point){
-    const p = point || defaultPoint(160, 0);
-    return addNode({
-        id:uid('comfy'),
-        type:'comfy',
-        x:p.x,
-        y:p.y,
-        w:420,
-        h:460,
-        mode:'text',
-        width:1024,
-        height:1024,
-        enhanceStrength:0.5,
-        enhanceUpscale:false,
-        enhanceUpscaleRes:2048,
-        editUpscale:false,
-        editUpscaleRes:2048,
-        editModel:allImageModels(imageApiProviders()[0]?.id || 'comfly')[0] || models.gpt,
-        ratio:'square',
-        resolution:'1k',
-        customRatio:'',
-        customSize:'',
-        customRatioWidth:'',
-        customRatioHeight:'',
-        customWidth:'',
-        customHeight:'',
-        comfyWorkflow:'',
-        comfyParams:{},
-        count:1,
-        inputs:[]
-    });
 }
 function addOutputNode(point){
     const p = point || defaultPoint(260, 0);
@@ -10709,7 +10688,8 @@ function linkCreateOptions(state){
             ]);
         }
         // 从生成节点拖出：自选下游（生图作参考 / Output 等），禁止默认强塞 Output
-        if(CANVAS_GENERATOR_TYPES.includes(node.type) || node.type === 'videoReverse' || node.type === 'imageRepairAgent'){
+        // 九宫格出边只允许 Output / 图片组，走 canConnect 自己的分支，不套这张生图菜单。
+        if(node.type !== 'nineGridAgent' && (CANVAS_GENERATOR_TYPES.includes(node.type) || node.type === 'videoReverse' || node.type === 'imageRepairAgent')){
             return filterCanvasNodeOptions([
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
                 {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
@@ -10722,7 +10702,7 @@ function linkCreateOptions(state){
         }
         return [];
     }
-    if(CANVAS_GENERATOR_TYPES.includes(node.type) || node.type === 'llm'){
+    if(node.type !== 'nineGridAgent' && (CANVAS_GENERATOR_TYPES.includes(node.type) || node.type === 'llm')){
         return filterCanvasNodeOptions([
             {type:'imageBatch', label:tr('canvas.imageBatchNode'), icon:'images'},
             {type:'prompt', label:tr('canvas.prompt'), icon:'text-cursor-input'},
@@ -11168,8 +11148,6 @@ function createNodeByType(type, point, opts){
     if(type === 'msgen') return addMsGenNode(point);
     if(type === 'video') return addVideoNode(point, opts);
     if(type === 'rh') return addRhNode(point);
-    if(type === 'comfy') return addComfyNode(point);
-    if(type === 'ltxDirector') return addLTXDirectorNode(point);
     if(type === 'output') return addOutputNode(point);
     if(type === 'imageBatch') return addImageBatchNode(point);
     return null;
@@ -11200,8 +11178,6 @@ function menuAdd(type){
     if(type === 'msgen') addMsGenNode(menuPoint);
     if(type === 'video') addVideoNode(menuPoint);
     if(type === 'rh') addRhNode(menuPoint);
-    if(type === 'comfy') addComfyNode(menuPoint);
-    if(type === 'ltxDirector') addLTXDirectorNode(menuPoint);
     if(type === 'output') addOutputNode(menuPoint);
 }
 function mediaKindForUpload(file){
@@ -16039,6 +16015,35 @@ function swapCanvasBlobMediaUrl(blobUrl, realUrl){
     });
     scheduleSaveNow();
 }
+/** 箭头指向 / 自定义视角：板上预览可以是 blob，服务端只能吃已落盘地址。 */
+async function ensureDurableCanvasImageUrl(url, nodeId){
+    const raw = String(url || '').trim();
+    const node = nodeId ? nodes.find(n => n.id === nodeId) : null;
+    const live = String(node?.url || '').trim();
+    const preview = String(node?._previewObjectUrl || '');
+    if(raw.startsWith('blob:') && live && !live.startsWith('blob:') && preview === raw) return live;
+    if(raw && !raw.startsWith('blob:')) return raw;
+    if(!raw && live && !live.startsWith('blob:')) return live;
+    const blobUrl = raw.startsWith('blob:') ? raw : (live.startsWith('blob:') ? live : '');
+    if(!blobUrl) return raw || live;
+    const res = await fetch(blobUrl);
+    if(!res.ok) throw new Error(langIsEn() ? 'Could not read the image' : '读取图片失败');
+    const blob = await res.blob();
+    const named = String(node?.name || '').trim();
+    const name = /\.(png|jpe?g|webp)$/i.test(named) ? named : `${(named || 'source').replace(/\.[^.]+$/, '')}.png`;
+    const uploaded = await uploadCroppedBlob(blob, name);
+    const durable = String(uploaded?.url || '').trim();
+    if(!durable || durable.startsWith('blob:')) throw new Error(langIsEn() ? 'Upload failed' : '上传失败');
+    swapCanvasBlobMediaUrl(blobUrl, durable);
+    return durable;
+}
+function retargetViewpointSourceUrl(job, previousUrl, targets){
+    if(!job || previousUrl === job.url) return;
+    (targets || []).forEach(item => {
+        const cur = nodes.find(n => n.id === item.node?.id);
+        if(cur && cur._editSourceUrl === previousUrl) cur._editSourceUrl = job.url;
+    });
+}
 function canvasToJpegBlob(canvasEl, quality=0.86){
     return new Promise((resolve, reject) => {
         try {
@@ -16610,7 +16615,7 @@ function refreshNodes(ids=[]){
 }
 /** 运行态徽章 HTML（与 renderNode 一致） */
 function nodeRunStatusHtml(node){
-    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','deepWhiteShotAgent','screenwritingAgent','viewpointAgent','pixarAdScriptAgent','videoReverse'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','msgen','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','deepWhiteShotAgent','screenwritingAgent','viewpointAgent','pixarAdScriptAgent','videoReverse'].includes(node.type) && node.runStatus
         && node.runStatus !== 'idle';
     if(!showStatus) return '';
     const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -16772,7 +16777,7 @@ function isNodeControl(target){
     // 图台/轻量结果台主媒体：允许拖节点与 Alt 复制（含 video 结果）
     if(target?.closest?.('.gen-stage-hero, .gen-stage-frame, .agent-result-hero, .agent-result-frame')) return false;
     // 注意：.gen-stage / 图台主图不计入控件，单击需选中节点以唤出下方控制台
-    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .image-action-bar-host, .image-expand-host, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs, .gen-stage-tile, .gen-stage-tile-actions, .gen-stage-grid, .gen-stage-stack-expand, .gen-stage-grid-collapse, .gen-stage-stack, .float-title-label, .float-title-input, .canvas-float-title.is-renaming');
+    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .slots-loop-copy-btn, .slots-loop-copy-full-btn, .slots-loop-run-btn, .canvas-custom-select, .gen-dock, .image-gen-dock-host, .image-action-bar-host, .image-expand-host, .frame-group-action-bar-host, .frame-group-bg-menu, .image-batch-action-bar-host, .image-batch-bg-rail, .canvas-bg-rail, .gen-stage-thumb, .gen-stage-badge, .gen-stage-thumbs, .gen-stage-tile, .gen-stage-tile-actions, .gen-stage-grid, .gen-stage-stack-expand, .gen-stage-grid-collapse, .gen-stage-stack, .float-title-label, .float-title-input, .canvas-float-title.is-renaming');
 }
 function destroyLTXEditor(node){
     if(!node?._ltxEditor) return;
@@ -16786,8 +16791,8 @@ const NODE_TYPE_ICON = {
     image:'image', prompt:'type', loop:'repeat', promptGroup:'layers', group:'folder',
     imageBatch:'images', frameStack:'images', llm:'brain', replicaAgent:'copy',
     imageRepairAgent:'wrench', batchPosterAgent:'layout-grid', nineGridAgent:'grid-3x3',
-    slotsLoopVideoAgent:'clapperboard', mxShellPromptAgent:'film', mxShellPolishAgent:'wand-sparkles', mxShellPromptView:'file-text', textOutput:'file-output', deepWhiteShotAgent:'clapperboard', deepWhiteShotView:'book-open', screenwritingAgent:'pen-line', viewpointAgent:'camera', pixarAdScriptAgent:'sparkles', videoReverse:'rewind', comfy:'workflow',
-    ltxDirector:'film', rh:'cloud', msgen:'sparkles', video:'video', output:'layout-grid'
+    slotsLoopVideoAgent:'clapperboard', mxShellPromptAgent:'film', mxShellPolishAgent:'wand-sparkles', mxShellPromptView:'file-text', textOutput:'file-output', deepWhiteShotAgent:'clapperboard', deepWhiteShotView:'book-open', screenwritingAgent:'pen-line', viewpointAgent:'camera', pixarAdScriptAgent:'sparkles', videoReverse:'rewind',
+    rh:'cloud', msgen:'sparkles', video:'video', output:'layout-grid'
 };
 function renderNode(node){
     normalizeApiNodeLayout(node);
@@ -16831,10 +16836,10 @@ function renderNode(node){
         }
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? tr('canvas.textNode') : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? (langIsEn() ? 'Prompt group' : '提示词组') : node.type === 'group' ? (langIsEn() ? 'New group' : '新建组') : node.type === 'output' ? 'Output' : node.type === 'imageBatch' ? (langIsEn() ? 'Image group' : '图片组') : node.type === 'frameStack' ? (langIsEn() ? 'Frame Stack' : '截帧集') : node.type === 'llm' ? 'LLM' : node.type === 'replicaAgent' ? '复刻 Agent' : node.type === 'imageRepairAgent' ? (langIsEn() ? 'Repair Agent' : '修图 Agent') : node.type === 'batchPosterAgent' ? 'Batch Poster Agent' : node.type === 'nineGridAgent' ? (langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent') : node.type === 'slotsLoopVideoAgent' ? (langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent') : node.type === 'mxShellPromptAgent' ? (langIsEn() ? 'Mx-Shell Prompt Agent' : 'Mx-Shell 提示词 Agent') : node.type === 'mxShellPolishAgent' ? (langIsEn() ? 'Mx-Shell Polish Agent' : 'Mx-Shell 润色 Agent') : node.type === 'textOutput' ? textOutputKindLabel(node.kind) : node.type === 'mxShellPromptView' ? textOutputKindLabel('mxShell') : node.type === 'deepWhiteShotAgent' ? (langIsEn() ? 'DeepWhite Shot Agent' : 'DeepWhite 导演分镜 Agent') : node.type === 'deepWhiteShotView' ? textOutputKindLabel('deepWhite') : node.type === 'viewpointAgent' ? (langIsEn() ? 'Viewpoint Agent' : '视角 Agent') : node.type === 'screenwritingAgent' ? (langIsEn() ? 'Screenwriting Agent' : '编剧 Agent') : node.type === 'pixarAdScriptAgent' ? (langIsEn() ? 'Story Anim Storyboard Agent' : '故事动画分镜 Agent') : node.type === 'videoReverse' ? '视频反推' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? tr('canvas.textNode') : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? (langIsEn() ? 'Prompt group' : '提示词组') : node.type === 'group' ? (langIsEn() ? 'New group' : '新建组') : node.type === 'output' ? 'Output' : node.type === 'imageBatch' ? (langIsEn() ? 'Image group' : '图片组') : node.type === 'frameStack' ? (langIsEn() ? 'Frame Stack' : '截帧集') : node.type === 'llm' ? 'LLM' : node.type === 'replicaAgent' ? '复刻 Agent' : node.type === 'imageRepairAgent' ? (langIsEn() ? 'Repair Agent' : '修图 Agent') : node.type === 'batchPosterAgent' ? 'Batch Poster Agent' : node.type === 'nineGridAgent' ? (langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent') : node.type === 'slotsLoopVideoAgent' ? (langIsEn() ? 'Slots Loop Video Agent' : 'Slots 循环视频 Agent') : node.type === 'mxShellPromptAgent' ? (langIsEn() ? 'Mx-Shell Prompt Agent' : 'Mx-Shell 提示词 Agent') : node.type === 'mxShellPolishAgent' ? (langIsEn() ? 'Mx-Shell Polish Agent' : 'Mx-Shell 润色 Agent') : node.type === 'textOutput' ? textOutputKindLabel(node.kind) : node.type === 'mxShellPromptView' ? textOutputKindLabel('mxShell') : node.type === 'deepWhiteShotAgent' ? (langIsEn() ? 'DeepWhite Shot Agent' : 'DeepWhite 导演分镜 Agent') : node.type === 'deepWhiteShotView' ? textOutputKindLabel('deepWhite') : node.type === 'viewpointAgent' ? (langIsEn() ? 'Viewpoint Agent' : '视角 Agent') : node.type === 'screenwritingAgent' ? (langIsEn() ? 'Screenwriting Agent' : '编剧 Agent') : node.type === 'pixarAdScriptAgent' ? (langIsEn() ? 'Story Anim Storyboard Agent' : '故事动画分镜 Agent') : node.type === 'videoReverse' ? '视频反推' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 运行状态徽章：含单节点失败与级联失败
-    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','deepWhiteShotAgent','screenwritingAgent','viewpointAgent','pixarAdScriptAgent','videoReverse'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','msgen','llm','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','deepWhiteShotAgent','screenwritingAgent','viewpointAgent','pixarAdScriptAgent','videoReverse'].includes(node.type) && node.runStatus
         && node.runStatus !== 'idle';
     const statusHtml = showStatus ? (() => {
         const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -17146,8 +17151,6 @@ function renderNode(node){
     if(node.type === 'msgen') body.appendChild(renderMsGenBody(node));
     if(node.type === 'video') body.appendChild(renderVideoBody(node));
     if(node.type === 'rh') body.appendChild(renderRhBody(node));
-    if(node.type === 'comfy') body.appendChild(renderComfyBody(node));
-    if(node.type === 'ltxDirector') body.appendChild(renderLTXDirectorBody(node));
     mountAgentResultStage(body, node);
     if(node.type === 'output') {
         const pendingHtml = (node._pending || []).map(p => outputPendingHtml(p)).join('');
@@ -17225,9 +17228,9 @@ function renderNode(node){
         if(!isNodeDragSurface(e.target)) return;
         startNodeDrag(e, node);
     };
-    const canInput = ['generator','comfy','ltxDirector','output','llm','prompt','msgen','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','deepWhiteShotAgent','screenwritingAgent','viewpointAgent','pixarAdScriptAgent','textOutput','videoReverse','frameStack','loop','imageBatch'].includes(node.type);
+    const canInput = ['generator','output','llm','prompt','msgen','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','deepWhiteShotAgent','screenwritingAgent','viewpointAgent','pixarAdScriptAgent','textOutput','videoReverse','frameStack','loop','imageBatch'].includes(node.type);
     // 框组只做视觉框选，无左右端口；连线走框内节点自身
-    const canOutput = ['image','prompt','loop','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','replicaAgent','imageRepairAgent','videoReverse','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','textOutput','mxShellPromptView','deepWhiteShotAgent','deepWhiteShotView','screenwritingAgent','viewpointAgent','pixarAdScriptAgent','frameStack','imageBatch'].includes(node.type);
+    const canOutput = ['image','prompt','loop','promptGroup','generator','llm','msgen','video','rh','replicaAgent','imageRepairAgent','videoReverse','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','textOutput','mxShellPromptView','deepWhiteShotAgent','deepWhiteShotView','screenwritingAgent','viewpointAgent','pixarAdScriptAgent','frameStack','imageBatch'].includes(node.type);
     // 图片组内子图：连线走组节点，子图两侧不显示端口圆点
     const hidePorts = node.type === 'image' && Boolean(imageBatchOwningImage(node.id));
     if(hidePorts) el.classList.add('in-image-batch');
@@ -17669,8 +17672,6 @@ function defaultNodeSize(type){
     if(type === 'msgen') return {w:260, h:0};
     if(type === 'video') return {w:260, h:0};
     if(type === 'rh') return {w:RH_DEFAULT_W, h:0};
-    if(type === 'comfy') return {w:420, h:460};
-    if(type === 'ltxDirector') return {w:1000, h:800};
     if(type === 'output') return {w:460, h:0};
     if(type === 'frameStack') return {w:460, h:0};
     if(type === 'imageBatch') return {w:GROUP_DEFAULT_W, h:GROUP_DEFAULT_H_IMAGE_BATCH};
@@ -17730,9 +17731,9 @@ function syncPromptGroupDownstreamLoops(group){
         .filter(n => n?.type === 'loop')
         .forEach(loop => syncLoopCountFromPromptGroup(loop, group));
 }
-function promptGroupChildTexts(groupNode){
+function promptGroupChildTexts(groupNode, readOnly=false){
     if(!groupNode || groupNode.type !== 'promptGroup') return [];
-    if(prunePromptGroupItems(groupNode)) syncPromptGroupDownstreamLoops(groupNode);
+    if(!readOnly && prunePromptGroupItems(groupNode)) syncPromptGroupDownstreamLoops(groupNode);
     const prefix = groupNode.prefixPrompt || '';
     return activePromptGroupChildren(groupNode)
         .map(p => applyPromptGroupPrefix(prefix, p.text || ''))
@@ -17815,7 +17816,7 @@ function loopInputPromptItems(node){
                     return;
                 }
                 else if(n.type === 'promptGroup') {
-                    promptGroupChildTexts(n).forEach(text => items.push(text));
+                    promptGroupChildTexts(n, true).forEach(text => items.push(text));
                     return;
                 }
                 else if(n.type === 'loop') text = renderLoopPrompt(n);
@@ -18237,15 +18238,104 @@ function renderLoopBody(node){
     }
     return wrap;
 }
+function imageProviderIsListed(raw){
+    const text = String(raw || '').trim();
+    if(!text) return true;
+    return imageApiProviders().some(p => p.id === legacyImageProviderId(text));
+}
+function chatProviderIsListed(raw){
+    const text = String(raw || '').trim();
+    if(!text) return true;
+    return chatApiProviders().some(p => p.id === text);
+}
+function canvasAgentModelRejectMessage(node, kind, forAgent){
+    const image = kind === 'image';
+    const rawProvider = String((image ? node?.apiProvider : node?.llmProvider) || '').trim();
+    const rawModel = String(node?.model || '').trim();
+    const providerKnown = image ? imageProviderIsListed(rawProvider) : chatProviderIsListed(rawProvider);
+    const checkProviderId = image
+        ? resolveImageProviderId(providerKnown ? rawProvider : '')
+        : resolveChatProviderId(providerKnown ? (rawProvider || 'comfly') : '');
+    const models = image ? providerImageModels(checkProviderId) : providerChatModels(checkProviderId);
+    const resolved = rawModel ? (image ? resolveImageModel(rawModel) : resolveChatModel(rawModel, checkProviderId)) : '';
+    const modelKnown = !rawModel || models.includes(resolved);
+    if(providerKnown && modelKnown) return '';
+    const listText = models.join(', ');
+    const optionText = forAgent ? '可选值见上下文的 availableModels。' : `可选：${listText}`;
+    const providerLabel = checkProviderId || (image ? 'runninghub' : 'comfly');
+    if(!providerKnown && !modelKnown){
+        return `provider「${rawProvider}」不存在。已按 ${providerLabel} 校验。模型「${rawModel}」也不在 ${providerLabel} 的可选列表里。${optionText}`;
+    }
+    if(!providerKnown){
+        const modelClause = rawModel
+            ? `模型「${resolved}」在 ${providerLabel} 的可选列表里。`
+            : '未填写 model。';
+        return `provider「${rawProvider}」不存在。已按 ${providerLabel} 校验。${modelClause}`;
+    }
+    return `模型「${rawModel}」不在 ${providerLabel} 的可选列表里。${optionText}`;
+}
+function rejectCanvasAgentModelChoice(node, kind, opts){
+    const message = canvasAgentModelRejectMessage(node, kind, opts?.agent);
+    if(!message) return false;
+    if(opts?.cascade) throw new Error(message);
+    softAlert(message);
+    return true;
+}
+// 所有可执行类型的前置检查失败都走这里。
+// cascade 时只抛错——agentLastError 和落盘由外层
+// （executeCanvasAgentNodeSkill 的 reject 分支
+//  和 executeAndSettle 的 catch）负责，这里不要重复写。
+// cascade 时不写 runStatus：写了会让 nodeLifecycle 判 discarded，
+// 而 assertAgentCanExecute 拦住原地重跑。
+// 这些前置全是用户事后能补上的（连图、填 brief），
+// 补好之后应该能原地重跑，不是被迫新建替换。
+// 人类路径保持原样（C 档只 softAlert，B 档写 runStatus）。
+// 新增可执行类型时接上这个函数，不要自己写一套——
+// 这是 P3 只修了 videoReverse 的原因。
+// 判据是 opts.cascade，不是 opts.agent。
+// 这意味着人手级联遇到前置缺失时也会抛错、停批。
+// 这是有意的：
+// - runOneCascadePass 上 B 档本来就会停（36243 看到
+//   runStatus==='failed' 自己抛），只有 C 档是新增中断。
+// - runNodeCascade 上 20 处都是新增中断，
+//   但改之前的行为是「失败条被 36193 无条件盖成 done」，
+//   也就是藏失败。
+// 停批是诚实的浪费，藏失败是不诚实的省事，本轮选前者。
+// 正确做法是「按依赖决定停不停」，
+// 那是一个独立改动，不在本轮范围。
+//
+// 两个已知的 pre-existing 问题，本轮不修：
+// - runNodeCascade 串行 36193：await 成功后无条件写 done，
+//   不看 runStatus → runner 自己写的失败条会被盖掉。
+// - runOneCascadePass 36243：对任何 failed 都抛，
+//   不看依赖关系就停整批。
+// 生成后失败（D 档）和前置缺失（B/C 档）
+// 都保持 cascade 时不写 runStatus，但理由不同：
+// 前置缺失是用户事后能补上的输入，
+// 生成后失败是可能重试成功的外部故障（1011 服务繁忙那种）。
+// 两者都不该因为一次失败就永久不可重跑。
+// D3 比 D2 更急：D2 至少抛错、Agent 能看见，
+// D3 连看见都做不到，它会把一次真失败报成成功。
+// 而 D3 的漏网由 executeAndSettle 的兜底接住，
+// 不依赖每个 runner 都记得抛错。
+function rejectCanvasAgentPrecondition(node, message, opts, recordStatus){
+    if(opts?.cascade) throw new Error(message);
+    if(recordStatus){
+        node.runStatus = 'failed';
+        node.runError = message;
+        return;
+    }
+    softAlert(message);
+}
 function renderLLMBody(node){
     const wrap = document.createElement('div');
     wrap.className = 'llm-body';
     const mode = node.mode || 'node';
-    node.llmProvider = resolveChatProviderId(node.llmProvider || 'comfly');
+    if(chatProviderIsListed(node.llmProvider)) node.llmProvider = resolveChatProviderId(node.llmProvider || 'comfly');
     const llmProv = node.llmProvider;
-    if(llmProv === 'modelscope') node.model = node.llmMsModel || node.model;
-    if(!providerChatModels(llmProv).includes(node.model)) node.model = providerChatModels(llmProv)[0] || node.model;
-    const modelOpts = chatModelOptions(node.model, llmProv);
+    const listProvider = chatProviderIsListed(llmProv) ? llmProv : resolveChatProviderId('');
+    if(listProvider === 'modelscope') node.model = node.llmMsModel || node.model;
+    const modelOpts = chatModelOptions(node.model, listProvider);
     const imgs = llmInputImages(node);
     const vids = llmInputVideos(node);
     const mediaBadge = vids.length
@@ -18493,7 +18583,7 @@ function llmInputText(node){
     return connections.filter(c => c.to === node.id).map(c => nodes.find(n => n.id === c.from)).filter(Boolean).map(n => {
         if(n.type === 'prompt') return isNodeEnabled(n) ? (n.text || '') : '';
         if(n.type === 'loop') return renderLoopPrompt(n);
-        if(n.type === 'promptGroup') return promptGroupChildTexts(n).join('\n\n');
+        if(n.type === 'promptGroup') return promptGroupChildTexts(n, true).join('\n\n');
         if(n.type === 'llm') return n.outputText || '';
         return '';
     }).filter(Boolean).join('\n\n');
@@ -18788,8 +18878,7 @@ async function runSlotsLoopVideoAgent(nodeId, opts={}){
     const imageRef = slotsLoopVideoAgentImageRef(node);
     if(!imageRef?.url){
         const msg = langIsEn() ? 'Connect a Slots static image to the Image input.' : '请通过 Image 端口连接一张 Slots 静态图。';
-        node.runStatus = 'failed';
-        node.runError = msg;
+        rejectCanvasAgentPrecondition(node, msg, opts, true);
         refreshNodes([nodeId]);
         return;
     }
@@ -18831,9 +18920,11 @@ async function runSlotsLoopVideoAgent(nodeId, opts={}){
         setStatus(langIsEn() ? 'Slots loop video prompts ready' : 'Slots 循环视频提示词已生成');
         scheduleSave();
     } catch(err) {
-        if(!opts.cascade) node.running = false;
-        node.runStatus = 'failed';
-        node.runError = err.message || String(err);
+        if(!opts.cascade){
+            node.running = false;
+            node.runStatus = 'failed';
+            node.runError = err.message || String(err);
+        }
         refreshNodes([nodeId]);
         if(opts.cascade) throw err;
         scheduleSave();
@@ -19427,8 +19518,7 @@ async function runMxShellPromptAgent(nodeId, opts={}){
             : (langIsEn()
                 ? 'Provide a story/script/storyboard draft (≥10 chars), or connect a Prompt node.'
                 : '请提供故事大纲/剧本/分镜草稿（至少 10 字），或连接提示词节点。');
-        node.runStatus = 'failed';
-        node.runError = msg;
+        rejectCanvasAgentPrecondition(node, msg, opts, true);
         refreshNodes([nodeId]);
         return;
     }
@@ -19501,9 +19591,11 @@ async function runMxShellPromptAgent(nodeId, opts={}){
             });
         }
     } catch(err) {
-        if(!opts.cascade) node.running = false;
-        node.runStatus = 'failed';
-        node.runError = err.message || String(err);
+        if(!opts.cascade){
+            node.running = false;
+            node.runStatus = 'failed';
+            node.runError = err.message || String(err);
+        }
         refreshNodes([nodeId]);
         if(opts.cascade) throw err;
         scheduleSave();
@@ -19676,8 +19768,7 @@ async function runDeepWhiteShotAgent(nodeId, opts={}){
         const msg = langIsEn()
             ? 'Provide a scene/screenplay (≥20 chars), or connect a Prompt node. DeepWhite requires a scene before designing shots.'
             : '请提供场景/剧本（至少 20 字），或连接提示词节点。DeepWhite skill 要求先有场景再设计镜头。';
-        node.runStatus = 'failed';
-        node.runError = msg;
+        rejectCanvasAgentPrecondition(node, msg, opts, true);
         refreshNodes([nodeId]);
         return;
     }
@@ -19740,9 +19831,11 @@ async function runDeepWhiteShotAgent(nodeId, opts={}){
             });
         }
     } catch(err) {
-        if(!opts.cascade) node.running = false;
-        node.runStatus = 'failed';
-        node.runError = err.message || String(err);
+        if(!opts.cascade){
+            node.running = false;
+            node.runStatus = 'failed';
+            node.runError = err.message || String(err);
+        }
         refreshNodes([nodeId]);
         if(opts.cascade) throw err;
         scheduleSave();
@@ -19996,8 +20089,7 @@ async function runScreenwritingAgent(nodeId, opts={}){
         const msg = langIsEn()
             ? 'Provide a brief or material (≥8 chars).'
             : '请提供 brief 或素材（至少 8 字）。';
-        node.runStatus = 'failed';
-        node.runError = msg;
+        rejectCanvasAgentPrecondition(node, msg, opts, true);
         refreshNodes([nodeId]);
         return;
     }
@@ -20043,9 +20135,11 @@ async function runScreenwritingAgent(nodeId, opts={}){
             });
         }
     } catch(err) {
-        if(!opts.cascade) node.running = false;
-        node.runStatus = 'failed';
-        node.runError = err.message || String(err);
+        if(!opts.cascade){
+            node.running = false;
+            node.runStatus = 'failed';
+            node.runError = err.message || String(err);
+        }
         refreshNodes([nodeId]);
         if(opts.cascade) throw err;
         scheduleSave();
@@ -20215,8 +20309,8 @@ async function runPixarAdScriptAgent(nodeId, opts={}){
     const mode = String(opts.mode || 'story_script') === 'asset_prompts' ? 'asset_prompts' : 'story_script';
     const story = pixarAdAgentScript(node);
     if(story.length < 20){
-        node.runStatus = 'failed';
-        node.runError = langIsEn() ? 'Please provide a story of at least 20 characters.' : '请提供至少 20 字的故事创意或剧本。';
+        const msg = langIsEn() ? 'Please provide a story of at least 20 characters.' : '请提供至少 20 字的故事创意或剧本。';
+        rejectCanvasAgentPrecondition(node, msg, opts, true);
         refreshNodes([nodeId]);
         return;
     }
@@ -20294,9 +20388,11 @@ async function runPixarAdScriptAgent(nodeId, opts={}){
                 : (langIsEn() ? 'Story script ready — outputs created' : '分镜脚本已生成 — 已分流输出节点'));
             if(outputs[0]) requestAnimationFrame(() => document.querySelector(`.node[data-id="${outputs[0].id}"]`)?.scrollIntoView?.({block:'nearest', behavior:'smooth'}));
         } catch(err) {
-            if(!opts.cascade) node.running = false;
-            node.runStatus = 'failed';
-            node.runError = err.message || String(err);
+            if(!opts.cascade){
+                node.running = false;
+                node.runStatus = 'failed';
+                node.runError = err.message || String(err);
+            }
             refreshNodes([nodeId]);
             scheduleSave();
             if(opts.cascade) throw err;
@@ -21021,16 +21117,25 @@ async function runBatchPosterImageSlot(genStub, themeSlot, basePrompt, posterRef
     const prompt = buildBatchPosterThemePrompt(basePrompt, slot.theme_prompt, slot.title_style, retryAttempt);
     const payload = await buildBatchPosterImagePayload(genStub, prompt, posterRef);
     const taskInfo = await createCanvasImageTask(payload);
+    const slotPending = makePending(uid('p'), {...run, prompt}, {
+        canvasTaskId:taskInfo.task_id,
+        canvasTaskType:'online-image',
+        batchPosterRunToken:runToken,
+    });
     if(out){
-        out._pending = [
-            ...(out._pending || []),
-            makePending(uid('p'), {...run, prompt}, {
-                canvasTaskId:taskInfo.task_id,
-                canvasTaskType:'online-image',
-                batchPosterRunToken:runToken,
-            }),
-        ];
+        noteCanvasAgentOutputHost(ownerNodeId, out);
+        out._pending = [...(out._pending || []), slotPending];
     }
+    registerCanvasTaskLedger(taskInfo.task_id, {
+        canvasId: canvas?.id || '',
+        hostNodeId: out?.id || '',
+        genNodeId: ownerNodeId || '',
+        pendingId: slotPending.id || '',
+        run,
+        appendGenerated: false,
+        startedAt: Number(slotPending.startedAt || nowMs()),
+        canvasTaskType: 'online-image',
+    });
     refreshRunNodes(ownerNode, out);
     scheduleSave();
     const status = await pollCanvasImageTask(taskInfo.task_id);
@@ -21059,23 +21164,42 @@ async function runBatchPosterImageSlotPlanB(genStub, themeSlot, basePrompt, post
     const scenePrompt = buildBatchPosterSceneOnlyPrompt(BATCH_POSTER_PLAN_B_SCENE_BASE, slot.theme_prompt, retryAttempt);
     const scenePayload = await buildBatchPosterImagePayload(genStub, scenePrompt, null, {modelOverride:nanoModel});
     const sceneTask = await createCanvasImageTask(scenePayload);
+    registerCanvasTaskLedger(sceneTask.task_id, {
+        canvasId: canvas?.id || '',
+        hostNodeId: out?.id || '',
+        genNodeId: ownerNodeId || '',
+        pendingId: '',
+        run,
+        appendGenerated: false,
+        startedAt: nowMs(),
+        canvasTaskType: 'online-image',
+    });
     const sceneResult = await waitForCanvasImageTask(sceneTask.task_id);
     const draftUrl = batchPosterDraftUrlFromTaskResult(sceneResult);
     if(!draftUrl) throw new Error(langIsEn() ? 'Plan B scene pass returned no image' : 'B计划场景阶段未返回图片');
     onProgress?.({phase:'image', subPhase:'typography'});
     const typoPayload = await buildBatchPosterTypographyEditPayload(genStub, draftUrl, posterRef, slot.title_style, titleCopy, basePrompt, {titleMode});
     const taskInfo = await createCanvasImageTask(typoPayload);
+    const typoPending = makePending(uid('p'), {...run, prompt:typoPayload.prompt}, {
+        canvasTaskId:taskInfo.task_id,
+        canvasTaskType:'online-image',
+        batchPosterRunToken:runToken,
+        stageLabel:langIsEn() ? 'Refining titles (gpt-image-2)…' : '标题精修 (gpt-image-2)…',
+    });
     if(out){
-        out._pending = [
-            ...(out._pending || []),
-            makePending(uid('p'), {...run, prompt:typoPayload.prompt}, {
-                canvasTaskId:taskInfo.task_id,
-                canvasTaskType:'online-image',
-                batchPosterRunToken:runToken,
-                stageLabel:langIsEn() ? 'Refining titles (gpt-image-2)…' : '标题精修 (gpt-image-2)…',
-            }),
-        ];
+        noteCanvasAgentOutputHost(ownerNodeId, out);
+        out._pending = [...(out._pending || []), typoPending];
     }
+    registerCanvasTaskLedger(taskInfo.task_id, {
+        canvasId: canvas?.id || '',
+        hostNodeId: out?.id || '',
+        genNodeId: ownerNodeId || '',
+        pendingId: typoPending.id || '',
+        run,
+        appendGenerated: false,
+        startedAt: Number(typoPending.startedAt || nowMs()),
+        canvasTaskType: 'online-image',
+    });
     refreshRunNodes(ownerNode, out);
     scheduleSave();
     const status = await pollCanvasImageTask(taskInfo.task_id);
@@ -21125,7 +21249,7 @@ function updateBatchPosterRunButton(node){
     el.classList.remove('running');
     if(span) span.textContent = langIsEn() ? 'Run Batch' : '一键批量生成';
 }
-async function executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPendingIds){
+async function executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPendingIds, cascade){
     const node = nodes.find(n => n.id === nodeId);
     if(!node) return;
     const posterRef = ctx.posterRef;
@@ -21188,7 +21312,9 @@ async function executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPending
         const generatedCount = slots.filter(slot => slot.status === 'succeeded').length;
         const lastFailure = slots.find(slot => slot.status !== 'succeeded')?.lastError || '';
         if(!generatedCount){
-            finishBatchPosterRun(node, runToken, {error:lastFailure || (langIsEn() ? 'Batch Poster image generation failed' : 'Batch Poster 图片生成失败')});
+            const message = lastFailure || (langIsEn() ? 'Batch Poster image generation failed' : 'Batch Poster 图片生成失败');
+            if(cascade) throw new Error(message);
+            finishBatchPosterRun(node, runToken, {error:message});
             refreshRunNodes(node, out);
             showErrorModal(lastFailure || (langIsEn() ? 'Batch Poster failed' : 'Batch Poster 批量生成失败'), 'Batch Poster Agent');
             scheduleSave();
@@ -21210,8 +21336,15 @@ async function executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPending
         setStatus(langIsEn() ? `Batch Poster: added ${generatedCount} image(s) to output` : `Batch Poster：已向 Output 追加 ${generatedCount} 张海报`);
         scheduleSave();
     } catch(err) {
-        removeBatchPosterRunPending(out, runToken, llmPendingIds);
         const stopped = node._agentStopRequested || /已停止|Stopped/i.test(String(err?.message || err));
+        if(cascade && !stopped){
+            removeBatchPosterRunPending(out, runToken, llmPendingIds);
+            delete node.runStatus;
+            delete node.runError;
+            node.running = false;
+            throw err;
+        }
+        removeBatchPosterRunPending(out, runToken, llmPendingIds);
         finishBatchPosterRun(node, runToken, stopped ? {} : {error:err.message || String(err)});
         refreshRunNodes(node, out);
         if(!stopped) showErrorModal(err.message || (langIsEn() ? 'Batch Poster failed' : 'Batch Poster 批量生成失败'), 'Batch Poster Agent');
@@ -21228,18 +21361,14 @@ async function runBatchPosterAgent(nodeId, opts={}){
     const posterRef = batchPosterAgentPosterRef(node);
     if(!posterRef?.url){
         const msg = langIsEn() ? 'Connect a reference poster image to the Image input.' : '请通过 Image 端口连接一张参考海报图。';
-        node.runStatus = 'failed';
-        node.runError = msg;
+        rejectCanvasAgentPrecondition(node, msg, opts, true);
         refreshNodes([nodeId]);
-        if(opts.cascade) throw new Error(msg);
         return;
     }
     if(batchPosterUsesCustomTheme(node) && !normalizeBatchPosterCustomTheme(node.custom_theme)){
         const msg = langIsEn() ? 'Enter a custom theme before running.' : '请先填写自定义主题。';
-        node.runStatus = 'failed';
-        node.runError = msg;
+        rejectCanvasAgentPrecondition(node, msg, opts, true);
         refreshNodes([nodeId]);
-        if(opts.cascade) throw new Error(msg);
         return;
     }
     delete node._agentStopRequested;
@@ -21259,6 +21388,7 @@ async function runBatchPosterAgent(nodeId, opts={}){
     let out = outputForNode(node, 460);
     const llmStageLabel = batchPosterBrainstormStatusLabelFromCfg(ctx.brainstorm);
     if(out){
+        noteCanvasAgentOutputHost(node, out);
         out._pending = [
             ...(out._pending || []),
             ...llmPendingIds.map(id => makePending(id, run, {
@@ -21271,8 +21401,8 @@ async function runBatchPosterAgent(nodeId, opts={}){
     scheduleSave();
     refreshNodes([nodeId]);
     setStatus(batchPosterBrainstormStatusLabelFromCfg(ctx.brainstorm));
-    if(opts.cascade) await executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPendingIds);
-    else void executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPendingIds);
+    if(opts.cascade) await executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPendingIds, true);
+    else void executeBatchPosterRun(nodeId, runToken, ctx, run, out, llmPendingIds, false);
 }
 function runBatchPosterFromButton(nodeId, event){
     event?.preventDefault?.();
@@ -21592,7 +21722,7 @@ function confirmNineGridOverwriteDeepWhite(node){
         : '当前九宫格已有 DeepWhite 推送的分镜提示词。重新跑「① 生成分镜」会覆盖它们，确定吗？';
     return window.confirm(msg);
 }
-async function runNineGridPhaseA(nodeId){
+async function runNineGridPhaseA(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || node.type !== 'nineGridAgent' || isNodeDisabled(node)) return false;
     // 取消覆盖确认时必须返回 false，避免「一键全流程」继续跑 Phase B
@@ -21601,15 +21731,13 @@ async function runNineGridPhaseA(nodeId){
     const refs = nineGridAgentRefsPayload(node);
     if(story.length < 10){
         const msg = langIsEn() ? 'Enter a story (10+ chars) or connect a Prompt node.' : '请输入剧本（至少 10 字）或上游连接 Prompt。';
-        node.runStatus = 'failed';
-        node.runError = msg;
+        rejectCanvasAgentPrecondition(node, msg, opts, true);
         refreshNodes([nodeId]);
         return false;
     }
     if(!refs.length){
         const msg = langIsEn() ? 'Connect at least one reference image.' : '请至少连接 1 张参考图。';
-        node.runStatus = 'failed';
-        node.runError = msg;
+        rejectCanvasAgentPrecondition(node, msg, opts, true);
         refreshNodes([nodeId]);
         return false;
     }
@@ -21642,6 +21770,11 @@ async function runNineGridPhaseA(nodeId){
         node.runStatus = 'done';
         return true;
     } catch(err) {
+        if(opts?.cascade){
+            delete node.runStatus;
+            delete node.runError;
+            throw err;
+        }
         node.runStatus = 'failed';
         node.runError = err.message || String(err);
         return false;
@@ -21653,7 +21786,7 @@ async function runNineGridPhaseA(nodeId){
         scheduleSave();
     }
 }
-async function runNineGridPhaseB(nodeId){
+async function runNineGridPhaseB(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || node.type !== 'nineGridAgent' || isNodeDisabled(node)) return;
     normalizeNineGridAgentNode(node);
@@ -21661,8 +21794,7 @@ async function runNineGridPhaseB(nodeId){
     const shots = normalizeNineGridShots(node.shots);
     if(!refs.length){
         const msg = langIsEn() ? 'Connect at least one reference image.' : '请至少连接 1 张参考图。';
-        node.runError = msg;
-        node.runStatus = 'failed';
+        rejectCanvasAgentPrecondition(node, msg, opts, true);
         refreshNodes([nodeId]);
         return;
     }
@@ -21670,8 +21802,7 @@ async function runNineGridPhaseB(nodeId){
         const msg = langIsEn()
             ? `Run Phase A first; each cell prompt needs at least ${NINE_GRID_SHOT_PROMPT_MIN_CHARS} Chinese characters.`
             : `请先运行 Phase A，并确保每格描述不少于 ${NINE_GRID_SHOT_PROMPT_MIN_CHARS} 字。`;
-        node.runError = msg;
-        node.runStatus = 'failed';
+        rejectCanvasAgentPrecondition(node, msg, opts, true);
         refreshNodes([nodeId]);
         return;
     }
@@ -21686,6 +21817,16 @@ async function runNineGridPhaseB(nodeId){
         });
         const payload = await buildNineGridImageTaskPayload(node, imagePrompt, refs);
         const taskInfo = await createCanvasImageTask(payload);
+        registerCanvasTaskLedger(taskInfo.task_id, {
+            canvasId: canvas?.id || '',
+            hostNodeId: node.id || '',
+            genNodeId: node.id || '',
+            pendingId: '',
+            run: runSnapshot(node, langIsEn() ? 'Nine Grid Agent' : '九宫格 Agent', refs),
+            appendGenerated: false,
+            startedAt: nowMs(),
+            canvasTaskType: 'online-image',
+        });
         const result = await waitForCanvasImageTask(taskInfo.task_id);
         const gridUrl = result.url || (Array.isArray(result.images) ? result.images[0] : '') || '';
         if(!gridUrl) throw new Error(langIsEn() ? 'No grid image URL returned' : '未返回九宫格大图 URL');
@@ -21713,6 +21854,11 @@ async function runNineGridPhaseB(nodeId){
         }
         node.runStatus = 'done';
     } catch(err) {
+        if(opts?.cascade){
+            delete node.runStatus;
+            delete node.runError;
+            throw err;
+        }
         node.runStatus = 'failed';
         node.runError = err.message || String(err);
     } finally {
@@ -21723,14 +21869,16 @@ async function runNineGridPhaseB(nodeId){
         scheduleSave();
     }
 }
-async function runNineGridFull(nodeId){
+async function runNineGridFull(nodeId, opts={}){
+    // 按钮不传 opts，仍走人类路径写 runStatus。
+    // 级联经 runCascadeNodeByType 传入 runOpts；cascade 为真时前置失败抛错。
     const node = nodes.find(n => n.id === nodeId);
     if(!node || node.type !== 'nineGridAgent' || isNodeDisabled(node)) return;
-    const phaseAOk = await runNineGridPhaseA(nodeId);
+    const phaseAOk = await runNineGridPhaseA(nodeId, opts);
     if(!phaseAOk) return;
     const after = nodes.find(n => n.id === nodeId);
     if(!after || after.runStatus === 'failed' || !normalizeNineGridShots(after.shots)) return;
-    await runNineGridPhaseB(nodeId);
+    await runNineGridPhaseB(nodeId, opts);
 }
 async function runNineGridCrop(nodeId){
     const node = nodes.find(n => n.id === nodeId);
@@ -21793,6 +21941,16 @@ async function runNineGridCellEdit(nodeId, idx){
             ratio:'wide',
         });
         const taskInfo = await createCanvasImageTask(payload);
+        registerCanvasTaskLedger(taskInfo.task_id, {
+            canvasId: canvas?.id || '',
+            hostNodeId: node.id || '',
+            genNodeId: node.id || '',
+            pendingId: '',
+            run: runSnapshot(node, editPrompt, refImages),
+            appendGenerated: false,
+            startedAt: nowMs(),
+            canvasTaskType: 'online-image',
+        });
         const result = await waitForCanvasImageTask(taskInfo.task_id);
         const url = result.url || (Array.isArray(result.images) ? result.images[0] : '') || '';
         if(!url) throw new Error(langIsEn() ? 'No image URL returned' : '未返回图片 URL');
@@ -22506,8 +22664,7 @@ async function runReplicaAgent(nodeId, opts={}){
         const msg = langIsEn()
             ? 'Connect an image to this node and assign it as background/keyframe (图1).'
             : '请连接图片节点，并在角色映射中指定「背景/构图参考」（图1）。';
-        node.runStatus = 'failed';
-        node.runError = msg;
+        rejectCanvasAgentPrecondition(node, msg, opts, true);
         refreshNodes([nodeId]);
         return;
     }
@@ -22571,8 +22728,8 @@ async function runReplicaAgent(nodeId, opts={}){
         if(!opts.cascade){
             syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
         } else {
-            node.runStatus = 'failed';
-            node.runError = err.message || String(err);
+            delete node.runStatus;
+            delete node.runError;
         }
         refreshRunNodes(node, host);
         scheduleSave();
@@ -22602,8 +22759,7 @@ async function runImageRepairAgent(nodeId, opts={}){
     const source = imageRepairAgentSourceImage(node, loopCtx);
     if(!source?.url){
         const msg = langIsEn() ? 'Connect one image node to repair.' : '请连接一张待修复的图片。';
-        node.runStatus = 'failed';
-        node.runError = msg;
+        rejectCanvasAgentPrecondition(node, msg, opts, true);
         refreshNodes([nodeId]);
         return;
     }
@@ -22783,16 +22939,20 @@ async function runVideoReverseNode(nodeId, opts={}){
     const message = videoReverseInputText(node).trim();
     const videos = videoReverseInputVideos(node);
     const promptNodes = videoReverseConnectedPromptNodes(node);
+    // message 已是提示词正文。早退文案另用 fail，避免把提示词当成错误写进 agentLastError。
     if(!promptNodes.length){
-        softAlert(langIsEn() ? 'Connect a Prompt node: drag from the prompt OUT port to this node IN port.' : '请先连接「提示词」节点：从提示词右侧输出端口，拖到视频反推节点左侧输入端口。');
+        const fail = langIsEn() ? 'Connect a Prompt node: drag from the prompt OUT port to this node IN port.' : '请先连接「提示词」节点：从提示词右侧输出端口，拖到视频反推节点左侧输入端口。';
+        rejectCanvasAgentPrecondition(node, fail, opts);
         return;
     }
     if(!message){
-        softAlert(langIsEn() ? 'The connected Prompt node is empty. Write your reverse-engineering instructions first.' : '提示词节点已连接，但内容为空。请先在提示词里写好反推要求。');
+        const fail = langIsEn() ? 'The connected Prompt node is empty. Write your reverse-engineering instructions first.' : '提示词节点已连接，但内容为空。请先在提示词里写好反推要求。';
+        rejectCanvasAgentPrecondition(node, fail, opts);
         return;
     }
     if(!videos.length){
-        softAlert(langIsEn() ? 'Upload a video on the left, or connect a video Image node.' : '请在左侧上传视频，或连接包含视频的节点。');
+        const fail = langIsEn() ? 'Upload a video on the left, or connect a video Image node.' : '请在左侧上传视频，或连接包含视频的节点。';
+        rejectCanvasAgentPrecondition(node, fail, opts);
         return;
     }
     if(!opts.cascade){ node.running = true; node.runStatus = 'running'; refreshNodes([node.id]); }
@@ -22804,9 +22964,11 @@ async function runVideoReverseNode(nodeId, opts={}){
         refreshNodes([node.id]);
         scheduleSave();
     } catch(err) {
-        if(!opts.cascade) node.running = false;
-        node.runStatus = 'failed';
-        node.runError = err.message || String(err);
+        if(!opts.cascade){
+            node.running = false;
+            node.runStatus = 'failed';
+            node.runError = err.message || String(err);
+        }
         refreshNodes([node.id]);
         if(opts.cascade) throw err;
     }
@@ -22820,7 +22982,7 @@ function composeGeneratorPrompt(gen, sources){
     return parts.join('\n\n');
 }
 function isGenConsoleNode(node){
-    // generator / video 完整 Gen Console；msgen 旧画布兼容但菜单隐藏；rh 保持节点内原 UI；ltx/comfy 明确不做
+    // generator / video 完整 Gen Console；msgen 旧画布兼容但菜单隐藏；rh 保持节点内原 UI
     return node && (node.type === 'generator' || node.type === 'msgen' || node.type === 'video');
 }
 /** 上传视频节点：仍是 video 图台，但不弹出底栏生成控制台 */
@@ -25340,12 +25502,11 @@ function genDockShellHtml(node, opts={}){
 function renderGeneratorBody(node){
     const wrap = document.createElement('div');
     wrap.className = 'generator-body gen-stage-only';
-    node.apiProvider = resolveImageProviderId(node.apiProvider || '');
+    if(imageProviderIsListed(node.apiProvider)) node.apiProvider = resolveImageProviderId(node.apiProvider || '');
     const migratedModel = normalizeLegacyImageModelId(node.model);
     if(migratedModel !== String(node.model || '').trim()) node.model = migratedModel;
-    const imageProviderModels = providerImageModels(node.apiProvider);
+    const imageProviderModels = providerImageModels(resolveImageProviderId(node.apiProvider || ''));
     if(!imageProviderModels.length) node.model = '';
-    else if(!imageProviderModels.includes(resolveImageModel(node.model))) node.model = imageProviderModels[0] || '';
     wrap.innerHTML = `${nodeFloatTitleHtml(node)}<div class="gen-stage-slot">${renderGenStageHtml(node)}</div>`;
     refreshGenStage(wrap, node);
     refreshIcons(wrap);
@@ -25463,7 +25624,7 @@ function positionImageGenDock(node){
 }
 function bindImageGenDockControls(wrap, node){
     if(!node || node.type !== 'generator') return;
-    node.apiProvider = resolveImageProviderId(node.apiProvider || '');
+    if(imageProviderIsListed(node.apiProvider)) node.apiProvider = resolveImageProviderId(node.apiProvider || '');
     const migratedModel = normalizeLegacyImageModelId(node.model);
     if(migratedModel !== String(node.model || '').trim()) node.model = migratedModel;
     const models = providerImageModels(node.apiProvider);
@@ -29452,6 +29613,8 @@ function buildImageNovelViewHtml(st){
     const en = langIsEn();
     const depth = normalizeArrowCameraDepth(st.cameraDepth);
     const depthItems = [['near', en ? 'Foreground' : '前景'], ['mid', en ? 'Midground' : '中景'], ['far', en ? 'Background' : '背景']].map(([key, label]) => `<button type="button" class="image-novel-view-depth-btn${depth === key ? ' is-active' : ''}" data-novel-view-depth="${escapeAttr(key)}">${escapeHtml(label)}</button>`).join('');
+    const model = viewpointImageModel(st.model);
+    const modelItems = viewpointImageModelChoices().map(key => `<button type="button" class="image-expand-menu-item${model === key ? ' is-active' : ''}" data-novel-view-model="${escapeAttr(key)}">${escapeHtml(key)}</button>`).join('');
     const sizeLabel = st.size === '2k' ? '2K' : '1K';
     const count = clampCustomViewpointCount(st.count);
     const sizeItems = [['1k', '1K'], ['2k', '2K']].map(([key, label]) => `<button type="button" class="image-expand-menu-item${st.size === key ? ' is-active' : ''}" data-novel-view-size="${escapeAttr(key)}">${escapeHtml(label)}</button>`).join('');
@@ -29465,6 +29628,13 @@ function buildImageNovelViewHtml(st){
             <button type="button" class="image-expand-icon" data-novel-view-act="close" title="${escapeAttr(en ? 'Close' : '关闭')}" aria-label="close"><i data-lucide="x"></i></button>
             <span class="image-expand-hint">${escapeHtml(en ? 'Tail is where you stand. Tip is the facing.' : '尾部是站位，尖端是脸朝的方向')}</span>
             <div class="image-novel-view-depth" role="group" aria-label="${escapeAttr(en ? 'Camera layer' : '机位层次')}">${depthItems}</div>
+            <div class="image-expand-drop">
+                <button type="button" class="image-expand-drop-btn" data-novel-view-menu="model" aria-expanded="false" title="${escapeAttr(en ? 'Image model' : '生图模型')}">
+                    <span data-novel-view-model-label>${escapeHtml(model)}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-novel-view-panel="model" hidden>${modelItems}</div>
+            </div>
             <div class="image-expand-drop">
                 <button type="button" class="image-expand-drop-btn" data-novel-view-menu="size" aria-expanded="false">
                     <span data-novel-view-size-label>${escapeHtml(sizeLabel)}</span>
@@ -29608,7 +29778,7 @@ function bindImageNovelViewChrome(host){
         btn.addEventListener('click', e => {
             e.stopPropagation();
             if(!imageNovelViewState) return;
-            imageNovelViewState.model = btn.getAttribute('data-novel-view-model') || NOVEL_VIEW_DEFAULT_MODEL;
+            imageNovelViewState.model = viewpointImageModel(btn.getAttribute('data-novel-view-model'));
             syncNovelViewModelUi(host);
             closeNovelViewMenus();
         });
@@ -29746,7 +29916,7 @@ async function openImageNovelView(target){
         arrowEnd: null,
         widthFrac: NOVEL_VIEW_DEFAULT_WIDTH,
         depthDir: 'into',
-        model: NOVEL_VIEW_DEFAULT_MODEL,
+        model: viewpointImageModel(''),
         size: '1k',
         quality: 'medium',
         cameraDepth: 'mid',
@@ -29845,6 +30015,7 @@ function runImageNovelViewFromPanel(){
         widthFrac: st.widthFrac,
         depthDir: st.depthDir,
         cameraDepth: depth,
+        model: viewpointImageModel(st.model),
         size: st.size || '1k',
         count: clampCustomViewpointCount(st.count),
         prompt: buildArrowViewpointIntent(st.arrowStart, st.arrowEnd, depth),
@@ -29907,6 +30078,9 @@ async function runImageNovelViewJob(job, list, source){
     try {
         if(!targets.length) throw new Error(langIsEn() ? 'New-view node missing' : '新视角节点已丢失');
         const composed = await composeNovelViewInput(job);
+        const previousUrl = job.url;
+        job.url = await ensureDurableCanvasImageUrl(job.url, source?.id);
+        retargetViewpointSourceUrl(job, previousUrl, targets);
         const res = await apiFetch('/api/canvas/viewpoint-agent', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -29918,7 +30092,7 @@ async function runImageNovelViewJob(job, list, source){
         if(!english) throw new Error(langIsEn() ? 'Empty viewpoint prompt' : '视角提示词为空');
         run.prompt = english;
         setStage(langIsEn() ? 'Generating new view…' : '新视角生成中…');
-        const model = generatorNanoBananaProModel('runninghub');
+        const model = viewpointImageModel(job.model);
         const w = composed.w || job.srcW || 1;
         const h = composed.h || job.srcH || 1;
         const refs = [{ url: job.url, name: outputImageName(job.url) || 'source.png', role: 'source' }];
@@ -30520,6 +30694,8 @@ function clampCustomViewpointCount(value){
 }
 function buildImageCustomViewpointHtml(st){
     const en = langIsEn();
+    const model = viewpointImageModel(st?.model);
+    const modelItems = viewpointImageModelChoices().map(key => `<button type="button" class="image-expand-menu-item${model === key ? ' is-active' : ''}" data-custom-view-model="${escapeAttr(key)}">${escapeHtml(key)}</button>`).join('');
     const resolution = customViewpointResolution(st?.resolution);
     const count = clampCustomViewpointCount(st?.count);
     const sizeItems = ['1k', '2k', '4k'].map(key => `<button type="button" class="image-expand-menu-item${resolution === key ? ' is-active' : ''}" data-custom-view-size="${key}">${key.toUpperCase()}</button>`).join('');
@@ -30531,6 +30707,13 @@ function buildImageCustomViewpointHtml(st){
             <button type="button" class="image-expand-icon" data-custom-view-act="close" title="${escapeAttr(en ? 'Close' : '关闭')}" aria-label="close"><i data-lucide="x"></i></button>
             <span class="image-expand-hint">${escapeHtml(en ? 'Custom viewpoint' : '自定义视角')}</span>
             <textarea class="image-expand-prompt image-custom-view-prompt" maxlength="400" placeholder="${escapeAttr(en ? 'e.g. low angle, looking up' : '如：低机位仰拍，略微推近')}"></textarea>
+            <div class="image-expand-drop">
+                <button type="button" class="image-expand-drop-btn" data-custom-view-menu="model" aria-expanded="false" title="${escapeAttr(en ? 'Image model' : '生图模型')}">
+                    <span data-custom-view-model-label>${escapeHtml(model)}</span>
+                    <i data-lucide="chevron-down" class="image-expand-drop-chevron"></i>
+                </button>
+                <div class="image-expand-menu" data-custom-view-panel="model" hidden>${modelItems}</div>
+            </div>
             <div class="image-expand-drop">
                 <button type="button" class="image-expand-drop-btn" data-custom-view-menu="size" aria-expanded="false" title="${escapeAttr(en ? 'Resolution' : '分辨率')}">
                     <span data-custom-view-size-label>${resolution.toUpperCase()}</span>
@@ -30574,6 +30757,28 @@ function bindImageCustomViewpointChrome(host){
     });
     prompt?.addEventListener('keydown', e => {
         if(e.key !== 'Escape') e.stopPropagation();
+    });
+    host.querySelector('[data-custom-view-menu="model"]')?.addEventListener('click', e => {
+        e.stopPropagation();
+        const menu = host.querySelector('[data-custom-view-panel="model"]');
+        if(!menu) return;
+        const next = menu.hidden;
+        closeCustomViewpointMenus();
+        menu.hidden = !next;
+        e.currentTarget.setAttribute('aria-expanded', next ? 'true' : 'false');
+        e.currentTarget.classList.toggle('is-open', next);
+    });
+    host.querySelectorAll('[data-custom-view-model]').forEach(btn => {
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            if(!imageCustomViewpointState) return;
+            const model = viewpointImageModel(btn.getAttribute('data-custom-view-model'));
+            imageCustomViewpointState.model = model;
+            host.querySelectorAll('[data-custom-view-model]').forEach(b => b.classList.toggle('is-active', b === btn));
+            const label = host.querySelector('[data-custom-view-model-label]');
+            if(label) label.textContent = model;
+            closeCustomViewpointMenus();
+        });
     });
     host.querySelector('[data-custom-view-menu="size"]')?.addEventListener('click', e => {
         e.stopPropagation();
@@ -30702,6 +30907,7 @@ async function openImageCustomViewpoint(target){
         srcW,
         srcH,
         intent: '',
+        model: viewpointImageModel(''),
         resolution: '2k',
         count: 1,
         running: false,
@@ -30753,6 +30959,7 @@ function runImageCustomViewpointFromPanel(){
         intent,
         srcW: st.srcW,
         srcH: st.srcH,
+        model: viewpointImageModel(st.model),
         resolution: customViewpointResolution(st.resolution),
         count,
     };
@@ -30811,6 +31018,9 @@ async function runImageCustomViewpointJob(job, list, source){
     };
     try {
         if(!targets.length) throw new Error(langIsEn() ? 'Viewpoint node missing' : '视角节点已丢失');
+        const previousUrl = job.url;
+        job.url = await ensureDurableCanvasImageUrl(job.url, source?.id);
+        retargetViewpointSourceUrl(job, previousUrl, targets);
         const res = await apiFetch('/api/canvas/viewpoint-agent', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -30822,7 +31032,7 @@ async function runImageCustomViewpointJob(job, list, source){
         if(!english) throw new Error(langIsEn() ? 'Empty viewpoint prompt' : '视角提示词为空');
         run.prompt = english;
         setStage(langIsEn() ? 'Generating viewpoint…' : '自定义视角生成中…');
-        const model = generatorNanoBananaProModel('runninghub');
+        const model = viewpointImageModel(job.model);
         const resolution = customViewpointResolution(job.resolution);
         const bitmap = await loadImageBitmapForExport(job.url);
         const w = bitmap.naturalWidth || bitmap.width || job.srcW || 1;
@@ -32419,43 +32629,6 @@ function renderVideoImageInputs(list, node, imageInputs){
     bindInputListPointerReorder(list, node);
     refreshIcons();
 }
-function comfyWorkflowOptions(selected){
-    const opts = comfyWorkflows.map(w => `<option value="${escapeHtml(w.name)}" ${w.name === selected ? 'selected' : ''}>${escapeHtml(w.title || w.name.replace('.json',''))}</option>`).join('');
-    return opts || `<option value="">${tr('canvas.comfyNoWorkflow')}</option>`;
-}
-function hasComfyWorkflow(name){
-    return !!name && comfyWorkflows.some(w => w.name === name);
-}
-function validComfyWorkflowName(name){
-    return hasComfyWorkflow(name) ? name : (comfyWorkflows[0]?.name || '');
-}
-function pruneMissingComfyWorkflows(){
-    let changed = false;
-    nodes.filter(n => n.type === 'comfy').forEach(node => {
-        if(node.comfyWorkflow && !hasComfyWorkflow(node.comfyWorkflow)){
-            delete comfyWorkflowCache[node.comfyWorkflow];
-            node.comfyWorkflow = '';
-            changed = true;
-        }
-    });
-    if(changed) scheduleSave();
-}
-function currentComfyWorkflow(node){
-    const selected = validComfyWorkflowName(node.comfyWorkflow || comfyWorkflows[0]?.name || '');
-    return comfyWorkflowCache[selected] || null;
-}
-async function ensureComfyWorkflow(name){
-    if(!hasComfyWorkflow(name)) return null;
-    if(comfyWorkflowCache[name]) return comfyWorkflowCache[name];
-    const res = await apiFetch(`/api/workflows/${encodeURIComponent(name)}`);
-    if(!res.ok){
-        delete comfyWorkflowCache[name];
-        return null;
-    }
-    const data = await res.json();
-    comfyWorkflowCache[name] = data;
-    return data;
-}
 function validRunningHubWorkflowId(workflowId){
     return String(workflowId || '').trim();
 }
@@ -32476,29 +32649,6 @@ async function ensureRunningHubWorkflow(workflowId){
     runningHubWorkflowCache[workflowId] = data.workflow || null;
     return runningHubWorkflowCache[workflowId];
 }
-function comfyFieldKind(f){
-    if(['image','video','audio'].includes(f?.type)) return f.type;
-    const key = `${f.input || ''} ${f.name || ''}`.toLowerCase();
-    if(f.type === 'textarea' || /prompt|text|提示词|正向|负向/.test(key)) return 'prompt';
-    return 'setting';
-}
-function comfyFields(node, kind='all'){
-    const data = currentComfyWorkflow(node);
-    const fields = data?.config?.fields || [];
-    return kind === 'all' ? fields : fields.filter(f => comfyFieldKind(f) === kind);
-}
-function comfyParamValue(node, field){
-    node.comfyParams = node.comfyParams || {};
-    if(node.comfyParams[field.id] !== undefined) return node.comfyParams[field.id];
-    return field.default ?? (field.type === 'boolean' ? false : (field.type === 'number' || field.type === 'slider' ? 0 : ''));
-}
-function comfyRandomEnabled(field){
-    return field?.type === 'number' && field.random_enabled === true;
-}
-function comfyRandomActive(node, fieldId){
-    node.comfyRandomActive = node.comfyRandomActive || {};
-    return node.comfyRandomActive[fieldId] !== false;
-}
 function comfyRandomValue(field){
     const isFloat = Number(field.step) > 0 && Number(field.step) < 1;
     let min = Number.isFinite(Number(field.min)) ? Number(field.min) : null;
@@ -32513,105 +32663,6 @@ function comfyRandomValue(field){
         return Number(value.toFixed(precision));
     }
     return Math.floor(value);
-}
-function toggleComfyRandom(nodeId, fieldId){
-    const node = nodes.find(n => n.id === nodeId);
-    if(!node) return;
-    const field = comfyFields(node).find(f => f.id === fieldId);
-    if(!comfyRandomEnabled(field)) return;
-    node.comfyRandomActive = node.comfyRandomActive || {};
-    node.comfyRandomActive[fieldId] = !comfyRandomActive(node, fieldId);
-    refreshNodes([node.id]);
-    scheduleSave();
-}
-function renderComfyBody(node){
-    const wrap = document.createElement('div');
-    wrap.className = 'comfy-body';
-    const inputSources = generatorSources(node);
-    const ordered = orderedSources(node, inputSources);
-    const mediaInputs = ordered.filter(src => src.refs?.length);
-    const imageInputs = mediaInputs
-        .map(src => ({...src, refs:imageRefsOnly(src.refs || [])}))
-        .filter(src => src.refs?.length);
-    const promptInputs = ordered.filter(src => src.prompt && !src.refs?.length);
-    const mode = node.mode || 'text';
-    const imageFieldCount = mode === 'custom' ? comfyFields(node, 'image').length : 0;
-    const videoFieldCount = mode === 'custom' ? comfyFields(node, 'video').length : 0;
-    const audioFieldCount = mode === 'custom' ? comfyFields(node, 'audio').length : 0;
-    const mediaFieldCount = imageFieldCount + videoFieldCount + audioFieldCount;
-    if(mode === 'custom'){
-        const validWorkflow = validComfyWorkflowName(node.comfyWorkflow);
-        if(node.comfyWorkflow && node.comfyWorkflow !== validWorkflow) node.comfyWorkflow = validWorkflow;
-        if(!node.comfyWorkflow && validWorkflow) node.comfyWorkflow = validWorkflow;
-    }
-    wrap.innerHTML = `
-        <div class="mode-tabs">
-            <button type="button" data-mode="text" class="${mode === 'text' ? 'active' : ''}">${tr('canvas.comfyModeText')}</button>
-            <button type="button" data-mode="enhance" class="${mode === 'enhance' ? 'active' : ''}">${tr('canvas.comfyModeEnhance')}</button>
-            <button type="button" data-mode="edit" class="${mode === 'edit' ? 'active' : ''}">${tr('canvas.comfyModeEdit')}</button>
-            <button type="button" data-mode="custom" class="${mode === 'custom' ? 'active' : ''}">${tr('canvas.comfyModeCustom')}</button>
-        </div>
-        <div class="comfy-content">
-            <div class="prompt-list"></div>
-            <div class="comfy-images ${(mode === 'text' || (mode === 'custom' && !mediaFieldCount)) ? 'hidden' : ''}">
-                <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">${mode === 'custom' ? `Media · Images ${imageFieldCount} · Videos ${videoFieldCount} · Audio ${audioFieldCount}` : 'Images'}</div>
-                <div class="input-list mt-2"></div>
-            </div>
-        </div>
-        <div class="comfy-controls">
-            <div class="gen-settings comfy-settings"></div>
-            <div class="gen-run-row">
-                ${(() => {
-                    const comfyBtn = agentPendingRunState(node.id, tr('canvas.comfyRun'), tr('canvas.comfyRunning'));
-                    return agentGenRunActionsHtml(node.id, `<button class="comfy-run ${comfyBtn.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''}><i data-lucide="zap" class="w-4 h-4"></i>${escapeHtml(comfyBtn.label)}</button>`);
-                })()}
-                ${cascadeBtnHtml(node)}
-            </div>
-            ${retryBarHtml(node)}
-        </div>
-    `;
-    wrap.querySelectorAll('[data-mode]').forEach(btn => {
-        btn.onclick = e => {
-            e.stopPropagation();
-            node.mode = btn.dataset.mode;
-            if(node.mode === 'custom' && !hasComfyWorkflow(node.comfyWorkflow) && comfyWorkflows[0]?.name){
-                node.comfyWorkflow = comfyWorkflows[0].name;
-                ensureComfyWorkflow(node.comfyWorkflow).then(() => render());
-            }
-            render();
-            scheduleSave();
-        };
-    });
-    renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
-    if(mode !== 'text' && !(mode === 'custom' && !mediaFieldCount)){
-        renderComfyImages(wrap.querySelector('.input-list'), node, mode === 'custom' ? mediaInputs : imageInputs);
-    }
-    renderComfySettings(wrap.querySelector('.comfy-settings'), node);
-    wrap.querySelector('.comfy-run').onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
-    bindCascadeButtons(wrap, node.id);
-    return wrap;
-}
-function renderComfyImages(list, node, imageInputs){
-    if(!list) return;
-    list.innerHTML = imageInputs.length ? '' : `<div class="text-[11px] text-gray-300 py-2">${tr('canvas.groupEmpty')}</div>`;
-    imageInputs.forEach((src, i) => {
-        const item = document.createElement('div');
-        item.className = 'input-item';
-        item.dataset.sourceId = src.id;
-        const firstRef = (src.refs || [])[0];
-        const kind = mediaKindForRef(firstRef || src.preview);
-        const icon = kind === 'video' ? 'file-video' : kind === 'audio' ? 'file-audio' : 'image';
-        const label = kind === 'image' ? `${tr('canvas.image')} ${i + 1}` : `${nodeTitleForMedia({mediaKind:kind})} ${i + 1}`;
-        const previewHtml = kind === 'video' && src.preview && !isMissingAssetUrl(src.preview)
-            ? `<video src="${escapeAttr(src.preview)}" muted preload="metadata" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback" draggable="false"></video>`
-            : kind === 'audio'
-                ? `<i data-lucide="${icon}" class="w-6 h-6 text-slate-400"></i>`
-                : (src.preview && !isMissingAssetUrl(src.preview) ? `<img src="${escapeAttr(src.preview)}" draggable="false">` : (src.preview ? missingAssetHtml(src.preview, true) : `<i data-lucide="${icon}" class="w-6 h-6 text-slate-400"></i>`));
-        item.innerHTML = `<span class="input-index">${i + 1}</span>${previewHtml}<span class="input-label">${escapeHtml(label)}</span>`;
-        list.appendChild(item);
-    });
-    bindInputListPointerReorder(list, node);
-    refreshIcons();
 }
 const RH_KNOWN_FIELD_OPTIONS = {
     aspectRatio:['1:1','16:9','9:16','4:3','3:4','4:5','5:4','3:2','2:3','21:9','9:21'],
@@ -34238,16 +34289,16 @@ async function runRhNode(nodeId, opts={}){
     ensureRhNodeSelection(node);
     const mode = rhCurrentKind(node);
     node.rhRandomValues = {};
-    if(mode === 'workflow' && !String(node.workflowId || '').trim()){ softAlert(tr('canvas.rhNeedWorkflowId')); return; }
-    if(mode === 'app' && !String(node.webappId || '').trim()){ softAlert(tr('canvas.rhNeedWebappId')); return; }
+    if(mode === 'workflow' && !String(node.workflowId || '').trim()){ rejectCanvasAgentPrecondition(node, tr('canvas.rhNeedWorkflowId'), opts); return; }
+    if(mode === 'app' && !String(node.webappId || '').trim()){ rejectCanvasAgentPrecondition(node, tr('canvas.rhNeedWebappId'), opts); return; }
     const selectedEntry = rhCurrentEntry(node);
     if(!selectedEntry){
-        softAlert(mode === 'workflow' ? '请先在 API 设置里添加 RH 工作流' : '请先在 API 设置里添加 RH 应用');
+        rejectCanvasAgentPrecondition(node, mode === 'workflow' ? '请先在 API 设置里添加 RH 工作流' : '请先在 API 设置里添加 RH 应用', opts);
         return;
     }
     if(mode === 'workflow') await ensureRunningHubWorkflowConfigForNode(node);
     if(!rhActiveFields(node).length){
-        softAlert(mode === 'workflow' ? '请先在 API 设置里编辑并保存这个 RH 工作流参数' : '请先在 API 设置里编辑并保存这个 RH 应用参数');
+        rejectCanvasAgentPrecondition(node, mode === 'workflow' ? '请先在 API 设置里编辑并保存这个 RH 工作流参数' : '请先在 API 设置里编辑并保存这个 RH 应用参数', opts);
         return;
     }
     const media = rhMediaSources(node);
@@ -34305,7 +34356,11 @@ async function runRhNode(nodeId, opts={}){
         const status = await pollRunningHubTask(taskId);
         if(status === 'failed'){
             const errMsg = node.runError || tr('canvas.rhFailed');
-            if(opts.cascade) throw new Error(errMsg);
+            if(opts.cascade){
+                delete node.runStatus;
+                delete node.runError;
+                throw new Error(errMsg);
+            }
             softAlert(errMsg);
         }
     } catch(err) {
@@ -34326,177 +34381,20 @@ async function runRhNode(nodeId, opts={}){
         clearNodePending(host, [pendingId]);
         syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:errMsg});
         refreshRunNodes(node, host);
-        if(!opts.cascade) softAlert(errMsg || tr('canvas.rhFailed'));
-        if(opts.cascade) throw err;
+        if(opts.cascade){
+            delete node.runStatus;
+            delete node.runError;
+            throw err;
+        }
+        softAlert(errMsg || tr('canvas.rhFailed'));
     }
     };
     if(opts.cascade) await execute();
     else void execute();
 }
-function renderComfySettings(container, node){
-    const mode = node.mode || 'text';
-    if(mode === 'text'){
-        container.innerHTML = `
-            <div class="gen-settings-row">
-                <label class="field"><div class="setting-title">${tr('canvas.width')}</div><input class="setting-input" data-field="width" type="number" min="64" step="64" value="${Number(node.width || 1024)}"></label>
-                <label class="field"><div class="setting-title">${tr('canvas.height')}</div><input class="setting-input" data-field="height" type="number" min="64" step="64" value="${Number(node.height || 1024)}"></label>
-            </div>
-        `;
-    } else if(mode === 'enhance'){
-        const strength = Number(node.enhanceStrength ?? 0.5);
-        container.innerHTML = `
-            <div class="gen-settings-row">
-                <label class="field" style="flex:1">
-                    <div class="setting-title" style="display:flex;justify-content:space-between">
-                        <span>${tr('studio.enhancementStrength')}</span><span class="enhance-strength-val">${strength.toFixed(2)}</span>
-                    </div>
-                    <input type="range" class="canvas-range enhance-strength-slider" data-field="enhanceStrength" min="0.1" max="1.0" step="0.05" value="${strength}">
-                </label>
-            </div>
-            <div class="gen-settings-row">
-                <button type="button" class="setting-check ${node.enhanceUpscale ? 'active' : ''}" data-toggle-field="enhanceUpscale"><span class="check-dot"></span>${tr('studio.superResolution')}</button>
-                <select class="select-lite ${node.enhanceUpscale ? '' : 'opacity-40 cursor-not-allowed'}" data-field="enhanceUpscaleRes" ${node.enhanceUpscale ? '' : 'disabled'}><option value="2048">2X (2048)</option><option value="4096">4X (4096)</option></select>
-            </div>
-        `;
-        container.querySelector('[data-field="enhanceUpscaleRes"]').value = String(node.enhanceUpscaleRes || 2048);
-    } else if(mode === 'edit'){
-        container.innerHTML = `
-            <div class="gen-settings-row">
-                <button type="button" class="setting-check ${node.editUpscale ? 'active' : ''}" data-toggle-field="editUpscale"><span class="check-dot"></span>${tr('studio.superResolution')}</button>
-                <select class="select-lite ${node.editUpscale ? '' : 'opacity-40 cursor-not-allowed'}" data-field="editUpscaleRes" ${node.editUpscale ? '' : 'disabled'}><option value="2048">2X (2048)</option><option value="4096">4X (4096)</option></select>
-            </div>
-        `;
-        container.querySelector('[data-field="editUpscaleRes"]').value = String(node.editUpscaleRes || 2048);
-    } else if(mode === 'custom'){
-        const selected = validComfyWorkflowName(node.comfyWorkflow || comfyWorkflows[0]?.name || '');
-        if(node.comfyWorkflow && node.comfyWorkflow !== selected) node.comfyWorkflow = selected;
-        const data = currentComfyWorkflow(node);
-        const fields = data?.config?.fields || [];
-        const settingFields = fields.filter(f => comfyFieldKind(f) === 'setting');
-        container.innerHTML = `
-            <div class="gen-settings-row">
-                <select class="select-lite comfy-workflow-select" data-field="comfyWorkflow" style="width:100%">${comfyWorkflowOptions(selected)}</select>
-            </div>
-            ${!selected ? `<div class="text-[11px] text-slate-400">${tr('canvas.comfyNoWorkflow')}</div>` : (!data ? `<div class="text-[11px] text-slate-400">${tr('canvas.comfyLoadingWorkflow')}</div>` : '')}
-            ${data ? settingFields.map(f => renderComfyCustomField(node, f)).join('') || `<div class="text-[11px] text-slate-400">${tr('canvas.comfyNoExtraParams')}</div>` : ''}
-        `;
-        if(selected && !data) ensureComfyWorkflow(selected).then(() => render());
-    } else {
-        container.innerHTML = '';
-    }
-    container.querySelectorAll('[data-toggle-field]').forEach(btn => {
-        btn.onmousedown = e => e.stopPropagation();
-        btn.onclick = e => {
-            e.stopPropagation();
-            const field = btn.dataset.toggleField;
-            node[field] = !node[field];
-            render();
-            scheduleSave();
-        };
-    });
-    container.querySelectorAll('button[data-comfy-param]').forEach(btn => {
-        btn.onmousedown = e => e.stopPropagation();
-        btn.onclick = e => updateComfyField(node, btn, e);
-    });
-    container.querySelectorAll('button[data-comfy-random]').forEach(btn => {
-        btn.onmousedown = e => e.stopPropagation();
-        btn.onclick = e => {
-            e.stopPropagation();
-            toggleComfyRandom(node.id, btn.dataset.comfyRandom);
-        };
-    });
-    container.querySelectorAll('input, select, textarea').forEach(input => {
-        input.onmousedown = e => e.stopPropagation();
-        input.onclick = e => e.stopPropagation();
-        if(input.classList.contains('model-select')) return;
-        input.onchange = e => updateComfyField(node, input, e);
-        input.oninput = e => updateComfyField(node, input, e);
-    });
-}
-function renderComfyCustomField(node, f){
-    const value = comfyParamValue(node, f);
-    const label = escapeHtml(f.name || f.input);
-    if(f.type === 'boolean'){
-        return `<div class="gen-settings-row">
-            <button type="button" class="setting-check ${value ? 'active' : ''}" data-comfy-param="${escapeHtml(f.id)}" data-comfy-type="boolean"><span class="check-dot"></span>${label}</button>
-        </div>`;
-    }
-    if(f.type === 'slider'){
-        const min = f.min ?? 0, max = f.max ?? 10, step = f.step ?? 1;
-        return `<div class="gen-settings-row">
-            <label class="field" style="flex:1">
-                <div class="setting-title" style="display:flex;justify-content:space-between"><span>${label}</span><span class="comfy-param-val">${escapeHtml(value)}</span></div>
-                <input type="range" class="canvas-range" data-comfy-param="${escapeHtml(f.id)}" data-comfy-type="slider" min="${min}" max="${max}" step="${step}" value="${escapeHtml(value)}">
-            </label>
-        </div>`;
-    }
-    if(f.type === 'dropdown'){
-        const opts = (f.options || []).map(o => `<option value="${escapeHtml(o)}" ${String(value) === String(o) ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('');
-        return `<div class="gen-settings-row">
-            <label class="field" style="flex:1"><div class="setting-title">${label}</div><select class="select-lite" data-comfy-param="${escapeHtml(f.id)}" data-comfy-type="dropdown" style="width:100%">${opts || '<option value="">(无选项)</option>'}</select></label>
-        </div>`;
-    }
-    if(f.type === 'textarea'){
-        return `<div class="gen-settings-row">
-            <label class="field" style="flex:1"><div class="setting-title">${label}</div><textarea class="setting-input" data-comfy-param="${escapeHtml(f.id)}" data-comfy-type="textarea" style="height:66px;padding-top:8px;resize:vertical">${escapeHtml(value)}</textarea></label>
-        </div>`;
-    }
-    const type = f.type === 'number' ? 'number' : 'text';
-    if(comfyRandomEnabled(f)){
-        const active = comfyRandomActive(node, f.id);
-        return `<div class="gen-settings-row">
-            <div class="comfy-random-field">
-                <label class="field"><div class="setting-title">${label}</div><input class="setting-input" type="number" data-comfy-param="${escapeHtml(f.id)}" data-comfy-type="number" value="${escapeHtml(value)}"></label>
-                <button class="tool-btn comfy-random-btn ${active ? 'active' : ''}" type="button" data-comfy-random="${escapeHtml(f.id)}" title="${active ? '随机已开启，点击关闭' : '随机已关闭，点击开启'}" aria-label="${active ? '随机已开启，点击关闭' : '随机已关闭，点击开启'}"><i data-lucide="dice-5" class="w-4 h-4"></i></button>
-            </div>
-        </div>`;
-    }
-    return `<div class="gen-settings-row">
-        <label class="field" style="flex:1"><div class="setting-title">${label}</div><input class="setting-input" type="${type}" data-comfy-param="${escapeHtml(f.id)}" data-comfy-type="${escapeHtml(f.type || 'text')}" value="${escapeHtml(value)}"></label>
-    </div>`;
-}
-function updateComfyField(node, input, event){
-    event?.stopPropagation();
-    const paramId = input.dataset.comfyParam;
-    if(paramId){
-        node.comfyParams = node.comfyParams || {};
-        const field = comfyFields(node).find(f => f.id === paramId);
-        const type = input.dataset.comfyType || field?.type || 'text';
-        if(type === 'boolean') node.comfyParams[paramId] = !Boolean(node.comfyParams[paramId] ?? field?.default ?? false);
-        else if(type === 'number' || type === 'slider') node.comfyParams[paramId] = Number(input.value) || 0;
-        else node.comfyParams[paramId] = input.value;
-        const val = input.closest('.field')?.querySelector('.comfy-param-val');
-        if(val) val.textContent = node.comfyParams[paramId];
-        if(type === 'boolean') render();
-        scheduleSave();
-        return;
-    }
-    const field = input.dataset.field;
-    if(!field) return;
-    if(field === 'comfyWorkflow'){
-        node.comfyWorkflow = validComfyWorkflowName(input.value);
-        node.comfyParams = {};
-        ensureComfyWorkflow(node.comfyWorkflow).then(() => render());
-        scheduleSave();
-        return;
-    }
-    if(input.type === 'checkbox') {
-        node[field] = input.checked;
-        if(field === 'enhanceUpscale') render();
-    }
-    else if(field === 'enhanceStrength') {
-        node[field] = Number(input.value) || 0.5;
-        const val = input.closest('.field')?.querySelector('.enhance-strength-val');
-        if(val) val.textContent = node[field].toFixed(2);
-    }
-    else if(['width','height','enhanceUpscaleRes','editUpscaleRes','count'].includes(field)) node[field] = Number(input.value) || 1;
-    else node[field] = input.value;
-    scheduleSave();
-}
-
-const CANVAS_GENERATOR_TYPES = ['generator','msgen','comfy','ltxDirector','video','rh','replicaAgent','imageRepairAgent'];
-const CANVAS_IMAGE_OUTPUT_TYPES = ['generator','msgen','comfy','ltxDirector','rh','replicaAgent','imageRepairAgent'];
-const CANVAS_MEDIA_OUTPUT_TYPES = ['generator','msgen','comfy','ltxDirector','video','rh','replicaAgent','imageRepairAgent'];
+export const CANVAS_GENERATOR_TYPES = ['generator','msgen','video','rh','replicaAgent','imageRepairAgent','nineGridAgent'];
+const CANVAS_IMAGE_OUTPUT_TYPES = ['generator','msgen','rh','replicaAgent','imageRepairAgent'];
+const CANVAS_MEDIA_OUTPUT_TYPES = ['generator','msgen','video','rh','replicaAgent','imageRepairAgent'];
 function agentResultPreviewUrls(node){
     return (node?.generatedOutputs || []).map(outputUrlValue).filter(Boolean);
 }
@@ -34604,7 +34502,8 @@ function shouldCreateOutputForNode(node){
     if(!node) return false;
     if(hasExplicitOutputConnection(node.id)) return true;
     // 轻量 Gen Console：媒体生成类结果落本节点，不自动建 Output（仅手连才双写）
-    if(CANVAS_GENERATOR_TYPES.includes(node.type)) return false;
+    // 九宫格整板仍由 outputForNode 落到 Output，不能跟着这条短路。
+    if(CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'nineGridAgent') return false;
     return !hasDownstreamGenerator(node.id);
 }
 function outputForNode(node, dx=460){
@@ -34635,6 +34534,7 @@ function pushNodePending(node, pendings){
             if(p && !p.aspect) p.aspect = aspect;
         });
     }
+    noteCanvasAgentOutputHost(node, host);
     host._pending = [...(host._pending || []), ...pendings];
     // 同步登记 ledger：即使后续 _pending 被清空，完成回调仍能落板
     pendings.forEach(p => registerPendingLedger(node, host, p));
@@ -34702,7 +34602,7 @@ function revealGeneratorResultsWhileRunning(gen){
     refreshOutputTimer();
 }
 function generatedImageRefs(node){
-    const keepGeneratedMedia = ['rh','ltxDirector','video'].includes(node?.type);
+    const keepGeneratedMedia = ['rh','video'].includes(node?.type);
     return (node?.generatedOutputs || [])
         .map((item, i) => {
             const url = outputUrlValue(item);
@@ -34756,7 +34656,7 @@ function mediaRefsFromNode(node){
         if(!urls.length) return [];
         const idx = Math.max(0, Math.min(urls.length - 1, Number(node.previewIndex ?? urls.length - 1)));
         const url = urls[idx];
-        const kind = ['rh','ltxDirector','video'].includes(node.type) && isVideoUrl(url)
+        const kind = ['rh','video'].includes(node.type) && isVideoUrl(url)
             ? 'video'
             : (isVideoUrl(url) ? 'video' : 'image');
         return [{url, name:outputImageName(url) || 'generated-1', kind}];
@@ -34780,7 +34680,16 @@ function generatorSources(gen, ctx=loopContext){
                     label:langIsEn() ? 'Upstream primary' : '上游主图',
                     preview:refs[0].url,
                     refs,
-                    prompt:''
+                    // 这里读 outputText 是为了让复刻和修图的分析正文进下游来源。
+                    // 其余四个媒体产出类型不写 outputText（正文在 prompt 或没有正文），
+                    // 所以 || '' 对它们是空操作。
+                    // 新增会写 outputText 的媒体产出类型时，这一行自动生效——
+                    // 不要再补分支，补分支会和 34941 抢顺序。
+                    // 已知边界：上游若经 output 宿主中转（复刻/修图 → output → generator），
+                    // output 走的是 images 那一支，读不到 outputText，会静默少一段正文。
+                    // 本轮不修，因为它是少数拓扑，而修它要动容器分支。
+                    // 直连是常见路径，已被这一行覆盖。
+                    prompt: n.outputText || ''
                 };
             }
         }
@@ -34851,7 +34760,7 @@ function generatorSources(gen, ctx=loopContext){
             return {id:n.id, type:'loop', label:`${tr('canvas.loopNode')} ${loopCount(n)}x`, refs:[], prompt};
         }
         if(n.type === 'promptGroup') {
-            const prompts = promptGroupChildTexts(n);
+            const prompts = promptGroupChildTexts(n, true);
             return {id:n.id, type:'promptGroup', label:`提示词 ${prompts.length} 个`, refs:[], prompt:prompts.join('\n\n')};
         }
         if(n.type === 'llm' && (n.mode || 'node') === 'node' && n.outputText) return {id:n.id, type:'llm', label:(n.outputText || 'LLM').slice(0, 32), refs:[], prompt:n.outputText || ''};
@@ -34908,7 +34817,6 @@ function softRefreshGeneratorInputLists(gen){
     const fill = (list, mode='image') => {
         if(!list) return;
         if(mode === 'video') renderVideoImageInputs(list, gen, imageInputs);
-        else if(mode === 'comfy') renderComfyImages(list, gen, mediaInputs);
         else if(mode === 'dock') renderGenDockImageInputs(list, gen, imageInputs, promptInputs);
         else renderImageInputList(list, gen, imageInputs);
     };
@@ -34928,7 +34836,6 @@ function softRefreshGeneratorInputLists(gen){
     const el = nodesEl?.querySelector(`.node[data-id="${CSS.escape(gen.id)}"]`);
     if(!el) return;
     if(gen.type === 'video') fill(el.querySelector('.gen-dock-refs'), 'dock');
-    else if(gen.type === 'comfy' || gen.type === 'ltxDirector') fill(el.querySelector('.input-list'), 'comfy');
     else if(gen.type === 'batchPosterAgent') fill(el.querySelector('.batch-poster-input-list'));
     else if(gen.type === 'slotsLoopVideoAgent') fill(el.querySelector('.slots-loop-input-list'));
     else fill(el.querySelector('.input-list'));
@@ -35062,7 +34969,6 @@ function syncGeneratorInputs(){
     nodes.filter(n => isGeneratorLikeNode(n)).forEach(gen => {
         if(gen.type === 'replicaAgent') syncReplicaAgentRoles(gen);
         else orderedSources(gen, generatorSources(gen));
-        if(gen.type === 'ltxDirector') ltxSyncConnectedImagesToTimeline(gen);
     });
 }
 function refreshGeneratorInputViews(){
@@ -35141,11 +35047,6 @@ function refreshGeneratorInputViews(){
                     annotateVideoDockFrameRoles(refs, gen);
                 } else if(!editingDock && !isCanvasTextEditing()) remountImageGenDock(gen);
             }
-        }
-        if(gen.type === 'comfy') renderComfyImages(el.querySelector('.input-list'), gen, imageInputs);
-        if(gen.type === 'ltxDirector'){
-            ltxSyncConnectedImagesToTimeline(gen);
-            renderComfyImages(el.querySelector('.input-list'), gen, imageInputs);
         }
         if(gen.type === 'rh'){
             const fields = rhActiveFields(gen);
@@ -35435,8 +35336,21 @@ async function runGenerator(genId, opts={}){
     if(!gen || isNodeDisabled(gen)) return;
     // 旧历史可能嵌了整颗 node；先瘦身，避免本次 runSnapshot/save 再炸 Invalid string length
     if(scrubGeneratorHistoryBloat(gen)) scheduleSave();
-    syncGeneratorDockFieldsIntoNode(gen);
-    pullFocusedEditableIntoModel();
+    // cascade 表示等不等轮询，agent 表示调用方是谁。
+    // 人类级联需要 dock sync（用户刚编辑，sync 是兜底），
+    // Agent 执行不需要（dock 是残留或空的，会覆盖刚写入的数据）。
+    // 两者正交，不能合并成一个标志。
+    if(!opts.agent){
+        syncGeneratorDockFieldsIntoNode(gen);
+        pullFocusedEditableIntoModel();
+    }
+    // 参考图入边是结构，不是措辞。不在白名单的模型回落到 nano-banana-pro，再走下面的清单校验。
+    if(opts.agent){
+        const hasReferenceEdge = connections.some(edge => edge.to === gen.id && nodes.some(node => node.id === edge.from && node.type === 'image'));
+        const coerced = coerceReferenceImageModel(String(gen.model || ''), hasReferenceEdge);
+        if(coerced && coerced !== gen.model) gen.model = coerced;
+    }
+    if(rejectCanvasAgentModelChoice(gen, 'image', opts)) return;
     // 循环必须显式传 loopContext；禁止吃全局残留（否则图片组会退化为「多参考出一张」）
     const loopCtx = opts.loopContext !== undefined ? opts.loopContext : null;
     if(syncConnectedImageBatchMembership(gen)){
@@ -35446,8 +35360,12 @@ async function runGenerator(genId, opts={}){
     const sources = orderedSources(gen, generatorSources(gen, loopCtx));
     const prompt = composeGeneratorPrompt(gen, sources);
     const refs = imageRefsOnly(sources.flatMap(s => s.refs || []));
-    if(!prompt && !refs.length){ softAlert(tr('canvas.needPromptOrImage')); return; }
-    if(isYouchuanRhModel(gen.model) && !prompt){ softAlert(tr('canvas.youchuanNeedPrompt')); return; }
+    if(!prompt && !refs.length){
+        const message = tr('canvas.needPromptOrImage');
+        rejectCanvasAgentPrecondition(gen, message, opts);
+        return;
+    }
+    if(isYouchuanRhModel(gen.model) && !prompt){ rejectCanvasAgentPrecondition(gen, tr('canvas.youchuanNeedPrompt'), opts); return; }
     const batchPlan = resolvePerItemGroupBatch(sources, loopCtx);
     console.log('[generator/run]', {
         nodeId: gen.id,
@@ -35467,13 +35385,21 @@ async function runGenerator(genId, opts={}){
             }
         } catch(err) {
             const errText = humanizeCanvasGenerationError(err.message || String(err));
+            if(opts.cascade){
+                delete gen.runStatus;
+                delete gen.runError;
+                gen.running = false;
+                delete gen._batchProgress;
+                refreshRunNodes(gen, out);
+                scheduleSave();
+                throw new Error(errText);
+            }
             gen.runStatus = 'failed';
             gen.runError = errText;
             gen.running = false;
             delete gen._batchProgress;
             refreshRunNodes(gen, out);
             scheduleSave();
-            if(opts.cascade) throw new Error(errText);
             return;
         } finally {
             if(opts.cascade){
@@ -35498,12 +35424,19 @@ async function runGenerator(genId, opts={}){
         }
     } catch(err) {
         const errText = humanizeCanvasGenerationError(err.message || String(err));
+        if(opts.cascade){
+            delete gen.runStatus;
+            delete gen.runError;
+            gen.running = false;
+            refreshRunNodes(gen, out);
+            scheduleSave();
+            throw new Error(errText);
+        }
         gen.runStatus = 'failed';
         gen.runError = errText;
         gen.running = false;
         refreshRunNodes(gen, out);
         scheduleSave();
-        if(opts.cascade) throw new Error(errText);
     }
 }
 async function runGeneratorLegacy(genId, opts={}){
@@ -35589,8 +35522,10 @@ async function runVideoNode(nodeId, opts={}){
     if(!node || isNodeDisabled(node)) return;
     // 防连点/重入：进行中勿再开一批
     if(!opts.cascade && (agentPendingCount(nodeId) > 0 || node.running)) return;
-    pullFocusedEditableIntoModel();
-    syncGeneratorDockFieldsIntoNode(node);
+    if(!opts.agent){
+        pullFocusedEditableIntoModel();
+        syncGeneratorDockFieldsIntoNode(node);
+    }
     const loopCtx = opts.loopContext !== undefined ? opts.loopContext : loopContext;
     const sources = orderedSources(node, generatorSources(node, loopCtx));
     const prompt = composeGeneratorPrompt(node, sources);
@@ -35599,7 +35534,7 @@ async function runVideoNode(nodeId, opts={}){
     const videoRefs = videoRefsOnly(allRefs);
     if(node.useFrameRoles && refs[0]) refs[0] = {...refs[0], role:'first_frame'};
     if(node.useFrameRoles && refs[1]) refs[1] = {...refs[1], role:'last_frame'};
-    if(!prompt){ softAlert(tr('canvas.videoNeedsPrompt')); return; }
+    if(!prompt){ rejectCanvasAgentPrecondition(node, tr('canvas.videoNeedsPrompt'), opts); return; }
     const count = Math.max(1, Math.min(8, Number(node.count || 1)));
     console.log('[video/run]', { nodeId, count, model: node.model || '' });
     const run = runSnapshot(node, prompt, refs);
@@ -35620,6 +35555,9 @@ async function runVideoNode(nodeId, opts={}){
         real_person_mode:node.realPersonMode !== false,
         canvas_id: canvas?.id || '',
         node_id: node.id || '',
+        ...(node.fidelity && typeof node.fidelity === 'object'
+            ? {fidelity:node.fidelity}
+            : {}),
     };
     // 先占位再提交。taskId 回来后写入 ledger，刷新可续查
     const pendingIds = Array.from({length:count}, () => uid('p'));
@@ -35653,7 +35591,12 @@ async function runVideoNode(nodeId, opts={}){
     const pollAll = () => Promise.all(taskInfos.map(task => pollCanvasVideoTask(task.task_id)));
     if(opts.cascade){
         const statuses = await pollAll();
-        if(statuses.includes('failed')) throw new Error(node.runError || tr('canvas.videoFailed'));
+        if(statuses.includes('failed')){
+            const message = node.runError || tr('canvas.videoFailed');
+            delete node.runStatus;
+            delete node.runError;
+            throw new Error(message);
+        }
         return;
     }
     void pollAll().then(statuses => {
@@ -35669,659 +35612,6 @@ async function runVideoNode(nodeId, opts={}){
                     : `视频生成失败（${failN}）`));
         }
     });
-}
-async function uploadCanvasUrlToComfy(url){
-    const blob = await fetch(url).then(r => {
-        if(!r.ok) throw new Error(langIsEn() ? 'Image read failed' : '图片读取失败');
-        return r.blob();
-    });
-    const filename = (url || '').split('/').pop()?.split('?')[0] || `canvas_${Date.now()}.png`;
-    const form = new FormData();
-    form.append('files', blob, filename);
-    const data = await apiFetch('/api/upload', {method:'POST', body:form}).then(async r => {
-        if(!r.ok) throw new Error(await responseErrorMessage(r, langIsEn() ? 'Image upload to ComfyUI failed' : '图片上传到 ComfyUI 失败'));
-        return r.json();
-    });
-    return data.files?.[0]?.comfy_name || filename;
-}
-async function comfyNameForRef(ref){
-    if(ref.comfy_name) return ref.comfy_name;
-    if(!ref.url) throw new Error(langIsEn() ? 'Missing input image' : '缺少输入图片');
-    return uploadCanvasUrlToComfy(ref.url);
-}
-async function runComfyUpscale(imageUrl, resolution){
-    if(!imageUrl) throw new Error(actionFailed('studio.superResolution', langIsEn() ? 'missing input image' : '缺少输入图片'));
-    const nextInput = await uploadCanvasUrlToComfy(imageUrl);
-    const upscale = await apiFetch('/api/generate', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-            workflow_json:'upscale.json',
-            params:{
-                "15": { image:nextInput },
-                "172": { seed:Math.floor(Math.random() * 4294967295), resolution:Number(resolution || 2048) }
-            },
-            type:'enhance',
-            client_id:CLIENT_ID
-        })
-    }).then(async r => { if(!r.ok) throw new Error(await responseErrorMessage(r, actionFailed('studio.superResolution'))); return r.json(); });
-    if(upscale.error) throw new Error(actionFailed('studio.superResolution', upscale.error));
-    if(!upscale.images?.length) throw new Error(noReturnedImage('studio.superResolution'));
-    return upscale.images || [];
-}
-function comfyResultOutputs(result){
-    return resultMediaUrls(result);
-}
-function resultMediaUrls(result){
-    const urls = [];
-    const add = value => {
-        if(!value) return;
-        if(typeof value === 'string'){
-            urls.push(value);
-            return;
-        }
-        if(Array.isArray(value)){
-            value.forEach(add);
-            return;
-        }
-        if(typeof value === 'object'){
-            if(value.url || value.path || value.src || value.uri){
-                const url = value.url || value.path || value.src || value.uri;
-                if(url) urls.push({url, kind:value.kind || value.type || value.mediaKind || '', name:value.name || value.filename || ''});
-            }
-            ['outputs','videos','images','urls','data','result'].forEach(key => add(value[key]));
-            ['url','path','src','uri','output','output_url','outputUrl','video','video_url','videoUrl','mp4_url','mp4Url','download_url','downloadUrl','preview_url','previewUrl'].forEach(key => add(value[key]));
-        }
-    };
-    ['items','outputs','videos','audios','texts','files','images','urls','data','result','output','url'].forEach(key => add(result?.[key]));
-    const seen = new Set();
-    return urls.map(item => {
-        const url = outputUrlValue(item);
-        if(!url) return null;
-        return typeof item === 'object' ? item : url;
-    }).filter(item => {
-        const url = outputUrlValue(item);
-        return url && !seen.has(url) && seen.add(url);
-    });
-}
-function ltxDirectorSyncSeconds(node){
-    const fps = Math.max(1, Number(node?.frameRate) || 24);
-    node.durationSeconds = Math.round((Number(node.durationFrames) || 120) / fps * 1000) / 1000;
-}
-function ltxParseTimeline(node){
-    try {
-        const t = JSON.parse(node?.ltxTimelineData || '{}');
-        return {
-            segments: Array.isArray(t.segments) ? t.segments : [],
-            audioSegments: Array.isArray(t.audioSegments) ? t.audioSegments : []
-        };
-    } catch(e) {
-        return {segments: [], audioSegments: []};
-    }
-}
-function ltxRefreshTimelineEditor(node){
-    if(!node?._ltxEditor || typeof window.LTXParseInitial !== 'function') return;
-    node._ltxEditor.timeline = window.LTXParseInitial(node.ltxTimelineData || '{}');
-    node._ltxEditor.loadImages?.();
-    node._ltxEditor.commitChanges?.(true);
-    node._ltxEditor.render?.();
-}
-function ltxSyncConnectedImagesToTimeline(node){
-    if(!node || node.type !== 'ltxDirector') return;
-    const hadTimeline = Boolean(node.ltxTimelineData);
-    const sources = orderedSources(node, generatorSources(node));
-    const imageInputs = sources.filter(src => imageRefsOnly(src.refs || []).length);
-    const timeline = ltxParseTimeline(node);
-    const fps = Math.max(1, Number(node.frameRate) || 24);
-    const defaultLen = Math.max(6, fps);
-    const manual = (timeline.segments || []).filter(s => !s.canvasSourceId);
-    const existingAuto = new Map((timeline.segments || []).filter(s => s.canvasSourceId).map(s => [s.canvasSourceId, s]));
-    const autoSegs = [];
-    let cursor = 0;
-    for(const src of imageInputs){
-        const ref = imageRefsOnly(src.refs || [])[0];
-        const url = ref?.url;
-        if(!url) continue;
-        let seg = existingAuto.get(src.id);
-        if(seg){
-            if(seg.imageB64 !== url){
-                seg.imageB64 = url;
-                seg.imageFile = null;
-                delete seg.imgObj;
-            }
-            if(!seg.length || seg.length < 1) seg.length = defaultLen;
-        } else {
-            seg = {
-                id:uid('ltxseg'),
-                start:cursor,
-                length:defaultLen,
-                prompt:src.prompt || '',
-                type:'image',
-                imageB64:url,
-                canvasSourceId:src.id,
-                guideStrength:1
-            };
-        }
-        seg.start = cursor;
-        cursor += Math.max(1, Number(seg.length) || defaultLen);
-        autoSegs.push(seg);
-    }
-    let nextStart = cursor;
-    const reflowedManual = [...manual].sort((a, b) => (Number(a.start) || 0) - (Number(b.start) || 0));
-    for(const seg of reflowedManual){
-        seg.start = nextStart;
-        nextStart += Math.max(1, Number(seg.length) || defaultLen);
-    }
-    const allSegs = [...autoSegs, ...reflowedManual];
-    const maxEnd = allSegs.reduce((m, s) => Math.max(m, (Number(s.start) || 0) + (Number(s.length) || 0)), 0);
-    if(maxEnd > (Number(node.durationFrames) || 0)){
-        node.durationFrames = Math.ceil(maxEnd);
-        ltxDirectorSyncSeconds(node);
-    }
-    const prevTimeline = node.ltxTimelineData;
-    node.ltxTimelineData = JSON.stringify({segments: allSegs, audioSegments: timeline.audioSegments || []});
-    ltxRefreshTimelineEditor(node);
-    if(hadTimeline && node.ltxTimelineData !== prevTimeline) scheduleSave();
-}
-function bindLTXParamsRow(container, node){
-    const row = container.querySelector('[data-ltx-params]');
-    if(!row) return;
-    const fps = () => Math.max(1, Number(node.frameRate) || 24);
-    const bindNum = (sel, apply) => {
-        const inp = row.querySelector(sel);
-        if(!inp) return;
-        inp.onmousedown = e => e.stopPropagation();
-        inp.onclick = e => e.stopPropagation();
-        inp.onchange = () => {
-            apply(inp);
-            ltxDirectorSyncSeconds(node);
-            if(node._ltxEditor){
-                node._ltxEditor.commitChanges?.(true);
-                node._ltxEditor.render?.();
-            }
-            scheduleSave();
-        };
-    };
-    const sec = row.querySelector('[data-ltx-duration-seconds]');
-    const frames = row.querySelector('[data-ltx-duration-frames]');
-    const rate = row.querySelector('[data-ltx-frame-rate]');
-    const width = row.querySelector('[data-ltx-width]');
-    const height = row.querySelector('[data-ltx-height]');
-    if(sec) sec.value = Number(node.durationSeconds) || 5;
-    if(frames) frames.value = Number(node.durationFrames) || 120;
-    if(rate) rate.value = Number(node.frameRate) || 24;
-    if(width) width.value = Number(node.customWidth) || 0;
-    if(height) height.value = Number(node.customHeight) || 0;
-    bindNum('[data-ltx-duration-seconds]', inp => {
-        const v = Math.max(0.1, Math.min(1000, parseFloat(inp.value) || node.durationSeconds || 5));
-        node.durationSeconds = Math.round(v * 1000) / 1000;
-        node.durationFrames = Math.max(1, Math.round(node.durationSeconds * fps()));
-        inp.value = node.durationSeconds;
-        if(frames) frames.value = node.durationFrames;
-    });
-    bindNum('[data-ltx-duration-frames]', inp => {
-        node.durationFrames = Math.max(1, Math.min(10000, parseInt(inp.value, 10) || 120));
-        if(sec) sec.value = Math.round((node.durationFrames / fps()) * 1000) / 1000;
-        inp.value = node.durationFrames;
-    });
-    bindNum('[data-ltx-frame-rate]', inp => {
-        node.frameRate = Math.max(1, Math.min(240, parseInt(inp.value, 10) || 24));
-        if(sec) sec.value = Math.round((node.durationFrames / fps()) * 1000) / 1000;
-    });
-    bindNum('[data-ltx-width]', inp => {
-        node.customWidth = Math.max(0, Math.min(8192, parseInt(inp.value, 10) || 0));
-        inp.value = node.customWidth;
-    });
-    bindNum('[data-ltx-height]', inp => {
-        node.customHeight = Math.max(0, Math.min(8192, parseInt(inp.value, 10) || 0));
-        inp.value = node.customHeight;
-    });
-}
-function ltxFlushTimelineToNode(node){
-    if(!node || node.type !== 'ltxDirector') return;
-    if(node._ltxEditor && typeof node._ltxEditor.commitChanges === 'function'){
-        node._ltxEditor.commitChanges(true);
-    }
-}
-function ltxBuildContiguousRelay(node, globalPromptFallback=''){
-    ltxFlushTimelineToNode(node);
-    const durationFrames = Math.max(1, Number(node.durationFrames) || 120);
-    const fallback = (globalPromptFallback || node.globalPrompt || '').trim() || '.';
-    let sortedSegments = [];
-    try {
-        const t = JSON.parse(node.ltxTimelineData || '{}');
-        sortedSegments = [...(t.segments || [])].sort((a, b) => (Number(a.start) || 0) - (Number(b.start) || 0));
-    } catch(e) {}
-    const contiguousLengths = [];
-    const contiguousPrompts = [];
-    let currentCursor = 0;
-    let pendingGap = 0;
-    for(const seg of sortedSegments){
-        const start = Number(seg.start) || 0;
-        const length = Math.max(1, Number(seg.length) || 1);
-        if(start >= durationFrames) break;
-        if(start > currentCursor){
-            const gapLength = Math.min(start, durationFrames) - currentCursor;
-            if(contiguousLengths.length > 0) contiguousLengths[contiguousLengths.length - 1] += gapLength;
-            else pendingGap += gapLength;
-        }
-        const clippedEnd = Math.min(start + length, durationFrames);
-        const clippedLength = clippedEnd - start;
-        contiguousLengths.push(clippedLength + pendingGap);
-        const prompt = (seg.prompt || '').trim();
-        contiguousPrompts.push(prompt || fallback);
-        if(!prompt) seg.prompt = fallback;
-        pendingGap = 0;
-        currentCursor = start + length;
-    }
-    const clampedCursor = Math.min(currentCursor, durationFrames);
-    if(contiguousLengths.length > 0 && clampedCursor < durationFrames){
-        contiguousLengths[contiguousLengths.length - 1] += durationFrames - clampedCursor;
-    }
-    if(!contiguousLengths.length){
-        contiguousLengths.push(durationFrames);
-        contiguousPrompts.push(fallback);
-    }
-    const guideStrength = sortedSegments
-        .filter(s => s.type !== 'text')
-        .map(s => (s.guideStrength !== undefined ? s.guideStrength : 1.0).toFixed(2))
-        .join(',');
-    return {
-        local_prompts:contiguousPrompts.join(' | '),
-        segment_lengths:contiguousLengths.join(','),
-        guide_strength:guideStrength,
-        sortedSegments
-    };
-}
-async function ltxDirectorBuildTimelinePayload(node, globalPromptFallback=''){
-    ltxDirectorSyncSeconds(node);
-    let timeline = {segments: [], audioSegments: []};
-    try { timeline = JSON.parse(node.ltxTimelineData || '{}'); } catch(e) {}
-    const relay = ltxBuildContiguousRelay(node, globalPromptFallback);
-    const segments = [...relay.sortedSegments];
-    for(const seg of segments){
-        if(seg.type === 'image' && !seg.imageFile){
-            const url = seg.imageB64 || '';
-            if(url){
-                const fullUrl = url.startsWith('http') ? url : (location.origin + (url.startsWith('/') ? url : '/' + url));
-                seg.imageFile = await uploadCanvasUrlToComfy(fullUrl);
-            }
-        }
-        if(seg.imgObj) delete seg.imgObj;
-    }
-    const timelineJson = JSON.stringify({segments, audioSegments: timeline.audioSegments || []});
-    node.ltxLocalPrompts = relay.local_prompts;
-    node.ltxSegmentLengths = relay.segment_lengths;
-    node.ltxGuideStrength = relay.guide_strength;
-    node.ltxTimelineData = timelineJson;
-    return {
-        global_prompt:(globalPromptFallback || node.globalPrompt || '').trim(),
-        duration_frames:Number(node.durationFrames) || 120,
-        duration_seconds:Number(node.durationSeconds) || 5,
-        timeline_data:timelineJson,
-        local_prompts:relay.local_prompts,
-        segment_lengths:relay.segment_lengths,
-        guide_strength:relay.guide_strength,
-        epsilon:Number(node.epsilon) || 0.001,
-        frame_rate:Number(node.frameRate) || 24,
-        use_custom_audio:Boolean(node.useCustomAudio),
-        display_mode:node.displayMode || 'seconds',
-        custom_width:Math.max(0, Number(node.customWidth) || 0),
-        custom_height:Math.max(0, Number(node.customHeight) || 0),
-        resize_method:'maintain aspect ratio',
-        divisible_by:Math.max(1, Number(node.divisibleBy) || 32),
-        img_compression:Number(node.imgCompression) ?? 18,
-        timeline_ui:''
-    };
-}
-function ltxDirectorTimelineSegments(node){
-    ltxFlushTimelineToNode(node);
-    if(node?._ltxEditor?.timeline?.segments) return node._ltxEditor.timeline.segments;
-    try {
-        const t = JSON.parse(node.ltxTimelineData || '{}');
-        return t.segments || [];
-    } catch(e) {
-        return [];
-    }
-}
-function clearStuckGeneratorRunning(node){
-    if(!node || !node.running) return;
-    if(cascadeRunningIds.has(node.id) || cascadeSerialIds.has(node.id)) return;
-    node.running = false;
-}
-function updateLTXNodeElementSize(node){
-    const el = domQuery(`.node[data-id="${CSS.escape(node.id)}"]`);
-    if(!el) return;
-    if(node.w) el.style.width = `${node.w}px`;
-    if(node.h) el.style.height = `${node.h}px`;
-    refreshGeometryAfterLayout();
-}
-function renderLTXDirectorBody(node){
-    if(typeof window.ltxMigrateLegacySegments === 'function') window.ltxMigrateLegacySegments(node);
-    else if(typeof ltxMigrateLegacySegments === 'function') ltxMigrateLegacySegments(node);
-    ltxDirectorSyncSeconds(node);
-    if(!node.ltxTimelineData){
-        const len = Math.max(1, Number(node.durationFrames) || 120);
-        node.ltxTimelineData = JSON.stringify({
-            segments:[{id:uid('ltxseg'), start:0, length:len, prompt:'', type:'text'}],
-            audioSegments:[]
-        });
-    }
-
-    const wrap = document.createElement('div');
-    wrap.className = 'ltx-director-body';
-    const sources = orderedSources(node, generatorSources(node));
-    const promptInputs = sources.filter(src => src.prompt && !src.refs?.length);
-    const imageInputs = sources
-        .map(src => ({...src, refs:imageRefsOnly(src.refs || [])}))
-        .filter(src => src.refs?.length);
-
-    wrap.innerHTML = `
-        <div class="prompt-list"></div>
-        <div class="ltx-params-row" data-ltx-params>
-            <label class="field"><span class="setting-title">${tr('canvas.ltxDurationSec')}</span><input class="setting-input" data-ltx-duration-seconds type="number" min="0.1" max="1000" step="0.01"></label>
-            <label class="field"><span class="setting-title">${tr('canvas.ltxDurationFrames')}</span><input class="setting-input" data-ltx-duration-frames type="number" min="1" max="10000" step="1"></label>
-            <label class="field"><span class="setting-title">${tr('canvas.ltxFps')}</span><input class="setting-input" data-ltx-frame-rate type="number" min="1" max="240" step="1"></label>
-            <label class="field"><span class="setting-title">${tr('canvas.width')}</span><input class="setting-input" data-ltx-width type="number" min="0" max="8192" step="32" title="0 = auto"></label>
-            <label class="field"><span class="setting-title">${tr('canvas.height')}</span><input class="setting-input" data-ltx-height type="number" min="0" max="8192" step="32" title="0 = auto"></label>
-        </div>
-        <div class="ltx-director-timeline-host" data-ltx-timeline-host></div>
-        <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">${tr('canvas.ltxLinkedImages')} · ${imageInputs.length}</div>
-        <div class="input-list mt-1"></div>
-        <div class="gen-run-row">
-            ${(() => {
-                const ltxBtn = agentPendingRunState(node.id, tr('canvas.ltxRun'), tr('canvas.ltxRunning'));
-                return agentGenRunActionsHtml(node.id, `<button class="comfy-run ltx-run ${ltxBtn.runningCls}" ${isNodeDisabled(node) ? 'disabled' : ''}><i data-lucide="film" class="w-4 h-4"></i>${escapeHtml(ltxBtn.label)}</button>`);
-            })()}
-            ${cascadeBtnHtml(node)}
-        </div>
-        ${retryBarHtml(node)}
-    `;
-
-    renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
-    bindLTXParamsRow(wrap, node);
-    ltxSyncConnectedImagesToTimeline(node);
-    renderComfyImages(wrap.querySelector('.input-list'), node, imageInputs);
-
-    const host = wrap.querySelector('[data-ltx-timeline-host]');
-    if(host && window.CanvasLTXTimelineEditor){
-        if(node._ltxEditor && node._ltxEditor.wrapper){
-            host.appendChild(node._ltxEditor.wrapper);
-            node._ltxEditor.container = host;
-            node._ltxEditor._onCanvasCommit = () => scheduleSave();
-            node._ltxEditor._onCanvasResize = () => { updateLTXNodeElementSize(node); scheduleSave(); };
-        } else {
-            destroyLTXEditor(node);
-            try {
-                const editor = new window.CanvasLTXTimelineEditor(node, host, null);
-                editor._onCanvasCommit = () => scheduleSave();
-                editor._onCanvasResize = () => { updateLTXNodeElementSize(node); scheduleSave(); };
-                node._ltxEditor = editor;
-            } catch(err) {
-                console.error('LTX timeline editor init failed', err);
-                host.innerHTML = `<div class="text-[11px] text-red-500 p-2">${escapeHtml(tr('canvas.ltxTimelineLoadFailed'))}</div>`;
-            }
-        }
-    } else if(host) {
-        host.innerHTML = `<div class="text-[11px] text-red-500 p-2">${escapeHtml(tr('canvas.ltxTimelineScriptMissing'))}</div>`;
-    }
-
-    const runBtn = wrap.querySelector('.ltx-run');
-    if(runBtn){
-        runBtn.onmousedown = e => e.stopPropagation();
-        runBtn.onclick = e => {
-            e.stopPropagation();
-            e.preventDefault();
-            runCanvasGenerate(node.id);
-        };
-    }
-    bindCascadeButtons(wrap, node.id);
-    return wrap;
-}
-async function runLTXDirectorNode(nodeId, opts={}){
-    const node = nodes.find(n => n.id === nodeId);
-    if(!node || node.type !== 'ltxDirector' || isNodeDisabled(node)) return;
-    clearStuckGeneratorRunning(node);
-    ltxFlushTimelineToNode(node);
-    const loopCtx = opts.loopContext !== undefined ? opts.loopContext : loopContext;
-    const sources = orderedSources(node, generatorSources(node, loopCtx));
-    const upstreamPrompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
-    const globalPrompt = [node.globalPrompt, upstreamPrompt].filter(Boolean).join('\n\n').trim();
-    const segments = ltxDirectorTimelineSegments(node);
-    const hasSegPrompt = segments.some(s => (s.prompt || '').trim());
-    const hasImageSeg = segments.some(s => s.type === 'image' && (s.imageFile || s.imageB64));
-    if(!globalPrompt && !hasSegPrompt && !hasImageSeg){
-        const msg = tr('canvas.needPromptOrImage');
-        setStatus(msg);
-        showErrorModal(msg, tr('canvas.ltxFailed'));
-        return;
-    }
-    if(segments.some(s => s.type === 'image' && !s.imageFile && !s.imageB64)){
-        const msg = tr('canvas.ltxImageSegNeedRef');
-        setStatus(msg);
-        showErrorModal(msg, tr('canvas.ltxFailed'));
-        return;
-    }
-    ltxDirectorSyncSeconds(node);
-    const pendingId = uid('p');
-    const refs = sources.flatMap(s => s.refs || []);
-    const run = runSnapshot(node, globalPrompt || segments.map(s => s.prompt).join(' | '), refs);
-    run.taskLabel = tr('canvas.ltxDirector');
-    const host = pushNodePending(node, [makePending(pendingId, run)]);
-    syncAppendableNodeRunState(node);
-    if(!opts.cascade) setStatus(tr('canvas.ltxRunning'));
-    refreshRunNodes(node, host);
-    const execute = async () => {
-    try {
-        const directorInputs = await ltxDirectorBuildTimelinePayload(node, globalPrompt);
-        const params = {
-            [LTX_DIRECTOR_WF_NODE]:directorInputs,
-            [LTX_DIRECTOR_SEED_NODE]:{noise_seed:Number(node.noiseSeed ?? 12)}
-        };
-        const result = await apiFetch('/api/generate', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                prompt:globalPrompt,
-                workflow_json:LTX_DIRECTOR_WORKFLOW,
-                params,
-                type:'ltx-director',
-                client_id:CLIENT_ID
-            })
-        }).then(async r => {
-            if(!r.ok) throw new Error(await responseErrorMessage(r, tr('canvas.ltxFailed')));
-            return r.json();
-        });
-        run.request = requestMetaFromResult(result);
-        if(result.error) throw new Error(result.error);
-        const outputs = comfyResultOutputs(result);
-        if(!outputs.length) throw new Error(tr('canvas.ltxNoOutput'));
-        const meta = collectRunMeta(host, pendingId);
-        clearNodePending(host, [pendingId]);
-        commitMediaOutputs(host, node, outputs, refs[0], [meta], {cascade:opts.cascade});
-        addGenerationLog({run, outputs, runMs:meta.runMs || 0});
-        syncAgentRunStatusAfterTask(node, {completed:agentPendingCount(node.id) === 0});
-        refreshRunNodes(node, host);
-        scheduleSave();
-    } catch(err) {
-        const meta = collectRunMeta(host, pendingId);
-        clearNodePending(host, [pendingId]);
-        addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:err.message || String(err)});
-        syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
-        refreshRunNodes(node, host);
-        if(opts.cascade) throw err;
-        showErrorModal(err.message || tr('canvas.ltxFailed'), tr('canvas.ltxFailed'));
-    }
-    };
-    if(opts.cascade) await execute();
-    else void execute();
-}
-async function runComfyNode(nodeId, opts={}){
-    const node = nodes.find(n => n.id === nodeId);
-    if(!node || isNodeDisabled(node)) return;
-    const loopCtx = opts.loopContext !== undefined ? opts.loopContext : loopContext;
-    const sources = orderedSources(node, generatorSources(node, loopCtx));
-    const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
-    const allRefs = sources.flatMap(s => s.refs || []);
-    const refs = imageRefsOnly(allRefs);
-    const mode = node.mode || 'text';
-    const customImageFields = mode === 'custom' ? comfyFields(node, 'image') : [];
-    const customVideoFields = mode === 'custom' ? comfyFields(node, 'video') : [];
-    const customAudioFields = mode === 'custom' ? comfyFields(node, 'audio') : [];
-    const customPromptFields = mode === 'custom' ? comfyFields(node, 'prompt') : [];
-    if((mode === 'text' || (mode === 'custom' && customPromptFields.length)) && !prompt){ softAlert(tr('canvas.needPrompt')); return; }
-    if((mode !== 'text' && mode !== 'custom' && !refs.length) || (mode === 'custom' && refs.length < customImageFields.length)){ softAlert(tr('canvas.needImage')); return; }
-    if(mode === 'custom' && videoRefsOnly(allRefs).length < customVideoFields.length){ softAlert(langIsEn() ? 'Please connect enough video inputs for this ComfyUI workflow.' : '请为这个 ComfyUI 工作流连接足够的视频输入'); return; }
-    if(mode === 'custom' && audioRefsOnly(allRefs).length < customAudioFields.length){ softAlert(langIsEn() ? 'Please connect enough audio inputs for this ComfyUI workflow.' : '请为这个 ComfyUI 工作流连接足够的音频输入'); return; }
-    const pendingId = uid('p');
-    const run = runSnapshot(node, prompt, refs);
-    run.taskLabel = comfyRunLabel(node);
-    const host = pushNodePending(node, [makePending(pendingId, run)]);
-    syncAppendableNodeRunState(node);
-    refreshRunNodes(node, host);
-    const execute = async () => {
-    try {
-        let images = [];
-        if(mode === 'text'){
-            run.taskLabel = tr('canvas.comfyText');
-            const result = await apiFetch('/api/generate', {
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                body:JSON.stringify({
-                    prompt,
-                    width:Number(node.width || 1024),
-                    height:Number(node.height || 1024),
-                    workflow_json:'Z-Image.json',
-                    type:'zimage',
-                    client_id:CLIENT_ID
-                })
-            }).then(async r => { if(!r.ok) throw new Error(await responseErrorMessage(r, actionFailed('canvas.comfyText'))); return r.json(); });
-            run.request = requestMetaFromResult(result);
-            images = comfyResultOutputs(result);
-        } else if(mode === 'enhance'){
-            run.taskLabel = tr('canvas.comfyEnhance');
-            const inputName = await comfyNameForRef(refs[0]);
-            const enhance = await apiFetch('/api/generate', {
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                body:JSON.stringify({
-                    workflow_json:'Z-Image-Enhance.json',
-                    params:{
-                        "15": { image:inputName },
-                        "204": { value:Number(node.enhanceStrength ?? 0.5) }
-                    },
-                    type:'enhance',
-                    client_id:CLIENT_ID
-                })
-            }).then(async r => { if(!r.ok) throw new Error(await responseErrorMessage(r, actionFailed('canvas.comfyEnhance'))); return r.json(); });
-            run.request = requestMetaFromResult(enhance);
-            if(enhance.error) throw new Error(actionFailed('canvas.comfyEnhance', enhance.error));
-            if(!enhance.images?.length) throw new Error(noReturnedImage('canvas.comfyEnhance'));
-            if(node.enhanceUpscale){
-                images = await runComfyUpscale(enhance.images?.[0], node.enhanceUpscaleRes || 2048);
-            } else {
-                images = enhance.images || [];
-            }
-        } else if(mode === 'custom'){
-            const workflowName = validComfyWorkflowName(node.comfyWorkflow || comfyWorkflows[0]?.name || '');
-            run.taskLabel = workflowName || tr('canvas.comfyCustom');
-            if(node.comfyWorkflow && node.comfyWorkflow !== workflowName) node.comfyWorkflow = workflowName;
-            const wf = await ensureComfyWorkflow(workflowName);
-            if(!workflowName || !wf) throw new Error(tr('canvas.comfyNoWorkflow'));
-            const fields = wf?.config?.fields || [];
-            const params = {};
-            const imageFields = fields.filter(f => comfyFieldKind(f) === 'image');
-            const videoFields = fields.filter(f => comfyFieldKind(f) === 'video');
-            const audioFields = fields.filter(f => comfyFieldKind(f) === 'audio');
-            const promptFields = fields.filter(f => comfyFieldKind(f) === 'prompt');
-            const settingFields = fields.filter(f => comfyFieldKind(f) === 'setting');
-            const assignMediaFields = async (mediaFields, mediaRefs) => {
-                const names = [];
-                for(const ref of mediaRefs.slice(0, mediaFields.length)) names.push(await comfyNameForRef(ref));
-                mediaFields.forEach((f, i) => {
-                    if(!f.node || !f.input) return;
-                    params[f.node] = params[f.node] || {};
-                    params[f.node][f.input] = names[i] || '';
-                });
-            };
-            await assignMediaFields(imageFields, refs);
-            await assignMediaFields(videoFields, videoRefsOnly(allRefs));
-            await assignMediaFields(audioFields, audioRefsOnly(allRefs));
-            promptFields.forEach(f => {
-                if(!f.node || !f.input) return;
-                params[f.node] = params[f.node] || {};
-                params[f.node][f.input] = prompt;
-            });
-            settingFields.forEach(f => {
-                if(!f.node || !f.input) return;
-                params[f.node] = params[f.node] || {};
-                if(comfyRandomEnabled(f) && comfyRandomActive(node, f.id)){
-                    node.comfyParams = node.comfyParams || {};
-                    node.comfyParams[f.id] = comfyRandomValue(f);
-                }
-                params[f.node][f.input] = comfyParamValue(node, f);
-            });
-            const result = await apiFetch('/api/generate', {
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                body:JSON.stringify({
-                    prompt,
-                    workflow_json:workflowName,
-                    params,
-                    type:'workflow-custom',
-                    client_id:CLIENT_ID
-                })
-            }).then(async r => { if(!r.ok) throw new Error(await responseErrorMessage(r, actionFailed('canvas.comfyCustom'))); return r.json(); });
-            run.request = requestMetaFromResult(result);
-            if(result.error) throw new Error(actionFailed('canvas.comfyCustom', result.error));
-            images = comfyResultOutputs(result);
-            if(!images.length) throw new Error(noReturnedImage('canvas.comfyCustom'));
-        } else {
-            run.taskLabel = tr('canvas.comfyEdit');
-            const names = [];
-            for (const ref of refs.slice(0, 3)) names.push(await comfyNameForRef(ref));
-            const result = await apiFetch('/api/generate', {
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                body:JSON.stringify({
-                    prompt,
-                    workflow_json:'Flux2-Klein.json',
-                    type:'klein',
-                    params:{
-                        "168": { text:prompt },
-                        "158": { noise_seed:Math.floor(Math.random() * 1000000) },
-                        "278": { image:names[0] || "" },
-                        "270": { image:names[1] || "" },
-                        "292": { image:names[2] || "" },
-                        "313": { value:Boolean(names[1]) },
-                        "314": { value:Boolean(names[2]) }
-                    },
-                    client_id:CLIENT_ID
-                })
-            }).then(async r => { if(!r.ok) throw new Error(await responseErrorMessage(r, actionFailed('canvas.comfyEdit'))); return r.json(); });
-            run.request = requestMetaFromResult(result);
-            if(result.error) throw new Error(actionFailed('canvas.comfyEdit', result.error));
-            if(!result.images?.length) throw new Error(noReturnedImage('canvas.comfyEdit'));
-            images = node.editUpscale ? await runComfyUpscale(result.images?.[0], node.editUpscaleRes || 2048) : result.images || [];
-        }
-        const meta = collectRunMeta(host, pendingId);
-        clearNodePending(host, [pendingId]);
-        commitMediaOutputs(host, node, images, refs[0], [meta], {cascade:opts.cascade});
-        addGenerationLog({run, outputs:images, runMs:meta.runMs || 0});
-        syncAgentRunStatusAfterTask(node, {completed:agentPendingCount(node.id) === 0});
-        refreshRunNodes(node, host);
-        scheduleSave();
-    } catch(err) {
-        const meta = collectRunMeta(host, pendingId);
-        addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:err.message || String(err)});
-        clearNodePending(host, [pendingId]);
-        syncAgentRunStatusAfterTask(node, {failed:agentPendingCount(node.id) === 0, error:err.message || String(err)});
-        refreshRunNodes(node, host);
-        if(opts.cascade) throw err;
-    }
-    };
-    if(opts.cascade) await execute();
-    else void execute();
 }
 async function callCanvasLLM(node, message, messages=[], mediaOpts={}){
     const llmProv = resolveChatProviderId(node.llmProvider || 'comfly');
@@ -36352,6 +35642,7 @@ async function callCanvasLLM(node, message, messages=[], mediaOpts={}){
 async function runLLMNode(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || (node.running && !opts.cascade)) return;
+    if(rejectCanvasAgentModelChoice(node, 'llm', opts)) return;
     const input = llmInputText(node) || node.userInput || '';
     if(!input){
         if(opts.cascade) throw new Error('LLM 缺少提示词输入');
@@ -36365,8 +35656,11 @@ async function runLLMNode(nodeId, opts={}){
         refreshNodes([node.id]);
         scheduleSave();
     } catch(err) {
-        if(!opts.cascade) node.running = false;
-        node.runStatus = 'failed'; node.runError = err.message || String(err);
+        if(!opts.cascade){
+            node.running = false;
+            node.runStatus = 'failed';
+            node.runError = err.message || String(err);
+        }
         refreshNodes([node.id]);
         if(opts.cascade) throw err;
     }
@@ -36512,7 +35806,7 @@ function runCascadeNodeByType(node, opts={}){
     if(node.type === 'replicaAgent') return runReplicaAgent(node.id, runOpts);
     if(node.type === 'imageRepairAgent') return runImageRepairAgent(node.id, runOpts);
     if(node.type === 'batchPosterAgent') return runBatchPosterAgent(node.id, runOpts);
-    if(node.type === 'nineGridAgent') return runNineGridFull(node.id);
+    if(node.type === 'nineGridAgent') return runNineGridFull(node.id, runOpts);
     if(node.type === 'slotsLoopVideoAgent') return runSlotsLoopVideoAgent(node.id, runOpts);
     if(isMxShellFamilyAgent(node)) return runMxShellPromptAgent(node.id, runOpts);
     if(node.type === 'deepWhiteShotAgent') return runDeepWhiteShotAgent(node.id, runOpts);
@@ -36520,19 +35814,16 @@ function runCascadeNodeByType(node, opts={}){
     if(node.type === 'viewpointAgent') return runViewpointAgent(node.id, runOpts);
     if(node.type === 'pixarAdScriptAgent') return runPixarAdScriptAgent(node.id, runOpts);
     if(node.type === 'msgen') return runMsGenNode(node.id, runOpts);
-    if(node.type === 'comfy') return runComfyNode(node.id, runOpts);
-    if(node.type === 'ltxDirector') return runLTXDirectorNode(node.id, runOpts);
     if(node.type === 'llm') return runLLMNode(node.id, runOpts);
     if(node.type === 'video') return runVideoNode(node.id, runOpts);
     if(node.type === 'rh') return runRhNode(node.id, runOpts);
+    if(node.type === 'videoReverse') return runVideoReverseNode(node.id, runOpts);
     return Promise.resolve();
 }
 function runCascadeNodeWithLoopContext(node, ctx, opts={}){
     return runCascadeNodeByType(node, {...opts, cascade:true, loopContext:ctx});
 }
-function cascadeParallelLimit(order, totalRounds){
-    const hasComfy = order.some(id => nodes.find(n => n.id === id)?.type === 'comfy');
-    if(hasComfy) return Math.max(1, Math.min(totalRounds, comfyBackendCount || 1));
+function cascadeParallelLimit(_order, totalRounds){
     return Math.max(1, Math.min(totalRounds, LOOP_PARALLEL_MAX));
 }
 async function runLimitedCascadeRounds(rounds, limit, runner){
@@ -36546,7 +35837,341 @@ async function runLimitedCascadeRounds(rounds, limit, runner){
     return Promise.allSettled(workers);
 }
 function canvasRunTypes(){
-    return ['generator','msgen','comfy','ltxDirector','llm','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','deepWhiteShotAgent','screenwritingAgent','viewpointAgent','pixarAdScriptAgent'];
+    return ['generator','msgen','llm','video','rh','replicaAgent','imageRepairAgent','batchPosterAgent','nineGridAgent','slotsLoopVideoAgent','mxShellPromptAgent','mxShellPolishAgent','deepWhiteShotAgent','screenwritingAgent','viewpointAgent','pixarAdScriptAgent','videoReverse'];
+}
+// reason 只给提案卡片看。写进节点会变成画布状态，和「只展示」相反。
+const CANVAS_AGENT_PROTECTED_NODE_KEYS = new Set([
+    'id','type','x','y','running','runStatus','runError','_pending','_cascadeIdx',
+    '_cascadeFailed','_agentStopRequested','_batchProgress','reason','agentConversationId',
+    '__proto__','prototype','constructor',
+]);
+function canvasAgentClone(value, fallback){
+    try {
+        return typeof structuredClone === 'function'
+            ? structuredClone(value)
+            : JSON.parse(JSON.stringify(value));
+    } catch(_){
+        return fallback;
+    }
+}
+function flattenCanvasAgentParameters(raw){
+    if(!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+    // parameters 与 initialParams 是同一条规则：只揭这两层壳，别的对象键原样留下。
+    let flat = raw;
+    for(const name of ['parameters', 'initialParams']){
+        const nested = flat[name];
+        if(!nested || typeof nested !== 'object' || Array.isArray(nested)) continue;
+        if(flat === raw) flat = {...raw};
+        Object.keys(nested).forEach(key => {
+            if(!Object.prototype.hasOwnProperty.call(flat, key)) flat[key] = nested[key];
+        });
+        delete flat[name];
+    }
+    return flat;
+}
+function canvasAgentSafePatch(raw){
+    const patch = {};
+    if(!raw || typeof raw !== 'object' || Array.isArray(raw)) return patch;
+    Object.entries(raw).forEach(([key, value]) => {
+        if(CANVAS_AGENT_PROTECTED_NODE_KEYS.has(key) || key.startsWith('_')) return;
+        patch[key] = value;
+    });
+    return patch;
+}
+// 单条来源正文上限。取会写进 agentSources.prompt 的请求里、取证点名的最大 max_tokens：
+// 编剧与 DeepWhite 默认 12288。视频反推 /api/canvas-llm、复刻、修图是 4096，九宫格看图是 2048。
+// 后三者不进这个字段。代码里没有另设字数上限，所以用这个 token 上限当作字数上限。
+// 故事动画脚本的默认是 16384，单条已经超过上下文 14000，留在总长兜底里砍，不抬高这一刀。
+export { flattenCanvasAgentParameters };
+const AGENT_SOURCE_PROMPT_MAX = 12288;
+function clipAgentSourcePrompt(value){
+    const text = String(value || '').trim();
+    if(!text) return '';
+    return text.length > AGENT_SOURCE_PROMPT_MAX ? text.slice(0, AGENT_SOURCE_PROMPT_MAX) : text;
+}
+function summarizeCanvasAgentSource(source){
+    const item = {
+        id: String(source?.id || ''),
+        type: String(source?.type || ''),
+        label: String(source?.label || ''),
+    };
+    const preview = String(source?.preview || '').trim();
+    if(preview) item.preview = preview;
+    const refs = (Array.isArray(source?.refs) ? source.refs : [])
+        .map(ref => String(ref?.url || '').trim())
+        .filter(Boolean);
+    if(refs.length) item.refs = refs;
+    const prompt = clipAgentSourcePrompt(source?.prompt);
+    if(prompt) item.prompt = prompt;
+    return item;
+}
+function agentSourcesForSnapshot(node){
+    if(node?.type === 'loop'){
+        return [{
+            id: String(node.id || ''),
+            type: 'loop',
+            label: '循环，实际轮数由 runNodeCascade 驱动，Agent 不能直接执行 loop',
+        }];
+    }
+    return generatorSources(node, null).map(summarizeCanvasAgentSource);
+}
+function canvasAgentAvailableModels(){
+    return {
+        fromConfig: canvasAgentModelsFromConfig,
+        image: imageApiProviders().map(p => ({ id: p.id, models: allImageModels(p.id) })),
+        chat: chatApiProviders().map(p => ({ id: p.id, models: providerChatModels(p.id) })),
+        video: videoModels.length ? videoModels.slice() : DEFAULT_VIDEO_MODELS.slice(),
+    };
+}
+/** Canvas Agent 只读桥：外部拿快照，不暴露闭包内的可变引用。 */
+export function getCanvasAgentSnapshot(){
+    const safeNodes = serializableCanvasNodes();
+    safeNodes.forEach(node => {
+        node.agentSources = agentSourcesForSnapshot(node);
+    });
+    const safeConnections = canvasAgentClone(connections || [], []);
+    const rect = board?.getBoundingClientRect?.();
+    const center = rect
+        ? screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2)
+        : {x:0, y:0};
+    return {
+        canvasId: String(canvas?.id || ''),
+        nodes: canvasAgentClone(safeNodes, []),
+        connections: safeConnections,
+        selectedNodeIds: [...selected],
+        viewport: {...viewport},
+        viewportCenter: {x:Number(center.x) || 0, y:Number(center.y) || 0},
+        settings: canvasAgentClone(canvas?.settings || {}, {}),
+        availableModels: canvasAgentAvailableModels(),
+        availableAssets: readCanvasAgentAssets(),
+    };
+}
+if (typeof window !== 'undefined') bindCanvasAgentAssetCache();
+/**
+ * Canvas Agent 写桥：一个 proposal 只留一个 undo 快照，失败则整批回滚。
+ * feature 层不得越过 canvasFacade 直接调用。
+ */
+export function applyCanvasAgentActions(rawActions=[], session){
+    if(!canvas) throw new Error('Canvas is not open');
+    const actions = Array.isArray(rawActions) ? rawActions : [];
+    if(!actions.length) return {createdNodeIds:[], idMap:{}};
+    const conversationId = String(session && session.conversationId || '').trim();
+    const before = snapshotCanvasState();
+    const idMap = new Map();
+    const seenTempIds = new Map();
+    const addedIds = [];
+    const refreshIds = new Set();
+    pushUndo();
+    try {
+        withSilentAddNode(() => {
+            actions.filter(action => action?.type === 'create_node').forEach(action => {
+                const nodeType = String(action.nodeType || '').trim();
+                const point = action.position && Number.isFinite(Number(action.position.x)) && Number.isFinite(Number(action.position.y))
+                    ? {x:Number(action.position.x), y:Number(action.position.y)}
+                    : defaultPoint();
+                const node = createNodeByType(nodeType, point);
+                if(!node) throw new Error(`Unsupported canvas node type: ${nodeType}`);
+                Object.assign(node, canvasAgentSafePatch(flattenCanvasAgentParameters(action.initialParams)));
+                node.x = point.x;
+                node.y = point.y;
+                // 本会话创建的节点。闸门只认这个字段，不认用户怎么说。补丁写不进来。
+                if(conversationId) node.agentConversationId = conversationId;
+                // 抬升在这里做，是因为它原本发生在控制台挂载时
+                // （applyVideoModelDefaults 只在挂载、新建、人改模型时跑）。
+                // 惰性抬升有两个问题：
+                // - 用户不点节点时抬升可能根本不发生；
+                //   update 路径更糟，提交时也不抬，4 原样送给海螺；
+                // - 抬升时机不可预测，所以无从记录。
+                // 复用 applyVideoModelDefaults 而不是另写范围判断，
+                // 是为了不制造第七份副本。
+                // 类型判断加在调用点：现有调用方传的都是视频节点，
+                // 共用函数不该为 Agent 路径改。
+                // 人类路径不经过这里，行为不变。
+                // 控制台以后挂上时 videoDockShellHtml 会再跑一次
+                // applyVideoModelDefaults。提前抬过之后那次是幂等空操作。
+                // 惰性抬升没有消失，它变成了兜底。
+                if(node.type === 'video') commitAgentVideoParamClamp(node);
+                // dock 在 add 时按当时的 prompt 挂上；同节点后续 refresh 不 remount，这里只对齐 textarea。
+                if(imageGenDockNodeId === node.id && imageGenDockEl){
+                    const promptEl = imageGenDockEl.querySelector('.gen-dock-prompt');
+                    if(promptEl) promptEl.value = String(node.prompt ?? '');
+                }
+                addedIds.push(node.id);
+                if(action.tempId){
+                    const tempId = String(action.tempId);
+                    const ordinal = actions.indexOf(action) + 1;
+                    const previous = seenTempIds.get(tempId);
+                    if(previous){
+                        throw new Error(`tempId "${tempId}" 重复，第 ${previous} 个和第 ${ordinal} 个节点都用了它`);
+                    }
+                    seenTempIds.set(tempId, ordinal);
+                    idMap.set(tempId, node.id);
+                }
+            });
+        });
+        const resolveId = value => idMap.get(String(value || '')) || String(value || '');
+        actions.filter(action => action?.type === 'update_node_params').forEach(action => {
+            const nodeId = resolveId(action.nodeId);
+            const node = nodes.find(item => item.id === nodeId);
+            if(!node) throw new Error(`Canvas node not found: ${nodeId}`);
+            Object.assign(node, canvasAgentSafePatch(flattenCanvasAgentParameters(action.patch)));
+            // update_node_params 的 nodeId 无条件进 invalidationActions 的 roots，
+            // 所以改一个 video 的 duration 会让它自己和全部下游标脏。
+            // 本轮的留痕直接写活节点、不走 actions，
+            // 所以不会额外触发一次标脏。
+            if(node.type === 'video') commitAgentVideoParamClamp(node);
+            refreshIds.add(nodeId);
+        });
+        actions.filter(action => action?.type === 'connect_nodes').forEach(action => {
+            const from = resolveId(action.sourceNodeId);
+            const to = resolveId(action.targetNodeId);
+            if(connections.some(item => item.from === from && item.to === to)) return;
+            if(!canConnect(from, to)) {
+                throw new Error(canvasAgentConnectRejectReason(from, to));
+            }
+            connections.push({id:uid('c'), from, to});
+            refreshIds.add(from);
+            refreshIds.add(to);
+        });
+        sanitizeConnections();
+        syncAllLoopImageBatchSizes();
+        syncGeneratorInputs();
+        selected.clear();
+        addedIds.forEach(id => selected.add(id));
+        commitStructureDomPatch({addedIds, refreshIds:[...refreshIds]});
+        refreshSelectionVisuals();
+        scheduleSave();
+        return {createdNodeIds:addedIds, idMap:Object.fromEntries(idMap)};
+    } catch(err) {
+        undoStack.pop();
+        nodes = before.nodes;
+        connections = before.connections;
+        selected.clear();
+        render({force:true});
+        refreshSelectionVisuals();
+        throw err;
+    }
+}
+// rh 用它自己的轮询上限。没有内部上限的生图/视频按观察到的 10–30 秒给 6 倍，不借用 RH 的排队时间。
+const RH_POLL_LIMIT = 720;
+const RH_POLL_INTERVAL_MS = 2500;
+const RH_AGENT_TIMEOUT_MS = RH_POLL_LIMIT * RH_POLL_INTERVAL_MS;
+const SINGLE_GENERATION_MS = 180 * 1000;
+const LLM_ROUND_MS = 2 * 60 * 1000;
+// 编剧长正文与服务端 TEXT_API_TIMEOUT_MS 默认值对齐。
+const SCREENWRITING_ROUND_MS = 5 * 60 * 1000;
+// 视频反推走 /api/canvas-llm，服务端超时默认 300 秒、max_tokens 默认 4096。Agent 等待用这一档，不用生图的 180 秒。
+const VIDEO_REVERSE_ROUND_MS = 5 * 60 * 1000;
+const REPLICA_DIMENSION_READ_MS = 8000;
+const BATCH_POSTER_IMAGE_ATTEMPTS = 1 + 2;
+const CANVAS_AGENT_MAX_SERIAL_EXECUTIONS = 12;
+const AGENT_TEXT_ROUND_TYPES = new Set([
+    'llm', 'slotsLoopVideoAgent', 'mxShellPromptAgent', 'mxShellPolishAgent',
+    'deepWhiteShotAgent', 'viewpointAgent', 'pixarAdScriptAgent',
+]);
+export function canvasAgentExecutionTimeoutMs(node){
+    const type = String(node?.type || '');
+    if(type === 'rh') return RH_AGENT_TIMEOUT_MS;
+    if(type === 'screenwritingAgent') return SCREENWRITING_ROUND_MS;
+    if(type === 'videoReverse') return VIDEO_REVERSE_ROUND_MS;
+    if(type === 'nineGridAgent') return LLM_ROUND_MS + SINGLE_GENERATION_MS;
+    if(type === 'batchPosterAgent') return LLM_ROUND_MS + SINGLE_GENERATION_MS * BATCH_POSTER_IMAGE_ATTEMPTS;
+    // 洗图 await 完成之后才开始换人，两阶段串行。读尺寸的 8000 毫秒在两阶段之前。
+    if(type === 'replicaAgent') return 2 * SINGLE_GENERATION_MS + REPLICA_DIMENSION_READ_MS;
+    if(AGENT_TEXT_ROUND_TYPES.has(type)) return LLM_ROUND_MS;
+    return SINGLE_GENERATION_MS;
+}
+export function canvasAgentBatchTimeoutMs(executionNodes){
+    return (executionNodes || [])
+        .slice(0, CANVAS_AGENT_MAX_SERIAL_EXECUTIONS)
+        .reduce((sum, node) => sum + canvasAgentExecutionTimeoutMs(node), 0);
+}
+function stampCanvasAgentLastError(node, message){
+    const text = String(message || '').trim();
+    if(!node || !text) return;
+    node.agentLastError = { message: text, at: Date.now() };
+    flushCanvasAgentSave();
+}
+function canvasAgentNotExecutableMessage(node){
+    const id = String(node?.id || '');
+    const type = String(node?.type || '');
+    if(type === 'image'){
+        return `节点 ${id}（类型 image）不可执行。\nimage 是静态图片展示节点，用于显示已有图片。\n要从提示词生成图片，请使用 generator 类型。\n要从提示词生成视频，请使用 video 类型。`;
+    }
+    return `节点 ${id}（类型 ${type}）不可执行。不要提议执行这个类型。`;
+}
+function rejectCanvasAgentExecution(node, message){
+    stampCanvasAgentLastError(node, message);
+    return Promise.reject(new Error(message));
+}
+/** 委托既有单节点 runner；不复制或改变手动执行逻辑。 */
+export function executeCanvasAgentNodeSkill(nodeId){
+    const id = String(nodeId || '');
+    const node = nodes.find(item => item.id === id);
+    if(!node) return Promise.reject(new Error(`Canvas node not found: ${nodeId}`));
+    if(!canvasRunTypes().includes(node.type)){
+        return rejectCanvasAgentExecution(node, canvasAgentNotExecutableMessage(node));
+    }
+    let settled = false;
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            if(settled) return;
+            settled = true;
+            const seconds = Math.round(canvasAgentExecutionTimeoutMs(node) / 1000);
+            const message = `节点 ${id} 的生成在 ${seconds} 秒内未完成，任务可能仍在后台运行。不要重建该节点，稍后检查其产出。`;
+            // agentLastError 只表示这次等待失败。后台轮询仍可能写回产出，两者可以同时在。
+            stampCanvasAgentLastError(nodes.find(item => item.id === id), message);
+            reject(new Error(message));
+        }, canvasAgentExecutionTimeoutMs(node));
+        (async () => {
+            const result = await runCascadeNodeByType(node, {cascade:true, agent:true});
+            // 轮询完成回调里，从清掉 _pending 到给 running 赋值之间禁止 await。
+            // 这两步之间一旦让出，while 会在产出写回之前判定完成，Agent 读到的仍是旧产出（cascade:false 直接返回的那个缺陷）。
+            // 现有测试只在函数返回后拍节点快照，构造不出这个间隙，所以抓不到。
+            // 9 个纯文本类型没有 _pending，cascade 时也不写 running，等待判据对它们不起作用，正确性完全依赖 cascade:true。若 Agent 路径改回 cascade:false，它们会全部静默退化。
+            // llm、slotsLoopVideoAgent、mxShellPromptAgent、mxShellPolishAgent、deepWhiteShotAgent、screenwritingAgent、viewpointAgent、pixarAdScriptAgent、videoReverse。
+            // 九宫格没有 _pending，但有自己的 running，且不接收 opts，所以不受 cascade 参数影响，两条路径行为相同。它的 while 立即通过，是因为 running 在 await 返回前已经清掉。
+            while(!settled && (agentPendingCount(id) > 0 || node.running)) await sleep(1000);
+            if(settled) return;
+            return result;
+        })().then(result => {
+            if(settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(result);
+        }, err => {
+            if(settled) return;
+            settled = true;
+            clearTimeout(timer);
+            const message = err instanceof Error ? err.message : String(err || '');
+            stampCanvasAgentLastError(nodes.find(item => item.id === id), message);
+            reject(err);
+        });
+    });
+}
+export function withCanvasAgentNode(nodeId, mutate){
+    const node = nodes.find(item => item.id === String(nodeId || ''));
+    if(node && typeof mutate === 'function') mutate(node);
+}
+/** 清掉 stale 之后再挂一次防抖保存。完成回调里的立刻保存发生在删除之前，那一份磁盘仍带着 agentStale。 */
+export function flushCanvasAgentSave(){
+    scheduleSave();
+}
+// 完成回调会清掉 _pending。这里只记这次 pending 挂上的那个 Output，settle 不能去扫全部 Output。
+const canvasAgentOutputHostBySource = new Map();
+function noteCanvasAgentOutputHost(source, host){
+    const sourceId = String(source?.id || (typeof source === 'string' ? source : '') || '');
+    if(!sourceId || host?.type !== 'output' || !host.id) return;
+    canvasAgentOutputHostBySource.set(sourceId, host.id);
+}
+export function takeCanvasAgentOutputHost(nodeId){
+    const id = String(nodeId || '');
+    const hostId = canvasAgentOutputHostBySource.get(id) || '';
+    canvasAgentOutputHostBySource.delete(id);
+    return hostId;
+}
+export function discardCanvasAgentOutputHost(nodeId){
+    canvasAgentOutputHostBySource.delete(String(nodeId || ''));
 }
 function canvasWorkflowEdges(){
     const runTypes = canvasRunTypes();
@@ -36947,7 +36572,9 @@ function deleteNode(id, event){
     purgeNodeFromGroups(id);
     destroyLTXEditor(nodes.find(n => n.id === id));
     nodes = nodes.filter(n => n.id !== id);
+    // 级联摘掉以这颗节点为端点的边
     connections = connections.filter(c => c.from !== id && c.to !== id);
+    markIntentionalStructureDelete();
     selected.delete(id);
     syncGeneratorInputs();
     const refreshIds = [...new Set([...neighborIds, ...owningGroups])]
@@ -36983,6 +36610,7 @@ function deleteConnection(id, event){
     if(!removed) return;
     try { pushUndo(); } catch(err) { console.warn('[infinite-canvas] undo snapshot failed', err); }
     connections = connections.filter(c => c.id !== id);
+    markIntentionalStructureDelete();
     if(hoveredConnectionId === id) hoveredConnectionId = '';
     if(connHoverArmedId === id) clearConnHoverArm();
     linkDeletePosById.delete(id);
@@ -37118,7 +36746,6 @@ function slimRunSnapshotNode(node){
         msCustomModel: node.msCustomModel,
         msgenModel: node.msgenModel,
         mode: node.mode,
-        comfyWorkflow: node.comfyWorkflow,
         webappId: node.webappId,
         workflowId: node.workflowId,
         ratio: node.ratio,
@@ -37134,19 +36761,9 @@ function runSnapshot(node, prompt, refs=[]){
         refs: (refs || []).map(ref => ({url:ref.url, name:ref.name || 'image'})).filter(ref => ref.url),
     };
 }
-function comfyRunLabel(node){
-    const mode = node?.mode || 'text';
-    if(mode === 'text') return tr('canvas.comfyText');
-    if(mode === 'enhance') return tr('canvas.comfyEnhance');
-    if(mode === 'edit') return tr('canvas.comfyEdit');
-    if(mode === 'custom') return node?.comfyWorkflow || tr('canvas.comfyCustom');
-    return 'ComfyUI';
-}
 function runTaskLabel(run){
     const node = run?.node || {};
     if(run?.taskLabel) return run.taskLabel;
-    if(run?.nodeType === 'comfy') return comfyRunLabel(node);
-    if(run?.nodeType === 'ltxDirector') return tr('canvas.ltxDirector');
     if(run?.nodeType === 'generator') return node.model || 'API Image';
     if(run?.nodeType === 'video') return node.model || 'Video';
     if(run?.nodeType === 'replicaAgent') return '复刻 Agent';
@@ -37193,8 +36810,6 @@ function runPlatformLabel(run){
     if(run?.nodeType === 'rh') return 'RunningHub';
     if(run?.nodeType === 'msgen') return 'ModelScope';
     if(run?.nodeType === 'video') return providerById(node.apiProvider || 'comfly')?.name || node.apiProvider || 'Video';
-    if(run?.nodeType === 'comfy') return 'ComfyUI';
-    if(run?.nodeType === 'ltxDirector') return 'ComfyUI';
     return run?.nodeType || 'Generate';
 }
 /** RH 本地落盘结果写入跨画布成片库（图片 + 视频，含用时） */
@@ -37232,20 +36847,7 @@ async function recordRhOutputsToHistoryLibrary(outputs, run, node, runMs = 0){
         } catch(_){ /* 成片库失败不阻断画布结果 */ }
     }
 }
-function comfyLabelFromWorkflow(workflow){
-    const name = String(workflow || '').toLowerCase();
-    if(!name) return '';
-    if(name === 'z-image.json') return tr('canvas.comfyText');
-    if(name === 'z-image-enhance.json' || name === 'upscale.json') return tr('canvas.comfyEnhance');
-    if(name === 'flux2-klein.json') return tr('canvas.comfyEdit');
-    return workflow;
-}
 function logTaskLabel(log){
-    const req = log?.request || {};
-    if(log?.platform === 'ComfyUI'){
-        const byWorkflow = comfyLabelFromWorkflow(req.workflow_json || req.workflow);
-        if(byWorkflow) return byWorkflow;
-    }
     return log?.model || '-';
 }
 function reportPlatformError({run, error, runMs=0}){
@@ -37733,7 +37335,7 @@ function bindAgentCountControls(wrap, node, opts={}){
 }
 function mergeGeneratedOutputs(node, outputs, append=false){
     if(!node) return;
-    const keepGeneratedMedia = ['rh','ltxDirector','video'].includes(node.type);
+    const keepGeneratedMedia = ['rh','video'].includes(node.type);
     const clean = (outputs || []).map(item => {
         const url = outputUrlValue(item);
         if(!url) return null;
@@ -37741,7 +37343,7 @@ function mergeGeneratedOutputs(node, outputs, append=false){
         const kind = node.type === 'video'
             ? 'video'
             : (mediaKindForOutputItem(item)
-                || (['rh','ltxDirector'].includes(node.type) && isVideoUrl(url) ? 'video' : '')
+                || (node.type === 'rh' && isVideoUrl(url) ? 'video' : '')
                 || 'image');
         if(!keepGeneratedMedia && kind !== 'image') return null;
         const runMs = Number(item?.runMs || 0) || 0;
@@ -37795,6 +37397,7 @@ function findPendingTask(taskId){
 /** 进行中任务登记：pending 被清掉后仍可按 taskId 找回落板目标 */
 const CANVAS_TASK_LEDGER_KEY = 'gemini-canvas-task-ledger-v1';
 const canvasTaskLedger = new Map();
+const serverLedgerHydratedCanvasIds = new Set();
 function loadCanvasTaskLedger(){
     try {
         const raw = sessionStorage.getItem(CANVAS_TASK_LEDGER_KEY);
@@ -37829,11 +37432,45 @@ function registerCanvasTaskLedger(taskId, info){
         updatedAt: nowMs(),
     });
     persistCanvasTaskLedger();
+    const saved = canvasTaskLedger.get(id);
+    if(saved?.canvasId){
+        void apiFetch('/api/canvas-task-ledger', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({task_id:id, canvas_id:saved.canvasId, info:saved}),
+        }).catch(() => { /* sessionStorage remains the local fallback */ });
+    }
 }
 function unregisterCanvasTaskLedger(taskId){
     const id = String(taskId || '').trim();
     if(!id) return;
     if(canvasTaskLedger.delete(id)) persistCanvasTaskLedger();
+    void apiFetch(`/api/canvas-task-ledger/${encodeURIComponent(id)}`, {
+        method:'DELETE',
+    }).catch(() => { /* server cleanup also has TTL */ });
+}
+async function hydrateServerCanvasTaskLedger(canvasId){
+    const id = String(canvasId || '').trim();
+    if(!id) return;
+    try {
+        const res = await apiFetch(`/api/canvas-task-ledger?canvas_id=${encodeURIComponent(id)}`);
+        if(!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        (Array.isArray(data?.tasks) ? data.tasks : []).forEach(item => {
+            const taskId = String(item?.task_id || '').trim();
+            const info = item?.info;
+            if(!taskId || !info || typeof info !== 'object') return;
+            const local = canvasTaskLedger.get(taskId);
+            if(!local || Number(item.updated_at || 0) >= Number(local.updatedAt || 0)){
+                canvasTaskLedger.set(taskId, {...info, canvasId:id});
+            }
+        });
+        persistCanvasTaskLedger();
+    } catch(_){
+        serverLedgerHydratedCanvasIds.delete(id);
+        return;
+    }
+    if(canvas?.id === id) resumeCanvasImageTasks();
 }
 function canvasTaskLedgerRaw(taskId){
     const id = String(taskId || '').trim();
@@ -38085,6 +37722,7 @@ function completeReplicaAgentTask(taskId, data){
     };
     if(!pending._recovered) out._pending = (out._pending || []).filter(p => p.id !== pending.id);
     const gen = ctx.gen || nodes.find(n => n.id === meta.run?.node?.id);
+    if(gen) gen.outputText = data.reverse_prompt || '';
     commitMediaOutputs(out, gen || (out.type !== 'output' ? out : null), images, meta.run?.refs?.[0], [meta], {
         appendGenerated:Boolean(pending.appendGenerated),
     });
@@ -38126,6 +37764,7 @@ function completeImageRepairAgentTask(taskId, data){
     };
     if(!pending._recovered) out._pending = (out._pending || []).filter(p => p.id !== pending.id);
     const gen = ctx.gen || nodes.find(n => n.id === meta.run?.node?.id);
+    if(gen) gen.outputText = data.reversed_prompt || '';
     commitMediaOutputs(out, gen || (out.type !== 'output' ? out : null), images, meta.run?.refs?.[0], [meta], {
         appendGenerated:Boolean(pending.appendGenerated),
     });
@@ -38629,6 +38268,14 @@ function applyCompletedCanvasImages(ctx, images, meta, taskId){
         || (out.type === 'generator' ? out : null);
     if(gen){
         mergeGeneratedOutputs(gen, images, Boolean(pending.appendGenerated));
+        // 九宫格的面板读 node.gridUrl，而通用完成路径只写 generatedOutputs 和 Output 画廊。
+        // 重开后图接回来了但面板看不到大图，用户会点「一键全流程」重跑 Phase A + Phase B，浪费 5160 秒起。
+        // 单格编辑不补：它的 gridUrl 还是旧大图、面板正常，用户只会重点那一格（1800 秒），
+        // 而这里拿不到格子下标、写进 gridUrl 会把整板换成这一格。已有大图时不覆盖。
+        if(gen.type === 'nineGridAgent' && !String(gen.gridUrl || '').trim()){
+            const gridUrl = outputUrlValue(images[0]);
+            if(gridUrl) gen.gridUrl = gridUrl;
+        }
         appendGeneratorPreviewRound(gen, images, meta);
         const stillPending = agentPendingCount(gen.id);
         gen.running = stillPending > 0;
@@ -38741,6 +38388,11 @@ function failCanvasImageTask(taskId, message){
 }
 function resumeCanvasImageTasks(){
     loadCanvasTaskLedger();
+    const activeCanvasId = String(canvas?.id || '');
+    if(activeCanvasId && !serverLedgerHydratedCanvasIds.has(activeCanvasId)){
+        serverLedgerHydratedCanvasIds.add(activeCanvasId);
+        void hydrateServerCanvasTaskLedger(activeCanvasId);
+    }
     // 先落板：在别的画布完成时停泊的结果
     flushParkedCanvasTaskResults();
     // ledger 有 task 但节点 _pending 已被存盘剥掉：重建占位，刷新后仍显示「生成中」
@@ -38753,6 +38405,11 @@ function resumeCanvasImageTasks(){
             const gen = nodes.find(n => n.id === info.genNodeId)
                 || nodes.find(n => n.id === info.run?.node?.id)
                 || null;
+            // 海报、九宫格登记之后走的是本函数末尾那段按 task_type 的轮询，
+            // 加上 resolveCanvasTaskContext 按 id 找节点，不依赖这里重建占位。
+            // 扩闸要处理重建占位的 UI 语义（假 running 那一类），是另一个量级的改动，而它不丢钱。
+            // replicaAgent、imageRepairAgent、挂在 image 上的任务已经登记，这段轮询会跑，结果能回来，缺的只是占位。本轮不补。
+            // 待办：resumable 白名单和这道类型闸是两份清单。2763ccb7 同一笔提交里 resumable 已有 replica-agent 和 image-repair-agent，闸写成 isGenConsoleNode 不覆盖它们；8640a032 只加了 rh。找不到把这两类排除出闸的提交说明。
             if(!gen || !(isGenConsoleNode(gen) || gen.type === 'rh')) continue;
             // 历史里已有该 pending 对应结果：勿再挂假 pending
             const pendingId = String(info.pendingId || '');
@@ -40841,7 +40498,7 @@ function nodeBounds(ids){
     const y2 = Math.max(...rects.map(r => r.y + r.h));
     return {x:x1, y:y1, w:x2 - x1, h:y2 - y1};
 }
-const FLOW_NODE_ORDER = {image:0, prompt:1, group:2, promptGroup:2, loop:3, llm:4, generator:5, replicaAgent:5, imageRepairAgent:5, videoReverse:5, slotsLoopVideoAgent:5, mxShellPromptAgent:5, mxShellPolishAgent:5, deepWhiteShotAgent:5, screenwritingAgent:5, viewpointAgent:5, pixarAdScriptAgent:5, textOutput:6, mxShellPromptView:6, deepWhiteShotView:6, msgen:5, video:5, rh:5, comfy:5, ltxDirector:5, output:6, frameStack:6, imageBatch:6};
+const FLOW_NODE_ORDER = {image:0, prompt:1, group:2, promptGroup:2, loop:3, llm:4, generator:5, replicaAgent:5, imageRepairAgent:5, videoReverse:5, slotsLoopVideoAgent:5, mxShellPromptAgent:5, mxShellPolishAgent:5, deepWhiteShotAgent:5, screenwritingAgent:5, viewpointAgent:5, pixarAdScriptAgent:5, textOutput:6, mxShellPromptView:6, deepWhiteShotView:6, msgen:5, video:5, rh:5, output:6, frameStack:6, imageBatch:6};
 function moveNodeWithChildren(node, newX, newY){
     if(!node) return;
     const dx = newX - Number(node.x || 0);
@@ -40993,7 +40650,7 @@ function canvasNodeSearchTypeFallback(type){
         mxShellPromptAgent:'Mx-Shell', mxShellPolishAgent:'Mx-Shell Polish', textOutput:'Text Output',
         mxShellPromptView:'Mx-Shell View', deepWhiteShotAgent:'DeepWhite', deepWhiteShotView:'DeepWhite Doc',
         screenwritingAgent:'Screenwriting', viewpointAgent:'Viewpoint', pixarAdScriptAgent:'Story Anim', videoReverse:'Video Reverse',
-        comfy:'ComfyUI', ltxDirector:'LTX Director', rh:'RunningHub',
+        rh:'RunningHub',
     };
     return map[type] || type || 'Node';
 }
@@ -41056,7 +40713,7 @@ function canvasNodeSearchCatMatch(node, cat){
     }
     if(cat === 'audio') return type === 'image' && kind === 'audio';
     if(cat === 'world'){
-        return ['rh','comfy','ltxDirector','replicaAgent','loop'].includes(type);
+        return ['rh','replicaAgent','loop'].includes(type);
     }
     if(cat === 'group') return type === 'group' || type === 'promptGroup' || type === 'imageBatch';
     return true;
@@ -42502,6 +42159,70 @@ function syncLoopImageBatchSize(loopNode){
 function syncAllLoopImageBatchSizes(){
     nodes.filter(n => n.type === 'loop').forEach(syncLoopImageBatchSize);
 }
+/*
+这里的检查顺序必须和 canConnect 的前三行 return 一致：
+自连 → 端点不存在 → 组节点。
+顺序错了会误报（找不到节点就没有 type，
+先判组节点会把「端点不存在」说成「框组无端口」）。
+移动 canConnect 前三行的顺序时，必须同步改这里。
+允许名单（43008 以后）不在这里复制——
+它是 100+ 行长尾，复制就是第五份副本，
+而它的失败由兜底的类型对文案覆盖，
+模型需要的是「这个组合不行」，不是「哪一行拒的」。
+*/
+export function canvasAgentConnectRejectReason(fromId, toId){
+    // 缝合 id：随机段是真的，时间戳是别的节点的。格式合法，查表拦不住。
+    // 和动作名白名单不是一条规则。白名单拦的是发明出来的工具名。
+    const stitchedPrefix = id => {
+        const matched = /^([a-z][a-z0-9]*)_[0-9a-f]+_\d{13}$/i.exec(String(id || ''));
+        return matched ? matched[1].toLowerCase() : '';
+    };
+    const liveIdHint = id => {
+        const prefix = stitchedPrefix(id);
+        if(!prefix) return '';
+        const live = nodes
+            .map(node => String(node && node.id || ''))
+            .filter(liveId => liveId.toLowerCase().startsWith(`${prefix}_`) && liveId !== String(id));
+        if(!live.length) return `画布上没有 ${prefix}_ 节点`;
+        return `画布上的 ${prefix}_ 节点：${live.join('、')}`;
+    };
+    if(!fromId || !toId || fromId === toId) return `端点 id 为空或自连：${fromId} -> ${toId}`;
+    const from = nodes.find(n => n.id === fromId);
+    const to = nodes.find(n => n.id === toId);
+    if(!from || !to){
+        const missing = [];
+        if(!from) missing.push(fromId);
+        if(!to) missing.push(toId);
+        const hints = [];
+        const seen = new Set();
+        missing.forEach(id => {
+            const prefix = stitchedPrefix(id);
+            if(!prefix || seen.has(prefix)) return;
+            seen.add(prefix);
+            hints.push(liveIdHint(id));
+        });
+        const tail = hints.length ? `。${hints.join(' ')}` : '';
+        return `端点不存在：${missing.join('、')} 不在画布上${tail}`;
+    }
+    if(from.type === 'group' || to.type === 'group'){
+        const groupIds = [];
+        if(from.type === 'group') groupIds.push(fromId);
+        if(to.type === 'group') groupIds.push(toId);
+        return `框组无端口，不能作为连线端点：${groupIds.join('、')}`;
+    }
+    return `${from.type} → ${to.type} 这个类型组合不被允许。端点：${fromId} (${from.type}) → ${toId} (${to.type})`;
+}
+/*
+这里的检查顺序必须和 canConnect 的前三行 return 一致：
+自连 → 端点不存在 → 组节点。
+顺序错了会误报（找不到节点就没有 type，
+先判组节点会把「端点不存在」说成「框组无端口」）。
+移动 canConnect 前三行的顺序时，必须同步改这里。
+允许名单（43008 以后）不在这里复制——
+它是 100+ 行长尾，复制就是第五份副本，
+而它的失败由兜底的类型对文案覆盖，
+模型需要的是「这个组合不行」，不是「哪一行拒的」。
+*/
 function canConnect(fromId, toId){
     if(!fromId || !toId || fromId === toId) return false;
     const from = nodes.find(n => n.id === fromId);
@@ -44418,6 +44139,7 @@ function deleteSelectedNodes(){
     const neighborIds = consumerNeighborIdsAfterDelete(toDelete);
     nodes = nodes.filter(n => !toDelete.has(n.id));
     connections = connections.filter(c => !toDelete.has(c.from) && !toDelete.has(c.to));
+    markIntentionalStructureDelete();
     selected.clear();
     syncGeneratorInputs();
     const refreshIds = [...new Set(neighborIds)].filter(nid => nodes.some(n => n.id === nid));
@@ -44582,8 +44304,7 @@ async function mountInfiniteCanvasEngineInner(root) {
 
   await loadConfig();
   if(!isMountGenerationCurrent(seq)) return disposeInfiniteCanvasEngine;
-  pruneMissingComfyWorkflows();
-  const forceGate = preferCanvasGateView;
+    const forceGate = preferCanvasGateView;
   if(forceGate){
     preferCanvasGateView = false;
     writeLastCanvasId('');
@@ -44628,7 +44349,7 @@ async function mountInfiniteCanvasEngineInner(root) {
 function exposeCanvasGlobals() {
   const map = {
     addImageNode, addPromptNode, addLoopNode, addLLMNode, addGeneratorNode, addReplicaAgentNode, addImageRepairAgentNode, addBatchPosterAgentNode, addNineGridAgentNode, addSlotsLoopVideoAgentNode, addMxShellPromptAgentNode, addMxShellPolishAgentNode, addMxShellPromptViewNode, addDeepWhiteShotAgentNode, addDeepWhiteShotViewNode, addViewpointAgentNode, addTextOutputNode, addVideoReverseNode, addMsGenNode, addImageBatchNode, runReplicaAgentFromButton, runImageRepairAgentFromButton, runBatchPosterFromButton, runNineGridFromButton, runSlotsLoopVideoFromButton, runMxShellPromptFromButton, runDeepWhiteShotFromButton,
-    addVideoNode, addRhNode, addComfyNode, addLTXDirectorNode, addOutputNode, addPromptGroupNode, groupSelectedImages, createImageBatchFromSelection, createPromptGroupFromSelection, organizeSelectedNodes,
+    addVideoNode, addRhNode, addOutputNode, addPromptGroupNode, groupSelectedImages, createImageBatchFromSelection, createPromptGroupFromSelection, organizeSelectedNodes,
     openCanvasNodeSearch, performUndo, performRedo,
     openCanvasHistoryHub, openCanvasGenerationBrowser, placeImageUrlOnCanvas, downloadAllCanvasOutputImages,
     exportCanvasWorkflowJson, openCanvasWorkflowImportPicker,

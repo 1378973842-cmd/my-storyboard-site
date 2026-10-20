@@ -14,7 +14,7 @@ const videoDock = videoDockStart >= 0 && videoDockEnd > videoDockStart
   ? eng.slice(videoDockStart, videoDockEnd)
   : '';
 const runStart = eng.indexOf('async function runVideoNode');
-const runEnd = eng.indexOf('async function uploadCanvasUrlToComfy');
+const runEnd = eng.indexOf('async function callCanvasLLM');
 const runVideo = runStart >= 0 && runEnd > runStart
   ? eng.slice(runStart, runEnd)
   : '';

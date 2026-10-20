@@ -12,6 +12,7 @@ import {
 } from '../../lib/infiniteCanvas/canvasEngine.js';
 import { CanvasLeftDock } from './CanvasBoardColorPicker';
 import { CanvasMaterialLibrary } from './CanvasMaterialLibrary';
+import { AgentFloatingPanel } from '../../features/canvas-agent/ui/AgentFloatingPanel';
 
 function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -42,7 +43,6 @@ function ensureCanvasScripts(): Promise<void> {
       installStudioI18n();
       await loadScript('/canvas/i18n-canvas.js');
       await loadScript('/canvas/lucide.js');
-      await loadScript('/canvas/ltx-director-timeline.js');
       scriptsReadyDone = true;
     })();
   }
@@ -239,6 +239,7 @@ export const InfiniteCanvas = memo(function InfiniteCanvas({
         onOpenChange={setMaterialLibraryOpen}
         active={shellActive}
       />
+      <AgentFloatingPanel rootRef={rootRef} active={shellActive} />
       <CanvasBootSplash
         visible={bootSplash && shellActive}
         onCanDismiss={dismissBootSplash}

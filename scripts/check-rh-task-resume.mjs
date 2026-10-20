@@ -9,7 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const eng = fs.readFileSync(path.join(root, 'src/lib/infiniteCanvas/canvasEngine.js'), 'utf8');
 
 const runStart = eng.indexOf('async function runRhNode');
-const runEnd = eng.indexOf('function renderComfySettings');
+const runEnd = eng.indexOf('export const CANVAS_GENERATOR_TYPES');
 const runRh = runStart >= 0 && runEnd > runStart ? eng.slice(runStart, runEnd) : '';
 
 const checks = [

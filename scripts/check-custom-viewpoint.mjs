@@ -24,13 +24,15 @@ assert(!engine.includes('data-novel-view-mode="orbit"'), '3D orbit is not a menu
 assert(engine.includes("mode === 'custom' || mode === 'orbit'"), 'leftover orbit clicks open custom');
 assert(engine.includes('function openImageCustomViewpoint'), 'open panel');
 assert(engine.includes('function runImageCustomViewpointJob'), 'run job');
-assert(engine.includes("generatorNanoBananaProModel('runninghub')"), 'model is nano-banana-pro');
+assert(engine.includes("generatorNanoBananaProModel('runninghub')"), 'model list still includes nano-banana-pro');
+assert(engine.includes('data-custom-view-menu="model"') && engine.includes('viewpointImageModel(job.model)') && engine.includes('nano-banana-2.1'), 'custom viewpoint can pick nano-banana-2.1');
 assert(engine.includes('data-custom-view-menu="size"') && engine.includes("customViewpointResolution"), 'resolution menu');
 assert(engine.includes('data-custom-view-count') && engine.includes('clampCustomViewpointCount'), 'count stepper');
 assert(engine.includes('canvas_resolution: resolution'), 'job sends chosen resolution');
 assert(engine.includes('Math.min(4,'), 'count cap is 4');
 assert(engine.includes("origin === 'custom-viewpoint'"), 'spawn origin');
 assert(engine.includes('/api/canvas/viewpoint-agent'), 'job calls viewpoint agent');
+assert(engine.includes('ensureDurableCanvasImageUrl(job.url, source?.id)'), 'custom viewpoint uploads blob refs before the agent');
 const linkStart = engine.indexOf('function linkCreateOptions');
 const linkEnd = engine.indexOf('function openLinkCreateMenu');
 assert(linkStart > 0 && linkEnd > linkStart && !engine.slice(linkStart, linkEnd).includes('viewpointAgent'), 'link menu has no viewpoint agent');

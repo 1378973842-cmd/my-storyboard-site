@@ -135,6 +135,7 @@ export function startPresenceHeartbeat(): () => void {
 }
 
 export async function logoutSession(): Promise<void> {
+  notifyAuthRequired();
   const sessionKey = getOrCreatePresenceSessionKey();
   await fetch('/api/auth/logout', {
     method: 'POST',

@@ -13,7 +13,7 @@ const syncFn = eng.slice(syncStart, eng.indexOf('async function runGenerator(', 
 const singleStart = eng.indexOf('async function runGeneratorSingle');
 const singleFn = eng.slice(singleStart, eng.indexOf('async function runGeneratorBatchParallel', singleStart));
 const videoStart = eng.indexOf('async function runVideoNode');
-const videoFn = eng.slice(videoStart, eng.indexOf('async function uploadCanvasUrlToComfy', videoStart));
+const videoFn = eng.slice(videoStart, eng.indexOf('async function callCanvasLLM', videoStart));
 
 const checks = [
   [syncFn.includes("querySelector('.gen-dock-count-input')"), 'dock sync reads count input'],

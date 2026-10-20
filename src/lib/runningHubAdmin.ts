@@ -366,6 +366,7 @@ function normalizeFetchedAppField(fieldRaw: unknown, index = 0): RhField {
 
 /** 把 /api/runninghub/app-info 的原始返回，解析成可编辑的字段列表 */
 export function fieldsFromAppInfoRaw(raw: unknown): RhField[] {
+  // 下标是故意传给 normalizeFetchedAppField 的第二个参数，用来生成 field_${index + 1}。不是 map 把下标误塞进数值上限。
   return rhAppFieldSourceList(raw).map((f, i) => normalizeFetchedAppField(f, i));
 }
 

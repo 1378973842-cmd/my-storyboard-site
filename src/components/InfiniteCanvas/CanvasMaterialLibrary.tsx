@@ -351,6 +351,7 @@ export const CanvasMaterialLibrary = memo(function CanvasMaterialLibrary({
       for (const file of list) {
         await uploadAssetItem(folderId, file);
       }
+      window.dispatchEvent(new CustomEvent('canvas-asset-library-changed'));
       await reloadLibrary();
       setExpanded(prev => ({ ...prev, [folderId]: true }));
     } catch (err) {
@@ -370,6 +371,7 @@ export const CanvasMaterialLibrary = memo(function CanvasMaterialLibrary({
           return;
         }
         const res = await createAssetCategory(name, draft.parentId);
+        window.dispatchEvent(new CustomEvent('canvas-asset-library-changed'));
         const newId = res?.category?.id as string | undefined;
         await reloadLibrary();
         if (draft.parentId) setExpanded(prev => ({ ...prev, [draft.parentId!]: true }));
@@ -387,6 +389,7 @@ export const CanvasMaterialLibrary = memo(function CanvasMaterialLibrary({
           return;
         }
         await renameAssetCategory(draft.id, name);
+        window.dispatchEvent(new CustomEvent('canvas-asset-library-changed'));
         await reloadLibrary();
         setDraft(null);
         return;
@@ -398,18 +401,21 @@ export const CanvasMaterialLibrary = memo(function CanvasMaterialLibrary({
           return;
         }
         await renameAssetItem(draft.id, name);
+        window.dispatchEvent(new CustomEvent('canvas-asset-library-changed'));
         await reloadLibrary();
         setDraft(null);
         return;
       }
       if (draft.kind === 'confirm-delete-folder') {
         await deleteAssetCategory(draft.id);
+        window.dispatchEvent(new CustomEvent('canvas-asset-library-changed'));
         await reloadLibrary();
         setDraft(null);
         return;
       }
       if (draft.kind === 'confirm-delete-item') {
         await deleteAssetItem(draft.id);
+        window.dispatchEvent(new CustomEvent('canvas-asset-library-changed'));
         await reloadLibrary();
         setDraft(null);
       }
@@ -434,6 +440,7 @@ export const CanvasMaterialLibrary = memo(function CanvasMaterialLibrary({
       }
       if (action === 'duplicate') {
         await duplicateAssetCategory(folderId);
+        window.dispatchEvent(new CustomEvent('canvas-asset-library-changed'));
         await reloadLibrary();
         return;
       }
@@ -459,6 +466,7 @@ export const CanvasMaterialLibrary = memo(function CanvasMaterialLibrary({
       for (const item of folder.items) {
         await moveAssetItem(item.id, targetId);
       }
+      window.dispatchEvent(new CustomEvent('canvas-asset-library-changed'));
       await reloadLibrary();
       setExpanded(prev => ({ ...prev, [targetId]: true }));
       setDraft(null);
@@ -856,6 +864,7 @@ export const CanvasMaterialLibrary = memo(function CanvasMaterialLibrary({
                 setError(null);
                 try {
                   await addAssetItem(targetId, url);
+                  window.dispatchEvent(new CustomEvent('canvas-asset-library-changed'));
                   await reloadLibrary();
                   setExpanded(prev => ({ ...prev, [targetId]: true }));
                 } catch (err) {

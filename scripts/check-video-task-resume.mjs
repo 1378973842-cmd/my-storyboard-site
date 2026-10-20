@@ -10,7 +10,7 @@ const eng = fs.readFileSync(path.join(root, 'src/lib/infiniteCanvas/canvasEngine
 const bridge = fs.readFileSync(path.join(root, 'src/services/canvasVideoBridge.ts'), 'utf8');
 
 const runStart = eng.indexOf('async function runVideoNode');
-const runEnd = eng.indexOf('async function uploadCanvasUrlToComfy');
+const runEnd = eng.indexOf('async function callCanvasLLM');
 const runVideo = runStart >= 0 && runEnd > runStart ? eng.slice(runStart, runEnd) : '';
 
 const checks = [
@@ -20,7 +20,7 @@ const checks = [
   [runVideo.includes('createCanvasVideoTask'), 'runVideo creates async tasks'],
   [runVideo.includes("canvasTaskType: 'canvas-video'"), 'pending tagged canvas-video'],
   [runVideo.includes('pollCanvasVideoTask'), 'runVideo polls tasks'],
-  [eng.includes("resumable = new Set(['online-image', 'replica-agent', 'image-repair-agent', 'canvas-video'])"), 'video resumable on reopen'],
+  [/resumable\s*=\s*new Set\(\[[^\]]*['"]canvas-video['"]/.test(eng), 'video resumable on reopen'],
   [eng.includes("if(p.canvasTaskType === 'canvas-video') pollCanvasVideoTask"), 'resume polls video'],
   [eng.includes('function completeCanvasVideoTask') && eng.includes('function pollCanvasVideoTask'), 'complete/poll helpers'],
   [eng.includes('ledger 有 task 但节点 _pending') || eng.includes('重建占位'), 'resume rebuilds pending slots'],
