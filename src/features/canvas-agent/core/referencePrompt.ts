@@ -4,6 +4,12 @@ function plain(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function readableName(value: unknown): string {
+  const text = plain(value);
+  if (!text || /\.(jpe?g|png|webp|gif|bmp|mp4|webm|mov|m4v|mkv)$/i.test(text)) return '';
+  return text;
+}
+
 function standInLabel(
   name: string,
   actions: CanvasAction[],
@@ -17,9 +23,9 @@ function standInLabel(
     action.type === 'create_node' && String(action.tempId || '').trim() === name
   ));
   const params = created && created.type === 'create_node' ? created.initialParams : undefined;
-  const createdLabel = plain(params?.name) || plain(params?.title);
+  const createdLabel = readableName(params?.name) || readableName(params?.title);
   const node = nodes.find((item) => item.id === name) as Record<string, unknown> | undefined;
-  const canvasLabel = plain(node?.name) || plain(node?.title) || plain(node?.floatTitle);
+  const canvasLabel = readableName(node?.name) || readableName(node?.title) || readableName(node?.floatTitle);
   const label = createdLabel || canvasLabel || `参考图${fallbackCount.n += 1}`;
   seen.set(name, label);
   return label;
@@ -27,6 +33,7 @@ function standInLabel(
 
 // {{}} 是内部记号，不能留在用户看得见的 prompt 里。
 // 换成节点名；没有名字就按出现顺序用参考图N。只删不换会留下「参考 与 的」这种残句。
+// 文件名不是节点名。name 是 canvas-output-xxx.jpg 时按没有名字处理，避免把文件名写进 prompt。
 function referenceLabels(
   prompt: string,
   actions: CanvasAction[],
@@ -96,7 +103,9 @@ export type UserCitations = {
 
 // 点名只认消息里的 @ 记号：{{节点id}}、使用模型 <id>。
 // {{canvas:id}} 和 {{id}} 是同一个节点。只留带前缀的那份，会对不上画布 id。
-// 口头答「要」不算。下一轮消息里仍没有记号，就继续拦。先不把确认做成点名。
+// 口头答「要」不算。确认这两个字本身不是点名。
+// 节点 id 一旦出现在本会话的用户消息里，就留在会话行上，后面没有记号的消息仍认这些 id。
+// 使用模型 仍只认这一条消息。模型自己写进提案的 id 不会进这一列。
 function addCitedNode(nodes: Set<string>, raw: string): void {
   const name = raw.trim();
   if (!name) return;
@@ -119,6 +128,17 @@ export function citationsInUserMessage(message: string): UserCitations {
     if (id) models.add(id);
   }
   return { nodes, models };
+}
+
+/** 落板认本条消息的 {{}}，再并上会话行里已经点过名的节点。没有用户消息时不拦（重做/替换）。 */
+export function citationsForApply(
+  userMessage: string | undefined,
+  sessionCitedNodes: readonly string[] = [],
+): UserCitations | null {
+  if (typeof userMessage !== 'string') return null;
+  const citations = citationsInUserMessage(userMessage);
+  for (const raw of sessionCitedNodes) addCitedNode(citations.nodes, String(raw || ''));
+  return citations;
 }
 
 function referenceTokenNames(prompt: string): string[] {
@@ -266,6 +286,18 @@ function sessionCreatedSource(
   if (!id) return false;
   const mark = nodes.find((item) => item.id === sourceId)?.agentConversationId;
   return typeof mark === 'string' && mark === id;
+}
+
+/** 落板前有、落板后没有的 connect_nodes。{{}} 新补上的边不算被拿掉。 */
+export function droppedConnectCount(before: CanvasAction[], after: CanvasAction[]): number {
+  const kept = new Set(
+    after.flatMap((action) => (
+      action.type === 'connect_nodes' ? [`${action.sourceNodeId}\0${action.targetNodeId}`] : []
+    )),
+  );
+  return before.filter((action) => (
+    action.type === 'connect_nodes' && !kept.has(`${action.sourceNodeId}\0${action.targetNodeId}`)
+  )).length;
 }
 
 // citations 为 null：不拦点名（重做/替换没有用户消息）。
@@ -416,8 +448,9 @@ export function referenceClampLabels(
   userMessage: string | undefined,
   connections: Array<{ from?: string; to?: string }> = [],
   conversationId = '',
+  sessionCitedNodes: readonly string[] = [],
 ): string[] {
-  const citations = typeof userMessage === 'string' ? citationsInUserMessage(userMessage) : null;
+  const citations = citationsForApply(userMessage, sessionCitedNodes);
   const settled = settleReferenceActions(actions, nodes, generatorTypes, citations, connections, conversationId);
   const used = new Set<number>();
   return actions.map((action) => {

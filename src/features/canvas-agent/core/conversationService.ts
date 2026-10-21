@@ -38,7 +38,7 @@ export async function createAgentConversation(
 
 export async function loadAgentConversation(
   conversationId: string,
-): Promise<{ conversation: AgentConversation; messages: AgentStoredMessage[] }> {
+): Promise<{ conversation: AgentConversation; messages: AgentStoredMessage[]; citedNodes?: string[] }> {
   return requestJson(`/api/canvas-agent/conversations/${encodeURIComponent(conversationId)}/messages`);
 }
 
@@ -55,7 +55,7 @@ export async function renameAgentConversation(
 
 export async function persistProposalOutcome(
   proposalId: string,
-  outcome: ProposalDiskOutcome,
+  outcome: ProposalDiskOutcome & { playbookId?: string; stage?: number },
 ): Promise<number> {
   const data = await requestJson<{ updated: number }>(
     `/api/canvas-agent/proposals/${encodeURIComponent(proposalId)}`,

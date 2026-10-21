@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
+import { citationsInUserMessage } from "../core/referencePrompt";
 
 export type CanvasAgentConversation = {
   id: string;
@@ -27,7 +28,10 @@ export function initCanvasAgentConversationSchema(
       canvas_id TEXT NOT NULL,
       title TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      agent_playbook_id TEXT NOT NULL DEFAULT '',
+      agent_stage INTEGER,
+      agent_cited_nodes TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_canvas_agent_conversations_owner
       ON canvas_agent_conversations(user_id, canvas_id, updated_at DESC);
@@ -45,6 +49,99 @@ export function initCanvasAgentConversationSchema(
     CREATE INDEX IF NOT EXISTS idx_canvas_agent_messages_conversation
       ON canvas_agent_messages(conversation_id, created_at ASC);
   `);
+  ensureConversationColumn(db, "agent_playbook_id", "TEXT NOT NULL DEFAULT ''");
+  ensureConversationColumn(db, "agent_stage", "INTEGER");
+  ensureConversationColumn(db, "agent_cited_nodes", "TEXT NOT NULL DEFAULT ''");
+}
+
+function ensureConversationColumn(
+  db: InstanceType<typeof Database>,
+  column: string,
+  definition: string,
+): void {
+  const columns = db.prepare("PRAGMA table_info(canvas_agent_conversations)").all() as { name: string }[];
+  if (!columns.some((item) => item.name === column)) {
+    db.exec(`ALTER TABLE canvas_agent_conversations ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+export function readConversationStage(
+  db: InstanceType<typeof Database>,
+  userId: string,
+  conversationId: string,
+): { playbookId: string; stage: number | null } {
+  const row = db.prepare(
+    `SELECT agent_playbook_id, agent_stage
+     FROM canvas_agent_conversations WHERE id = ? AND user_id = ?`
+  ).get(conversationId, userId) as { agent_playbook_id?: string; agent_stage?: number | null } | undefined;
+  const stage = row?.agent_stage;
+  return {
+    playbookId: String(row?.agent_playbook_id || ""),
+    stage: typeof stage === "number" && Number.isInteger(stage) ? stage : null,
+  };
+}
+
+export function recordConversationStage(
+  db: InstanceType<typeof Database>,
+  userId: string,
+  proposalId: string,
+  playbookId: string,
+  stage: number,
+): void {
+  const row = db.prepare(
+    `SELECT conversation_id FROM canvas_agent_messages
+     WHERE user_id = ? AND json_extract(metadata_json, '$.proposal.id') = ?`
+  ).get(userId, proposalId) as { conversation_id?: string } | undefined;
+  const conversationId = String(row?.conversation_id || "");
+  if (!conversationId) return;
+  db.prepare(
+    `UPDATE canvas_agent_conversations
+     SET agent_playbook_id = ?, agent_stage = ?
+     WHERE id = ? AND user_id = ?`
+  ).run(playbookId, stage, conversationId, userId);
+}
+
+function parseCitedNodeIds(raw: unknown): string[] {
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.map((item) => String(item || "").trim()).filter(Boolean))].sort();
+  } catch {
+    return [];
+  }
+}
+
+export function readConversationCitedNodes(
+  db: InstanceType<typeof Database>,
+  userId: string,
+  conversationId: string,
+): string[] {
+  const row = db.prepare(
+    `SELECT agent_cited_nodes
+     FROM canvas_agent_conversations WHERE id = ? AND user_id = ?`
+  ).get(conversationId, userId) as { agent_cited_nodes?: string } | undefined;
+  return parseCitedNodeIds(row?.agent_cited_nodes);
+}
+
+/** 只并用户消息里的 {{节点}}。确认、使用模型、模型写进提案的 id 都不写。 */
+export function recordConversationCitations(
+  db: InstanceType<typeof Database>,
+  userId: string,
+  conversationId: string,
+  message: string,
+): string[] {
+  const current = readConversationCitedNodes(db, userId, conversationId);
+  const incoming = [...citationsInUserMessage(message).nodes];
+  if (!incoming.length) return current;
+  const merged = [...new Set([...current, ...incoming])].sort();
+  if (merged.length === current.length && merged.every((id, index) => id === current[index])) return current;
+  db.prepare(
+    `UPDATE canvas_agent_conversations
+     SET agent_cited_nodes = ?
+     WHERE id = ? AND user_id = ?`
+  ).run(JSON.stringify(merged), conversationId, userId);
+  return merged;
 }
 
 export function listCanvasAgentConversations(
@@ -190,6 +287,7 @@ export type CanvasAgentProposalOutcome = {
   status: string;
   error: string | null;
   partialSkipped: number | null;
+  droppedConnects: number | null;
   reason: string | null;
 };
 
@@ -207,6 +305,7 @@ export function updateCanvasAgentProposalOutcome(
        '$.proposal.status', ?,
        '$.proposal.error', ?,
        '$.proposal.partialSkipped', ?,
+       '$.proposal.droppedConnects', ?,
        '$.proposal.reason', ?
      )
      WHERE user_id = ?
@@ -215,6 +314,7 @@ export function updateCanvasAgentProposalOutcome(
     outcome.status,
     outcome.error,
     outcome.partialSkipped,
+    outcome.droppedConnects,
     outcome.reason,
     userId,
     proposalId,

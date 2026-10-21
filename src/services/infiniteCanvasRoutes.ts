@@ -468,7 +468,7 @@ export function registerInfiniteCanvasRoutes(
   }
 
   registerCanvasLlmRoutes(app, projectRoot, gate);
-  registerCanvasAgentRoutes(app, gate, deps?.db, (playbookId) => readPlaybookForAgent(projectRoot, playbookId));
+  registerCanvasAgentRoutes(app, gate, deps?.db, (playbookId) => readPlaybookForAgent(projectRoot, playbookId), projectRoot);
   registerCanvasVideoRoutes(app, {
     projectRoot,
     requireGate: gate,

@@ -147,6 +147,8 @@ export type ActionProposal = {
   error?: string;
   feedbackDeliveredAt?: number;
   partialSkipped?: number | null;
+  /** 落板时被点名闸门拿掉的 connect_nodes 条数。状态仍是 applied。 */
+  droppedConnects?: number | null;
   reason?: string;
   inLibrary?: boolean;
   progress?: { done: number; total: number };
@@ -200,7 +202,7 @@ export type AgentStoredMessage = {
 };
 
 export type CanvasAgentStreamEvent =
-  | { type: 'meta'; model: string; conversationId?: string }
+  | { type: 'meta'; model: string; conversationId?: string; citedNodes?: string[] }
   | { type: 'delta'; text: string }
   | { type: 'tool'; log: AgentToolLog }
   | { type: 'proposal'; proposal: ActionProposal }

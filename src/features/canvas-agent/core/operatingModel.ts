@@ -199,6 +199,113 @@ export function assertAgentActionContent(
   );
 }
 
+function shotSeconds(value: number): string {
+  const rounded = Math.round(value * 1000) / 1000;
+  return String(rounded);
+}
+
+function shotLabel(index: string, start: number, end: number): string {
+  return `分镜${index}（${shotSeconds(start)}-${shotSeconds(end)}s）`;
+}
+
+function sameSecond(left: number, right: number): boolean {
+  return Math.abs(left - right) < 1e-6;
+}
+
+function finiteDuration(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const duration = Number(value);
+  return Number.isFinite(duration) ? duration : null;
+}
+
+function shotTime(line: string): { start: number; end: number } | null {
+  const time = line.match(/(\d+(?:\.\d+)?)\s*[-~～—–－]\s*(\d+(?:\.\d+)?)\s*(?:s|S|秒)/)
+    || line.match(/(\d+(?:\.\d+)?)\s*[-~～—–－]\s*(\d+(?:\.\d+)?)/);
+  if (!time) return null;
+  return { start: Number(time[1]), end: Number(time[2]) };
+}
+
+// 时间可以在分镜行的任意一栏。认 0-3、0-3s、0.0-3.0s、0-3秒。
+// 引用记号换成名字时会把换行收成空格，所以不能按换行切开。
+// 一段都读不出时只提示格式，不拿重叠去判。没有分镜标记就跳过。
+export function assertVideoShotTimeline(prompt: string, duration: number | null): void {
+  const marks = [...prompt.matchAll(/分镜\s*(\d+)\s*丨/g)];
+  const lines = marks.map((mark, index) => {
+    const start = mark.index ?? 0;
+    const end = marks[index + 1]?.index ?? prompt.length;
+    return { index: mark[1], time: shotTime(prompt.slice(start, end)) };
+  });
+  if (!lines.length) return;
+  if (lines.some((line) => !line.time)) {
+    throw new Error('解析不出时间段，请写成 X-Ys 形式');
+  }
+  const rows = lines.map((line) => ({
+    index: line.index,
+    start: line.time?.start || 0,
+    end: line.time?.end || 0,
+  }));
+  if (duration == null) throw new Error('有分镜时间段，但没有节点时长，无法核对');
+  for (const row of rows) {
+    if (row.end < row.start) {
+      throw new Error(`${shotLabel(row.index, row.start, row.end)}结束早于开始`);
+    }
+  }
+  if (!sameSecond(rows[0].start, 0)) {
+    throw new Error(`${shotLabel(rows[0].index, rows[0].start, rows[0].end)}没有从 0s 接上`);
+  }
+  for (let i = 1; i < rows.length; i += 1) {
+    const prev = rows[i - 1];
+    const next = rows[i];
+    const overlapEnd = Math.min(prev.end, next.end);
+    if (next.start < prev.end - 1e-6) {
+      throw new Error(`分镜${prev.index} 和分镜${next.index} 在 ${shotSeconds(next.start)}-${shotSeconds(overlapEnd)}s 重叠`);
+    }
+    if (next.start > prev.end + 1e-6) {
+      throw new Error(`${shotLabel(prev.index, prev.start, prev.end)}与${shotLabel(next.index, next.start, next.end)}留了空档`);
+    }
+  }
+  const total = rows.reduce((sum, row) => sum + (row.end - row.start), 0);
+  if (!sameSecond(total, duration)) {
+    throw new Error(`分镜时长合计 ${shotSeconds(total)} 秒，节点时长是 ${shotSeconds(duration)} 秒`);
+  }
+}
+
+// ponytail: 同一批对同一节点改两次时，后一次的时长只看自己的 patch，没有才看本次创建或画布上的原值。
+// 升级路径是先把同一节点的 patch 折成一份再核对。
+export function assertCanvasVideoShotTimelines(
+  actions: CanvasAction[],
+  nodes: CanvasNodeSnapshot[],
+): void {
+  const created = new Map<string, { type: string; duration: number | null }>();
+  for (const action of actions) {
+    if (action.type !== 'create_node' || !action.tempId) continue;
+    created.set(action.tempId, {
+      type: action.nodeType,
+      duration: finiteDuration(action.initialParams?.duration),
+    });
+  }
+  for (const action of actions) {
+    if (action.type === 'create_node') {
+      if (action.nodeType !== 'video') continue;
+      const prompt = action.initialParams?.prompt;
+      if (typeof prompt !== 'string') continue;
+      assertVideoShotTimeline(prompt, finiteDuration(action.initialParams?.duration));
+      continue;
+    }
+    if (action.type !== 'update_node_params') continue;
+    const prompt = action.patch?.prompt;
+    if (typeof prompt !== 'string') continue;
+    const made = created.get(action.nodeId);
+    const live = nodes.find((node) => node.id === action.nodeId);
+    const type = made?.type || live?.type;
+    if (type !== 'video') continue;
+    const duration = finiteDuration(action.patch?.duration)
+      ?? made?.duration
+      ?? finiteDuration(live?.duration);
+    assertVideoShotTimeline(prompt, duration);
+  }
+}
+
 export function applyRebuildGuards(actions: CanvasAction[], snapshot: CanvasSnapshot): CanvasAction[] {
   const discards: CanvasAction[] = [];
   const next = actions.map((action) => {

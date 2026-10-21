@@ -20,7 +20,7 @@ import type {
   ExecuteNodeSkillAction,
 } from '../types';
 import { AGENT_CREATABLE_NODE_TYPES } from '../types';
-import { citationsInUserMessage, settleReferenceActions } from './referencePrompt';
+import { citationsForApply, droppedConnectCount, settleReferenceActions } from './referencePrompt';
 import { rejectUnknownCanvasParamKeys } from '../tools/skillRegistry';
 import { normalizeCanvasActions, openBatchProgress } from './proposal';
 import { assertNoExecutionCycle, sortBatchExecutions } from './executionOrder';
@@ -29,6 +29,7 @@ import {
   applyRebuildGuards,
   assertAgentActionContent,
   assertAgentCanExecute,
+  assertCanvasVideoShotTimelines,
   downstreamChoices,
   settleAgentStaleAfterExecution,
   type ImpactChoice,
@@ -194,12 +195,13 @@ export function translateReferenceTokens(
   snapshot: CanvasSnapshot,
   userMessage?: string,
   conversationId?: string,
+  sessionCitedNodes?: readonly string[],
 ): CanvasAction[] {
   return settleReferenceActions(
     actions,
     snapshot.nodes,
     CANVAS_GENERATOR_TYPES,
-    typeof userMessage === 'string' ? citationsInUserMessage(userMessage) : null,
+    citationsForApply(userMessage, sessionCitedNodes),
     snapshot.connections,
     conversationId,
   );
@@ -230,10 +232,12 @@ export async function batchApplyChanges(
   onProgress?: (done: number, total: number) => void,
   userMessage?: string,
   conversationId?: string,
+  sessionCitedNodes?: readonly string[],
 ): Promise<{
   choices: ImpactChoice[];
   skippedCount: number;
   failedExecution?: { nodeId: string; message: string; reason?: string };
+  droppedConnects: number;
 }> {
   const snapshot = getCanvasSnapshot();
   const normalized = normalizeCanvasActions(actions);
@@ -242,12 +246,15 @@ export async function batchApplyChanges(
   const readable = flattenModelParamKeys(normalized);
   rejectUnknownCanvasParamKeys(readable);
   const choices = downstreamChoices(snapshot, readable);
+  const prepared = applyRebuildGuards(readable, snapshot);
   const translated = translateReferenceTokens(
-    applyRebuildGuards(readable, snapshot),
+    prepared,
     snapshot,
     userMessage,
     conversationId,
+    sessionCitedNodes,
   );
+  const droppedConnects = droppedConnectCount(prepared, translated);
   const guarded = withResolvedPositions(translated, snapshot);
   if (!guarded.length) throw new Error('建议中没有可执行的画布操作');
   const structural = guarded.filter(
@@ -315,7 +322,9 @@ export async function batchApplyChanges(
     const nodeId = resolveExecutionId(action.nodeId);
     skipExecution(nodeId, `本批最多连续执行 12 个节点，节点 ${nodeId} 未执行。不要重建该节点。`);
   }
-  return failedExecution ? { choices, skippedCount, failedExecution } : { choices, skippedCount };
+  return failedExecution
+    ? { choices, skippedCount, failedExecution, droppedConnects }
+    : { choices, skippedCount, droppedConnects };
 }
 
 export const canvasFacade = {

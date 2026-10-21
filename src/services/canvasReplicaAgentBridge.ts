@@ -226,7 +226,7 @@ const GEMINI_VISION_JPEG_QUALITY = Math.min(
 
 /** 缩小并转 JPEG，避免 Comfly/Gemini 因 1.6MB+ PNG base64 或拉取大图超时 */
 /** 缩小并转 JPEG，避免 Comfly/Gemini 因 1.6MB+ PNG base64 或拉取大图超时 */
-async function compressImageForGeminiVision(input: Buffer): Promise<Buffer> {
+export async function compressImageForGeminiVision(input: Buffer): Promise<Buffer> {
   return sharp(input)
     .rotate()
     .resize({
@@ -239,7 +239,7 @@ async function compressImageForGeminiVision(input: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
-async function readImageBufferForGemini(projectRoot: string, input: string): Promise<Buffer> {
+export async function readImageBufferForGemini(projectRoot: string, input: string): Promise<Buffer> {
   const trimmed = String(input || "").trim();
   const dataMatch = /^data:(image\/[^;]+);base64,(.+)$/is.exec(trimmed);
   if (dataMatch) {

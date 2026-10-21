@@ -40,6 +40,7 @@ import {
 } from 'lucide-react';
 import { isInfiniteCanvasEditorOpen } from '../../../lib/infiniteCanvas/canvasEngine.js';
 import { CANVAS_GENERATOR_TYPES, batchApplyChanges, getCanvasSnapshot } from '../core/canvasFacade';
+import { inferAppliedPlaybookStage } from '../core/stageLedger';
 import { referenceClampLabels } from '../core/referencePrompt';
 import { pendingExecutionFeedback, proposalWaitsForClick } from '../core/proposal';
 import {
@@ -64,7 +65,6 @@ import {
   mentionChipToken,
   mentionModelCandidates,
   mentionQueryAt,
-  stripMentionQuery,
   type ImpactChoice,
   type MentionCandidate,
 } from '../core/operatingModel';
@@ -82,6 +82,20 @@ import type {
 import './canvas-agent.css';
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
+
+function appliedStageOutcome(playbookId: string, current: ActionProposal) {
+  const stage = current.status === 'applied'
+    ? inferAppliedPlaybookStage(
+      playbookId,
+      current.actions,
+      (id) => getCanvasSnapshot().nodes.find((node) => node.id === id)?.type || '',
+    )
+    : null;
+  return {
+    ...diskProposalOutcome(current),
+    ...(stage != null && playbookId ? { playbookId, stage } : {}),
+  };
+}
 type AgentMode = 'confirm' | 'auto';
 type ChatTurn = AgentChatMessage & {
   elapsedMs?: number;
@@ -191,6 +205,200 @@ function resolveFloatingPlacement(
   };
 }
 
+type MentionInsert = Pick<MentionCandidate, 'kind' | 'id' | 'label' | 'preview' | 'thumb' | 'media'>;
+
+function composerPlainText(root: HTMLElement): string {
+  let out = '';
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out += node.textContent || '';
+      return;
+    }
+    if (!(node instanceof HTMLElement)) return;
+    const kind = node.dataset.mentionKind;
+    const id = node.dataset.mentionId;
+    if ((kind === 'node' || kind === 'model') && id) {
+      out += mentionChipToken({ kind, id });
+      return;
+    }
+    if (node.dataset.skillChip) return;
+    if (node.tagName === 'BR') {
+      out += '\n';
+      return;
+    }
+    node.childNodes.forEach(walk);
+  };
+  root.childNodes.forEach(walk);
+  return out.replace(/\u00a0/g, ' ').replace(/[ \t]+\n/g, '\n').trim();
+}
+
+function caretQuery(root: HTMLElement): string | null {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || !root.contains(sel.anchorNode)) return null;
+  if (sel.anchorNode?.nodeType !== Node.TEXT_NODE) return null;
+  return mentionQueryAt(sel.anchorNode.textContent || '', sel.anchorOffset);
+}
+
+function closeMentionPreviews() {
+  document.querySelectorAll('.canvas-agent-mention-preview').forEach((node) => node.remove());
+}
+
+function ensureSkillChip(root: HTMLElement, title: string | null, onRemove: () => void) {
+  const existing = root.querySelector(':scope > [data-skill-chip]');
+  if (!title) {
+    existing?.remove();
+    return;
+  }
+  if (existing instanceof HTMLElement) {
+    const label = existing.querySelector('span');
+    if (label) label.textContent = title;
+    if (existing !== root.firstChild) root.prepend(existing);
+    return;
+  }
+  const chip = document.createElement('span');
+  chip.className = 'canvas-agent-skill-chip';
+  chip.contentEditable = 'false';
+  chip.dataset.skillChip = '1';
+  const label = document.createElement('span');
+  label.textContent = title;
+  chip.append(label);
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.setAttribute('aria-label', '取消技能');
+  remove.textContent = '×';
+  remove.addEventListener('mousedown', (event) => event.preventDefault());
+  remove.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onRemove();
+  });
+  chip.append(remove);
+  root.prepend(chip);
+}
+
+function replaceComposerText(root: HTMLElement, text: string) {
+  const chip = root.querySelector(':scope > [data-skill-chip]');
+  root.replaceChildren();
+  if (text) root.append(document.createTextNode(text));
+  if (chip) root.prepend(chip);
+}
+
+function keepCaretAfterSkill(root: HTMLElement) {
+  const chip = root.querySelector(':scope > [data-skill-chip]');
+  const sel = window.getSelection();
+  if (!chip || !sel || !sel.isCollapsed || !sel.rangeCount || !root.contains(sel.anchorNode)) return;
+  const range = sel.getRangeAt(0);
+  const before = document.createRange();
+  before.setStart(root, 0);
+  before.setEnd(range.startContainer, range.startOffset);
+  if (!before.intersectsNode(chip)) placeCaretAfter(chip);
+}
+
+function placeCaretAfter(node: Node) {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const range = document.createRange();
+  range.setStartAfter(node);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function mentionPill(item: MentionInsert): HTMLSpanElement {
+  const pill = document.createElement('span');
+  pill.className = 'canvas-agent-skill-chip canvas-agent-mention-pill';
+  pill.contentEditable = 'false';
+  pill.dataset.mentionKind = item.kind;
+  pill.dataset.mentionId = item.id;
+  const label = document.createElement('span');
+  label.className = 'canvas-agent-mention-pill-label';
+  label.textContent = item.label;
+  pill.append(label);
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.setAttribute('aria-label', '移除引用');
+  remove.textContent = '×';
+  remove.addEventListener('mousedown', (event) => event.preventDefault());
+  pill.append(remove);
+  const preview = document.createElement('span');
+  preview.className = 'canvas-agent-mention-preview';
+  if (item.media === 'video' && item.preview) {
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'metadata';
+    video.src = item.preview;
+    preview.append(video);
+  } else if (item.preview || item.thumb) {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.src = item.thumb || item.preview || '';
+    if (item.thumb && item.preview && item.thumb !== item.preview) {
+      img.addEventListener('error', () => {
+        if (img.dataset.fallback) return;
+        img.dataset.fallback = '1';
+        img.src = item.preview || '';
+      });
+    }
+    preview.append(img);
+  }
+  const caption = document.createElement('span');
+  caption.textContent = item.label;
+  preview.append(caption);
+  pill.append(preview);
+  const closePreview = () => {
+    preview.classList.remove('is-open');
+    if (preview.parentElement !== pill) pill.append(preview);
+  };
+  pill.addEventListener('mouseenter', () => {
+    document.body.append(preview);
+    preview.classList.add('is-open');
+    const rect = pill.getBoundingClientRect();
+    const width = 168;
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    const height = preview.offsetHeight;
+    let top = rect.top - height - 8;
+    if (top < 8) top = Math.min(window.innerHeight - height - 8, rect.bottom + 8);
+    preview.style.left = `${left}px`;
+    preview.style.top = `${top}px`;
+  });
+  pill.addEventListener('mouseleave', closePreview);
+  remove.addEventListener('click', () => preview.remove());
+  return pill;
+}
+
+function insertMentionPill(root: HTMLElement, item: MentionInsert) {
+  const sel = window.getSelection();
+  let anchor: Text | null = null;
+  if (sel && sel.rangeCount && sel.anchorNode?.nodeType === Node.TEXT_NODE && root.contains(sel.anchorNode)) {
+    const textNode = sel.anchorNode as Text;
+    const cursor = sel.anchorOffset;
+    const raw = textNode.textContent || '';
+    const before = raw.slice(0, cursor).replace(/@([^\s@{}]*)$/, '');
+    const after = raw.slice(cursor);
+    textNode.textContent = before;
+    anchor = textNode;
+    if (after) textNode.after(document.createTextNode(after));
+  }
+  const existing = root.querySelector(
+    `[data-mention-kind="${item.kind}"][data-mention-id="${CSS.escape(item.id)}"]`,
+  );
+  if (existing) {
+    const next = existing.nextSibling;
+    placeCaretAfter(next?.nodeType === Node.TEXT_NODE ? next : existing);
+    return;
+  }
+  const pill = mentionPill(item);
+  const space = document.createTextNode(' ');
+  if (anchor?.parentNode) {
+    anchor.after(pill);
+    pill.after(space);
+  } else {
+    root.append(pill, space);
+  }
+  placeCaretAfter(space);
+}
+
 function useCanvasEditorVisible(active: boolean): boolean {
   const [visible, setVisible] = useState(false);
   useEffect(() => {
@@ -228,10 +436,14 @@ export function AgentFloatingPanel({
   const [title, setTitle] = useState('探索创作方向');
   const [conversationId, setConversationId] = useState('');
   const conversationIdRef = useRef('');
+  const citedNodesRef = useRef<string[]>([]);
+  const playbookIdRef = useRef('');
+  const appliedSkillRef = useRef('');
   const [conversations, setConversations] = useState<AgentConversation[]>([]);
   const [renaming, setRenaming] = useState(false);
   const [input, setInput] = useState('');
   const [playbookId, setPlaybookId] = useState('');
+  playbookIdRef.current = playbookId;
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [proposals, setProposals] = useState<ActionProposal[]>([]);
   const proposalsRef = useRef<ActionProposal[]>([]);
@@ -266,16 +478,9 @@ export function AgentFloatingPanel({
   const [notice, setNotice] = useState('');
   const [impactChoice, setImpactChoice] = useState<ImpactChoice[] | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
-  const [mentionChips, setMentionChips] = useState<Array<Pick<MentionCandidate, 'kind' | 'id' | 'label'>>>([]);
   const abortRef = useRef<AbortController | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const chipRowRef = useRef<HTMLSpanElement | null>(null);
-  const [chipIndent, setChipIndent] = useState(0);
-  useLayoutEffect(() => {
-    const node = chipRowRef.current;
-    setChipIndent(node ? node.offsetWidth + 8 : 0);
-  }, [playbookId, mentionChips]);
+  const composerRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const startedAt = useRef(0);
   const modeRef = useRef(mode);
@@ -384,6 +589,7 @@ export function AgentFloatingPanel({
   const clearConversationView = useCallback(() => {
     abortRef.current?.abort();
     conversationIdRef.current = '';
+    citedNodesRef.current = [];
     setConversationId('');
     setTitle('探索创作方向');
     setMessages([]);
@@ -399,6 +605,7 @@ export function AgentFloatingPanel({
   const showConversation = useCallback(async (id: string) => {
     const data = await loadAgentConversation(id);
     conversationIdRef.current = data.conversation.id;
+    citedNodesRef.current = Array.isArray(data.citedNodes) ? data.citedNodes : [];
     setConversationId(data.conversation.id);
     setTitle(data.conversation.title);
     setMessages(
@@ -498,10 +705,14 @@ export function AgentFloatingPanel({
           onProgress,
           proposal.userMessage,
           conversationIdRef.current,
+          citedNodesRef.current,
         ),
         update: updateProposal,
         current: () => proposalsRef.current.find((item) => item.id === proposal.id),
-        persist: (current) => persistProposalOutcome(current.id, diskProposalOutcome(current)),
+        persist: (current) => persistProposalOutcome(
+          current.id,
+          appliedStageOutcome(playbookIdRef.current, current),
+        ),
         queue: writeQueueRef.current,
       });
       if (outcome !== 'rejected' && outcome.choices.length) setImpactChoice(outcome.choices);
@@ -555,6 +766,7 @@ export function AgentFloatingPanel({
           conversationIdRef.current = event.conversationId;
           setConversationId(event.conversationId);
         }
+        if (Array.isArray(event.citedNodes)) citedNodesRef.current = event.citedNodes;
       } else if (event.type === 'delta') {
         setMessages((items) =>
           items.map((item) =>
@@ -580,7 +792,10 @@ export function AgentFloatingPanel({
           flushProposalWriteQueue(
             writeQueueRef.current,
             (id) => proposalsRef.current.find((item) => item.id === id),
-            (current) => persistProposalOutcome(current.id, diskProposalOutcome(current)),
+            (current) => persistProposalOutcome(
+              current.id,
+              appliedStageOutcome(playbookIdRef.current, current),
+            ),
           );
         });
       }
@@ -592,7 +807,8 @@ export function AgentFloatingPanel({
     async (raw: string, history: ChatTurn[]) => {
       const text = raw.trim();
       if (streaming || (!text && !playbookId)) return;
-      setMentionChips([]);
+      closeMentionPreviews();
+      if (composerRef.current) replaceComposerText(composerRef.current, '');
       const snapshot = getCanvasSnapshot();
       const contextRatio = Math.min(
         100,
@@ -671,23 +887,71 @@ export function AgentFloatingPanel({
     ],
   );
 
-  const addMention = useCallback((item: Pick<MentionCandidate, 'kind' | 'id' | 'label'>) => {
-    const cursor = composerRef.current?.selectionStart ?? input.length;
-    setInput((value) => stripMentionQuery(value, cursor));
-    setMentionChips((chips) => (
-      chips.some((chip) => chip.kind === item.kind && chip.id === item.id)
-        ? chips
-        : [...chips, { kind: item.kind, id: item.id, label: item.label }]
-    ));
+  const syncComposer = useCallback(() => {
+    const root = composerRef.current;
+    if (!root) return;
+    const text = composerPlainText(root);
+    const chip = root.querySelector(':scope > [data-skill-chip]');
+    if (!text && !root.querySelector('.canvas-agent-mention-pill')) {
+      const leftovers = [...root.childNodes].filter((node) => node !== chip);
+      if (leftovers.length) {
+        leftovers.forEach((node) => node.remove());
+        if (document.activeElement === root) {
+          if (chip) placeCaretAfter(chip);
+          else {
+            const range = document.createRange();
+            range.setStart(root, 0);
+            range.collapse(true);
+            const selection = window.getSelection();
+            selection?.removeAllRanges();
+            selection?.addRange(range);
+          }
+        }
+      }
+    }
+    if (playbookIdRef.current && !root.querySelector(':scope > [data-skill-chip]')) setPlaybookId('');
+    setInput(text);
+    setMentionQuery(caretQuery(root));
+  }, []);
+
+  const fillComposer = useCallback((text: string) => {
+    closeMentionPreviews();
+    const root = composerRef.current;
+    if (root) replaceComposerText(root, text);
+    setInput(text);
     setMentionQuery(null);
-    composerRef.current?.focus();
-  }, [input.length]);
+  }, []);
+
+  useEffect(() => {
+    const root = composerRef.current;
+    if (!root) return;
+    const title = playbookId
+      ? (agentPlaybooks.find((item) => item.id === playbookId)?.title || playbookId)
+      : null;
+    const skillChanged = appliedSkillRef.current !== playbookId;
+    appliedSkillRef.current = playbookId;
+    const hadChip = !!root.querySelector(':scope > [data-skill-chip]');
+    ensureSkillChip(root, title, () => setPlaybookId(''));
+    if (title && !hadChip && skillChanged) {
+      root.focus();
+      const chip = root.querySelector(':scope > [data-skill-chip]');
+      if (chip) placeCaretAfter(chip);
+    }
+  }, [playbookId, visible]);
+
+  const addMention = useCallback((item: MentionInsert) => {
+    const root = composerRef.current;
+    if (!root) return;
+    root.focus();
+    insertMentionPill(root, item);
+    setInput(composerPlainText(root));
+    setMentionQuery(null);
+  }, []);
 
   const sendMessage = useCallback(() => {
-    const cited = mentionChips.map((chip) => mentionChipToken(chip)).join(' ');
-    const text = [cited, input.trim()].filter(Boolean).join(' ');
+    const text = composerRef.current ? composerPlainText(composerRef.current) : input.trim();
     void sendText(text, messages);
-  }, [input, mentionChips, messages, sendText]);
+  }, [input, messages, sendText]);
 
   const retryFrom = useCallback(
     (assistantId: string) => {
@@ -704,7 +968,12 @@ export function AgentFloatingPanel({
     const line = selected.length
       ? selected.map((node) => `${node.type}#${node.id}`).join('、')
       : '当前没有选中节点';
-    setInput((value) => `${value}${value ? '\n' : ''}参考画布：${line}`);
+    const root = composerRef.current;
+    if (root) {
+      const has = composerPlainText(root).length > 0;
+      root.append(document.createTextNode(`${has ? '\n' : ''}参考画布：${line}`));
+      setInput(composerPlainText(root));
+    }
     setMenu('');
   }, []);
 
@@ -750,7 +1019,7 @@ export function AgentFloatingPanel({
   const beginPanelDrag = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
       if (!floating || event.button !== 0) return;
-      if ((event.target as HTMLElement).closest('button,input,textarea')) return;
+      if ((event.target as HTMLElement).closest('button,input,textarea,.canvas-agent-composer-input')) return;
       const root = portalRoot;
       const panel = panelRef.current;
       if (!root || !panel) return;
@@ -1088,6 +1357,7 @@ export function AgentFloatingPanel({
                     proposal.userMessage,
                     snapshot.connections,
                     conversationId,
+                    citedNodesRef.current,
                   );
                 } catch {
                   clampLines = [];
@@ -1163,7 +1433,11 @@ export function AgentFloatingPanel({
                     <section>
                       <h5>节点</h5>
                       {mentionNodes.map((item) => (
-                        <button key={item.id} type="button" onClick={() => addMention(item)}
+                        <button
+                          key={item.id}
+                          type="button"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => addMention(item)}
                         >
                           <span className="canvas-agent-mention-thumb">
                             {item.media === 'video' && item.preview ? (
@@ -1191,7 +1465,11 @@ export function AgentFloatingPanel({
                     <section>
                       <h5>模型</h5>
                       {mentionModels.map((item) => (
-                        <button key={item.id} type="button" onClick={() => addMention(item)}
+                        <button
+                          key={item.id}
+                          type="button"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => addMention(item)}
                         >
                           <span className="canvas-agent-mention-thumb is-model">
                             {item.group === '视频' ? <Film aria-hidden="true" /> : <ImageIcon aria-hidden="true" />}
@@ -1206,76 +1484,75 @@ export function AgentFloatingPanel({
               ) : null}
               <div className="canvas-agent-composer">
                 <div className="canvas-agent-field">
-                  {playbookId || mentionChips.length ? (
-                    <span ref={chipRowRef} className="canvas-agent-chip-row">
-                      {playbookId ? (
-                        <span className="canvas-agent-skill-chip" contentEditable={false}>
-                          {agentPlaybooks.find((item) => item.id === playbookId)?.title || playbookId}
-                          <button
-                            type="button"
-                            aria-label="取消技能"
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => setPlaybookId('')}
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ) : null}
-                      {mentionChips.map((chip) => (
-                        <span key={`${chip.kind}:${chip.id}`} className="canvas-agent-skill-chip" contentEditable={false}>
-                          {chip.label}
-                          <button
-                            type="button"
-                            aria-label="移除引用"
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => setMentionChips((chips) => chips.filter((item) => item.id !== chip.id || item.kind !== chip.kind))}
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ))}
-                    </span>
-                  ) : null}
-                  <textarea
+                  <div
                     ref={composerRef}
-                    value={input}
-                    style={chipIndent ? { textIndent: chipIndent } : undefined}
-                    onChange={(event) => {
-                    setInput(event.target.value);
-                    setMentionQuery(mentionQueryAt(event.target.value, event.target.selectionStart));
-                  }}
-                  onKeyDown={(event) => {
-                    event.stopPropagation();
-                    if (event.key === 'Backspace' && (mentionChips.length || playbookId)) {
-                      const start = composerRef.current?.selectionStart ?? 0;
-                      const end = composerRef.current?.selectionEnd ?? 0;
-                      if (start === 0 && end === 0) {
+                    className={`canvas-agent-composer-input${input.trim() ? '' : ' is-empty'}`}
+                    contentEditable
+                    role="textbox"
+                    aria-multiline="true"
+                    spellCheck={false}
+                    data-placeholder="随心输入，@ 可引用节点或模型"
+                    suppressContentEditableWarning
+                    onInput={syncComposer}
+                    onScroll={() => {
+                      document.querySelectorAll('.canvas-agent-mention-preview.is-open').forEach((node) => {
+                        node.classList.remove('is-open');
+                      });
+                    }}
+                    onClick={(event) => {
+                      const button = (event.target as HTMLElement).closest('.canvas-agent-mention-pill button');
+                      if (!button || !composerRef.current) return;
+                      const pill = button.closest('.canvas-agent-mention-pill');
+                      const space = pill?.nextSibling;
+                      pill?.remove();
+                      if (space?.nodeType === Node.TEXT_NODE) {
+                        const text = space.textContent || '';
+                        if (!text.trim()) space.remove();
+                        else if (text.startsWith(' ')) space.textContent = text.slice(1);
+                      }
+                      syncComposer();
+                    }}
+                    onPaste={(event) => {
+                      event.preventDefault();
+                      const text = event.clipboardData.getData('text/plain');
+                      const sel = window.getSelection();
+                      if (!sel || !sel.rangeCount) return;
+                      const range = sel.getRangeAt(0);
+                      range.deleteContents();
+                      const node = document.createTextNode(text);
+                      range.insertNode(node);
+                      placeCaretAfter(node);
+                      syncComposer();
+                    }}
+                    onKeyDown={(event) => {
+                      event.stopPropagation();
+                      if (
+                        composerRef.current
+                        && event.key.length === 1
+                        && !event.metaKey
+                        && !event.ctrlKey
+                        && !event.altKey
+                      ) keepCaretAfterSkill(composerRef.current);
+                      if (event.key === 'Backspace' && playbookId && !input.trim()) {
                         event.preventDefault();
-                        if (mentionChips.length) {
-                          setMentionChips((chips) => chips.slice(0, -1));
-                        } else {
-                          setPlaybookId('');
+                        setPlaybookId('');
+                        return;
+                      }
+                      if (event.key === 'Escape' && mentionQuery !== null) {
+                        event.preventDefault();
+                        setMentionQuery(null);
+                        return;
+                      }
+                      if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                        event.preventDefault();
+                        if (mentionItems.length) {
+                          addMention(mentionItems[0]);
+                          return;
                         }
-                        return;
+                        sendMessage();
                       }
-                    }
-                    if (event.key === 'Escape' && mentionQuery !== null) {
-                      event.preventDefault();
-                      setMentionQuery(null);
-                      return;
-                    }
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault();
-                      if (mentionItems.length) {
-                        addMention(mentionItems[0]);
-                        return;
-                      }
-                      sendMessage();
-                    }
-                  }}
-                  placeholder="随心输入，@ 可引用节点或模型"
-                  rows={2}
-                />
+                    }}
+                  />
                 </div>
                 <div className="canvas-agent-composer-bar">
                   <button
@@ -1304,7 +1581,7 @@ export function AgentFloatingPanel({
                     type="button"
                     className="canvas-agent-send"
                     onClick={streaming ? stopStreaming : sendMessage}
-                    disabled={!streaming && !input.trim() && !playbookId && !mentionChips.length}
+                    disabled={!streaming && !input.trim() && !playbookId}
                     aria-label={streaming ? '停止生成' : '发送'}
                   >
                     {streaming ? <Square aria-hidden="true" /> : <ArrowUp aria-hidden="true" />}
@@ -1329,7 +1606,7 @@ export function AgentFloatingPanel({
                   <button
                     type="button"
                     onClick={() => {
-                      setInput('先头脑风暴三个可拍的镜头方向，先不要改画布。');
+                      fillComposer('先头脑风暴三个可拍的镜头方向，先不要改画布。');
                       setMenu('');
                     }}
                   >
@@ -1369,7 +1646,7 @@ export function AgentFloatingPanel({
                           key={skill.id}
                           type="button"
                           onClick={() => {
-                            setInput(`使用「${skill.name}」处理当前选中节点。${skill.description}`);
+                            fillComposer(`使用「${skill.name}」处理当前选中节点。${skill.description}`);
                             setMenu('');
                           }}
                         >
@@ -1385,7 +1662,7 @@ export function AgentFloatingPanel({
                           key={type}
                           type="button"
                           onClick={() => {
-                            setInput(`创建一个 ${type} 节点，并说明它在当前工作流中的作用。`);
+                            fillComposer(`创建一个 ${type} 节点，并说明它在当前工作流中的作用。`);
                             setMenu('');
                           }}
                         >

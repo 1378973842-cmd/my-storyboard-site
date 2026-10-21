@@ -8,9 +8,15 @@ import {
   resolveTextLlmEnv,
   textLlmConfigError,
 } from '../../../services/canvasTextLlmBridge.js';
-import { allCanvasAITools, canvasSkillRegistry } from '../tools/skillRegistry.js';
+import {
+  compressImageForGeminiVision,
+  readImageBufferForGemini,
+} from '../../../services/canvasReplicaAgentBridge.js';
+import { agentPlaybooks, allCanvasAITools, canvasSkillRegistry } from '../tools/skillRegistry.js';
 import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, unknownCanvasActionMessage } from '../core/proposal.js';
 import { operatingPrompt } from '../core/operatingModel.js';
+import { canvasAgentStagePrefix } from '../core/stageLedger.js';
+import { VISION_IMAGE_CAP } from '../core/contextSerializer.js';
 import type {
   ActionProposal,
   CanvasAction,
@@ -24,6 +30,10 @@ import {
   initCanvasAgentConversationSchema,
   listCanvasAgentConversations,
   listCanvasAgentMessages,
+  readConversationCitedNodes,
+  readConversationStage,
+  recordConversationCitations,
+  recordConversationStage,
   renameCanvasAgentConversation,
   resolveCanvasAgentConversation,
   updateCanvasAgentProposalOutcome,
@@ -38,6 +48,7 @@ type ChatBody = {
   canvasId?: string;
   conversationId?: string;
   playbookId?: string;
+  visionImages?: unknown;
 };
 
 type ToolCall = {
@@ -207,11 +218,48 @@ function streamText(
   chunks.forEach((chunk) => sendEvent(res, { type: 'delta', text: chunk }));
 }
 
+async function compressedVisionUrls(root: string, listed: unknown): Promise<string[]> {
+  if (!root || !Array.isArray(listed)) return [];
+  const out: string[] = [];
+  for (const item of listed) {
+    if (out.length >= VISION_IMAGE_CAP) break;
+    const url = String(item || '').trim();
+    if (!url || url.startsWith('blob:')) continue;
+    try {
+      const raw = await readImageBufferForGemini(root, url);
+      const jpeg = await compressImageForGeminiVision(raw);
+      out.push(`data:image/jpeg;base64,${jpeg.toString('base64')}`);
+      console.log('[canvas-agent] vision image', {
+        rawKB: Math.round(raw.length / 1024),
+        jpegKB: Math.round(jpeg.length / 1024),
+      });
+    } catch (err) {
+      console.warn(
+        '[canvas-agent] vision image skipped',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+  return out;
+}
+
+function userContentWithImages(
+  text: string,
+  dataUrls: string[],
+): string | Array<Record<string, unknown>> {
+  if (!dataUrls.length) return text;
+  return [
+    { type: 'text', text },
+    ...dataUrls.map((url) => ({ type: 'image_url', image_url: { url } })),
+  ];
+}
+
 export function registerCanvasAgentRoutes(
   app: Express,
   gate?: RequestHandler,
   db?: InstanceType<typeof Database>,
   readPlaybookText?: (playbookId: string) => string,
+  visionRoot = '',
 ): void {
   if (db) {
     initCanvasAgentConversationSchema(db);
@@ -240,6 +288,7 @@ export function registerCanvasAgentRoutes(
       if (!proposalId || !status) return res.status(400).json({ error: '缺少提案状态' });
       const rawError = req.body?.error;
       const rawSkipped = req.body?.partialSkipped;
+      const rawDropped = req.body?.droppedConnects;
       const rawReason = req.body?.reason;
       const updated = updateCanvasAgentProposalOutcome(
         db,
@@ -249,9 +298,25 @@ export function registerCanvasAgentRoutes(
           status,
           error: typeof rawError === 'string' && rawError ? rawError : null,
           partialSkipped: typeof rawSkipped === 'number' && Number.isFinite(rawSkipped) ? rawSkipped : null,
+          droppedConnects: typeof rawDropped === 'number' && Number.isFinite(rawDropped) && rawDropped > 0
+            ? Math.floor(rawDropped)
+            : null,
           reason: typeof rawReason === 'string' && rawReason ? rawReason : null,
         },
       );
+      const playbookId = String(req.body?.playbookId || '').trim();
+      const stage = req.body?.stage;
+      if (
+        status === 'applied'
+        && updated > 0
+        && agentPlaybooks.some((item) => item.id === playbookId)
+        && typeof stage === 'number'
+        && Number.isInteger(stage)
+        && stage >= 0
+        && stage <= 4
+      ) {
+        recordConversationStage(db, req.authUser?.id || '', proposalId, playbookId, stage);
+      }
       return res.json({ updated });
     });
     app.get('/api/canvas-agent/conversations/:id/messages', ...protectedRoute, (req, res) => {
@@ -261,6 +326,7 @@ export function registerCanvasAgentRoutes(
       return res.json({
         conversation,
         messages: listCanvasAgentMessages(db, userId, conversation.id),
+        citedNodes: readConversationCitedNodes(db, userId, conversation.id),
       });
     });
     app.patch('/api/canvas-agent/conversations/:id', ...protectedRoute, (req, res) => {
@@ -290,6 +356,7 @@ export function registerCanvasAgentRoutes(
     const requestedPlaybookId = typeof body.playbookId === 'string' ? body.playbookId.trim() : '';
     if (!message && !requestedPlaybookId) return res.status(400).json({ error: '缺少消息内容' });
     let conversation: CanvasAgentConversation | null = null;
+    let citedNodes: string[] = [];
     if (db) {
       const canvasId = String(body.canvasId || '').trim().slice(0, 120);
       if (!canvasId) return res.status(400).json({ error: '缺少 canvasId' });
@@ -306,6 +373,12 @@ export function registerCanvasAgentRoutes(
           req.authUser?.id || '',
           conversation.id,
           'user',
+          message,
+        );
+        citedNodes = recordConversationCitations(
+          db,
+          req.authUser?.id || '',
+          conversation.id,
           message,
         );
       } catch (error) {
@@ -328,6 +401,7 @@ export function registerCanvasAgentRoutes(
     sendEvent(res, {
       type: 'meta',
       model,
+      citedNodes,
       ...(conversation ? { conversationId: conversation.id } : {}),
     });
 
@@ -340,10 +414,15 @@ export function registerCanvasAgentRoutes(
       .filter((item) => item.content.trim());
     const context = String(body.context || '');
     const playbookText = requestedPlaybookId && readPlaybookText ? readPlaybookText(requestedPlaybookId) : '';
+    const storedStage = db && conversation
+      ? readConversationStage(db, req.authUser?.id || '', conversation.id)
+      : { playbookId: '', stage: null };
+    const stageText = canvasAgentStagePrefix(storedStage.playbookId, storedStage.stage, requestedPlaybookId);
+    const imageDataUrls = await compressedVisionUrls(visionRoot, body.visionImages);
     const messages: Array<Record<string, unknown>> = [
-      { role: 'system', content: `${SYSTEM_PROMPT}\n${operatingPrompt(message, playbookText)}\n\n${context}` },
+      { role: 'system', content: `${SYSTEM_PROMPT}\n${operatingPrompt(message, playbookText)}${stageText}\n\n${context}` },
       ...history,
-      { role: 'user', content: message },
+      { role: 'user', content: userContentWithImages(message, imageDataUrls) },
     ];
 
     try {

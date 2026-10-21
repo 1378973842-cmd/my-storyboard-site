@@ -1,4 +1,4 @@
-import { serializeCanvasContext } from './contextSerializer';
+import { serializeCanvasContext, visionImageUrlsForTurn } from './contextSerializer';
 import type {
   AgentChatMessage,
   CanvasAgentStreamEvent,

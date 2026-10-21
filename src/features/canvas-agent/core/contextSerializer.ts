@@ -5,8 +5,11 @@ import type {
 } from '../types';
 import { downstreamImpactPaths } from './invalidation';
 import { mentionCandidates, nodeLifecycle, rebuildCount } from './operatingModel';
+import { citationsInUserMessage } from './referencePrompt';
 
 const ASSET_LIST_CAP = 20;
+// ponytail: 与 Mx-Shell 的参考图上限相同。再多要改成按步骤挑，不是把上限加大。
+export const VISION_IMAGE_CAP = 8;
 
 function presentAvailableAssets(list: CanvasSnapshot['availableAssets'] | undefined) {
   if (!list) return {};
@@ -48,6 +51,44 @@ const ROLE_CAP = 16;
 function compactText(value: unknown, max = MAX_TEXT): string {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function isStillImageUrl(url: string): boolean {
+  if (!url || url.startsWith('blob:')) return false;
+  const clean = url.split('?')[0].toLowerCase();
+  return !/\.(mp4|webm|mov|m4v|mkv|mp3|wav|m4a)$/.test(clean);
+}
+
+function currentImageUrl(node: CanvasNodeSnapshot): string {
+  for (const key of ['url', 'imageUrl', 'coverUrl'] as const) {
+    const value = String(node[key] || '').trim();
+    if (isStillImageUrl(value)) return value;
+  }
+  return '';
+}
+
+// 这一步要看的图：用户这条消息点名的，再加上选中节点直接连着的上游。
+// 每张只取当前 url，不带 history。整张画布上没点名、也没连到选中节点的图不传。
+export function visionImageUrlsForTurn(snapshot: CanvasSnapshot, message: string): string[] {
+  const cited = citationsInUserMessage(message).nodes;
+  const byId = new Map(snapshot.nodes.map((node) => [node.id, node]));
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  const push = (node: CanvasNodeSnapshot | undefined) => {
+    if (!node || urls.length >= VISION_IMAGE_CAP) return;
+    if (node.type === 'video' || node.type === 'audio') return;
+    const url = currentImageUrl(node);
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    urls.push(url);
+  };
+  for (const id of cited) push(byId.get(id));
+  const selected = new Set(snapshot.selectedNodeIds);
+  for (const edge of snapshot.connections) {
+    if (!selected.has(edge.to)) continue;
+    push(byId.get(edge.from));
+  }
+  return urls;
 }
 
 function mediaUrls(node: CanvasNodeSnapshot): string[] {

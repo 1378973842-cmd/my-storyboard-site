@@ -14,13 +14,13 @@ import {
   refreshCanvasAgentAssets,
 } from './core/assetLibraryCache';
 import { logoutSession } from '../../lib/authSession';
-import { collectCanvasContext, serializeCanvasContext } from './core/contextSerializer';
+import { collectCanvasContext, serializeCanvasContext, visionImageUrlsForTurn } from './core/contextSerializer';
 import { buildNineGridImagePrompt } from '../../lib/nineGrid/nineGridCore.js';
 import { formatNineGridRefLooksForPhaseA } from '../../services/canvasNineGridBridge';
 import { checkCanvasContentFidelity } from '../../services/canvasContentFidelity';
 import { sortBatchExecutions } from './core/executionOrder';
 import { actionProposalNeedsApproval, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, openBatchProgress, partialBatchUpdate, pendingExecutionFeedback, proposalWaitsForClick, settleBatchProposal, unknownCanvasActionMessage } from './core/proposal';
-import { citationsInUserMessage, imageModelAcceptsReferenceInput, readableReferencePrompt, REFERENCE_IMAGE_FALLBACK_MODEL, referenceClampLabels, settleReferenceActions } from './core/referencePrompt';
+import { citationsForApply, citationsInUserMessage, droppedConnectCount, imageModelAcceptsReferenceInput, readableReferencePrompt, REFERENCE_IMAGE_FALLBACK_MODEL, referenceClampLabels, settleReferenceActions } from './core/referencePrompt';
 import {
   deliverProposalDone,
   diskProposalOutcome,
@@ -32,6 +32,10 @@ import {
   appendCanvasAgentMessage,
   createCanvasAgentConversation,
   initCanvasAgentConversationSchema,
+  readConversationCitedNodes,
+  readConversationStage,
+  recordConversationCitations,
+  recordConversationStage,
   updateCanvasAgentProposalOutcome,
 } from './server/conversationStore';
 import { ProposalPreviewCard } from './ui/ProposalPreviewCard';
@@ -42,6 +46,8 @@ import { downstreamImpactPaths, invalidationActions, nodeHasGeneratedOutput, ups
 import {
   applyRebuildGuards,
   assertAgentActionContent,
+  assertCanvasVideoShotTimelines,
+  assertVideoShotTimeline,
   choiceActions,
   classifyIntake,
   downstreamChoices,
@@ -55,6 +61,7 @@ import {
   operatingPrompt,
   settleAgentStaleAfterExecution,
 } from './core/operatingModel';
+import { canvasAgentStagePrefix, canvasAgentStageSegment, inferAppliedPlaybookStage } from './core/stageLedger';
 import type { ActionProposal, CanvasSnapshot } from './types';
 
 const snapshot: CanvasSnapshot = {
@@ -90,6 +97,48 @@ assert.deepEqual(
   ['image-1', 'prompt-1'],
 );
 assert.match(serializeCanvasContext(snapshot), /hero\.png/);
+assert.deepEqual(
+  visionImageUrlsForTurn(snapshot, ''),
+  ['/uploads/hero.png'],
+);
+const visionSnap: CanvasSnapshot = {
+  ...snapshot,
+  nodes: [
+    ...snapshot.nodes,
+    {
+      id: 'scene-1',
+      type: 'image',
+      url: '/uploads/scene.png',
+      history: ['/uploads/old-a.png', '/uploads/old-b.png'],
+    },
+    { id: 'prop-1', type: 'image', url: '/uploads/prop.png' },
+    { id: 'extra-1', type: 'image', url: '/uploads/extra.png' },
+    { id: 'clip-1', type: 'video', url: '/uploads/clip.mp4' },
+  ],
+  connections: [
+    ...snapshot.connections,
+    { id: 'e-scene', from: 'scene-1', to: 'video-1' },
+  ],
+};
+assert.deepEqual(
+  visionImageUrlsForTurn(visionSnap, '参考 {{prop-1}} {{clip-1}}'),
+  ['/uploads/prop.png', '/uploads/hero.png', '/uploads/scene.png'],
+);
+assert.equal(
+  visionImageUrlsForTurn({
+    ...visionSnap,
+    nodes: [
+      ...visionSnap.nodes,
+      ...Array.from({ length: 9 }, (_, index) => ({
+        id: `more-${index}`,
+        type: 'image',
+        url: `/uploads/more-${index}.png`,
+      })),
+    ],
+    selectedNodeIds: [],
+  }, Array.from({ length: 9 }, (_, index) => `{{more-${index}}}`).join(' ')).length,
+  8,
+);
 assert.equal(upstreamDigest(snapshot, 'video-1').length, 16);
 assert.deepEqual(
   downstreamImpactPaths(snapshot, ['prompt-1']).map((item) => item.path),
@@ -634,13 +683,39 @@ const appliedRow = outcomeDb.prepare(
    WHERE json_extract(metadata_json, '$.proposal.id') = ?`,
 ).get(appliedProposal.id) as { metadata_json: string };
 const appliedMeta = JSON.parse(appliedRow.metadata_json) as {
-  proposal: { status: string; error: string | null; partialSkipped: number | null };
+  proposal: { status: string; error: string | null; partialSkipped: number | null; droppedConnects: number | null };
   toolLogs: Array<{ id: string }>;
 };
 assert.equal(appliedMeta.proposal.status, 'applied');
 assert.equal(appliedMeta.proposal.error, null);
 assert.equal(appliedMeta.proposal.partialSkipped, null);
+assert.equal(appliedMeta.proposal.droppedConnects, null);
 assert.equal(appliedMeta.toolLogs[0]?.id, 'tool-2');
+
+const strippedProposal: ActionProposal = {
+  ...appliedProposal,
+  id: 'proposal-stripped',
+  status: 'pending',
+  actions: [
+    { type: 'create_node', tempId: 'vid', nodeType: 'video', initialParams: { prompt: '画面' } },
+    { type: 'connect_nodes', sourceNodeId: 'img_a', targetNodeId: 'vid' },
+    { type: 'connect_nodes', sourceNodeId: 'img_b', targetNodeId: 'vid' },
+  ],
+};
+seedOutcome(strippedProposal);
+await runProposalApply(strippedProposal, {
+  batchApply: async () => ({ skippedCount: 0, choices: [], droppedConnects: 2 }),
+  update: rememberOutcome,
+  current: () => outcomeMemory.get(strippedProposal.id),
+  persist: async () => 0,
+  queue: new Set(),
+});
+const strippedSaved = outcomeMemory.get(strippedProposal.id);
+assert.equal(strippedSaved?.status, 'applied');
+assert.equal(strippedSaved?.droppedConnects, 2);
+const strippedFeedback = pendingExecutionFeedback(strippedSaved ? [strippedSaved] : []);
+assert.match(strippedFeedback?.content || '', /\[系统反馈\] 上一轮有 2 条连线因为没被点名而被拿掉，节点已建但没有参考图/);
+assert.equal(pendingExecutionFeedback([failedProposal('plain-applied', '', 3, { status: 'applied' })]), null);
 
 const impactProposal: ActionProposal = {
   ...raceProposal,
@@ -955,6 +1030,11 @@ assert.deepEqual(corrected?.unknownTypes, []);
 const agentRoute = readFileSync('src/features/canvas-agent/server/registerCanvasAgentRoutes.ts', 'utf8');
 assert.match(agentRoute, /unknownCanvasActionMessage\(interpreted\.unknownTypes\)/);
 assert.match(agentRoute, /动作类型无法识别/);
+assert.match(agentRoute, /type: 'image_url'/);
+assert.match(agentRoute, /compressImageForGeminiVision/);
+assert.match(agentRoute, /VISION_IMAGE_CAP/);
+const agentClient = readFileSync('src/features/canvas-agent/core/agentService.ts', 'utf8');
+assert.match(agentClient, /visionImageUrlsForTurn/);
 assert.match(expiredHtml, /canvas-agent-proposal is-expired is-collapsed/);
 assert.match(expiredHtml, /已过期/);
 assert.doesNotMatch(expiredHtml, /过期错误/);
@@ -1193,18 +1273,121 @@ assert.notEqual(agentPlaybooks[0]?.path, 'prompts/mx_shell_prompt_system.md');
 assert.equal(agentPlaybooks[1]?.id, 'canvas-opening-animation');
 assert.equal(agentPlaybooks[1]?.title, '开场动画');
 assert.equal(agentPlaybooks[1]?.path, 'prompts/playbook_opening_animation.md');
+const playbookStepEnd: Record<string, string> = {
+  'canvas-video-piece': '## 时长规则',
+  'canvas-opening-animation': '## 核心原则',
+};
+const secondsPerShot = /每镜\s*[0-9]|每\s*[0-9][^。\n]{0,12}秒一个镜头/;
+const stackedMovePush = /一镜内[^。\n]{0,16}(?:连打|多手法|多种手法|五种手法)|(?:多种|五种)手法连打/;
+const stackedMoveDeny = /不靠|不要|禁止|别|不能|不得/;
+const playbookGaps: string[] = [];
 const playbookBodies = ['canvas-video-piece', 'canvas-opening-animation'].map((id) => {
   const body = readRegisteredPlaybookText('.', id);
   assert.ok(body.length > 0, id);
+  console.log(`playbook body ${id}: ${body.length}`);
   assert.equal(body.includes('运镜词典（强制参考）'), false, id);
-  assert.equal(/每镜\s*[0-9]|每\s*[0-9][^。\n]{0,12}秒一个镜头/.test(body), false, id);
+  const need = (text: string, pattern: RegExp, label: string) => {
+    if (!pattern.test(text)) playbookGaps.push(`${id} 缺 ${label}`);
+  };
+  if (secondsPerShot.test(body)) playbookGaps.push(`${id} 有秒数档`);
+  need(body, /主运镜/, '主运镜');
+  need(body, /步骤 0 · 资产分析/, '步骤 0 · 资产分析');
+  need(body, /video 的 prompt 里不要写参考图的文件名/, 'video prompt 不写文件名');
+  if (body.includes('必须和这些 @ 出现在同一条用户消息里')) playbookGaps.push(`${id} 仍要求同一条消息 @`);
+  const modeRow = body.split('\n').find((line) => line.startsWith('| 模式 |')) || '';
+  const intensityRow = body.split('\n').find((line) => line.startsWith('| 运镜强度 |')) || '';
+  if (!modeRow) playbookGaps.push(`${id} 缺模式行`);
+  else {
+    need(modeRow, /用户没提就问一句：多机位还是一镜到底/, '模式改为问');
+    if (/用户没说\s*→\s*默认/.test(modeRow)) playbookGaps.push(`${id} 模式仍默认`);
+  }
+  if (!intensityRow) playbookGaps.push(`${id} 缺运镜强度行`);
+  else {
+    need(intensityRow, /用户没提就问一句：克制、标准还是炫技/, '运镜强度改为问');
+    if (/用户没说\s*→\s*standard|没说就用 standard/.test(intensityRow)) {
+      playbookGaps.push(`${id} 运镜强度仍默认`);
+    }
+  }
+  if (body.split('\n').some((line) => stackedMovePush.test(line) && !stackedMoveDeny.test(line))) {
+    playbookGaps.push(`${id} 鼓励一镜内多手法连打`);
+  }
+  const stepsAt = body.indexOf('## 执行逻辑');
+  const stepsEnd = body.indexOf(playbookStepEnd[id], stepsAt + 1);
+  assert.ok(stepsAt >= 0 && stepsEnd > stepsAt, id);
+  const steps = body.slice(stepsAt, stepsEnd);
+  need(steps, /这要重跑整[段条]，约 X 秒/, '步骤区报价句');
+  need(steps, /不要写进 video prompt/, '步骤区台词禁令');
   return body;
 });
+assert.deepEqual(playbookGaps, []);
 const playbookLoaded = ['canvas-video-piece', 'canvas-opening-animation'].map((id) => readPlaybookForAgent('.', id));
 const cameraInjection = playbookLoaded[0].slice(playbookBodies[0].length);
 assert.match(cameraInjection, /^\n\n---\n\n## 运镜词典（强制参考）\n\n/);
 assert.equal(playbookLoaded[1].slice(playbookBodies[1].length), cameraInjection);
 assert.match(cameraInjection, /甩镜/);
+assert.equal(inferAppliedPlaybookStage('canvas-video-piece', [
+  { type: 'create_node', tempId: 'gen', nodeType: 'generator' },
+  { type: 'create_node', tempId: 'vid', nodeType: 'video' },
+], () => ''), 3);
+assert.equal(inferAppliedPlaybookStage('canvas-video-piece', [
+  { type: 'create_node', tempId: 'grid', nodeType: 'nineGridAgent' },
+], () => ''), 2);
+assert.equal(inferAppliedPlaybookStage('canvas-video-piece', [
+  { type: 'execute_node_skill', nodeId: 'anchor' },
+], (id) => id === 'anchor' ? 'generator' : ''), 1);
+assert.equal(inferAppliedPlaybookStage('canvas-video-piece', [
+  { type: 'execute_node_skill', nodeId: 'vid' },
+], () => 'video'), 4);
+assert.equal(inferAppliedPlaybookStage('canvas-opening-animation', [
+  { type: 'create_node', tempId: 'vid', nodeType: 'video' },
+], () => ''), 1);
+assert.equal(inferAppliedPlaybookStage('canvas-opening-animation', [
+  { type: 'execute_node_skill', nodeId: 'vid' },
+], () => 'video'), 2);
+assert.equal(inferAppliedPlaybookStage('canvas-opening-animation', [], () => ''), null);
+assert.equal(canvasAgentStagePrefix('canvas-video-piece', 3, 'canvas-opening-animation'), '');
+assert.equal(canvasAgentStagePrefix('', null, 'canvas-opening-animation'), '');
+const stageSegment = canvasAgentStageSegment('canvas-opening-animation', 1);
+const systemPrompt = readFileSync(new URL('./server/registerCanvasAgentRoutes.ts', import.meta.url), 'utf8');
+const systemStart = systemPrompt.indexOf('const SYSTEM_PROMPT = `');
+const systemEnd = systemPrompt.indexOf('`;', systemStart);
+const systemBody = systemPrompt.slice(systemStart + 'const SYSTEM_PROMPT = `'.length, systemEnd);
+const openingLoaded = readPlaybookForAgent('.', 'canvas-opening-animation');
+const openingAssembled = `${systemBody}\n${operatingPrompt('开场', openingLoaded)}\n\n${stageSegment}`;
+console.log(`system prompt with opening stage: ${openingAssembled.length}`);
+const stageDb = new Database(':memory:');
+initCanvasAgentConversationSchema(stageDb);
+const freshConversation = createCanvasAgentConversation(stageDb, 'user', 'canvas', '新对话');
+assert.deepEqual(readConversationStage(stageDb, 'user', freshConversation.id), { playbookId: '', stage: null });
+appendCanvasAgentMessage(stageDb, 'user', freshConversation.id, 'assistant', '提案', {
+  proposal: { id: 'p1', actions: [] },
+});
+recordConversationStage(stageDb, 'user', 'p1', 'canvas-opening-animation', 1);
+assert.deepEqual(readConversationStage(stageDb, 'user', freshConversation.id), {
+  playbookId: 'canvas-opening-animation',
+  stage: 1,
+});
+const otherConversation = createCanvasAgentConversation(stageDb, 'user', 'canvas', '另一条');
+assert.equal(readConversationStage(stageDb, 'user', otherConversation.id).stage, null);
+assert.deepEqual(readConversationCitedNodes(stageDb, 'user', freshConversation.id), []);
+assert.deepEqual(
+  recordConversationCitations(stageDb, 'user', freshConversation.id, '确认'),
+  [],
+);
+assert.deepEqual(
+  recordConversationCitations(stageDb, 'user', freshConversation.id, '使用模型 midjourneyV8.1'),
+  [],
+);
+assert.deepEqual(
+  recordConversationCitations(stageDb, 'user', freshConversation.id, '{{img_a}} 是角色 {{canvas:img_b}} 是场景'),
+  ['canvas:img_b', 'img_a', 'img_b'],
+);
+assert.deepEqual(
+  recordConversationCitations(stageDb, 'user', freshConversation.id, '确认'),
+  ['canvas:img_b', 'img_a', 'img_b'],
+);
+assert.deepEqual(readConversationCitedNodes(stageDb, 'user', otherConversation.id), []);
+stageDb.close();
 const playbookPanelSource = readFileSync(new URL('./ui/AgentFloatingPanel.tsx', import.meta.url), 'utf8');
 assert.doesNotMatch(playbookPanelSource, /按编排规范|按技能「|画布编排/);
 assert.match(playbookPanelSource, /setPlaybookId\(playbook\.id\)/);
@@ -1223,9 +1406,17 @@ assert.match(playbookRouteSource, /readPlaybookText\(requestedPlaybookId\)/);
 assert.doesNotMatch(playbookRouteSource, /body\.path/);
 assert.match(playbookPanelSource, /setPlaybookId\(playbook\.id\)/);
 assert.match(playbookPanelSource, /canvas-agent-skill-chip/);
-assert.match(playbookPanelSource, /aria-label="取消技能"/);
-assert.match(playbookPanelSource, /canvas-agent-chip-row/);
-assert.match(playbookPanelSource, /aria-label="移除引用"/);
+assert.match(playbookPanelSource, /setAttribute\('aria-label', '取消技能'\)/);
+assert.match(playbookPanelSource, /data-skill-chip/);
+assert.match(playbookPanelSource, /canvas-agent-mention-pill/);
+assert.match(playbookPanelSource, /canvas-agent-composer-input/);
+assert.doesNotMatch(playbookPanelSource, /canvas-agent-chip-row/);
+assert.doesNotMatch(playbookPanelSource, /chipsInline/);
+assert.doesNotMatch(
+  readFileSync(new URL('./ui/canvas-agent.css', import.meta.url), 'utf8'),
+  /overflow-x:\s*auto/,
+);
+assert.match(playbookPanelSource, /setAttribute\('aria-label', '移除引用'\)/);
 assert.doesNotMatch(playbookPanelSource, /setInput\(insertMention/);
 const playbookClientSource = readFileSync(new URL('./core/agentService.ts', import.meta.url), 'utf8');
 assert.match(playbookClientSource, /playbookId: request\.playbookId/);
@@ -1653,10 +1844,27 @@ const gridNodes = [{ id: anchorId, type: 'generator', x: 0, y: 0, name: '角色�
 const gridFromConfirm = settleReferenceActions(gridProposal, gridNodes, GENERATOR_TYPES, citationsInUserMessage('确认'));
 assert.equal(gridFromConfirm.some((action) => action.type === 'create_node' && action.nodeType === 'nineGridAgent'), true);
 assert.equal(gridFromConfirm.some((action) => action.type === 'connect_nodes'), false);
+assert.equal(droppedConnectCount(gridProposal, gridFromConfirm), 1);
 const gridFromCite = settleReferenceActions(gridProposal, gridNodes, GENERATOR_TYPES, citationsInUserMessage(`{{${anchorId}}}`));
 assert.equal(gridFromCite.some((action) => (
   action.type === 'connect_nodes' && action.sourceNodeId === anchorId && action.targetNodeId === 'grid_shot_plan'
 )), true);
+assert.equal(droppedConnectCount(gridProposal, gridFromCite), 0);
+const gridFromSessionCite = settleReferenceActions(
+  gridProposal,
+  gridNodes,
+  GENERATOR_TYPES,
+  citationsForApply('确认', [anchorId]),
+);
+assert.equal(gridFromSessionCite.some((action) => (
+  action.type === 'connect_nodes' && action.sourceNodeId === anchorId && action.targetNodeId === 'grid_shot_plan'
+)), true);
+const cartoonLibraryId = 'img_cartoon_turnaround';
+const librarySettled = settleReferenceActions([
+  { type: 'create_node' as const, tempId: 'gen_zhuge', nodeType: 'generator' as const, initialParams: { prompt: `参考 {{${cartoonLibraryId}}}` } },
+  { type: 'connect_nodes' as const, sourceNodeId: cartoonLibraryId, targetNodeId: 'gen_zhuge' },
+], [{ id: cartoonLibraryId, type: 'image', x: 0, y: 0, name: '卡通三视图' }], GENERATOR_TYPES, citationsForApply('确认', [anchorId]));
+assert.equal(librarySettled.some((action) => action.type === 'connect_nodes' && action.sourceNodeId === cartoonLibraryId), false);
 const sessionId = '1c44a842-992c-4b08-9e4d-c2f337bb803e';
 const stampedAnchor = [{ ...gridNodes[0], agentConversationId: sessionId }];
 const gridFromSession = settleReferenceActions(
@@ -1744,6 +1952,14 @@ assert.equal(readableReferencePrompt('{{ }}', [], []), '');
 assert.equal(
   readableReferencePrompt('参考 {{img_old}} 的构图', [], [{ id: 'img_old', type: 'image', name: '旧角色' }]),
   '参考 旧角色 的构图',
+);
+assert.equal(
+  readableReferencePrompt('阿波罗角色形象参考 {{img_a}}', [], [{ id: 'img_a', type: 'image', name: 'canvas-output-1791792460637.jpg' }]),
+  '阿波罗角色形象参考 参考图1',
+);
+assert.equal(
+  readableReferencePrompt('参考 {{img_b}}', [], [{ id: 'img_b', type: 'image', name: 'canvas-output-1.jpg', title: '阿波罗' }]),
+  '参考 阿波罗',
 );
 const zhugeMessage = '一章 30 秒。三国题材，主角是诸葛亮，在帐中备战。';
 const zhugePrompt = '三国诸葛亮角色锚点，参考 {{img_role_1}} 与 {{img_role_2}} 的面部与发冠特征。他身着素雅的白袍道饰，手执羽扇，神态深邃沉稳，电影级质感，精细面部，写实风格，8k --ar 16:9';
@@ -2046,16 +2262,75 @@ assert.ok(orderAt('const normalized = normalizeCanvasActions') < orderAt('flatte
 assert.ok(orderAt('flattenModelParamKeys(normalized)') < orderAt('rejectUnknownCanvasParamKeys('));
 assert.ok(orderAt('rejectUnknownCanvasParamKeys(') < orderAt('applyRebuildGuards('));
 assert.ok(orderAt('applyRebuildGuards(') < orderAt('invalidationActions('));
+assert.ok(orderAt('assertCanvasVideoShotTimelines(') < orderAt('applyCanvasAgentActions('));
+const landedShots = [
+  '分镜1丨起势丨0-4s丨大远景 + 俯拍 + 缓慢推进',
+  '分镜2丨聚焦丨4-9s丨中景 + 低角度仰拍 + 缓慢推进',
+  '分镜3丨溃败丨9-15s丨中景 + 俯拍 + 摇摄下摇',
+].join('\n');
+const openingTen = [
+  '分镜1丨0-3s丨大远景 + 高角度俯拍 + 缓慢横移，揭示环境：雪夜城堡被战火笼罩，溃散的军队在漫天飞雪的荒原上向四周逃窜。',
+  '分镜2丨3-7s丨中景 + 低角度仰拍 + 缓慢推进，凝视与悲凉：老国王身披残破战袍孤立于城头，眼神沧桑绝望，大风卷着雪花吹动他的白发与斗篷。',
+  '分镜3丨7-10s丨特写 + 平视 + 缓慢拉远，收束离场：镜头转向冰封的石质纹理界面，金色耀眼的游戏标题文字在寒风雪花中聚拢浮现。',
+].join('\n');
+const overlapShots = [
+  '分镜1丨0-4s丨甲',
+  '分镜2丨4-10s丨乙',
+  '分镜3丨9-15s丨丙',
+].join('\n');
+const shortShots = [
+  '分镜1丨0-4s丨甲',
+  '分镜2丨4-9s丨乙',
+  '分镜3丨9-14s丨丙',
+].join('\n');
+const gappedShots = landedShots.replace('4-9s', '6-9s');
+assert.doesNotThrow(() => assertVideoShotTimeline(openingTen, 10));
+assert.doesNotThrow(() => assertVideoShotTimeline(openingTen.replace(/\n/g, ' '), 10));
+// 防回归：引用记号换成名字时换行被收成空格。按换行切开只会读到 0-3，合计被报成 3。
+assert.doesNotThrow(() => assertVideoShotTimeline(
+  '参考角色外观 参考图1。 分镜1丨起势丨0-3s丨甲 分镜2丨承接丨3-6s丨乙 分镜3丨高潮丨6-10s丨丙',
+  10,
+));
+assert.doesNotThrow(() => assertVideoShotTimeline(landedShots, 15));
+assert.throws(
+  () => assertVideoShotTimeline(overlapShots, 15),
+  /分镜2 和分镜3 在 9-10s 重叠/,
+);
+assert.throws(
+  () => assertVideoShotTimeline(shortShots, 15),
+  /分镜时长合计 14 秒，节点时长是 15 秒/,
+);
+assert.throws(
+  () => assertVideoShotTimeline('分镜1丨起势丨大远景\n分镜2丨聚焦丨中景', 10),
+  /解析不出时间段，请写成 X-Ys 形式/,
+);
+assert.throws(
+  () => assertVideoShotTimeline(gappedShots, 13),
+  /分镜1（0-4s）与分镜2（6-9s）留了空档/,
+);
+assert.doesNotThrow(() => assertCanvasVideoShotTimelines([
+  { type: 'update_node_params', nodeId: 'vid', patch: { prompt: landedShots } },
+], [{ id: 'vid', type: 'video', duration: 15 }]));
+assert.throws(
+  () => assertCanvasVideoShotTimelines([
+    { type: 'create_node', nodeType: 'video', tempId: 'v', initialParams: { prompt: overlapShots, duration: 15 } },
+  ], []),
+  /分镜2 和分镜3 在 9-10s 重叠/,
+);
+assert.doesNotThrow(() => assertCanvasVideoShotTimelines([
+  { type: 'update_node_params', nodeId: 'gen', patch: { prompt: overlapShots } },
+], [{ id: 'gen', type: 'generator', duration: 15 }]));
 assert.match(promptSource, /reuse those tempIds when connecting, updating or executing them/);
 assert.match(promptSource, /proposalFor\(actions, message\)/);
-assert.match(facadeSource, /translateReferenceTokens\(\s*applyRebuildGuards\(readable, snapshot\),\s*snapshot,\s*userMessage,/);
+assert.match(facadeSource, /translateReferenceTokens\(\s*prepared,\s*snapshot,\s*userMessage,\s*conversationId,\s*sessionCitedNodes,\s*\)/);
+assert.match(facadeSource, /droppedConnectCount\(prepared, translated\)/);
 assert.match(facadeSource, /snapshot\.connections/);
 const runGeneratorAt = engineSource.indexOf('async function runGenerator');
 const coerceAt = engineSource.indexOf('coerceReferenceImageModel', runGeneratorAt);
 const rejectModelAt = engineSource.indexOf('rejectCanvasAgentModelChoice(gen', runGeneratorAt);
 assert.ok(coerceAt > runGeneratorAt && coerceAt < rejectModelAt);
 const agentPanelSource = readFileSync(new URL('./ui/AgentFloatingPanel.tsx', import.meta.url), 'utf8');
-assert.match(agentPanelSource, /batchApplyChanges\(\s*actions,\s*onProgress,\s*proposal\.userMessage,\s*conversationIdRef\.current,\s*\)/);
+assert.match(agentPanelSource, /batchApplyChanges\(\s*actions,\s*onProgress,\s*proposal\.userMessage,\s*conversationIdRef\.current,\s*citedNodesRef\.current,\s*\)/);
 assert.ok(orderAt('const markProgress = openBatchProgress(ordered.length') < orderAt('for (const action of runnable)'));
 assert.ok(orderAt('markProgress()') < orderAt('if (failedExecution)'));
 assert.ok(orderAt('markProgress()') < orderAt('Date.now() >= deadline'));

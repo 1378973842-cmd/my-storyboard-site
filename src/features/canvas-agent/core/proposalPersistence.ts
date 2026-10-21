@@ -7,19 +7,24 @@ export type ProposalDiskOutcome = {
   status: ActionProposal['status'];
   error: string | null;
   partialSkipped: number | null;
+  droppedConnects: number | null;
   reason: string | null;
 };
 
 /** 缺省写成 null，重开时原样读回。空错误、缺失的跳过数和缺失的 reason 都是 null。 */
 export function diskProposalOutcome(
-  proposal: Pick<ActionProposal, 'status' | 'error' | 'partialSkipped' | 'reason'>,
+  proposal: Pick<ActionProposal, 'status' | 'error' | 'partialSkipped' | 'droppedConnects' | 'reason'>,
 ): ProposalDiskOutcome {
   const skipped = proposal.partialSkipped;
   const reason = proposal.reason;
+  const dropped = proposal.droppedConnects;
   return {
     status: proposal.status,
     error: typeof proposal.error === 'string' && proposal.error ? proposal.error : null,
     partialSkipped: typeof skipped === 'number' && Number.isFinite(skipped) ? skipped : null,
+    droppedConnects: typeof dropped === 'number' && Number.isFinite(dropped) && dropped > 0
+      ? Math.floor(dropped)
+      : null,
     reason: typeof reason === 'string' && reason ? reason : null,
   };
 }
@@ -98,6 +103,7 @@ type ApplyBatchResult<T> = {
   skippedCount: number;
   failedExecution?: { nodeId: string; message: string; reason?: string };
   choices: T[];
+  droppedConnects?: number;
 };
 
 export async function runProposalApply<T>(
@@ -122,9 +128,13 @@ export async function runProposalApply<T>(
     });
     choices = result.choices;
     const executionCount = proposal.actions.filter((action) => action.type === 'execute_node_skill').length;
+    const droppedConnects = Math.max(0, Math.floor(Number(result.droppedConnects) || 0));
     deps.update(
       proposal.id,
-      settleBatchProposal(executionCount, result.skippedCount, result.failedExecution),
+      {
+        ...settleBatchProposal(executionCount, result.skippedCount, result.failedExecution),
+        ...(droppedConnects > 0 ? { droppedConnects } : {}),
+      },
     );
   } catch (applyError) {
     deps.update(proposal.id, {

@@ -221,7 +221,20 @@ export function actionProposalNeedsApproval(actions: CanvasAction[]): boolean {
   );
 }
 
+function unnamedConnectSentence(proposal: ActionProposal): string {
+  const dropped = Math.max(0, Math.floor(Number(proposal.droppedConnects) || 0));
+  if (dropped <= 0) return '';
+  return `上一轮有 ${dropped} 条连线因为没被点名而被拿掉，节点已建但没有参考图。`;
+}
+
 function executionFeedbackContent(proposal: ActionProposal): string {
+  const unnamed = unnamedConnectSentence(proposal);
+  if (proposal.status === 'applied') {
+    return [
+      `[系统反馈] ${unnamed}`,
+      '这是执行结果，不是用户诉求。',
+    ].join('\n');
+  }
   if (proposal.status === 'exec_failed' && proposal.reason === 'dependency_not_ready') {
     const matched = String(proposal.error || '').match(/节点 (.+) 引用的上游 (.+) 还没有产出/);
     const nodeId = matched?.[1] || '';
@@ -230,6 +243,7 @@ function executionFeedbackContent(proposal: ActionProposal): string {
       `节点 ${nodeId} 引用的上游 ${upstreamId} 还没有产出，无法执行。`,
       `这不是 ${nodeId} 的参数问题，不要改 ${nodeId}、不要重建 ${nodeId}。`,
       `请把 ${upstreamId} 也加进这一批执行——八-2 会把 ${upstreamId} 排到 ${nodeId} 前面，${upstreamId} 出图后 ${nodeId} 自然能跑；或先单独执行 ${upstreamId} 再执行 ${nodeId}。`,
+      ...(unnamed ? [unnamed] : []),
     ].join('\n');
   }
   if (proposal.status === 'exec_failed') {
@@ -244,6 +258,7 @@ function executionFeedbackContent(proposal: ActionProposal): string {
       '节点已留在画布上。不要重新创建该节点；',
       ...(storyRetry ? [] : ['修正它的参数后，只提交对该节点的执行。']),
       '这是执行结果，不是用户诉求。',
+      ...(unnamed ? [unnamed] : []),
     ];
     const skipped = Math.max(0, Math.floor(Number(proposal.partialSkipped) || 0));
     if (skipped > 0) lines.push(`${skipped} 个节点因上一条执行失败而未执行。`);
@@ -260,11 +275,13 @@ function executionFeedbackContent(proposal: ActionProposal): string {
       '被跳过的节点没有产出，也没有失败记录。',
       '这是执行结果，不是用户诉求。',
       '如需执行被跳过的节点，请单独提交。',
+      ...(unnamed ? [unnamed] : []),
     ].join('\n');
   }
   return [
     `[系统反馈] 上一轮提交的操作未能应用：${proposal.error || ''}`,
     '这是执行结果，不是用户诉求。请修正后重新提交。',
+    ...(unnamed ? [unnamed] : []),
   ].join('\n');
 }
 
@@ -295,13 +312,18 @@ export function settleBatchProposal(
   return partialBatchUpdate(executionCount, skippedCount);
 }
 
-/** 最近一条尚未送达的 failed / partial / exec_failed。expired 和其他状态不进下一轮。 */
+function proposalNeedsFeedback(proposal: ActionProposal): boolean {
+  if (proposal.status === 'failed' || proposal.status === 'partial' || proposal.status === 'exec_failed') return true;
+  return proposal.status === 'applied' && Math.floor(Number(proposal.droppedConnects) || 0) > 0;
+}
+
+/** 最近一条尚未送达的 failed / partial / exec_failed，以及落板时拿掉了连线的 applied。expired 不进下一轮。 */
 export function pendingExecutionFeedback(
   proposals: ActionProposal[],
 ): { id: string; content: string } | null {
   let latest: ActionProposal | null = null;
   for (const proposal of proposals) {
-    if (proposal.status !== 'failed' && proposal.status !== 'partial' && proposal.status !== 'exec_failed') continue;
+    if (!proposalNeedsFeedback(proposal)) continue;
     if (proposal.feedbackDeliveredAt !== undefined) continue;
     if (!latest || proposal.createdAt >= latest.createdAt) latest = proposal;
   }
