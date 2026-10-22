@@ -103,6 +103,27 @@ export function actionDisplayLabel(action: CanvasAction, actions: CanvasAction[]
   return `运行 ${handle}`;
 }
 
+// 落板后的标题只数真正留下的动作。模型摘要不能当标题。
+// 连线被闸门拿掉时必须写出 0 条和拿掉的条数，不能只写「已连线」。
+export function derivedStepTitle(actions: CanvasAction[], droppedConnects = 0): string {
+  const dropped = Math.max(0, Math.floor(Number(droppedConnects) || 0));
+  const creates = actions.filter((action) => action.type === 'create_node').length;
+  const updates = actions.filter((action) => action.type === 'update_node_params').length;
+  const connects = actions.filter((action) => action.type === 'connect_nodes').length;
+  const runs = actions.filter((action) => action.type === 'execute_node_skill').length;
+  const keptConnects = Math.max(0, connects - dropped);
+  const parts: string[] = [];
+  if (creates) parts.push('节点已创建');
+  if (updates) parts.push('参数已更新');
+  if (connects || dropped) {
+    parts.push(dropped > 0
+      ? `已连线（${keptConnects} 条，${dropped} 条因未点名被拿掉）`
+      : '已连线');
+  }
+  if (runs) parts.push('已提交生成');
+  return parts.join('，');
+}
+
 export type InterpretedCanvasText = {
   actions: CanvasAction[];
   summary: string;
@@ -201,6 +222,26 @@ export function interpretCanvasProposalText(text: string): InterpretedCanvasText
   if (summary && reasons.has(summary)) summary = '';
   if (!summary) summary = rationales.find((item) => !reasons.has(item)) || '';
   return { actions, summary, prose: located.prose, unknownTypes: [] };
+}
+
+// 正文点名的短句。判据是有没有待批准提案，长句照常可以新建。
+const SHORT_YES = /^(?:好的|确认|行|继续|嗯)[。.!！]?$/u;
+
+/** 待批准时短句肯定留着。applied 或还没有提案时，这句不发放新建，连着新建节点的边一起拿掉。 */
+export function stripCreatesOnShortYes(
+  actions: CanvasAction[],
+  proposalStatus: string | null,
+  message: string,
+): CanvasAction[] {
+  if (proposalStatus === 'pending' || !SHORT_YES.test(message.trim())) return actions;
+  const created = new Set(actions.flatMap((action) => (
+    action.type === 'create_node' && action.tempId ? [action.tempId] : []
+  )));
+  return actions.filter((action) => {
+    if (action.type === 'create_node') return false;
+    return action.type !== 'connect_nodes'
+      || (!created.has(action.sourceNodeId) && !created.has(action.targetNodeId));
+  });
 }
 
 /** 手动确认始终等点击。自动模式只自动落「没有更新、也没有执行」的结构。更新和执行点过才算已应用。 */

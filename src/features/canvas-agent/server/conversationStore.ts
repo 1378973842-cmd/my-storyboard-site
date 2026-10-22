@@ -144,6 +144,20 @@ export function recordConversationCitations(
   return merged;
 }
 
+export function hasPendingCanvasAgentProposal(
+  db: InstanceType<typeof Database>,
+  userId: string,
+  conversationId: string,
+): boolean {
+  const row = db.prepare(
+    `SELECT 1 AS ok FROM canvas_agent_messages
+     WHERE conversation_id = ? AND user_id = ?
+       AND json_extract(metadata_json, '$.proposal.status') = 'pending'
+     LIMIT 1`
+  ).get(conversationId, userId);
+  return Boolean(row);
+}
+
 export function listCanvasAgentConversations(
   db: InstanceType<typeof Database>,
   userId: string,

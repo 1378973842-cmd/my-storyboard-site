@@ -16,6 +16,7 @@ export type CanvasTaskRecord<TResult = unknown> = {
   updatedAt: number;
   result: TResult | null;
   error: string;
+  upstreamTaskId?: string;
 };
 
 export function canonicalizeParams(value: unknown): unknown {
@@ -87,6 +88,7 @@ export function initCanvasTaskLedger(db: InstanceType<typeof Database>): void {
       ON canvas_task_bindings(user_id, canvas_id, updated_at DESC);
   `);
   ensureColumn(db, "canvas_tasks", "params_hash", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "canvas_tasks", "upstream_task_id", "TEXT NOT NULL DEFAULT ''");
   const now = Date.now();
   db.prepare(
     `UPDATE canvas_task_runs
@@ -215,6 +217,20 @@ export function saveCanvasTask(
   }
 }
 
+export function saveCanvasTaskUpstreamId(
+  db: InstanceType<typeof Database> | undefined,
+  taskId: string,
+  upstreamTaskId: string
+): void {
+  const upstream = String(upstreamTaskId || "").trim();
+  if (!db || !taskId || !upstream) return;
+  db.prepare(
+    `UPDATE canvas_tasks
+     SET upstream_task_id = ?, updated_at = ?
+     WHERE task_id = ?`
+  ).run(upstream, Date.now(), taskId);
+}
+
 export function readCanvasTask<TResult>(
   db: InstanceType<typeof Database> | undefined,
   taskId: string,
@@ -223,7 +239,7 @@ export function readCanvasTask<TResult>(
   if (!db || !taskId || !userId) return null;
   const row = db.prepare(
     `SELECT task_id, user_id, canvas_id, node_id, task_type, payload_json,
-            status, result_json, error, created_at, updated_at
+            status, result_json, error, created_at, updated_at, upstream_task_id
      FROM canvas_tasks WHERE task_id = ? AND user_id = ?`
   ).get(taskId, userId) as Record<string, unknown> | undefined;
   if (!row) return null;
@@ -239,6 +255,7 @@ export function readCanvasTask<TResult>(
     error: String(row.error || ""),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
+    upstreamTaskId: String(row.upstream_task_id || ""),
   };
 }
 

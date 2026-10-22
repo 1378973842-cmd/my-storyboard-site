@@ -349,6 +349,8 @@ export type FlattenedImageBytes = { buffer: Buffer; mime: string; filename: stri
 export type RunningHubUploadOpts = {
   /** true：有 alpha 则铺白再传。扩图必须 false */
   flattenAlpha?: boolean;
+  /** 视频参考图：铺白之后再压。生图上传不传这个 */
+  compress?: (input: Buffer) => Promise<Buffer>;
 };
 
 const MODEL_REF_FLATTEN_BG = { r: 255, g: 255, b: 255 };
@@ -388,8 +390,21 @@ export async function uploadBinaryToRunningHub(
   const packed = flattenAlpha
     ? await flattenAlphaForModelRef(read.buffer, read.mime, read.filename)
     : read;
-  if (publicUrl && packed.buffer.equals(read.buffer)) return publicUrl;
-  const { buffer, mime, filename } = packed;
+  let buffer = packed.buffer;
+  let mime = packed.mime;
+  let filename = packed.filename;
+  if (opts?.compress) {
+    const rawBytes = buffer.length;
+    buffer = Buffer.from(await opts.compress(buffer));
+    mime = "image/jpeg";
+    const base = String(filename || "upload").replace(/\.[^.]+$/, "") || "upload";
+    filename = `${base}.jpg`;
+    console.log("[canvas-video] reference image", {
+      rawKB: Math.round(rawBytes / 1024),
+      jpegKB: Math.round(buffer.length / 1024),
+    });
+  }
+  if (publicUrl && buffer.equals(read.buffer)) return publicUrl;
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(buffer)], { type: mime }), filename);
   const res = await fetch(rhUrl(env, env.uploadPath), {
@@ -435,7 +450,8 @@ export async function submitAndPollRunningHub(
   env: StoryboardImageEnv,
   submitPath: string,
   body: Record<string, unknown>,
-  logTag: string
+  logTag: string,
+  hooks?: { onUpstreamTaskId?: (taskId: string) => void }
 ): Promise<string> {
   const pollMs = Number(process.env.STORYBOARD_IMAGE_POLL_MS || 2000);
   const deadline = Date.now() + Number(process.env.STORYBOARD_IMAGE_TIMEOUT_MS || 1800000);
@@ -467,6 +483,7 @@ export async function submitAndPollRunningHub(
   const taskId = extractTaskId(submitRaw);
   if (!taskId) throw new Error(`RunningHub 未返回 taskId：${JSON.stringify(submitRaw).slice(0, 500)}`);
 
+  hooks?.onUpstreamTaskId?.(taskId);
   console.log(`[${logTag}] taskId=${taskId}, polling…`);
 
   let lastPayload: unknown = null;

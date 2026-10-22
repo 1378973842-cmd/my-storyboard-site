@@ -31,7 +31,7 @@ import {
     readCanvasAgentAssets,
     refreshCanvasAgentAssets,
 } from '../../features/canvas-agent/core/assetLibraryCache.ts';
-import { coerceReferenceImageModel } from '../../features/canvas-agent/core/referencePrompt.ts';
+import { coerceReferenceImageModel, referenceCapsuleLabel, referenceConnectionOrder } from '../../features/canvas-agent/core/referencePrompt.ts';
 import {
     enrichLiveNodesFromRemote,
     mergeCanvasConnectionLists,
@@ -5756,7 +5756,9 @@ function scheduleSaveNow(){
 function pullFocusedEditableIntoModel(){
     const el = document.activeElement;
     if(!el || !isEditableTarget(el)) return;
-    const value = typeof el.value === 'string' ? el.value : (el.isContentEditable ? el.textContent : null);
+    const value = typeof el.value === 'string'
+        ? el.value
+        : (el.isContentEditable ? (el.dataset?.promptCapsules ? promptEditorValue(el) : el.textContent) : null);
     if(value == null) return;
     if(imageGenDockEl?.contains?.(el)){
         const node = nodes.find(n => n.id === imageGenDockNodeId);
@@ -25461,7 +25463,7 @@ function genDockShellHtml(node, opts={}){
     return `
         <div class="gen-dock ${opts.floating ? 'is-floating' : 'is-embedded'}">
             ${refs}
-            <textarea class="gen-dock-prompt" placeholder="${escapeAttr(langIsEn() ? 'Describe anything you want to generate…' : '描述任何你想要生成的内容')}" rows="3">${escapeHtml(node.prompt || '')}</textarea>
+            <div class="gen-dock-prompt" contenteditable="true" role="textbox" data-prompt-capsules="1" data-placeholder="${escapeAttr(langIsEn() ? 'Describe anything you want to generate…' : '描述任何你想要生成的内容')}"></div>
             ${upstream}
             <div class="gen-dock-bar">
                 <div class="gen-dock-group gen-dock-group-source">
@@ -25655,9 +25657,10 @@ function bindImageGenDockControls(wrap, node){
     delete wrap.__placeSizePanel;
     const promptEl = wrap.querySelector('.gen-dock-prompt');
     if(promptEl){
+        mountPromptCapsules(promptEl, node);
         bindScrollableText(promptEl);
-        promptEl.oninput = e => {
-            node.prompt = e.target.value;
+        promptEl.oninput = () => {
+            node.prompt = promptEditorValue(promptEl);
             touchBoardInteraction();
             scheduleSave();
         };
@@ -25923,6 +25926,10 @@ function remountImageGenDock(node){
         if(!imageGenDockEl?.contains?.(document.activeElement)) return null;
         const ta = imageGenDockEl.querySelector?.('.gen-dock-prompt');
         if(!ta || document.activeElement !== ta) return null;
+        if(ta.dataset?.promptCapsules){
+            const caret = promptEditorCaret(ta);
+            return { value: promptEditorValue(ta), start: caret, end: caret, capsules: true };
+        }
         return {
             value: ta.value,
             start: ta.selectionStart,
@@ -25975,16 +25982,24 @@ function remountImageGenDock(node){
     if(keepPrompt){
         const ta = host.querySelector?.('.gen-dock-prompt');
         if(ta){
-            if(typeof keepPrompt.value === 'string'){
+            if(ta.dataset?.promptCapsules){
+                const next = typeof keepPrompt.value === 'string' ? keepPrompt.value : (node.prompt || '');
+                paintVideoPrompt(ta, next, node);
+                node.prompt = next;
+                try {
+                    ta.focus({ preventScroll: true });
+                    placePromptCaret(ta, Number(keepPrompt.start) || 0);
+                } catch(_){ /* ignore */ }
+            } else if(typeof keepPrompt.value === 'string'){
                 ta.value = keepPrompt.value;
                 node.prompt = keepPrompt.value;
+                try {
+                    ta.focus({ preventScroll: true });
+                    const start = Number(keepPrompt.start);
+                    const end = Number(keepPrompt.end);
+                    if(Number.isFinite(start) && Number.isFinite(end)) ta.setSelectionRange(start, end);
+                } catch(_){ /* ignore */ }
             }
-            try {
-                ta.focus({ preventScroll: true });
-                const start = Number(keepPrompt.start);
-                const end = Number(keepPrompt.end);
-                if(Number.isFinite(start) && Number.isFinite(end)) ta.setSelectionRange(start, end);
-            } catch(_){ /* ignore */ }
         }
     }
 }
@@ -32030,7 +32045,7 @@ function videoDockShellHtml(node){
     return `
         <div class="gen-dock is-floating video-dock">
             <div class="gen-dock-refs"></div>
-            <textarea class="gen-dock-prompt" placeholder="${escapeAttr(isSparkVideo20Model(node.model) ? tr('canvas.videoPromptAtHint') : (langIsEn() ? 'Describe the video you want…' : '描述你想生成的视频…'))}" rows="3">${escapeHtml(node.prompt || '')}</textarea>
+            <div class="gen-dock-prompt" contenteditable="true" role="textbox" data-prompt-capsules="1" data-placeholder="${escapeAttr(isSparkVideo20Model(node.model) ? tr('canvas.videoPromptAtHint') : (langIsEn() ? 'Describe the video you want…' : '描述你想生成的视频…'))}"></div>
             <div class="gen-dock-bar">
                 <div class="gen-dock-group gen-dock-group-source">
                     <label class="gen-dock-chip gen-dock-chip-provider">
@@ -32099,10 +32114,129 @@ function sparkVideoMentionItems(node){
     });
     return out;
 }
+function promptEditorMeasure(el, stop){
+    let out = '';
+    let found = !stop;
+    const walk = (node) => {
+        if(found && stop) return;
+        if(stop && node === stop.node && node.nodeType === Node.TEXT_NODE){
+            out += (node.textContent || '').slice(0, stop.offset);
+            found = true;
+            return;
+        }
+        if(stop && node === stop.node && node.nodeType === Node.ELEMENT_NODE){
+            [...node.childNodes].slice(0, stop.offset).forEach(walk);
+            found = true;
+            return;
+        }
+        if(node.nodeType === Node.TEXT_NODE){ out += node.textContent || ''; return; }
+        if(node.nodeType !== Node.ELEMENT_NODE) return;
+        const id = node.dataset?.mentionId;
+        if(id){ out += `{{${id}}}`; return; }
+        if(node.tagName === 'BR'){ out += '\n'; return; }
+        if((node.tagName === 'DIV' || node.tagName === 'P') && out && !out.endsWith('\n')) out += '\n';
+        node.childNodes.forEach(walk);
+    };
+    el.childNodes.forEach(walk);
+    return out;
+}
+function promptEditorValue(el){
+    if(!el) return '';
+    if(typeof el.value === 'string') return el.value;
+    return promptEditorMeasure(el, null);
+}
+function promptEditorCaret(el){
+    if(!el) return 0;
+    if(typeof el.value === 'string') return Number(el.selectionStart || 0);
+    const sel = window.getSelection();
+    if(!sel?.rangeCount || !el.contains(sel.anchorNode)) return promptEditorValue(el).length;
+    return promptEditorMeasure(el, {node: sel.anchorNode, offset: sel.anchorOffset}).length;
+}
+function placePromptCaret(el, offset){
+    const target = Math.max(0, Number(offset) || 0);
+    const sel = window.getSelection();
+    if(!sel) return;
+    const range = document.createRange();
+    let seen = 0;
+    let placed = false;
+    const place = (node, index) => {
+        range.setStart(node, index);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        placed = true;
+    };
+    const walk = (node) => {
+        if(placed) return;
+        if(node.nodeType === Node.TEXT_NODE){
+            const text = node.textContent || '';
+            if(seen + text.length >= target){ place(node, target - seen); return; }
+            seen += text.length;
+            return;
+        }
+        if(node.nodeType !== Node.ELEMENT_NODE) return;
+        const id = node.dataset?.mentionId;
+        if(id){
+            const len = id.length + 4;
+            if(target <= seen){ place(node.parentNode, [...node.parentNode.childNodes].indexOf(node)); return; }
+            seen += len;
+            return;
+        }
+        node.childNodes.forEach(walk);
+    };
+    el.childNodes.forEach(walk);
+    if(!placed){
+        range.selectNodeContents(el);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+    }
+}
+function videoPromptCapsule(id, host){
+    const source = nodes.find(item => item.id === id);
+    const order = referenceConnectionOrder(host?.id || '', id, connections, nodes);
+    const label = referenceCapsuleLabel(source, order);
+    const span = document.createElement('span');
+    span.className = 'canvas-agent-skill-chip canvas-agent-mention-pill';
+    span.contentEditable = 'false';
+    span.dataset.mentionId = id;
+    const url = String(source?.url || source?.imageUrl || source?.coverUrl || '').trim();
+    if(url && source?.type !== 'video' && source?.type !== 'audio' && !isVideoUrl(url)){
+        const img = document.createElement('img');
+        img.className = 'canvas-agent-mention-pill-thumb';
+        img.alt = '';
+        img.src = canvasThumbUrl(url);
+        img.addEventListener('error', () => {
+            if(img.dataset.fallback) return;
+            img.dataset.fallback = '1';
+            img.src = url;
+        });
+        span.append(img);
+    }
+    const name = document.createElement('span');
+    name.className = 'canvas-agent-mention-pill-label';
+    name.textContent = label;
+    span.append(name);
+    return span;
+}
+function paintVideoPrompt(el, prompt, host){
+    const text = String(prompt || '');
+    el.replaceChildren();
+    const re = /\{\{\s*([^{}]+?)\s*\}\}/g;
+    let last = 0;
+    for(const match of text.matchAll(re)){
+        const start = match.index ?? 0;
+        if(start > last) el.append(document.createTextNode(text.slice(last, start)));
+        const id = String(match[1] || '').trim();
+        if(id) el.append(videoPromptCapsule(id, host));
+        last = start + match[0].length;
+    }
+    if(last < text.length) el.append(document.createTextNode(text.slice(last)));
+}
 function sparkAtQueryAtCursor(ta){
     if(!ta) return null;
-    const pos = Number(ta.selectionStart || 0);
-    const before = String(ta.value || '').slice(0, pos);
+    const pos = promptEditorCaret(ta);
+    const before = promptEditorValue(ta).slice(0, pos);
     const at = before.lastIndexOf('@');
     if(at < 0) return null;
     const query = before.slice(at + 1);
@@ -32126,15 +32260,21 @@ function closeSparkAtPicker(){
 }
 function insertSparkAtToken(ta, node, item, range){
     if(!ta || !item) return;
-    const start = range?.start ?? sparkAtQueryAtCursor(ta)?.start ?? ta.selectionStart;
-    const end = ta.selectionStart;
-    const before = ta.value.slice(0, start);
-    const after = ta.value.slice(end);
+    const value = promptEditorValue(ta);
+    const start = range?.start ?? sparkAtQueryAtCursor(ta)?.start ?? promptEditorCaret(ta);
+    const end = promptEditorCaret(ta);
+    const before = value.slice(0, start);
+    const after = value.slice(end);
     const token = `${item.token} `;
-    ta.value = `${before}${token}${after}`;
-    const caret = before.length + token.length;
-    ta.setSelectionRange(caret, caret);
-    node.prompt = ta.value;
+    const next = `${before}${token}${after}`;
+    if(ta.dataset?.promptCapsules){
+        paintVideoPrompt(ta, next, node);
+        placePromptCaret(ta, before.length + token.length);
+    } else {
+        ta.value = next;
+        ta.setSelectionRange(before.length + token.length, before.length + token.length);
+    }
+    node.prompt = next;
     closeSparkAtPicker();
     ta.focus();
     touchBoardInteraction();
@@ -32208,7 +32348,7 @@ function bindSparkVideoAtMentions(wrap, node, ta){
     ta.addEventListener('compositionstart', () => { composing = true; });
     ta.addEventListener('compositionend', () => {
         composing = false;
-        node.prompt = ta.value;
+        node.prompt = promptEditorValue(ta);
         syncSparkAtPicker(wrap, ta, node);
     });
     ta.addEventListener('keydown', e => {
@@ -32233,6 +32373,22 @@ function bindSparkVideoAtMentions(wrap, node, ta){
         }
     });
 }
+function mountPromptCapsules(el, node){
+    if(!el?.dataset?.promptCapsules) return;
+    paintVideoPrompt(el, node.prompt || '', node);
+    el.onpaste = (event) => {
+        event.preventDefault();
+        const text = event.clipboardData?.getData('text/plain') || '';
+        const start = promptEditorCaret(el);
+        const value = promptEditorValue(el);
+        const next = `${value.slice(0, start)}${text}${value.slice(start)}`;
+        paintVideoPrompt(el, next, node);
+        placePromptCaret(el, start + text.length);
+        node.prompt = next;
+        touchBoardInteraction();
+        scheduleSave();
+    };
+}
 function bindVideoDockControls(wrap, node){
     if(!wrap || !node || node.type !== 'video') return;
     const inputSources = generatorSources(node);
@@ -32247,12 +32403,13 @@ function bindVideoDockControls(wrap, node){
 
     const localPrompt = wrap.querySelector('.gen-dock-prompt');
     if(localPrompt){
+        mountPromptCapsules(localPrompt, node);
         bindScrollableText(localPrompt);
-        localPrompt.oninput = e => {
-            node.prompt = e.target.value;
+        localPrompt.oninput = (event) => {
+            node.prompt = promptEditorValue(localPrompt);
             touchBoardInteraction();
             scheduleSave();
-            if(isSparkVideo20Model(node.model) && !e.isComposing) syncSparkAtPicker(wrap, localPrompt, node);
+            if(isSparkVideo20Model(node.model) && !event.isComposing) syncSparkAtPicker(wrap, localPrompt, node);
         };
         localPrompt.onfocus = () => touchBoardInteraction();
         bindSparkVideoAtMentions(wrap, node, localPrompt);
@@ -35323,7 +35480,8 @@ function syncGeneratorDockFieldsIntoNode(gen){
     const modelSelect = imageGenDockEl.querySelector('.model-select, .video-model');
     const providerSelect = imageGenDockEl.querySelector('.provider-select, .video-provider');
     const countInput = imageGenDockEl.querySelector('.gen-dock-count-input');
-    if(promptEl && typeof promptEl.value === 'string') gen.prompt = promptEl.value;
+    if(promptEl?.dataset?.promptCapsules) gen.prompt = promptEditorValue(promptEl);
+    else if(promptEl && typeof promptEl.value === 'string') gen.prompt = promptEl.value;
     if(modelSelect?.value) gen.model = modelSelect.value;
     if(providerSelect?.value) gen.apiProvider = providerSelect.value;
     // 数量只绑了 change/Enter：未失焦就点生成时 DOM 已是 2、node.count 仍是 1 → 只出一张
@@ -35994,7 +36152,8 @@ export function applyCanvasAgentActions(rawActions=[], session){
                 // dock 在 add 时按当时的 prompt 挂上；同节点后续 refresh 不 remount，这里只对齐 textarea。
                 if(imageGenDockNodeId === node.id && imageGenDockEl){
                     const promptEl = imageGenDockEl.querySelector('.gen-dock-prompt');
-                    if(promptEl) promptEl.value = String(node.prompt ?? '');
+                    if(promptEl?.dataset?.promptCapsules) paintVideoPrompt(promptEl, String(node.prompt ?? ''), node);
+                    else if(promptEl) promptEl.value = String(node.prompt ?? '');
                 }
                 addedIds.push(node.id);
                 if(action.tempId){
@@ -36057,6 +36216,8 @@ const RH_POLL_LIMIT = 720;
 const RH_POLL_INTERVAL_MS = 2500;
 const RH_AGENT_TIMEOUT_MS = RH_POLL_LIMIT * RH_POLL_INTERVAL_MS;
 const SINGLE_GENERATION_MS = 180 * 1000;
+// 海螺 H3、10 秒、768P、两张参考图实测 424 秒才回来。video 给 10 分钟，生图仍用 180。
+const VIDEO_GENERATION_MS = 600 * 1000;
 const LLM_ROUND_MS = 2 * 60 * 1000;
 // 编剧长正文与服务端 TEXT_API_TIMEOUT_MS 默认值对齐。
 const SCREENWRITING_ROUND_MS = 5 * 60 * 1000;
@@ -36078,6 +36239,7 @@ export function canvasAgentExecutionTimeoutMs(node){
     if(type === 'batchPosterAgent') return LLM_ROUND_MS + SINGLE_GENERATION_MS * BATCH_POSTER_IMAGE_ATTEMPTS;
     // 洗图 await 完成之后才开始换人，两阶段串行。读尺寸的 8000 毫秒在两阶段之前。
     if(type === 'replicaAgent') return 2 * SINGLE_GENERATION_MS + REPLICA_DIMENSION_READ_MS;
+    if(type === 'video') return VIDEO_GENERATION_MS;
     if(AGENT_TEXT_ROUND_TYPES.has(type)) return LLM_ROUND_MS;
     return SINGLE_GENERATION_MS;
 }

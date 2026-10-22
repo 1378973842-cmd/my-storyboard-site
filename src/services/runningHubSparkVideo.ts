@@ -2,6 +2,7 @@
  * RunningHub Seedance 2.0（路径 sparkvideo-2.0）：multimodal-video
  * POST /openapi/v2/rhart-video/sparkvideo-2.0/multimodal-video
  */
+import { compressImageForGeminiVision } from "./canvasReplicaAgentBridge.js";
 import {
   getStoryboardImageEnv,
   resolveInputsToRunningHubUrls,
@@ -104,6 +105,7 @@ export async function runSparkVideo20Job(opts: {
   watermark?: boolean;
   seed?: unknown;
   projectRoot: string;
+  onUpstreamTaskId?: (taskId: string) => void;
 }): Promise<string> {
   const prompt = String(opts.prompt || "").trim();
   if (!prompt) throw new Error("缺少视频提示词");
@@ -112,6 +114,7 @@ export async function runSparkVideo20Job(opts: {
   const env = getStoryboardImageEnv() || getRunningHubEnv();
   const imageUrls = await resolveInputsToRunningHubUrls(opts.images || [], opts.projectRoot, env, {
     flattenAlpha: true,
+    compress: compressImageForGeminiVision,
   });
   const videoUrls = await resolveMediaUrls(opts.videos || [], opts.projectRoot, env, 3);
   const audioUrls = await resolveMediaUrls(opts.audios || [], opts.projectRoot, env, 3);
@@ -135,5 +138,7 @@ export async function runSparkVideo20Job(opts: {
     watermark: Boolean(opts.watermark),
   };
 
-  return submitAndPollRunningHub(env, getSparkVideo20SubmitPath(), body, "canvas-video/seedance-2.0");
+  return submitAndPollRunningHub(env, getSparkVideo20SubmitPath(), body, "canvas-video/seedance-2.0", {
+    onUpstreamTaskId: opts.onUpstreamTaskId,
+  });
 }

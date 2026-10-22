@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { Check, Play, Plus, Unplug, X } from 'lucide-react';
-import { actionDisplayLabel, actionReasonText } from '../core/proposal';
+import { actionDisplayLabel, actionReasonText, derivedStepTitle } from '../core/proposal';
 import type { ActionProposal, CanvasAction } from '../types';
 import { proposalTimeLabel } from './proposalOrder';
 
@@ -28,6 +28,10 @@ export function ProposalPreviewCard({
 }) {
   const pending = proposal.status === 'pending';
   const applying = proposal.status === 'applying';
+  const settled = proposal.status === 'applied' || proposal.status === 'partial' || proposal.status === 'exec_failed';
+  const stepTitle = settled
+    ? (derivedStepTitle(proposal.actions, proposal.droppedConnects ?? 0) || proposal.title)
+    : proposal.title;
   const timeLabel = proposalTimeLabel(proposal.createdAt);
   const head = (
     <>
@@ -48,7 +52,7 @@ export function ProposalPreviewCard({
             ? '应用中'
             : '待确认'}
       </span>
-      <h4>{proposal.title}</h4>
+      <h4>{stepTitle}</h4>
       {timeLabel ? <time className="canvas-agent-proposal-time" dateTime={new Date(proposal.createdAt).toISOString()}>{timeLabel}</time> : null}
     </>
   );
@@ -58,7 +62,7 @@ export function ProposalPreviewCard({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-      aria-label={proposal.title}
+      aria-label={stepTitle}
     >
       <div className="canvas-agent-proposal-head">
         {onToggle ? (

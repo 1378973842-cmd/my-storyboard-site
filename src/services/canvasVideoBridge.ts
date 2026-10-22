@@ -13,6 +13,7 @@ import {
   initCanvasTaskLedger,
   readCanvasTask,
   saveCanvasTask,
+  saveCanvasTaskUpstreamId,
 } from "./canvasTaskLedger.js";
 import {
   checkCanvasContentFidelity,
@@ -76,6 +77,7 @@ type CanvasVideoTask = {
   updated_at: number;
   result: CanvasVideoResult | null;
   error: string;
+  upstreamTaskId?: string;
 };
 
 const tasks = new Map<string, CanvasVideoTask>();
@@ -94,6 +96,23 @@ function persistVideoTask(task: CanvasVideoTask, deps: CanvasVideoBridgeDeps): v
     result: task.result,
     error: task.error,
   });
+}
+
+function videoErrorText(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const parts = [error.message];
+  let cause: unknown = error.cause;
+  for (let depth = 0; cause && depth < 2; depth += 1) {
+    if (!(cause instanceof Error)) {
+      parts.push(String(cause));
+      break;
+    }
+    const code = "code" in cause ? String((cause as { code?: unknown }).code || "") : "";
+    const detail = [code, cause.message].filter(Boolean).join(" ");
+    if (detail && !parts.includes(detail)) parts.push(detail);
+    cause = cause.cause;
+  }
+  return parts.join(" | ");
 }
 
 function collectUrls(list: CanvasVideoPayload["images"]): string[] {
@@ -196,7 +215,8 @@ function validateVideoPayload(payload: CanvasVideoPayload): { prompt: string; mo
 async function executeCanvasVideoJob(
   req: Request,
   payload: CanvasVideoPayload,
-  deps: CanvasVideoBridgeDeps
+  deps: CanvasVideoBridgeDeps,
+  hooks?: { onUpstreamTaskId?: (taskId: string) => void }
 ): Promise<CanvasVideoResult> {
   const { prompt, model } = validateVideoPayload(payload);
   const images = collectUrls(payload.images);
@@ -234,6 +254,7 @@ async function executeCanvasVideoJob(
         watermark: payload.watermark,
         seed: payload.seed,
         projectRoot: deps.projectRoot,
+        onUpstreamTaskId: hooks?.onUpstreamTaskId,
       })
     : await runHailuoH3VideoJob({
         prompt,
@@ -244,6 +265,7 @@ async function executeCanvasVideoJob(
         duration: payload.duration,
         ratio: payload.aspect_ratio,
         projectRoot: deps.projectRoot,
+        onUpstreamTaskId: hooks?.onUpstreamTaskId,
       });
 
   const localUrl = await persistRemoteVideo(upstreamUrl, deps.projectRoot);
@@ -280,7 +302,13 @@ async function runCanvasVideoTask(
   task.updated_at = Date.now();
   persistVideoTask(task, deps);
   try {
-    const result = await executeCanvasVideoJob(req, payload, deps);
+    const result = await executeCanvasVideoJob(req, payload, deps, {
+      onUpstreamTaskId(upstreamId) {
+        task.upstreamTaskId = upstreamId;
+        task.updated_at = Date.now();
+        saveCanvasTaskUpstreamId(deps.db, task.id, upstreamId);
+      },
+    });
     task.status = "succeeded";
     task.result = result;
     task.error = "";
@@ -288,7 +316,7 @@ async function runCanvasVideoTask(
     persistVideoTask(task, deps);
   } catch (e) {
     task.status = "failed";
-    task.error = e instanceof Error ? e.message : String(e);
+    task.error = videoErrorText(e);
     task.updated_at = Date.now();
     persistVideoTask(task, deps);
     console.error("[canvas-video-task] failed:", taskId, task.error);
@@ -308,7 +336,7 @@ async function handleCanvasVideoSync(
   } catch (e) {
     const err = e as Error & { status?: number; fidelityIssues?: FidelityIssue[] };
     const status = Number(err.status) || 502;
-    const msg = err instanceof Error ? err.message : String(e);
+    const msg = videoErrorText(e);
     if (status >= 500) console.error("[canvas-video] failed:", msg);
     res.status(status).json({
       error: msg,
@@ -368,6 +396,7 @@ export function registerCanvasVideoRoutes(app: Express, deps: CanvasVideoBridgeD
       status: task.status,
       result: task.status === "succeeded" ? task.result : null,
       error: task.error || undefined,
+      upstream_task_id: task.upstreamTaskId || undefined,
       updated_at: "updated_at" in task ? task.updated_at : task.updatedAt,
     });
   });

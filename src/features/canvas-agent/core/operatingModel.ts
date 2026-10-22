@@ -1,5 +1,6 @@
 import type { CanvasAction, CanvasNodeSnapshot, CanvasSnapshot } from '../types';
 import { downstreamImpactPaths, nodeHasGeneratedOutput } from './invalidation';
+import { referenceCapsuleLabel } from './referencePrompt';
 
 export const MAX_REBUILDS = 3;
 
@@ -410,9 +411,52 @@ function mentionThumb(node: CanvasNodeSnapshot, url: string): Pick<MentionCandid
   return { preview: url, media: 'image' };
 }
 
+export type MentionLook = {
+  label: string;
+  thumb?: string;
+  preview?: string;
+  media?: 'image' | 'video';
+};
+
+export function mentionLook(node: CanvasNodeSnapshot): MentionLook {
+  const url = previewUrl(node);
+  return {
+    label: mentionNodeLabel(node),
+    ...(url ? mentionThumb(node, url) : {}),
+  };
+}
+
+export type HistoryPiece =
+  | { type: 'text'; text: string }
+  | { type: 'node'; id: string }
+  | { type: 'model'; id: string };
+
+// 发出去的消息只存 {{id}} / 使用模型 id。历史气泡按这个切回胶囊。
+export function historyPieces(content: string): HistoryPiece[] {
+  const pieces: HistoryPiece[] = [];
+  const re = /\{\{\s*([^{}]+?)\s*\}\}|使用模型\s+(\S+)/g;
+  let last = 0;
+  for (const match of content.matchAll(re)) {
+    const start = match.index ?? 0;
+    if (start > last) pieces.push({ type: 'text', text: content.slice(last, start) });
+    const nodeId = String(match[1] || '').trim();
+    const rawModel = String(match[2] || '');
+    const modelId = rawModel.replace(/[，。,.、；;:：]+$/u, '').trim();
+    if (nodeId) pieces.push({ type: 'node', id: nodeId });
+    else if (modelId) pieces.push({ type: 'model', id: modelId });
+    const punct = rawModel.slice(modelId.length);
+    last = start + match[0].length;
+    if (punct) pieces.push({ type: 'text', text: punct });
+  }
+  if (last < content.length) pieces.push({ type: 'text', text: content.slice(last) });
+  return pieces;
+}
+
 function mentionNodeLabel(node: CanvasNodeSnapshot): string {
-  const custom = String(node.floatTitle || node.name || node.title || '').trim();
-  if (custom) return custom.slice(0, 32);
+  const semantic = referenceCapsuleLabel(node, 0);
+  if (semantic !== '参考图') return semantic.slice(0, 32);
+  const named = String(node.name || '').trim();
+  if (named) return named.slice(0, 32);
   const file = String(node.url || '').split('/').pop()?.split('?')[0] || '';
   if (node.type === 'image' && file && !file.startsWith('blob:')) return file.slice(0, 32);
   const index = Number(node.floatTitleIndex) || 0;

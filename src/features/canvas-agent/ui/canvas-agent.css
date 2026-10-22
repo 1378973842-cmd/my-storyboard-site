@@ -303,6 +303,111 @@ html.canvas-image-edit-open .canvas-agent-layer {
   background: transparent;
 }
 
+.canvas-agent-message .canvas-agent-md {
+  max-width: 100%;
+  min-width: 0;
+  color: #e5e2e1;
+  font-size: 13px;
+  line-height: 1.65;
+  display: grid;
+  gap: 10px;
+}
+
+.canvas-agent-message .canvas-agent-md p,
+.canvas-agent-message .canvas-agent-md li,
+.canvas-agent-message .canvas-agent-md blockquote,
+.canvas-agent-message .canvas-agent-md td,
+.canvas-agent-message .canvas-agent-md th {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  white-space: normal;
+}
+
+.canvas-agent-message .canvas-agent-md h2,
+.canvas-agent-message .canvas-agent-md h3,
+.canvas-agent-message .canvas-agent-md h4 {
+  margin: 0;
+  color: #e5e2e1;
+  font-family: "Noto Serif", serif;
+  font-weight: 560;
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+}
+
+.canvas-agent-message .canvas-agent-md h2 { font-size: 18px; }
+.canvas-agent-message .canvas-agent-md h3 { font-size: 15px; }
+.canvas-agent-message .canvas-agent-md h4 { font-size: 13.5px; }
+
+.canvas-agent-message .canvas-agent-md strong {
+  font-weight: 640;
+  color: #e5e2e1;
+}
+
+.canvas-agent-message .canvas-agent-md ul,
+.canvas-agent-message .canvas-agent-md ol {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.canvas-agent-message .canvas-agent-md blockquote {
+  padding: 8px 12px;
+  background: #1c1b1b;
+  color: #c8c4c2;
+  white-space: pre-wrap;
+}
+
+.canvas-agent-message .canvas-agent-md :not(pre) > code {
+  padding: 0 4px;
+  background: #131313;
+  font-size: 12px;
+}
+
+.canvas-agent-message .canvas-agent-md pre {
+  margin: 0;
+  padding: 10px 12px;
+  background: #131313;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.canvas-agent-message .canvas-agent-md hr {
+  border: 0;
+  height: 0.5px;
+  margin: 2px 0;
+  background: rgba(69, 70, 77, 0.45);
+}
+
+.canvas-agent-message .canvas-agent-md table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 2px;
+  font-size: 12px;
+}
+
+.canvas-agent-message .canvas-agent-md th,
+.canvas-agent-message .canvas-agent-md td {
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.canvas-agent-message .canvas-agent-md th {
+  background: #242322;
+  color: #e5e2e1;
+  font-weight: 560;
+}
+
+.canvas-agent-message .canvas-agent-md td {
+  background: #1c1b1b;
+}
+
 .canvas-agent-meta,
 .canvas-agent-message-tools,
 .canvas-agent-processed > button {
@@ -616,9 +721,9 @@ html.canvas-image-edit-open .canvas-agent-layer {
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  height: 18px;
-  padding: 0 2px 0 8px;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
   border: 0;
   border-radius: 999px;
   background: #242322;
@@ -627,22 +732,6 @@ html.canvas-image-edit-open .canvas-agent-layer {
   line-height: 18px;
   user-select: none;
   pointer-events: none;
-}
-
-.canvas-agent-skill-chip button {
-  display: grid;
-  width: 16px;
-  height: 16px;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: #ffb866;
-  font-size: 12px;
-  line-height: 1;
-  pointer-events: auto;
-  cursor: pointer;
 }
 
 .canvas-agent-composer-bar {
@@ -874,11 +963,22 @@ html.canvas-image-edit-open .canvas-agent-layer {
 
 .canvas-agent-mention-pill {
   position: relative;
-  max-width: 148px;
+  max-width: 168px;
+  height: 22px;
   margin: 0 1px;
+  padding: 0 8px 0 3px;
   vertical-align: middle;
   pointer-events: auto;
   cursor: default;
+}
+
+.canvas-agent-mention-pill-thumb {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 4px;
+  object-fit: cover;
+  background: #131313;
 }
 
 .canvas-agent-mention-pill-label {
@@ -888,6 +988,20 @@ html.canvas-image-edit-open .canvas-agent-layer {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.canvas-agent-mention-name {
+  width: 72px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #e5e2e1;
+  font: inherit;
+  padding: 0;
+}
+
+.canvas-agent-mention-name::placeholder {
+  color: #777371;
 }
 
 .canvas-agent-mention-preview {

@@ -10,15 +10,51 @@ function readableName(value: unknown): string {
   return text;
 }
 
+const REFERENCE_ORDER_SKIP = new Set(['video', 'audio', 'prompt', 'llm', 'group', 'loop']);
+
+// 显示层用。落地后的 prompt 仍存 {{id}}，不在这里改写成「参考图N」。
+// 语义名按 title、floatTitle、name。文件名不算。没有语义名才用连线顺序。
+export function referenceCapsuleLabel(
+  node: Record<string, unknown> | null | undefined,
+  connectionOrder: number,
+): string {
+  const label = readableName(node?.title) || readableName(node?.floatTitle) || readableName(node?.name);
+  if (label) return label;
+  return connectionOrder > 0 ? `参考图${connectionOrder}` : '参考图';
+}
+
+export function mentionTitleToStore(raw: unknown): string {
+  const text = readableName(raw);
+  return text ? text.slice(0, 32) : '';
+}
+
+export function referenceConnectionOrder(
+  targetId: string,
+  sourceId: string,
+  connections: readonly { from?: string; to?: string }[],
+  nodes: readonly { id?: string; type?: string }[],
+): number {
+  let order = 0;
+  for (const edge of connections) {
+    if (String(edge.to || '') !== targetId) continue;
+    const from = String(edge.from || '').trim();
+    if (!from) continue;
+    const type = String(nodes.find((item) => item.id === from)?.type || '');
+    if (type && REFERENCE_ORDER_SKIP.has(type)) continue;
+    order += 1;
+    if (from === sourceId) return order;
+  }
+  return 0;
+}
+
 function standInLabel(
   name: string,
   actions: CanvasAction[],
   nodes: CanvasNodeSnapshot[],
   seen: Map<string, string>,
-  fallbackCount: { n: number },
 ): string {
   const cached = seen.get(name);
-  if (cached) return cached;
+  if (cached !== undefined) return cached;
   const created = actions.find((action) => (
     action.type === 'create_node' && String(action.tempId || '').trim() === name
   ));
@@ -26,13 +62,14 @@ function standInLabel(
   const createdLabel = readableName(params?.name) || readableName(params?.title);
   const node = nodes.find((item) => item.id === name) as Record<string, unknown> | undefined;
   const canvasLabel = readableName(node?.name) || readableName(node?.title) || readableName(node?.floatTitle);
-  const label = createdLabel || canvasLabel || `参考图${fallbackCount.n += 1}`;
+  const label = createdLabel || canvasLabel;
   seen.set(name, label);
   return label;
 }
 
 // {{}} 是内部记号，不能留在用户看得见的 prompt 里。
-// 换成节点名；没有名字就按出现顺序用参考图N。只删不换会留下「参考 与 的」这种残句。
+// 有节点名就换成名字。name 是文件名或没有名字时不编「参考图N」：
+// 那一句不是分镜行就整段删掉，引用靠连线。分镜行里只删记号，避免把镜头一起删掉。
 // 文件名不是节点名。name 是 canvas-output-xxx.jpg 时按没有名字处理，避免把文件名写进 prompt。
 function referenceLabels(
   prompt: string,
@@ -40,10 +77,9 @@ function referenceLabels(
   nodes: CanvasNodeSnapshot[],
 ): Map<string, string> {
   const seen = new Map<string, string>();
-  const fallbackCount = { n: 0 };
   for (const match of prompt.matchAll(/\{\{\s*([^{}]*?)\s*\}\}/g)) {
     const name = String(match[1] || '').trim();
-    if (name) standInLabel(name, actions, nodes, seen, fallbackCount);
+    if (name) standInLabel(name, actions, nodes, seen);
   }
   return seen;
 }
@@ -75,18 +111,30 @@ function withFidelityNames(
   };
 }
 
+function dropUnnamedReferenceSegments(
+  prompt: string,
+  actions: CanvasAction[],
+  nodes: CanvasNodeSnapshot[],
+): string {
+  const seen = new Map<string, string>();
+  return prompt.split(/(?<=[。！？\n])/u).filter((part) => {
+    const ids = [...part.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map((match) => match[1].trim()).filter(Boolean);
+    if (!ids.length || ids.every((id) => standInLabel(id, actions, nodes, seen))) return true;
+    return /分镜\s*\d/u.test(part);
+  }).join('');
+}
+
 export function readableReferencePrompt(
   prompt: string,
   actions: CanvasAction[],
   nodes: CanvasNodeSnapshot[],
 ): string {
   const seen = new Map<string, string>();
-  const fallbackCount = { n: 0 };
-  return prompt
+  return dropUnnamedReferenceSegments(prompt, actions, nodes)
     .replace(/\{\{\s*([^{}]*?)\s*\}\}/g, (_match, raw: string) => {
       const name = String(raw || '').trim();
       if (!name) return '';
-      return standInLabel(name, actions, nodes, seen, fallbackCount);
+      return standInLabel(name, actions, nodes, seen);
     })
     .replace(/\s+/g, ' ')
     .replace(/(?:\s*,\s*)+/g, ', ')
@@ -201,8 +249,9 @@ export function imageModelAcceptsReferenceInput(model: string): boolean {
   return REFERENCE_CAPABLE_IMAGE_MODELS.some((item) => item.toLowerCase() === id);
 }
 
-// 空模型留给节点默认值（图片模型 V2）。有入边且所选模型不在白名单时，写成 V2。
+// 空模型留给节点默认值（图片模型 V2）。有入边且所选模型不在图片白名单时，写成 V2。
 // 用户点名也盖不过这条：判据是边上有没有参考图，不是措辞。
+// 只给图片类节点用。video 的合法模型是海螺 H3 和 Seedance 2.0，不在这张表里。
 export function coerceReferenceImageModel(model: string, hasReferenceEdge: boolean): string {
   const current = model.trim();
   if (!hasReferenceEdge || !current || imageModelAcceptsReferenceInput(current)) return current;
@@ -304,7 +353,8 @@ export function droppedConnectCount(before: CanvasAction[], after: CanvasAction[
 // 有 citations：没被 @ 到的 model 删掉。
 // 引用边留下两种：用户点了名，或来源节点标着本会话 id。
 // 没这个标记的图（素材库、旧节点）仍然拿掉。
-// 参考图能力在点名之后另算：节点有参考图入边，且模型不在白名单，就写成图片模型 V2。
+// 参考图能力在点名之后另算：图片类节点有参考图入边，且模型不在图片白名单，就写成图片模型 V2。
+// video 不走这张表。视频能不能跑由 canvasVideoBridge 的海螺 H3 / Seedance 2.0 判断。
 // prompt 里的 {{}} 仍换成读得通的说法，避免「参考 与」。
 export function settleReferenceActions(
   actions: CanvasAction[],
@@ -400,6 +450,7 @@ export function settleReferenceActions(
   return settled.map((action) => {
     if (action.type === 'update_node_params') {
       const node = nodes.find((item) => item.id === action.nodeId);
+      if (node?.type === 'video') return action;
       const existing = typeof node?.model === 'string' ? node.model : '';
       const patch = withReferenceCapableModel(
         { ...action.patch },
@@ -410,7 +461,7 @@ export function settleReferenceActions(
       if (!stamped.clamp && stamped.params.model === action.patch.model) return action;
       return { ...action, patch: stamped.params, ...(stamped.clamp ? { modelClamp: stamped.clamp } : {}) };
     }
-    if (action.type !== 'create_node' || !generatorTypes.includes(action.nodeType)) return action;
+    if (action.type !== 'create_node' || action.nodeType === 'video' || !generatorTypes.includes(action.nodeType)) return action;
     const tempId = String(action.tempId || '').trim();
     const params = withReferenceCapableModel(
       { ...(action.initialParams || {}) },

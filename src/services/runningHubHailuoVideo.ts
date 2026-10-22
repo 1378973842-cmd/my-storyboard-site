@@ -4,6 +4,7 @@
  */
 import { FormData } from "undici";
 import { readUploadsBytes } from "./ossStore.js";
+import { compressImageForGeminiVision } from "./canvasReplicaAgentBridge.js";
 import {
   getStoryboardImageEnv,
   isPublicRunningHubImageUrl,
@@ -193,6 +194,7 @@ export async function runHailuoH3VideoJob(opts: {
   duration?: unknown;
   ratio?: unknown;
   projectRoot: string;
+  onUpstreamTaskId?: (taskId: string) => void;
 }): Promise<string> {
   const prompt = String(opts.prompt || "").trim();
   if (!prompt) throw new Error("缺少视频提示词");
@@ -201,6 +203,7 @@ export async function runHailuoH3VideoJob(opts: {
   const env = getRunningHubEnv();
   const imageUrls = await resolveInputsToRunningHubUrls(opts.images || [], opts.projectRoot, env, {
     flattenAlpha: true,
+    compress: compressImageForGeminiVision,
   });
   const videoUrls = await resolveMediaUrls(opts.videos || [], opts.projectRoot, env, 3);
   const audioUrls = await resolveMediaUrls(opts.audios || [], opts.projectRoot, env, 3);
@@ -215,5 +218,7 @@ export async function runHailuoH3VideoJob(opts: {
     ratio: mapHailuoH3Ratio(opts.ratio),
   };
 
-  return submitAndPollRunningHub(env, getHailuoH3SubmitPath(), body, "canvas-video/hailuo-h3");
+  return submitAndPollRunningHub(env, getHailuoH3SubmitPath(), body, "canvas-video/hailuo-h3", {
+    onUpstreamTaskId: opts.onUpstreamTaskId,
+  });
 }

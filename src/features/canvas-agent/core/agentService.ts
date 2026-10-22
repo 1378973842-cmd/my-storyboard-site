@@ -12,6 +12,7 @@ export type AgentStreamRequest = {
   model?: string;
   conversationId?: string;
   playbookId?: string;
+  citedNodeIds?: readonly string[];
   signal?: AbortSignal;
   onEvent: (event: CanvasAgentStreamEvent) => void;
 };
@@ -36,6 +37,7 @@ export async function streamCanvasAgent(request: AgentStreamRequest): Promise<vo
       conversationId: request.conversationId,
       playbookId: request.playbookId,
       context: serializeCanvasContext(request.snapshot),
+      visionImages: visionImageUrlsForTurn(request.snapshot, request.message, request.citedNodeIds),
       messages: request.messages.map(({ role, content }) => ({ role, content })),
     }),
     signal: request.signal,

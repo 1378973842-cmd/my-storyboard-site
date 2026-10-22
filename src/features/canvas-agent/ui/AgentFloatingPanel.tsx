@@ -38,10 +38,10 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { isInfiniteCanvasEditorOpen } from '../../../lib/infiniteCanvas/canvasEngine.js';
+import { isInfiniteCanvasEditorOpen, flushCanvasAgentSave, withCanvasAgentNode } from '../../../lib/infiniteCanvas/canvasEngine.js';
 import { CANVAS_GENERATOR_TYPES, batchApplyChanges, getCanvasSnapshot } from '../core/canvasFacade';
 import { inferAppliedPlaybookStage } from '../core/stageLedger';
-import { referenceClampLabels } from '../core/referencePrompt';
+import { referenceClampLabels, mentionTitleToStore, referenceCapsuleLabel } from '../core/referencePrompt';
 import { pendingExecutionFeedback, proposalWaitsForClick } from '../core/proposal';
 import {
   deliverProposalDone,
@@ -63,14 +63,17 @@ import {
   choiceActions,
   mentionCandidates,
   mentionChipToken,
+  mentionLook,
   mentionModelCandidates,
   mentionQueryAt,
+  historyPieces,
   type ImpactChoice,
   type MentionCandidate,
 } from '../core/operatingModel';
 import { agentPlaybooks, canvasSkillRegistry } from '../tools/skillRegistry';
 import { AGENT_CREATABLE_NODE_TYPES } from '../types';
 import { ProposalPreviewCard } from './ProposalPreviewCard';
+import { AssistantMarkdown } from './assistantMarkdown';
 import { proposalDefaultOpen, proposalDisplayTier, sortProposalsForDisplay } from './proposalOrder';
 import type {
   ActionProposal,
@@ -243,7 +246,7 @@ function closeMentionPreviews() {
   document.querySelectorAll('.canvas-agent-mention-preview').forEach((node) => node.remove());
 }
 
-function ensureSkillChip(root: HTMLElement, title: string | null, onRemove: () => void) {
+function ensureSkillChip(root: HTMLElement, title: string | null) {
   const existing = root.querySelector(':scope > [data-skill-chip]');
   if (!title) {
     existing?.remove();
@@ -262,17 +265,6 @@ function ensureSkillChip(root: HTMLElement, title: string | null, onRemove: () =
   const label = document.createElement('span');
   label.textContent = title;
   chip.append(label);
-  const remove = document.createElement('button');
-  remove.type = 'button';
-  remove.setAttribute('aria-label', '取消技能');
-  remove.textContent = '×';
-  remove.addEventListener('mousedown', (event) => event.preventDefault());
-  remove.addEventListener('click', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    onRemove();
-  });
-  chip.append(remove);
   root.prepend(chip);
 }
 
@@ -304,22 +296,63 @@ function placeCaretAfter(node: Node) {
   sel.addRange(range);
 }
 
+function commitMentionTitle(id: string, input: HTMLInputElement) {
+  if (input.dataset.saved) return;
+  const stored = mentionTitleToStore(input.value);
+  if (!stored) return;
+  input.dataset.saved = '1';
+  withCanvasAgentNode(id, (node) => {
+    node.title = stored;
+  });
+  flushCanvasAgentSave();
+  input.replaceWith(document.createTextNode(stored));
+}
+
 function mentionPill(item: MentionInsert): HTMLSpanElement {
   const pill = document.createElement('span');
   pill.className = 'canvas-agent-skill-chip canvas-agent-mention-pill';
   pill.contentEditable = 'false';
   pill.dataset.mentionKind = item.kind;
   pill.dataset.mentionId = item.id;
+  if (item.media === 'image' && (item.thumb || item.preview)) {
+    const thumb = document.createElement('img');
+    thumb.className = 'canvas-agent-mention-pill-thumb';
+    thumb.alt = '';
+    thumb.src = item.thumb || item.preview || '';
+    if (item.thumb && item.preview && item.thumb !== item.preview) {
+      thumb.addEventListener('error', () => {
+        if (thumb.dataset.fallback) return;
+        thumb.dataset.fallback = '1';
+        thumb.src = item.preview || '';
+      });
+    }
+    pill.append(thumb);
+  }
   const label = document.createElement('span');
   label.className = 'canvas-agent-mention-pill-label';
-  label.textContent = item.label;
+  const source = item.kind === 'node'
+    ? getCanvasSnapshot().nodes.find((node) => node.id === item.id)
+    : undefined;
+  const semantic = source ? referenceCapsuleLabel(source, 0) : '';
+  const shown = semantic && semantic !== '参考图' ? semantic : item.label;
+  if (item.kind === 'node' && item.media === 'image' && semantic === '参考图') {
+    const nameInput = document.createElement('input');
+    nameInput.className = 'canvas-agent-mention-name';
+    nameInput.placeholder = '起名';
+    nameInput.setAttribute('aria-label', '参考图名字');
+    nameInput.addEventListener('mousedown', (event) => event.stopPropagation());
+    nameInput.addEventListener('keydown', (event) => {
+      event.stopPropagation();
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      commitMentionTitle(item.id, nameInput);
+    });
+    nameInput.addEventListener('blur', () => commitMentionTitle(item.id, nameInput));
+    label.append(nameInput);
+  } else {
+    label.textContent = shown;
+  }
   pill.append(label);
-  const remove = document.createElement('button');
-  remove.type = 'button';
-  remove.setAttribute('aria-label', '移除引用');
-  remove.textContent = '×';
-  remove.addEventListener('mousedown', (event) => event.preventDefault());
-  pill.append(remove);
   const preview = document.createElement('span');
   preview.className = 'canvas-agent-mention-preview';
   if (item.media === 'video' && item.preview) {
@@ -343,7 +376,7 @@ function mentionPill(item: MentionInsert): HTMLSpanElement {
     preview.append(img);
   }
   const caption = document.createElement('span');
-  caption.textContent = item.label;
+  caption.textContent = shown;
   preview.append(caption);
   pill.append(preview);
   const closePreview = () => {
@@ -363,7 +396,6 @@ function mentionPill(item: MentionInsert): HTMLSpanElement {
     preview.style.top = `${top}px`;
   });
   pill.addEventListener('mouseleave', closePreview);
-  remove.addEventListener('click', () => preview.remove());
   return pill;
 }
 
@@ -396,7 +428,9 @@ function insertMentionPill(root: HTMLElement, item: MentionInsert) {
   } else {
     root.append(pill, space);
   }
-  placeCaretAfter(space);
+  const nameInput = pill.querySelector('input');
+  if (nameInput instanceof HTMLInputElement) nameInput.focus();
+  else placeCaretAfter(space);
 }
 
 function useCanvasEditorVisible(active: boolean): boolean {
@@ -417,6 +451,58 @@ function useCanvasEditorVisible(active: boolean): boolean {
     };
   }, [active]);
   return visible;
+}
+
+function UserMessageBody({ content }: { content: string }) {
+  const snapshot = getCanvasSnapshot();
+  const nodes = new Map(snapshot.nodes.map((node) => [node.id, node]));
+  const models = new Map(
+    mentionModelCandidates(snapshot.availableModels).map((item) => [item.id, item.label]),
+  );
+  const pieces = historyPieces(content);
+  if (!pieces.some((piece) => piece.type !== 'text')) return <>{content}</>;
+  return (
+    <>
+      {pieces.map((piece, index) => {
+        if (piece.type === 'text') return <span key={index}>{piece.text}</span>;
+        const named = piece.type === 'node' && nodes.has(piece.id) ? mentionLook(nodes.get(piece.id)!) : null;
+        const label = named?.label
+          || (piece.type === 'model' ? (models.get(piece.id) || piece.id) : piece.id);
+        const src = named?.media === 'image' ? (named.thumb || named.preview || '') : '';
+        return (
+          <span key={index} className="canvas-agent-skill-chip canvas-agent-mention-pill">
+            {src ? (
+              <img
+                className="canvas-agent-mention-pill-thumb"
+                alt=""
+                src={src}
+                onError={(event) => {
+                  const image = event.currentTarget;
+                  if (image.dataset.fallback || !named?.preview) return;
+                  image.dataset.fallback = '1';
+                  image.src = named.preview;
+                }}
+              />
+            ) : null}
+            <span className="canvas-agent-mention-pill-label">{label}</span>
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
+function removeMentionBeforeCaret(root: HTMLElement): boolean {
+  const sel = window.getSelection();
+  if (!sel || !sel.isCollapsed || !sel.anchorNode || !root.contains(sel.anchorNode)) return false;
+  const prev = sel.anchorNode.nodeType === Node.TEXT_NODE && sel.anchorOffset === 0
+    ? sel.anchorNode.previousSibling
+    : sel.anchorNode === root
+      ? root.childNodes[sel.anchorOffset - 1] || null
+      : null;
+  if (!(prev instanceof HTMLElement) || !prev.classList.contains('canvas-agent-mention-pill')) return false;
+  prev.remove();
+  return true;
 }
 
 export function AgentFloatingPanel({
@@ -494,7 +580,17 @@ export function AgentFloatingPanel({
       setOpen(false);
       return;
     }
-    const frame = requestAnimationFrame(() => setPortalRoot(rootRef.current));
+    // 根节点可能晚于这一帧才挂上。只排一次 rAF 会在 current 仍为空时停住，浮窗再也出不来。
+    let frame = 0;
+    const sync = () => {
+      const node = rootRef.current;
+      if (node) {
+        setPortalRoot(node);
+        return;
+      }
+      frame = requestAnimationFrame(sync);
+    };
+    sync();
     return () => cancelAnimationFrame(frame);
   }, [active, rootRef]);
 
@@ -860,6 +956,7 @@ export function AgentFloatingPanel({
           snapshot,
           conversationId: conversationId || undefined,
           playbookId: playbookId || undefined,
+          citedNodeIds: citedNodesRef.current,
           signal: controller.signal,
           onEvent: (event) => handleAgentEvent(assistantMessage.id, event),
         });
@@ -931,7 +1028,7 @@ export function AgentFloatingPanel({
     const skillChanged = appliedSkillRef.current !== playbookId;
     appliedSkillRef.current = playbookId;
     const hadChip = !!root.querySelector(':scope > [data-skill-chip]');
-    ensureSkillChip(root, title, () => setPlaybookId(''));
+    ensureSkillChip(root, title);
     if (title && !hadChip && skillChanged) {
       root.focus();
       const chip = root.querySelector(':scope > [data-skill-chip]');
@@ -1279,7 +1376,11 @@ export function AgentFloatingPanel({
               {messages.map((message) => (
                 <article key={message.id} className={`canvas-agent-message is-${message.role}`}>
                   {message.role === 'user' ? <span>YOU</span> : null}
-                  <p>{message.content || (streaming ? '正在构思…' : '')}</p>
+                  {message.role === 'user' ? (
+                    <p>{message.content ? <UserMessageBody content={message.content} /> : null}</p>
+                  ) : (
+                    <AssistantMarkdown text={message.content || (streaming ? '正在构思…' : '')} />
+                  )}
                   {message.role === 'assistant' && message.elapsedMs ? (
                     <div className="canvas-agent-meta">
                       <span>总用时 {Math.max(1, Math.round(message.elapsedMs / 1000))}s</span>
@@ -1499,19 +1600,6 @@ export function AgentFloatingPanel({
                         node.classList.remove('is-open');
                       });
                     }}
-                    onClick={(event) => {
-                      const button = (event.target as HTMLElement).closest('.canvas-agent-mention-pill button');
-                      if (!button || !composerRef.current) return;
-                      const pill = button.closest('.canvas-agent-mention-pill');
-                      const space = pill?.nextSibling;
-                      pill?.remove();
-                      if (space?.nodeType === Node.TEXT_NODE) {
-                        const text = space.textContent || '';
-                        if (!text.trim()) space.remove();
-                        else if (text.startsWith(' ')) space.textContent = text.slice(1);
-                      }
-                      syncComposer();
-                    }}
                     onPaste={(event) => {
                       event.preventDefault();
                       const text = event.clipboardData.getData('text/plain');
@@ -1533,6 +1621,11 @@ export function AgentFloatingPanel({
                         && !event.ctrlKey
                         && !event.altKey
                       ) keepCaretAfterSkill(composerRef.current);
+                      if (event.key === 'Backspace' && composerRef.current && removeMentionBeforeCaret(composerRef.current)) {
+                        event.preventDefault();
+                        syncComposer();
+                        return;
+                      }
                       if (event.key === 'Backspace' && playbookId && !input.trim()) {
                         event.preventDefault();
                         setPlaybookId('');

@@ -19,8 +19,8 @@ import { buildNineGridImagePrompt } from '../../lib/nineGrid/nineGridCore.js';
 import { formatNineGridRefLooksForPhaseA } from '../../services/canvasNineGridBridge';
 import { checkCanvasContentFidelity } from '../../services/canvasContentFidelity';
 import { sortBatchExecutions } from './core/executionOrder';
-import { actionProposalNeedsApproval, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, openBatchProgress, partialBatchUpdate, pendingExecutionFeedback, proposalWaitsForClick, settleBatchProposal, unknownCanvasActionMessage } from './core/proposal';
-import { citationsForApply, citationsInUserMessage, droppedConnectCount, imageModelAcceptsReferenceInput, readableReferencePrompt, REFERENCE_IMAGE_FALLBACK_MODEL, referenceClampLabels, settleReferenceActions } from './core/referencePrompt';
+import { actionProposalNeedsApproval, derivedStepTitle, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, openBatchProgress, partialBatchUpdate, pendingExecutionFeedback, proposalWaitsForClick, settleBatchProposal, stripCreatesOnShortYes, unknownCanvasActionMessage } from './core/proposal';
+import { citationsForApply, citationsInUserMessage, droppedConnectCount, imageModelAcceptsReferenceInput, readableReferencePrompt, REFERENCE_IMAGE_FALLBACK_MODEL, referenceCapsuleLabel, referenceConnectionOrder, mentionTitleToStore, referenceClampLabels, settleReferenceActions } from './core/referencePrompt';
 import {
   deliverProposalDone,
   diskProposalOutcome,
@@ -39,6 +39,7 @@ import {
   updateCanvasAgentProposalOutcome,
 } from './server/conversationStore';
 import { ProposalPreviewCard } from './ui/ProposalPreviewCard';
+import { AssistantMarkdown } from './ui/assistantMarkdown';
 import { proposalDefaultOpen, PROPOSAL_OPEN_CAP, sortProposalsForDisplay } from './ui/proposalOrder';
 import { agentPlaybooks, convertSkillToAITool, canvasSkillRegistry, coreCanvasTools, CREATE_PARAM_KEYS, UPDATE_PARAM_KEYS, describeCreateCanvasNodes, describeUpdateNodeConfig, rejectUnknownCanvasParamKeys } from './tools/skillRegistry';
 import { readPlaybookForAgent, readRegisteredPlaybookText } from '../../services/infiniteCanvasRoutes';
@@ -54,6 +55,7 @@ import {
   insertMention,
   mentionChipToken,
   mentionCandidates,
+  historyPieces,
   stripMentionQuery,
   mentionModelCandidates,
   mentionQueryAt,
@@ -124,6 +126,14 @@ assert.deepEqual(
   visionImageUrlsForTurn(visionSnap, '参考 {{prop-1}} {{clip-1}}'),
   ['/uploads/prop.png', '/uploads/hero.png', '/uploads/scene.png'],
 );
+assert.deepEqual(
+  visionImageUrlsForTurn({
+    ...visionSnap,
+    selectedNodeIds: [],
+    connections: snapshot.connections,
+  }, '符合预期', ['prop-1']),
+  ['/uploads/prop.png'],
+);
 assert.equal(
   visionImageUrlsForTurn({
     ...visionSnap,
@@ -139,6 +149,19 @@ assert.equal(
   }, Array.from({ length: 9 }, (_, index) => `{{more-${index}}}`).join(' ')).length,
   8,
 );
+assert.equal(referenceCapsuleLabel({ title: '阿波罗', name: 'canvas-output-1.jpg' }, 2), '阿波罗');
+assert.equal(referenceCapsuleLabel({ floatTitle: '神殿', name: '角色参考' }, 1), '神殿');
+assert.equal(referenceCapsuleLabel({ name: 'canvas-output-1.jpg' }, 1), '参考图1');
+assert.equal(referenceCapsuleLabel({}, 0), '参考图');
+assert.equal(referenceConnectionOrder('vid', 'img_b', [
+  { from: 'prompt-1', to: 'vid' },
+  { from: 'img_a', to: 'vid' },
+  { from: 'img_b', to: 'vid' },
+], [
+  { id: 'prompt-1', type: 'prompt' },
+  { id: 'img_a', type: 'image' },
+  { id: 'img_b', type: 'image' },
+]), 2);
 assert.equal(upstreamDigest(snapshot, 'video-1').length, 16);
 assert.deepEqual(
   downstreamImpactPaths(snapshot, ['prompt-1']).map((item) => item.path),
@@ -289,6 +312,14 @@ const named = mentionCandidates({
 });
 assert.equal(named[0]?.label, '圣诞老人三视图');
 assert.equal(named[0]?.thumb, '/uploads/gallery/hero_thumb.webp');
+const titledOverFile = mentionCandidates({
+  ...snapshot,
+  nodes: [{ id: 'image-8', type: 'image', url: '/uploads/a.png', name: 'canvas-output-1.jpg', title: '阿波罗' }],
+});
+assert.equal(titledOverFile[0]?.label, '阿波罗');
+assert.equal(mentionTitleToStore('阿波罗'), '阿波罗');
+assert.equal(mentionTitleToStore('canvas-output-1.jpg'), '');
+assert.equal(mentionTitleToStore('  '), '');
 const mentionModels = {
   fromConfig: true,
   image: [{ id: 'runninghub', models: [
@@ -317,6 +348,17 @@ assert.ok(menu.some((item) => item.id === 'seedance-2.0' && item.label === 'Seed
 const hailuo = menu.find((item) => item.label === '海螺 H3');
 assert.equal(hailuo?.id, 'hailuo-h3');
 assert.equal(insertMention('用 @', 3, hailuo || { kind: 'model', id: '' }), '用 使用模型 hailuo-h3 ');
+assert.deepEqual(
+  historyPieces('{{img_a}} 是阿波罗。{{img_b}} 是神殿。使用模型 hailuo-h3。'),
+  [
+    { type: 'node', id: 'img_a' },
+    { type: 'text', text: ' 是阿波罗。' },
+    { type: 'node', id: 'img_b' },
+    { type: 'text', text: ' 是神殿。' },
+    { type: 'model', id: 'hailuo-h3' },
+    { type: 'text', text: '。' },
+  ],
+);
 const withNewImage = mentionModelCandidates({
   ...mentionModels,
   image: [{ id: 'runninghub', models: [...mentionModels.image[0].models, 'brand-new-image-model'] }],
@@ -984,6 +1026,58 @@ const sameSentence: ActionProposal = {
 };
 assert.equal(sameSentence.generative, true);
 assert.equal(proposalWaitsForClick('confirm', sameSentence), true);
+const shortYesCreate = [
+  { type: 'create_node' as const, tempId: 'v', nodeType: 'video' as const, initialParams: { prompt: '分镜' } },
+  { type: 'connect_nodes' as const, sourceNodeId: 'img', targetNodeId: 'v' },
+];
+const appliedYes = stripCreatesOnShortYes(shortYesCreate, 'applied', '好的');
+assert.equal(appliedYes.some((action) => action.type === 'create_node'), false);
+assert.equal(appliedYes.length, 0);
+assert.equal(stripCreatesOnShortYes(shortYesCreate, 'pending', '好的').some((action) => action.type === 'create_node'), true);
+assert.equal(stripCreatesOnShortYes(shortYesCreate, 'applied', '改成远景').some((action) => action.type === 'create_node'), true);
+const strippedConnects = [
+  { type: 'connect_nodes' as const, sourceNodeId: 'img_a', targetNodeId: 'vid' },
+  { type: 'connect_nodes' as const, sourceNodeId: 'img_b', targetNodeId: 'vid' },
+];
+assert.equal(
+  derivedStepTitle(strippedConnects, 2),
+  '已连线（0 条，2 条因未点名被拿掉）',
+);
+assert.notEqual(derivedStepTitle(strippedConnects, 2), '已连线');
+assert.equal(derivedStepTitle(strippedConnects, 0), '已连线');
+assert.equal(derivedStepTitle([
+  { type: 'create_node' as const, tempId: 'v', nodeType: 'video' as const, initialParams: {} },
+  ...strippedConnects,
+], 2), '节点已创建，已连线（0 条，2 条因未点名被拿掉）');
+const liedConnectCard = renderToStaticMarkup(createElement(ProposalPreviewCard, {
+  proposal: {
+    id: 'lied-connect',
+    title: 'Agent 画布操作建议',
+    summary: '连接 2 条边',
+    actions: strippedConnects,
+    status: 'applied',
+    droppedConnects: 2,
+    requiresApproval: true,
+    generative: false,
+    createdAt: 1,
+    userMessage: '确认',
+  },
+  onApply() {},
+  onDiscard() {},
+}));
+assert.match(liedConnectCard, /<h4>已连线（0 条，2 条因未点名被拿掉）<\/h4>/);
+assert.match(liedConnectCard, /连接 2 条边/);
+const markdownSample = renderToStaticMarkup(createElement(AssistantMarkdown, {
+  text: '## 分镜\n\n**俯冲**\n\n- 睁眼\n\n> 停在这里\n\n| 镜 | 秒 |\n| --- | --- |\n| 俯冲 | 0-3 |\n\n---\n\n```\n{{img_a}}\n```\n',
+}));
+assert.match(markdownSample, /<h3>分镜<\/h3>/);
+assert.match(markdownSample, /<strong>俯冲<\/strong>/);
+assert.match(markdownSample, /<li>睁眼<\/li>/);
+assert.match(markdownSample, /<blockquote>停在这里<\/blockquote>/);
+assert.match(markdownSample, /<th>镜<\/th>/);
+assert.match(markdownSample, /<td>0-3<\/td>/);
+assert.match(markdownSample, /<hr\/>/);
+assert.match(markdownSample, /<code>\{\{img_a\}\}<\/code>/);
 const tempCard = renderToStaticMarkup(createElement(ProposalPreviewCard, {
   proposal: sameSentence,
   onApply() {},
@@ -1033,8 +1127,15 @@ assert.match(agentRoute, /动作类型无法识别/);
 assert.match(agentRoute, /type: 'image_url'/);
 assert.match(agentRoute, /compressImageForGeminiVision/);
 assert.match(agentRoute, /VISION_IMAGE_CAP/);
+const hailuoVideo = readFileSync('src/services/runningHubHailuoVideo.ts', 'utf8');
+const sparkVideo = readFileSync('src/services/runningHubSparkVideo.ts', 'utf8');
+assert.match(hailuoVideo, /compress: compressImageForGeminiVision/);
+assert.match(sparkVideo, /compress: compressImageForGeminiVision/);
+assert.match(readFileSync('src/services/runningHubStoryboardImage.ts', 'utf8'), /hooks\?\.onUpstreamTaskId\?\.\(taskId\)/);
+assert.match(readFileSync('src/services/canvasTaskLedger.ts', 'utf8'), /upstream_task_id/);
+assert.match(readFileSync('src/services/canvasVideoBridge.ts', 'utf8'), /saveCanvasTaskUpstreamId/);
 const agentClient = readFileSync('src/features/canvas-agent/core/agentService.ts', 'utf8');
-assert.match(agentClient, /visionImageUrlsForTurn/);
+assert.match(agentClient, /visionImages:\s*visionImageUrlsForTurn\(request\.snapshot,\s*request\.message,\s*request\.citedNodeIds\)/);
 assert.match(expiredHtml, /canvas-agent-proposal is-expired is-collapsed/);
 assert.match(expiredHtml, /已过期/);
 assert.doesNotMatch(expiredHtml, /过期错误/);
@@ -1298,14 +1399,14 @@ const playbookBodies = ['canvas-video-piece', 'canvas-opening-animation'].map((i
   const intensityRow = body.split('\n').find((line) => line.startsWith('| 运镜强度 |')) || '';
   if (!modeRow) playbookGaps.push(`${id} 缺模式行`);
   else {
-    need(modeRow, /用户没提就问一句：多机位还是一镜到底/, '模式改为问');
-    if (/用户没说\s*→\s*默认/.test(modeRow)) playbookGaps.push(`${id} 模式仍默认`);
+    need(modeRow, /见步骤 1/, '模式见步骤 1');
+    if (/用户没提就问一句|用户没说\s*→\s*默认/.test(modeRow)) playbookGaps.push(`${id} 模式仍把停留在缺省列`);
   }
   if (!intensityRow) playbookGaps.push(`${id} 缺运镜强度行`);
   else {
-    need(intensityRow, /用户没提就问一句：克制、标准还是炫技/, '运镜强度改为问');
-    if (/用户没说\s*→\s*standard|没说就用 standard/.test(intensityRow)) {
-      playbookGaps.push(`${id} 运镜强度仍默认`);
+    need(intensityRow, /见步骤 1/, '运镜强度见步骤 1');
+    if (/用户没提就问一句|用户没说\s*→\s*standard|没说就用 standard/.test(intensityRow)) {
+      playbookGaps.push(`${id} 运镜强度仍把停留在缺省列`);
     }
   }
   if (body.split('\n').some((line) => stackedMovePush.test(line) && !stackedMoveDeny.test(line))) {
@@ -1317,6 +1418,41 @@ const playbookBodies = ['canvas-video-piece', 'canvas-opening-animation'].map((i
   const steps = body.slice(stepsAt, stepsEnd);
   need(steps, /这要重跑整[段条]，约 X 秒/, '步骤区报价句');
   need(steps, /不要写进 video prompt/, '步骤区台词禁令');
+  const step0 = steps.slice(steps.indexOf('### 步骤 0'), steps.indexOf('### 步骤 1'));
+  const step0First = step0.split('\n').map((line) => line.trim()).find((line) => line && !line.startsWith('#'));
+  if (step0First !== '这一步的产物不是『识别这是什么图』。只说图里是阿波罗、是神殿，等于没做这一步——那是识别，不是分析。这一步只报两样：图里没有而故事需要的；图里有而和故事冲突的。两样都没有时，一行说『图与故事一致』。报完停下等用户确认，确认前不写任何分镜、不建任何节点。') {
+    playbookGaps.push(`${id} 步骤 0 第一句不是闸门`);
+  }
+  if (step0.includes('参考关系只靠连线')) playbookGaps.push(`${id} 连线句仍停在步骤 0`);
+  const step1 = steps.slice(steps.indexOf('### 步骤 1'), steps.indexOf('### 步骤 2'));
+  if (!step1.includes('没有待批准提案时')) playbookGaps.push(`${id} 步骤 1 没有短句肯定禁令`);
+  const videoFrom = id === 'canvas-video-piece' ? '### 步骤 3' : '### 步骤 1';
+  const videoTo = id === 'canvas-video-piece' ? '### 步骤 4' : '### 步骤 2';
+  const videoStep = steps.slice(steps.indexOf(videoFrom), steps.indexOf(videoTo));
+  if (!videoStep.includes('参考关系只靠连线表达')) playbookGaps.push(`${id} 建 video 那步没有连线句`);
+  const askAt = step1.indexOf('没答就不能建节点、不能写分镜——先问，等回答。');
+  const productAt = step1.indexOf('产物：');
+  if (askAt < 0 || productAt < 0 || askAt > productAt) playbookGaps.push(`${id} 开工追问不在产物之前`);
+  const refStart = body.indexOf('参考图承载细节');
+  const refEnd = body.indexOf('\n### ', refStart + 1);
+  const refSection = refStart >= 0 && refEnd > refStart ? body.slice(refStart, refEnd) : '';
+  if (!refSection.includes('不等于角色只写名字')) playbookGaps.push(`${id} 参考图原则缺不等于角色只写名字`);
+  const writeFrom = id === 'canvas-video-piece' ? '### 步骤 3' : '### 步骤 1';
+  const writeTo = id === 'canvas-video-piece' ? '### 步骤 4' : '### 步骤 2';
+  const writeStep = steps.slice(steps.indexOf(writeFrom), steps.indexOf(writeTo));
+  const beforeProduct = writeStep.slice(0, writeStep.indexOf('产物：'));
+  const shotLineMarks = [
+    '分镜行怎么写',
+    '表情与眼神', '身体状态', '位置与构图', '动作精度', '特效：形态',
+    '道具与环境交互', '物理附着', '光：方向、色温、硬度、变化', '视线与关系',
+    '远景 / 建立', '特写：表情、眼神', '动作镜', '特效镜', '对白 / 静场',
+    '远景那一镜里，外观锚定和构图合并写，不要单独再抄一遍脸和服装。',
+    '不要写『参考图1』这种编号',
+  ];
+  if (shotLineMarks.some((mark) => !beforeProduct.includes(mark))) {
+    playbookGaps.push(`${id} 分镜行九类或选择表不在产物之前`);
+  }
+  if (body.includes('和原则 2 的关系')) playbookGaps.push(`${id} 仍用原则编号指外观锚定`);
   return body;
 });
 assert.deepEqual(playbookGaps, []);
@@ -1406,9 +1542,11 @@ assert.match(playbookRouteSource, /readPlaybookText\(requestedPlaybookId\)/);
 assert.doesNotMatch(playbookRouteSource, /body\.path/);
 assert.match(playbookPanelSource, /setPlaybookId\(playbook\.id\)/);
 assert.match(playbookPanelSource, /canvas-agent-skill-chip/);
-assert.match(playbookPanelSource, /setAttribute\('aria-label', '取消技能'\)/);
+assert.doesNotMatch(playbookPanelSource, /取消技能/);
 assert.match(playbookPanelSource, /data-skill-chip/);
 assert.match(playbookPanelSource, /canvas-agent-mention-pill/);
+assert.match(playbookPanelSource, /canvas-agent-mention-pill-thumb/);
+assert.match(playbookPanelSource, /UserMessageBody/);
 assert.match(playbookPanelSource, /canvas-agent-composer-input/);
 assert.doesNotMatch(playbookPanelSource, /canvas-agent-chip-row/);
 assert.doesNotMatch(playbookPanelSource, /chipsInline/);
@@ -1416,7 +1554,7 @@ assert.doesNotMatch(
   readFileSync(new URL('./ui/canvas-agent.css', import.meta.url), 'utf8'),
   /overflow-x:\s*auto/,
 );
-assert.match(playbookPanelSource, /setAttribute\('aria-label', '移除引用'\)/);
+assert.doesNotMatch(playbookPanelSource, /移除引用/);
 assert.doesNotMatch(playbookPanelSource, /setInput\(insertMention/);
 const playbookClientSource = readFileSync(new URL('./core/agentService.ts', import.meta.url), 'utf8');
 assert.match(playbookClientSource, /playbookId: request\.playbookId/);
@@ -1516,6 +1654,10 @@ assert.ok(longPacked.length > fixturePacked.length);
 assert.ok(longPacked.length < 14_000);
 
 const engineSource = readFileSync('src/lib/infiniteCanvas/canvasEngine.js', 'utf8');
+assert.match(engineSource, /data-prompt-capsules="1"/);
+assert.match(engineSource, /referenceCapsuleLabel\(source, order\)/);
+assert.match(engineSource, /mountPromptCapsules\(localPrompt, node\)/);
+assert.match(engineSource, /mountPromptCapsules\(promptEl, node\)/);
 const connectRejectReason = new Function(
   'nodes',
   'fromId',
@@ -1946,8 +2088,8 @@ const numberedClean = readableReferencePrompt('参考 {{a}} 与 {{b}} 的面部�
   { type: 'create_node', tempId: 'a', nodeType: 'image', initialParams: {} },
   { type: 'create_node', tempId: 'b', nodeType: 'image', initialParams: {} },
 ], []);
-assert.equal(numberedClean, '参考 参考图1 与 参考图2 的面部特征');
-assert.doesNotMatch(numberedClean, /参考 与/);
+assert.equal(numberedClean, '');
+assert.doesNotMatch(numberedClean, /参考图/);
 assert.equal(readableReferencePrompt('{{ }}', [], []), '');
 assert.equal(
   readableReferencePrompt('参考 {{img_old}} 的构图', [], [{ id: 'img_old', type: 'image', name: '旧角色' }]),
@@ -1955,7 +2097,14 @@ assert.equal(
 );
 assert.equal(
   readableReferencePrompt('阿波罗角色形象参考 {{img_a}}', [], [{ id: 'img_a', type: 'image', name: 'canvas-output-1791792460637.jpg' }]),
-  '阿波罗角色形象参考 参考图1',
+  '',
+);
+assert.equal(
+  readableReferencePrompt('参考{{img_a}}阿波罗形象与{{img_b}}神殿场景。\n分镜1丨云端丨0-3s丨白袍金饰', [], [
+    { id: 'img_a', type: 'image', name: 'canvas-output-1791792460637.jpg' },
+    { id: 'img_b', type: 'image', name: 'canvas-output-1791858206685.jpg' },
+  ]),
+  '分镜1丨云端丨0-3s丨白袍金饰',
 );
 assert.equal(
   readableReferencePrompt('参考 {{img_b}}', [], [{ id: 'img_b', type: 'image', name: 'canvas-output-1.jpg', title: '阿波罗' }]),
@@ -2101,6 +2250,37 @@ const replayPatch = replaySettled.find((action) => action.type === 'update_node_
 assert.equal(replayPatch && replayPatch.type === 'update_node_params' ? replayPatch.patch.model : '', REFERENCE_IMAGE_FALLBACK_MODEL);
 assert.equal(replayPatch && replayPatch.type === 'update_node_params' ? replayPatch.modelClamp : 'set', undefined);
 assert.equal(replaySettled.some((action) => action.type === 'connect_nodes'), false);
+const videoWithEdge = settleReferenceActions(
+  [
+    { type: 'connect_nodes' as const, sourceNodeId: 'img_a', targetNodeId: 'vid_1' },
+    { type: 'update_node_params' as const, nodeId: 'vid_1', patch: { prompt: '分镜1丨俯冲丨0-3s丨白袍' } },
+  ],
+  [
+    { id: 'vid_1', type: 'video', model: 'seedance-2.0' },
+    { id: 'img_a', type: 'image' },
+  ],
+  generatorTypes,
+  citationsForApply('确认', ['img_a']),
+);
+const videoPatch = videoWithEdge.find((action) => action.type === 'update_node_params');
+assert.equal(videoPatch && videoPatch.type === 'update_node_params' ? videoPatch.patch.model : 'missing', undefined);
+assert.equal(videoWithEdge.some((action) => action.type === 'connect_nodes'), true);
+const videoCreate = settleReferenceActions(
+  [
+    {
+      type: 'create_node' as const,
+      tempId: 'v',
+      nodeType: 'video',
+      initialParams: { model: 'hailuo-h3', prompt: '分镜' },
+    },
+    { type: 'connect_nodes' as const, sourceNodeId: 'img_a', targetNodeId: 'v' },
+  ],
+  [{ id: 'img_a', type: 'image' }],
+  generatorTypes,
+  citationsInUserMessage('{{img_a}} 使用模型 hailuo-h3'),
+);
+const videoCreated = videoCreate.find((action) => action.type === 'create_node');
+assert.equal(videoCreated && videoCreated.type === 'create_node' ? videoCreated.initialParams?.model : '', 'hailuo-h3');
 const forcedPictureModel = settleReferenceActions(
   [{
     type: 'update_node_params' as const,
@@ -2263,6 +2443,7 @@ assert.ok(orderAt('flattenModelParamKeys(normalized)') < orderAt('rejectUnknownC
 assert.ok(orderAt('rejectUnknownCanvasParamKeys(') < orderAt('applyRebuildGuards('));
 assert.ok(orderAt('applyRebuildGuards(') < orderAt('invalidationActions('));
 assert.ok(orderAt('assertCanvasVideoShotTimelines(') < orderAt('applyCanvasAgentActions('));
+assert.match(promptSource, /stripCreatesOnShortYes\(actions, proposalStatus, message\)/);
 const landedShots = [
   '分镜1丨起势丨0-4s丨大远景 + 俯拍 + 缓慢推进',
   '分镜2丨聚焦丨4-9s丨中景 + 低角度仰拍 + 缓慢推进',
@@ -2331,6 +2512,9 @@ const rejectModelAt = engineSource.indexOf('rejectCanvasAgentModelChoice(gen', r
 assert.ok(coerceAt > runGeneratorAt && coerceAt < rejectModelAt);
 const agentPanelSource = readFileSync(new URL('./ui/AgentFloatingPanel.tsx', import.meta.url), 'utf8');
 assert.match(agentPanelSource, /batchApplyChanges\(\s*actions,\s*onProgress,\s*proposal\.userMessage,\s*conversationIdRef\.current,\s*citedNodesRef\.current,\s*\)/);
+assert.match(agentPanelSource, /citedNodeIds:\s*citedNodesRef\.current/);
+assert.match(agentPanelSource, /mentionTitleToStore\(input\.value\)/);
+assert.match(agentPanelSource, /node\.title = stored/);
 assert.ok(orderAt('const markProgress = openBatchProgress(ordered.length') < orderAt('for (const action of runnable)'));
 assert.ok(orderAt('markProgress()') < orderAt('if (failedExecution)'));
 assert.ok(orderAt('markProgress()') < orderAt('Date.now() >= deadline'));
@@ -2724,6 +2908,7 @@ return {
 assert.ok(reverseHarness.canvasRunTypes().includes('videoReverse'));
 assert.equal(reverseHarness.canvasAgentExecutionTimeoutMs({ type: 'videoReverse' }), 300_000);
 assert.equal(reverseHarness.canvasAgentExecutionTimeoutMs({ type: 'generator' }), 180_000);
+assert.equal(reverseHarness.canvasAgentExecutionTimeoutMs({ type: 'video' }), 600_000);
 const llmBridge = readFileSync('src/services/canvasLlmBridge.ts', 'utf8');
 assert.match(llmBridge, /max_tokens: Number\(process\.env\.CANVAS_LLM_MAX_TOKENS \|\| 4096\)/);
 assert.match(llmBridge, /TEXT_API_TIMEOUT_MS \|\| 300000/);

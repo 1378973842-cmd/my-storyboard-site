@@ -67,10 +67,23 @@ function currentImageUrl(node: CanvasNodeSnapshot): string {
   return '';
 }
 
-// 这一步要看的图：用户这条消息点名的，再加上选中节点直接连着的上游。
-// 每张只取当前 url，不带 history。整张画布上没点名、也没连到选中节点的图不传。
-export function visionImageUrlsForTurn(snapshot: CanvasSnapshot, message: string): string[] {
-  const cited = citationsInUserMessage(message).nodes;
+// 这一步要看的图：本条消息点名的，加上本会话已经点过名的，再加上选中节点直接连着的上游。
+// 每张只取当前 url，不带 history。没点过名、也没连到选中节点的图不传。最多 8 张。
+export function visionImageUrlsForTurn(
+  snapshot: CanvasSnapshot,
+  message: string,
+  sessionCitedNodes: readonly string[] = [],
+): string[] {
+  const cited: string[] = [];
+  const seenIds = new Set<string>();
+  const addCited = (id: string) => {
+    const name = id.trim();
+    if (!name || seenIds.has(name)) return;
+    seenIds.add(name);
+    cited.push(name);
+  };
+  for (const id of citationsInUserMessage(message).nodes) addCited(id);
+  for (const id of sessionCitedNodes) addCited(id);
   const byId = new Map(snapshot.nodes.map((node) => [node.id, node]));
   const urls: string[] = [];
   const seen = new Set<string>();

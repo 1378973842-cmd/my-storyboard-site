@@ -5257,6 +5257,20 @@ html.canvas-text-expand-open { overflow:hidden; }
   box-sizing:border-box;
 }
 .gen-dock-prompt::placeholder { color:rgba(229,226,225,.32); }
+.gen-dock .gen-dock-prompt[contenteditable="true"] {
+  /* 控制台宽度只跟底栏走。width:0 让这段文字不参与最大内容宽度，min-width:100% 再铺满底栏。 */
+  width:0;
+  min-width:100%;
+  max-width:100%;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  overflow:auto;
+  caret-color:#e5e2e1;
+}
+.gen-dock .gen-dock-prompt[contenteditable="true"]:empty::before {
+  content:attr(data-placeholder);
+  color:rgba(229,226,225,.32);
+}
 .spark-at-picker {
   position:absolute;
   z-index:8;

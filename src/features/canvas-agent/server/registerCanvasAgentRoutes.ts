@@ -13,7 +13,7 @@ import {
   readImageBufferForGemini,
 } from '../../../services/canvasReplicaAgentBridge.js';
 import { agentPlaybooks, allCanvasAITools, canvasSkillRegistry } from '../tools/skillRegistry.js';
-import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, unknownCanvasActionMessage } from '../core/proposal.js';
+import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, stripCreatesOnShortYes, unknownCanvasActionMessage } from '../core/proposal.js';
 import { operatingPrompt } from '../core/operatingModel.js';
 import { canvasAgentStagePrefix } from '../core/stageLedger.js';
 import { VISION_IMAGE_CAP } from '../core/contextSerializer.js';
@@ -30,6 +30,7 @@ import {
   initCanvasAgentConversationSchema,
   listCanvasAgentConversations,
   listCanvasAgentMessages,
+  hasPendingCanvasAgentProposal,
   readConversationCitedNodes,
   readConversationStage,
   recordConversationCitations,
@@ -460,11 +461,22 @@ export function registerCanvasAgentRoutes(
             unknownTypes: retried?.unknownTypes.length ? retried.unknownTypes : interpreted.unknownTypes,
           };
       }
-      const actions = normalizeCanvasActions(
+      let actions = normalizeCanvasActions(
         calls.length ? calls.flatMap(actionsForTool) : (interpreted?.actions || []),
       );
+      const proposalStatus = !(db && conversation)
+        ? 'pending'
+        : hasPendingCanvasAgentProposal(db, req.authUser?.id || '', conversation.id)
+          ? 'pending'
+          : 'applied';
+      const beforeShortYes = actions.length;
+      actions = stripCreatesOnShortYes(actions, proposalStatus, message);
+      const shortYesBlocked = beforeShortYes > 0 && actions.length === 0;
 
-      if (actions.length) {
+      if (shortYesBlocked) {
+        persistedText = '上一批已经落板，短句肯定不会新建。要做什么，直接说。';
+        streamText(res, persistedText);
+      } else if (actions.length) {
         calls.forEach((call) => {
           const log = {
             id: call.id,
