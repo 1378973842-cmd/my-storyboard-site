@@ -355,7 +355,7 @@ export function droppedConnectCount(before: CanvasAction[], after: CanvasAction[
 // 没这个标记的图（素材库、旧节点）仍然拿掉。
 // 参考图能力在点名之后另算：图片类节点有参考图入边，且模型不在图片白名单，就写成图片模型 V2。
 // video 不走这张表。视频能不能跑由 canvasVideoBridge 的海螺 H3 / Seedance 2.0 判断。
-// prompt 里的 {{}} 仍换成读得通的说法，避免「参考 与」。
+// create 落板不改 prompt。{{id}} 原样留下，画面才画得出胶囊。
 export function settleReferenceActions(
   actions: CanvasAction[],
   nodes: CanvasNodeSnapshot[],
@@ -435,11 +435,6 @@ export function settleReferenceActions(
       if (occupied.has(key)) continue;
       occupied.add(key);
       edges.push({ type: 'connect_nodes', sourceNodeId: source, targetNodeId: tempId });
-    }
-    if (hasReferenceToken(prompt)) {
-      const cleaned = readableReferencePrompt(prompt, kept, nodes);
-      if (!cleaned) throw new Error('删掉引用后 prompt 为空，请补上实际的提示词。');
-      params.prompt = cleaned;
     }
     const named = withFidelityNames(params, prompt, kept, nodes);
     if (!hadReferences && !hasReferenceToken(prompt)) return { ...action, initialParams: named };

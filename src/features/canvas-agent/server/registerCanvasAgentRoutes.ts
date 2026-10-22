@@ -474,7 +474,7 @@ export function registerCanvasAgentRoutes(
       const shortYesBlocked = beforeShortYes > 0 && actions.length === 0;
 
       if (shortYesBlocked) {
-        persistedText = '上一批已经落板，短句肯定不会新建。要做什么，直接说。';
+        persistedText = '上一批已完成。您是要继续做下一步，还是要改刚才的分析？\n直接说需求就行。';
         streamText(res, persistedText);
       } else if (actions.length) {
         calls.forEach((call) => {

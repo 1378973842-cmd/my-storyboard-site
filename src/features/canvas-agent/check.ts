@@ -1453,6 +1453,10 @@ const playbookBodies = ['canvas-video-piece', 'canvas-opening-animation'].map((i
     playbookGaps.push(`${id} 分镜行九类或选择表不在产物之前`);
   }
   if (body.includes('和原则 2 的关系')) playbookGaps.push(`${id} 仍用原则编号指外观锚定`);
+  if (!beforeProduct.includes('不要写分镜1/分镜2/分镜3')) playbookGaps.push(`${id} 一镜到底写法不在产物之前`);
+  if (!beforeProduct.includes('必须在同一个提案里做完')) playbookGaps.push(`${id} 建节点和连边没要求同一提案`);
+  const axesAt = step1.indexOf('克制不等于一镜到底');
+  if (axesAt < 0 || axesAt < askAt) playbookGaps.push(`${id} 克制和一镜到底没拆开`);
   return body;
 });
 assert.deepEqual(playbookGaps, []);
@@ -2070,8 +2074,9 @@ const fidelityPrompt = fidelityVideo && fidelityVideo.type === 'create_node' ? S
 const fidelityPayload = fidelityVideo && fidelityVideo.type === 'create_node'
   ? fidelityVideo.initialParams?.fidelity
   : undefined;
-assert.equal(fidelityPrompt.includes('{{'), false);
-assert.match(fidelityPrompt, /角色锚点：诸葛亮/);
+assert.match(fidelityPrompt, /\{\{gen_anchor_zhuge\}\}/);
+assert.match(fidelityPrompt, /在帐中备战/);
+assert.doesNotMatch(fidelityPrompt, /角色锚点：诸葛亮/);
 assert.deepEqual(checkCanvasContentFidelity({
   prompt: fidelityPrompt,
   durationSec: 15,
@@ -2136,7 +2141,9 @@ const zhugeParams = zhugeGen && zhugeGen.type === 'create_node' ? zhugeGen.initi
 assert.equal(zhugeParams?.model, undefined);
 assert.equal(zhugeSettled.some((action) => action.type === 'connect_nodes'), false);
 assert.doesNotMatch(String(zhugeParams?.prompt || ''), /参考 与/);
-assert.match(String(zhugeParams?.prompt || ''), /参考 角色参考1 与 角色参考2 的面部与发冠特征/);
+assert.match(String(zhugeParams?.prompt || ''), /\{\{img_role_1\}\}/);
+assert.match(String(zhugeParams?.prompt || ''), /\{\{img_role_2\}\}/);
+assert.doesNotMatch(String(zhugeParams?.prompt || ''), /角色参考1/);
 assert.equal(zhugeParams?.ratio, '16:9');
 const namedSettled = settleReferenceActions(
   zhugeActions,
@@ -2281,6 +2288,21 @@ const videoCreate = settleReferenceActions(
 );
 const videoCreated = videoCreate.find((action) => action.type === 'create_node');
 assert.equal(videoCreated && videoCreated.type === 'create_node' ? videoCreated.initialParams?.model : '', 'hailuo-h3');
+const videoTokenCreate = settleReferenceActions(
+  [{
+    type: 'create_node' as const,
+    tempId: 'v_token',
+    nodeType: 'video',
+    initialParams: { model: 'hailuo-h3', prompt: '与 {{img_a}}（金发白袍）的外观完全一致' },
+  }],
+  [{ id: 'img_a', type: 'image', title: '阿波罗' }],
+  generatorTypes,
+  citationsInUserMessage('{{img_a}} 使用模型 hailuo-h3'),
+);
+const videoToken = videoTokenCreate.find((action) => action.type === 'create_node' && action.tempId === 'v_token');
+const videoTokenPrompt = videoToken && videoToken.type === 'create_node' ? String(videoToken.initialParams?.prompt || '') : '';
+assert.match(videoTokenPrompt, /\{\{img_a\}\}（金发白袍）/);
+assert.doesNotMatch(videoTokenPrompt, /阿波罗/);
 const forcedPictureModel = settleReferenceActions(
   [{
     type: 'update_node_params' as const,
@@ -2444,6 +2466,8 @@ assert.ok(orderAt('rejectUnknownCanvasParamKeys(') < orderAt('applyRebuildGuards
 assert.ok(orderAt('applyRebuildGuards(') < orderAt('invalidationActions('));
 assert.ok(orderAt('assertCanvasVideoShotTimelines(') < orderAt('applyCanvasAgentActions('));
 assert.match(promptSource, /stripCreatesOnShortYes\(actions, proposalStatus, message\)/);
+assert.match(promptSource, /上一批已完成。您是要继续做下一步，还是要改刚才的分析？/);
+assert.doesNotMatch(promptSource, /要做什么，直接说/);
 const landedShots = [
   '分镜1丨起势丨0-4s丨大远景 + 俯拍 + 缓慢推进',
   '分镜2丨聚焦丨4-9s丨中景 + 低角度仰拍 + 缓慢推进',
