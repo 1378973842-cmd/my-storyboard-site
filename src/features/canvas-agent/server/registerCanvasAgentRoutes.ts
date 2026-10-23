@@ -1,4 +1,5 @@
 import type { Express, RequestHandler, Response } from 'express';
+import path from 'node:path';
 import type Database from 'better-sqlite3';
 import {
   augmentChatCompletionsBody,
@@ -40,6 +41,7 @@ import {
   readConversationCitedNodes,
   readConversationEffected,
   readConversationStage,
+  readProposalRollbackContext,
   recordConversationCitations,
   recordConversationEffected,
   recordConversationStage,
@@ -76,6 +78,13 @@ import {
 } from './agentMemoryStore.js';
 import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from '../core/memory.js';
 import { compactHistory } from '../core/history.js';
+import { rollbackCanvasPlan } from '../core/rollbackPlan.js';
+import {
+  copyCanvasDocumentTo,
+  getCanvas,
+  readCanvasDocumentFile,
+  saveCanvas,
+} from '../../../services/infiniteCanvasStore.js';
 import { toolContract, toolResultContent } from '../core/toolContract.js';
 import {
   createAgentApiKey,
@@ -341,6 +350,64 @@ export function registerCanvasAgentRoutes(
       return next();
     };
     const protectedRoute = [bearerAuth];
+    // 画布文档在服务端（线上是阿里云那台），快照就存在同一块盘上。
+    const snapshotRoot = path.join(path.dirname(String(db.name || '.')), 'data', 'canvas-snapshots');
+    const safePathPart = (value: string) => String(value || '').replace(/[^a-zA-Z0-9_-]/g, '');
+    // 回滚一份提案：只还原它碰过的节点/连线，别的编辑不动。
+    // dryRun 先给差异，确认后才写盘。
+    app.post('/api/canvas-agent/proposals/:id/rollback', ...protectedRoute, (req, res) => {
+      const proposalId = String(req.params.id || '').trim();
+      const context = readProposalRollbackContext(db, req.authUser?.id || '', proposalId);
+      if (!context) return res.status(404).json({ error: '提案不存在' });
+      const target = path.join(
+        snapshotRoot,
+        safePathPart(context.canvasId),
+        `${safePathPart(proposalId)}.json`,
+      );
+      const snapshot = readCanvasDocumentFile(target);
+      if (!snapshot || !Array.isArray(snapshot.nodes) || !Array.isArray(snapshot.connections)) {
+        return res.status(409).json({ error: '这次应用没有快照，不能回滚' });
+      }
+      let current;
+      try {
+        current = getCanvas(context.canvasId, true, {
+          userId: req.authUser?.id || '',
+          isAdmin: req.authUser?.role === 'admin',
+        });
+      } catch {
+        return res.status(404).json({ error: '画布不存在' });
+      }
+      const plan = rollbackCanvasPlan({
+        before: {
+          nodes: snapshot.nodes as Array<Record<string, unknown> & { id: string }>,
+          connections: snapshot.connections as Array<{ id: string; from: string; to: string }>,
+        },
+        current: {
+          nodes: (Array.isArray(current.nodes) ? current.nodes : []) as Array<Record<string, unknown> & { id: string }>,
+          connections: (Array.isArray(current.connections) ? current.connections : []) as Array<{ id: string; from: string; to: string }>,
+        },
+        actions: context.actions,
+        createdNodeIds: context.effectedNodeIds,
+      });
+      if (req.body?.dryRun) return res.json({ dryRun: true, summary: plan.summary });
+      try {
+        saveCanvas(context.canvasId, {
+          nodes: plan.nodes,
+          connections: plan.connections,
+          base_updated_at: Number(current.updated_at) || undefined,
+          intentional_delete: true,
+          allow_empty_nodes: true,
+        }, {
+          userId: req.authUser?.id || '',
+          isAdmin: req.authUser?.role === 'admin',
+        });
+      } catch (error) {
+        return res.status(409).json({
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return res.json({ ok: true, summary: plan.summary });
+    });
     app.get('/api/canvas-agent/conversations', ...protectedRoute, (req, res) => {
       const canvasId = String(req.query.canvas_id || '').trim().slice(0, 120);
       if (!canvasId) return res.status(400).json({ error: '缺少 canvas_id' });
@@ -383,6 +450,22 @@ export function registerCanvasAgentRoutes(
       );
       const playbookId = String(req.body?.playbookId || '').trim();
       const stage = req.body?.stage;
+      // 落板前先拍一张画布快照：回滚只认这一份。
+      if (status === 'applying' && updated > 0) {
+        try {
+          const rollbackContext = readProposalRollbackContext(db, req.authUser?.id || '', proposalId);
+          if (rollbackContext) {
+            const target = path.join(
+              snapshotRoot,
+              safePathPart(rollbackContext.canvasId),
+              `${safePathPart(proposalId)}.json`,
+            );
+            copyCanvasDocumentTo(rollbackContext.canvasId, target);
+          }
+        } catch {
+          /* 快照失败不阻断落板 */
+        }
+      }
       if (
         status === 'applied'
         && updated > 0

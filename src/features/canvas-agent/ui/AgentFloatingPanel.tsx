@@ -64,6 +64,7 @@ import {
   persistProposalOutcome,
   postAgentJobObservation,
   renameAgentConversation,
+  rollbackProposal as rollbackProposalApi,
   type AgentJobView,
 } from '../core/conversationService';
 import {
@@ -625,6 +626,7 @@ export function AgentFloatingPanel({
   /** 打开面板时找回「这轮还没结束」的作业。 */
   const [activeJob, setActiveJob] = useState<AgentJobView | null>(null);
   const [jobNoticeHidden, setJobNoticeHidden] = useState(false);
+  const [rollbackConfirmId, setRollbackConfirmId] = useState('');
   const [impactChoice, setImpactChoice] = useState<ImpactChoice[] | null>(null);
   /** 本地提案（重做）自己出的审批卡。服务端不会为它发卡，卡只活在这一屏。 */
   const [localRunCards, setLocalRunCards] = useState<Record<string, AskCard>>({});
@@ -1487,6 +1489,31 @@ export function AgentFloatingPanel({
   }, [messages, sendText, streaming]);
 
   /**
+   * 撤销这次应用：先出差异，再点一次才写盘。
+   * 快照在服务端（线上那台阿里云），只还原这份提案碰过的节点/连线。
+   */
+  const requestRollback = useCallback(async (proposal: ActionProposal) => {
+    if (streaming) return;
+    try {
+      if (rollbackConfirmId !== proposal.id) {
+        const preview = await rollbackProposalApi(proposal.id, true);
+        const summary = preview.summary;
+        setRollbackConfirmId(proposal.id);
+        setNotice(
+          `撤销会删 ${summary.removedNodes.length} 个节点、恢复 ${summary.restoredNodes.length} 个节点、`
+          + `边 −${summary.removedEdges}/+${summary.restoredEdges}。再点一次确认。`,
+        );
+        return;
+      }
+      await rollbackProposalApi(proposal.id, false);
+      setRollbackConfirmId('');
+      window.location.reload();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    }
+  }, [rollbackConfirmId, streaming]);
+
+  /**
    * 续跑：只跑观察里还没记到的节点，跑完一项记一步。
    * 关页面不会丢进度——下一次打开读的是同一份作业。
    */
@@ -1999,6 +2026,9 @@ export function AgentFloatingPanel({
                       nodeLabels={nodeLabelsFor(touchedIds)}
                       canContinue={Boolean(proposalJobRef.current.get(proposal.id))}
                       onContinue={() => continueJob(proposal)}
+                      canRollback={proposal.status === 'applied' || proposal.status === 'partial'}
+                      rollbackConfirm={rollbackConfirmId === proposal.id}
+                      onRollback={() => void requestRollback(proposal)}
                       onToggle={() => setProposalOpen((current) => ({ ...current, [proposal.id]: !open }))}
                       onApply={applyProposal}
                       onDiscard={discardProposal}

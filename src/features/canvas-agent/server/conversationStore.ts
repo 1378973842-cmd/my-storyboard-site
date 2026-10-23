@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { mergeEffectedNodes, parseEffectedNodes, type EffectedNode } from "../core/effectLedger";
 import { citationsInUserMessage } from "../core/referencePrompt";
 import type { AskCard } from "../core/askCard";
+import type { CanvasAction } from "../types";
 
 export type CanvasAgentConversation = {
   id: string;
@@ -465,6 +466,37 @@ export function deleteCanvasAgentArtifacts(
     console.warn("[canvas-agent] 清理画布会话失败:", error);
     return 0;
   }
+}
+
+/** 回滚要用的上下文：提案落在哪个画布、它当初要做什么、真正建出了哪些节点。 */
+export function readProposalRollbackContext(
+  db: InstanceType<typeof Database>,
+  userId: string,
+  proposalId: string,
+): { canvasId: string; actions: CanvasAction[]; effectedNodeIds: string[] } | null {
+  const row = db.prepare(
+    `SELECT c.canvas_id AS canvas_id, m.metadata_json AS metadata_json
+     FROM canvas_agent_messages m
+     JOIN canvas_agent_conversations c ON c.id = m.conversation_id
+     WHERE m.user_id = ? AND json_extract(m.metadata_json, '$.proposal.id') = ?
+     LIMIT 1`
+  ).get(userId, proposalId) as { canvas_id?: string; metadata_json?: string } | undefined;
+  if (!row?.canvas_id) return null;
+  let proposal: Record<string, unknown> = {};
+  try {
+    proposal = (JSON.parse(String(row.metadata_json || "{}")) as { proposal?: Record<string, unknown> }).proposal || {};
+  } catch {
+    return null;
+  }
+  const actions = Array.isArray(proposal.actions) ? proposal.actions as CanvasAction[] : [];
+  const effected = Array.isArray(proposal.effectedNodes)
+    ? proposal.effectedNodes as Array<{ id?: string }>
+    : [];
+  return {
+    canvasId: String(row.canvas_id),
+    actions,
+    effectedNodeIds: effected.map((item) => String(item?.id || "")).filter(Boolean),
+  };
 }
 
 export function listCanvasAgentMessages(

@@ -76,6 +76,19 @@ export async function deleteAgentConversation(conversationId: string): Promise<v
   });
 }
 
+/** 回滚一份提案（只还原它碰过的节点/连线）。dryRun 先给差异。 */
+export async function rollbackProposal(
+  proposalId: string,
+  dryRun: boolean,
+): Promise<{
+  summary: { removedNodes: string[]; restoredNodes: string[]; removedEdges: number; restoredEdges: number };
+}> {
+  return requestJson(`/api/canvas-agent/proposals/${encodeURIComponent(proposalId)}/rollback`, {
+    method: 'POST',
+    body: JSON.stringify({ dryRun }),
+  });
+}
+
 /**
  * 把「我批了 / 跑完了 / 取消」写回服务端作业。
  * 这是给下一阶段（关页可恢复）铺的路，现在失败也不该影响画布操作。

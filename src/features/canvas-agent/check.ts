@@ -70,6 +70,7 @@ import {
   nextAgentJobStatus,
 } from './core/jobState';
 import { remainingRunNodes, runNodeIdsOf } from './core/jobPlan';
+import { rollbackCanvasPlan } from './core/rollbackPlan';
 import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from './core/memory';
 import { compactHistory } from './core/history';
 import { actionRequiresApproval, toolContract, toolResultContent } from './core/toolContract';
@@ -1972,6 +1973,43 @@ assert.deepEqual(remainingRunNodes(['a'], [{ nodeId: 'a', outcome: 'discarded' }
 assert.deepEqual(remainingRunNodes(['a'], undefined), ['a']);
 assert.deepEqual(remainingRunNodes([], [{ nodeId: 'a', outcome: 'applied' }]), []);
 
+// ---- 回滚：只还原这份提案碰过的节点/连线 ----
+const rollbackPlan = rollbackCanvasPlan({
+  before: {
+    nodes: [
+      { id: 'n1', type: 'generator', prompt: '旧提示词' },
+      { id: 'keep', type: 'image', url: '/keep.png' },
+    ],
+    connections: [{ id: 'e0', from: 'n1', to: 'keep' }],
+  },
+  current: {
+    nodes: [
+      { id: 'n1', type: 'generator', prompt: '新提示词' },
+      { id: 'keep', type: 'image', url: '/keep.png' },
+      { id: 'created', type: 'image', url: '/new.png' },
+    ],
+    connections: [
+      { id: 'e0', from: 'n1', to: 'keep' },
+      { id: 'e1', from: 'n1', to: 'created' },
+    ],
+  },
+  actions: [
+    { type: 'update_node_params', nodeId: 'n1', patch: { prompt: '新提示词' } },
+    { type: 'create_node', tempId: 'created', nodeType: 'image' },
+    { type: 'connect_nodes', sourceNodeId: 'n1', targetNodeId: 'created' },
+  ],
+  createdNodeIds: ['created'],
+});
+assert.deepEqual(rollbackPlan.summary.removedNodes, ['created']);
+assert.deepEqual(rollbackPlan.summary.restoredNodes, ['n1']);
+assert.equal(rollbackPlan.summary.removedEdges, 1);
+assert.equal(rollbackPlan.nodes.find((node) => node.id === 'n1')?.prompt, '旧提示词');
+assert.equal(rollbackPlan.nodes.some((node) => node.id === 'created'), false);
+assert.equal(rollbackPlan.nodes.some((node) => node.id === 'keep'), true, '没碰过的节点保留');
+assert.equal(rollbackPlan.connections.length, 1);
+assert.equal(rollbackPlan.connections[0].id, 'e0');
+
+
 // ---- 记忆 / 指标 / 工具契约 / Agent Key ----
 assert.equal(memoryPromptPrefix([]), '');
 const memoryText = memoryPromptPrefix([
@@ -2100,6 +2138,11 @@ assert.match(approvalRouteSource, /Bearer/);
 assert.match(approvalRouteSource, /remember_project_fact/);
 assert.match(approvalRouteSource, /\/api\/canvas-agent\/metrics/);
 assert.match(approvalRouteSource, /\/api\/canvas-agent\/memory/);
+assert.match(approvalRouteSource, /\/proposals\/:id\/rollback/);
+assert.match(approvalRouteSource, /copyCanvasDocumentTo\(/);
+assert.match(approvalRouteSource, /status === 'applying'/);
+assert.match(approvalPanelSource, /requestRollback\(/);
+assert.match(approvalPanelSource, /rollbackProposalApi\(/);
 const mcpSource = readFileSync(new URL('../../../scripts/canvas-agent-mcp.mjs', import.meta.url), 'utf8');
 assert.match(mcpSource, /tools\/list/);
 assert.match(mcpSource, /canvas_agent_job_create/);

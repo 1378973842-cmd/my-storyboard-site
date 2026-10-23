@@ -21,6 +21,9 @@ export function ProposalPreviewCard({
   nodeLabels,
   canContinue = false,
   onContinue,
+  canRollback = false,
+  rollbackConfirm = false,
+  onRollback,
 }: {
   proposal: ActionProposal;
   onApply: (proposal: ActionProposal) => void;
@@ -31,6 +34,9 @@ export function ProposalPreviewCard({
   nodeLabels?: Record<string, string>;
   canContinue?: boolean;
   onContinue?: () => void;
+  canRollback?: boolean;
+  rollbackConfirm?: boolean;
+  onRollback?: () => void;
 }) {
   // 只剩运行的提案由审批卡放行，这里的应用按钮挡不过运行闸，不出按钮。
   const runOnly = proposal.actions.length > 0 && proposal.actions.every((action) => action.type === 'execute_node_skill');
@@ -126,6 +132,13 @@ export function ProposalPreviewCard({
             <div className="canvas-agent-proposal-buttons">
               <button type="button" onClick={onContinue}>
                 继续下一步
+              </button>
+            </div>
+          ) : null}
+          {canRollback && onRollback && settled ? (
+            <div className="canvas-agent-proposal-buttons">
+              <button type="button" onClick={onRollback}>
+                {rollbackConfirm ? '确认撤销这次应用' : '撤销这次应用'}
               </button>
             </div>
           ) : null}

@@ -403,6 +403,30 @@ export function getCanvas(id: string, allowDeleted = false, ctx?: CanvasAccessCo
   return maybePersistSlimmed(doc);
 }
 
+/** Agent 回滚用：把画布文档原样拷一份（apply 之前）。 */
+export function copyCanvasDocumentTo(id: string, targetPath: string): boolean {
+  const fp = filePath(id);
+  if (!existsSync(fp)) return false;
+  mkdirSync(path.dirname(targetPath), { recursive: true });
+  writeFileSync(targetPath, readFileSync(fp));
+  return true;
+}
+
+/** Agent 回滚用：读回当时那份文档。 */
+export function readCanvasDocumentFile(
+  targetPath: string,
+): { nodes?: unknown; connections?: unknown; updated_at?: number } | null {
+  try {
+    return JSON.parse(readFileSync(targetPath, "utf8")) as {
+      nodes?: unknown;
+      connections?: unknown;
+      updated_at?: number;
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function getCanvasMeta(id: string, ctx?: CanvasAccessContext | null) {
   const doc = getCanvas(id, false, ctx);
   return {
