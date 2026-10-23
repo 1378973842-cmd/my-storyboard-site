@@ -777,15 +777,17 @@ export function registerCanvasAgentRoutes(
         );
         effectedNodes = readConversationEffected(db, req.authUser?.id || '', conversation.id);
         // 继续下一步：沿用同一份作业，只把它推回 running，步数 +1。
-        const resumedJob = continueJobId
-          ? transitionAgentJob(db, req.authUser?.id || '', continueJobId, 'continue', {
-            step: (getAgentJob(db, req.authUser?.id || '', continueJobId)?.step || 0) + 1,
-          })
+        // 先校验归属，再迁移状态；顺序反了会给不匹配的会话留下一个 running 的孤儿。
+        const existingJob = continueJobId
+          ? getAgentJob(db, req.authUser?.id || '', continueJobId)
           : null;
-        if (continueJobId) {
-          if (!resumedJob || resumedJob.conversation_id !== conversation.id) {
-            return res.status(409).json({ error: '作业已经结束，不能继续' });
-          }
+        if (continueJobId && (!existingJob || existingJob.conversation_id !== conversation.id)) {
+          return res.status(409).json({ error: '作业已经结束，不能继续' });
+        }
+        if (existingJob) {
+          // 步数在每轮规划结束时 +1，继续这一步不动 step，否则会重复记。
+          const resumedJob = transitionAgentJob(db, req.authUser?.id || '', existingJob.id, 'continue');
+          if (!resumedJob) return res.status(409).json({ error: '作业状态不允许继续' });
           jobId = resumedJob.id;
         } else {
           // 一轮 Agent 任务从请求进来的这一秒开始记账。之后关页面、断线都不影响这行。
@@ -990,6 +992,8 @@ export function registerCanvasAgentRoutes(
           });
         });
         const proposal = proposalFor(actions, message);
+        // 作业 id 跟着提案一起落库：刷新后还能继续、还能把结果写回。
+        if (jobId) proposal.jobId = jobId;
         if (interpreted?.summary) proposal.summary = interpreted.summary;
         else {
           const reasons = new Set(proposal.actions.map(actionReasonText).filter(Boolean));
@@ -1064,7 +1068,8 @@ export function registerCanvasAgentRoutes(
           jobId,
           needsUser ? 'ask' : 'finish',
           {
-            step: 1,
+            // 每轮规划结束记一步；不写死 1，继续过的作业才不会被重置。
+            step: (getAgentJob(db, req.authUser?.id || '', jobId)?.step || 0) + 1,
             result: {
               ...(persistedProposal
                 ? { proposalId: persistedProposal.id, proposalStatus: persistedProposal.status }

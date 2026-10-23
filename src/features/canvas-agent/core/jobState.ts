@@ -25,7 +25,8 @@ const TRANSITIONS: Record<AgentJobEvent, Transition> = {
   ask: { from: ['running'], to: 'waiting_approval' },
   execute: { from: ['waiting_approval'], to: 'executing' },
   // 观察完、用户点「继续下一步」：同一份作业回到 running，再规划一步。
-  continue: { from: ['executing', 'waiting_approval'], to: 'running' },
+  // 也允许从 done 回来：落板结算时可能已经把作业收尾，继续是人为决定重开。
+  continue: { from: ['executing', 'waiting_approval', 'done'], to: 'running' },
   finish: { from: ['running', 'waiting_approval', 'executing'], to: 'done' },
   fail: { from: ['queued', 'running', 'waiting_approval', 'executing'], to: 'failed' },
   cancel: { from: ['queued', 'running', 'waiting_approval', 'executing'], to: 'cancelled' },

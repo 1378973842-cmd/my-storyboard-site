@@ -1,4 +1,4 @@
-import {
+﻿import {
   Fragment,
   useCallback,
   useEffect,
@@ -549,6 +549,10 @@ export function AgentFloatingPanel({
   const jobIdRef = useRef('');
   const proposalJobRef = useRef<Map<string, string>>(new Map());
   const continueCountRef = useRef<Map<string, number>>(new Map());
+  /** 刷新后提案上带着 jobId；同一次会话里还有内存映射兜底。 */
+  const jobIdOfProposal = useCallback((proposal: ActionProposal) => (
+    proposal.jobId || proposalJobRef.current.get(proposal.id) || ''
+  ), []);
   /** 审批卡发出时记下的节点集与内容。只在这一次会话的内存里，刷新即失效。 */
   const runScopeRef = useRef<Map<string, RunScope>>(new Map());
   const askHistoryRef = useRef<ChatTurn[]>([]);
@@ -902,7 +906,7 @@ export function AgentFloatingPanel({
       if (!actions.length) return;
       const runNodeIds = runNodeIdsOf(actions);
       // 作业账本：批准即从「等用户」进「执行中」。失败不影响画布操作。
-      const proposalJobId = proposalJobRef.current.get(proposal.id) || '';
+      const proposalJobId = jobIdOfProposal(proposal);
       if (proposalJobId) {
         void ackAgentJob(proposalJobId, 'execute', {
           stepTotal: runNodeIds.length || 1,
@@ -992,7 +996,7 @@ export function AgentFloatingPanel({
         }));
       }
     },
-    [rememberRunScope, updateProposal],
+    [jobIdOfProposal, rememberRunScope, updateProposal],
   );
   const applyRef = useRef(applyProposal);
   applyRef.current = applyProposal;
@@ -1030,7 +1034,7 @@ export function AgentFloatingPanel({
   const discardProposal = useCallback(
     (proposal: ActionProposal) => {
       updateProposal(proposal.id, { status: 'discarded' });
-      const jobId = proposalJobRef.current.get(proposal.id) || '';
+      const jobId = jobIdOfProposal(proposal);
       if (jobId) {
         void ackAgentJob(jobId, 'finish', {
           result: { proposalId: proposal.id, status: 'discarded' },
@@ -1065,7 +1069,7 @@ export function AgentFloatingPanel({
     }
     runApprovalRef.current = [...(card.node_keys || [])];
     void applyRef.current(proposal);
-  }, [discardProposal, localRunCards]);
+  }, [discardProposal, jobIdOfProposal, localRunCards]);
 
   const finishTurn = useCallback((assistantId: string) => {
     const elapsedMs = Math.max(0, Date.now() - startedAt.current);
@@ -1477,7 +1481,7 @@ export function AgentFloatingPanel({
    */
   const continueJob = useCallback((proposal: ActionProposal) => {
     if (streaming) return;
-    const jobId = proposalJobRef.current.get(proposal.id) || '';
+    const jobId = jobIdOfProposal(proposal);
     if (!jobId) return;
     const used = continueCountRef.current.get(jobId) || 0;
     if (used >= 3) {
@@ -1486,7 +1490,7 @@ export function AgentFloatingPanel({
     }
     continueCountRef.current.set(jobId, used + 1);
     void sendText('', messages, jobId);
-  }, [messages, sendText, streaming]);
+  }, [jobIdOfProposal, messages, sendText, streaming]);
 
   /**
    * 撤销这次应用：先出差异，再点一次才写盘。
@@ -2028,7 +2032,7 @@ export function AgentFloatingPanel({
                       open={open}
                       clampLines={clampLines}
                       nodeLabels={nodeLabelsFor(touchedIds)}
-                      canContinue={Boolean(proposalJobRef.current.get(proposal.id))}
+                      canContinue={Boolean(jobIdOfProposal(proposal))}
                       onContinue={() => continueJob(proposal)}
                       canRollback={proposal.status === 'applied' || proposal.status === 'partial'}
                       rollbackConfirm={rollbackConfirmId === proposal.id}
@@ -2387,3 +2391,5 @@ export function AgentFloatingPanel({
     portalRoot,
   );
 }
+
+

@@ -160,6 +160,8 @@ export type ActionProposal = {
   effectedNodes?: Array<{ id: string; nodeType: string; label?: string }>;
   changelog?: string;
   messageId?: string;
+  /** 产生这份提案的作业。刷新后靠它继续/回写，不用再猜。 */
+  jobId?: string;
 };
 
 export type CanvasContextPayload = {

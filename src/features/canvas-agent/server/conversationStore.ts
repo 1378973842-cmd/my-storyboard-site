@@ -1,4 +1,6 @@
 import type Database from "better-sqlite3";
+import path from "node:path";
+import { rmSync } from "node:fs";
 import { v4 as uuidv4 } from "uuid";
 import { mergeEffectedNodes, parseEffectedNodes, type EffectedNode } from "../core/effectLedger";
 import { citationsInUserMessage } from "../core/referencePrompt";
@@ -460,6 +462,18 @@ export function deleteCanvasAgentArtifacts(
         /* 老库还没建内存表 */
       }
     });
+    // 快照是磁盘文件，跟着画布一起清，别留孤儿目录。
+    try {
+      const snapshotDir = path.join(
+        path.dirname(String(db.name || ".")),
+        "data",
+        "canvas-snapshots",
+        id.replace(/[^a-zA-Z0-9_-]/g, ""),
+      );
+      rmSync(snapshotDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
     transaction();
     return ids.length;
   } catch (error) {
