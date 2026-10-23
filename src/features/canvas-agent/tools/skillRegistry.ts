@@ -279,6 +279,24 @@ export const coreCanvasTools: AIToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'remember_project_fact',
+      description:
+        'Persist a project fact or user preference that must survive this conversation '
+        + '(character identity, locked style, default duration/model, recurring constraints). '
+        + 'Do not store transient canvas state, node ids, or anything the canvas already shows.',
+      parameters: objectSchema(
+        {
+          kind: { type: 'string', enum: ['fact', 'preference'] },
+          key: { type: 'string' },
+          value: { type: 'string' },
+        },
+        ['kind', 'key', 'value'],
+      ),
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'trigger_skill_execution',
       description:
         'Propose running existing node skills. Generation always requires explicit user approval.',

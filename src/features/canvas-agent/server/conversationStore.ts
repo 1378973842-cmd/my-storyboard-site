@@ -453,6 +453,11 @@ export function deleteCanvasAgentArtifacts(
       } catch {
         /* 老库还没建 jobs 表 */
       }
+      try {
+        db.prepare("DELETE FROM canvas_agent_memory WHERE canvas_id = ?").run(id);
+      } catch {
+        /* 老库还没建内存表 */
+      }
     });
     transaction();
     return ids.length;

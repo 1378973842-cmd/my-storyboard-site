@@ -70,6 +70,29 @@ import {
   nextAgentJobStatus,
 } from './core/jobState';
 import { remainingRunNodes, runNodeIdsOf } from './core/jobPlan';
+import { memoryPromptPrefix } from './core/memory';
+import { actionRequiresApproval, toolContract, toolResultContent } from './core/toolContract';
+import {
+  initCanvasAgentMemorySchema,
+  deleteAgentMemory,
+  listAgentMemory,
+  upsertAgentMemory,
+} from './server/agentMemoryStore';
+import {
+  countTurnsSince,
+  finishAgentTurn,
+  initCanvasAgentTurnSchema,
+  overDailyQuota,
+  startAgentTurn,
+  summarizeAgentTurns,
+} from './server/agentTurnStore';
+import {
+  createAgentApiKey,
+  initCanvasAgentApiKeySchema,
+  listAgentApiKeys,
+  resolveAgentApiKeyOwner,
+  revokeAgentApiKey,
+} from './server/agentApiKeyStore';
 import { ProposalPreviewCard } from './ui/ProposalPreviewCard';
 import { AssistantMarkdown } from './ui/assistantMarkdown';
 import { proposalDefaultOpen, PROPOSAL_OPEN_CAP, sortProposalsForDisplay } from './ui/proposalOrder';
@@ -226,8 +249,9 @@ assert.equal(actionProposalNeedsApproval(actions), true);
 const tool = convertSkillToAITool(canvasSkillRegistry[0]);
 assert.equal(tool.type, 'function');
 assert.match(tool.function.name, /^run_/);
-assert.equal(coreCanvasTools.length, 5);
+assert.equal(coreCanvasTools.length, 6);
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'ask_user'));
+assert.ok(coreCanvasTools.some((item) => item.function.name === 'remember_project_fact'));
 assert.ok(coreCanvasTools.every((item) => item.function.parameters.type === 'object'));
 
 assert.equal(classifyIntake('总结当前画布，不要修改'), 'direct');
@@ -1947,6 +1971,78 @@ assert.deepEqual(remainingRunNodes(['a'], [{ nodeId: 'a', outcome: 'discarded' }
 assert.deepEqual(remainingRunNodes(['a'], undefined), ['a']);
 assert.deepEqual(remainingRunNodes([], [{ nodeId: 'a', outcome: 'applied' }]), []);
 
+// ---- 记忆 / 指标 / 工具契约 / Agent Key ----
+assert.equal(memoryPromptPrefix([]), '');
+const memoryText = memoryPromptPrefix([
+  { kind: 'fact', key: '主角', value: '银发少年' },
+  { kind: 'preference', key: '默认时长', value: '15s' },
+]);
+assert.match(memoryText, /\[project_memory\]/);
+assert.match(memoryText, /事实｜主角：银发少年/);
+assert.match(memoryText, /偏好｜默认时长：15s/);
+assert.equal(memoryPromptPrefix([{ kind: 'fact', key: '', value: 'x' }]), '');
+
+assert.equal(toolContract('trigger_skill_execution')?.requiresApproval, true);
+assert.equal(toolContract('create_canvas_nodes')?.requiresApproval, false);
+assert.equal(toolContract('nope'), null);
+assert.equal(toolContract('run_foo', ['run_foo'])?.requiresApproval, true);
+assert.equal(toolResultContent('remember_project_fact').status, 'stored');
+assert.equal(actionRequiresApproval('execute_node_skill'), true);
+assert.equal(actionRequiresApproval('create_node'), false);
+
+const metaDb = new Database(':memory:');
+initCanvasAgentConversationSchema(metaDb);
+initCanvasAgentJobSchema(metaDb);
+initCanvasAgentTurnSchema(metaDb);
+initCanvasAgentMemorySchema(metaDb);
+initCanvasAgentApiKeySchema(metaDb);
+metaDb.exec(`CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY, email TEXT, display_name TEXT, password_hash TEXT, role TEXT, disabled INTEGER
+)`);
+metaDb.prepare('INSERT INTO users (id, email, display_name, password_hash, role, disabled) VALUES (?, ?, ?, ?, ?, 0)')
+  .run('user', 'u@local', '用户', 'x', 'admin');
+const memoryConversation = createCanvasAgentConversation(metaDb, 'user', 'canvas-mem', '记忆');
+assert.equal(
+  upsertAgentMemory(metaDb, 'user', 'canvas-mem', { kind: 'fact', key: '主角', value: '银发' })?.key,
+  '主角',
+);
+assert.equal(
+  upsertAgentMemory(metaDb, 'user', 'canvas-mem', { kind: 'fact', key: '主角', value: '银发少年' })?.value,
+  '银发少年',
+);
+assert.equal(upsertAgentMemory(metaDb, 'user', 'canvas-mem', { kind: 'bad', key: 'x', value: 'y' }), null);
+assert.equal(listAgentMemory(metaDb, 'user', 'canvas-mem').length, 1);
+assert.equal(listAgentMemory(metaDb, 'user', 'canvas-mem')[0].value, '银发少年');
+assert.equal(deleteAgentMemory(metaDb, 'user', 'canvas-mem', 'fact', '主角'), true);
+assert.equal(listAgentMemory(metaDb, 'user', 'canvas-mem').length, 0);
+
+const turnId = startAgentTurn(metaDb, {
+  userId: 'user',
+  canvasId: 'canvas-mem',
+  conversationId: memoryConversation.id,
+  jobId: 'job-1',
+  model: 'fake-model',
+});
+assert.equal(countTurnsSince(metaDb, 'user', Date.now() - 3_600_000), 1);
+finishAgentTurn(metaDb, turnId, { status: 'ok', replyChars: 12, proposalActions: 2 });
+const metrics = summarizeAgentTurns(metaDb, 'user', Date.now() - 3_600_000);
+assert.equal(metrics.totals.ok, 1);
+assert.equal(metrics.byModel[0].model, 'fake-model');
+assert.ok(metrics.latencyMs.avg >= 0);
+assert.equal(overDailyQuota(10, 10), true);
+assert.equal(overDailyQuota(9, 10), false);
+assert.equal(overDailyQuota(100, 0), false);
+
+const apiKey = createAgentApiKey(metaDb, 'user', 'mcp');
+assert.ok(apiKey?.token.startsWith('agt_'));
+assert.equal(listAgentApiKeys(metaDb, 'user').length, 1);
+assert.equal(resolveAgentApiKeyOwner(metaDb, apiKey!.token)?.id, 'user');
+assert.equal(revokeAgentApiKey(metaDb, 'user', apiKey!.key.id), true);
+assert.equal(resolveAgentApiKeyOwner(metaDb, apiKey!.token), null);
+assert.equal(resolveAgentApiKeyOwner(metaDb, 'agt_nope'), null);
+metaDb.close();
+
+
 const approvalPanelSource = readFileSync(new URL('./ui/AgentFloatingPanel.tsx', import.meta.url), 'utf8');
 assert.match(approvalPanelSource, /useState<AgentMode>\('confirm'\)/);
 assert.match(approvalPanelSource, /setMode\('auto'\)/);
@@ -1968,6 +2064,16 @@ assert.match(approvalRouteSource, /app\.post\('\/api\/canvas-agent\/jobs\/:id\/e
 assert.match(approvalRouteSource, /app\.post\('\/api\/canvas-agent\/jobs'/);
 assert.match(approvalRouteSource, /app\.post\('\/api\/canvas-agent\/jobs\/:id\/observations'/);
 assert.match(approvalRouteSource, /app\.get\('\/api\/canvas-agent\/jobs\/:id\/stream'/);
+assert.match(approvalRouteSource, /\/api\/canvas-agent\/keys/);
+assert.match(approvalRouteSource, /Bearer/);
+assert.match(approvalRouteSource, /remember_project_fact/);
+assert.match(approvalRouteSource, /\/api\/canvas-agent\/metrics/);
+assert.match(approvalRouteSource, /\/api\/canvas-agent\/memory/);
+const mcpSource = readFileSync(new URL('../../../scripts/canvas-agent-mcp.mjs', import.meta.url), 'utf8');
+assert.match(mcpSource, /tools\/list/);
+assert.match(mcpSource, /canvas_agent_job_create/);
+const toolRegistrySource = readFileSync(new URL('./tools/skillRegistry.ts', import.meta.url), 'utf8');
+assert.match(toolRegistrySource, /remember_project_fact/);
 assert.match(approvalPanelSource, /postAgentJobObservation\(/);
 assert.match(approvalPanelSource, /listAgentJobs\(/);
 assert.match(approvalPanelSource, /runNodeIdsOf\(/);

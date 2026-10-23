@@ -1,4 +1,5 @@
 import type { ActionProposal, CanvasAction } from '../types';
+import { actionRequiresApproval } from './toolContract';
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -261,9 +262,8 @@ export function proposalWaitsForClick(
 }
 
 export function actionProposalNeedsApproval(actions: CanvasAction[]): boolean {
-  return actions.some((action) =>
-    ['create_node', 'connect_nodes', 'update_node_params', 'execute_node_skill'].includes(action.type),
-  );
+  // 审批不在这里写死：工具契约说了算（执行要批，建/连/改不批）。
+  return actions.some((action) => actionRequiresApproval(action.type));
 }
 
 function unnamedConnectSentence(proposal: ActionProposal): string {

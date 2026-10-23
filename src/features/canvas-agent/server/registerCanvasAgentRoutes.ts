@@ -60,6 +60,29 @@ import {
   touchAgentJob,
   transitionAgentJob,
 } from './agentJobStore.js';
+import {
+  countTurnsSince,
+  finishAgentTurn,
+  initCanvasAgentTurnSchema,
+  overDailyQuota,
+  startAgentTurn,
+  summarizeAgentTurns,
+} from './agentTurnStore.js';
+import {
+  deleteAgentMemory,
+  initCanvasAgentMemorySchema,
+  listAgentMemory,
+  upsertAgentMemory,
+} from './agentMemoryStore.js';
+import { memoryPromptPrefix } from '../core/memory.js';
+import { toolContract, toolResultContent } from '../core/toolContract.js';
+import {
+  createAgentApiKey,
+  initCanvasAgentApiKeySchema,
+  listAgentApiKeys,
+  resolveAgentApiKeyOwner,
+  revokeAgentApiKey,
+} from './agentApiKeyStore.js';
 import { isTerminalAgentJob } from '../core/jobState.js';
 
 type ChatBody = {
@@ -289,7 +312,20 @@ export function registerCanvasAgentRoutes(
   if (db) {
     initCanvasAgentConversationSchema(db);
     initCanvasAgentJobSchema(db);
-    const protectedRoute = gate ? [gate] : [];
+    initCanvasAgentTurnSchema(db);
+    initCanvasAgentMemorySchema(db);
+    initCanvasAgentApiKeySchema(db);
+    // 双入口：浏览器走 cookie，脚本/MCP 走 Bearer（Agent Key）。
+    const bearerAuth: RequestHandler = (req, res, next) => {
+      if (req.authUser) return next();
+      const match = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization || ""));
+      if (!match) return gate ? gate(req, res, next) : next();
+      const owner = resolveAgentApiKeyOwner(db, match[1]);
+      if (!owner) return res.status(401).json({ error: "Agent Key 无效或已撤销" });
+      req.authUser = owner;
+      return next();
+    };
+    const protectedRoute = [bearerAuth];
     app.get('/api/canvas-agent/conversations', ...protectedRoute, (req, res) => {
       const canvasId = String(req.query.canvas_id || '').trim().slice(0, 120);
       if (!canvasId) return res.status(400).json({ error: '缺少 canvas_id' });
@@ -521,6 +557,64 @@ export function registerCanvasAgentRoutes(
       req.on('close', finish);
       tick();
     });
+    // 项目记忆：跨会话的角色/风格/偏好。先存最近的事实，不做语义检索。
+    app.get('/api/canvas-agent/memory', ...protectedRoute, (req, res) => {
+      const canvasId = String(req.query.canvas_id || '').trim().slice(0, 120);
+      if (!canvasId) return res.status(400).json({ error: '缺少 canvas_id' });
+      const limit = Number(req.query.limit) || 20;
+      return res.json({ facts: listAgentMemory(db, req.authUser?.id || '', canvasId, limit) });
+    });
+    app.post('/api/canvas-agent/memory', ...protectedRoute, (req, res) => {
+      const canvasId = String(req.body?.canvas_id || '').trim().slice(0, 120);
+      if (!canvasId) return res.status(400).json({ error: '缺少 canvas_id' });
+      const saved = upsertAgentMemory(db, req.authUser?.id || '', canvasId, {
+        kind: req.body?.kind,
+        key: req.body?.key,
+        value: req.body?.value,
+        source: String(req.body?.source || 'user'),
+      });
+      if (!saved) return res.status(400).json({ error: 'kind / key / value 不合法' });
+      return res.json({ fact: saved });
+    });
+    app.delete('/api/canvas-agent/memory/:kind/:key', ...protectedRoute, (req, res) => {
+      const canvasId = String(req.query.canvas_id || '').trim().slice(0, 120);
+      if (!canvasId) return res.status(400).json({ error: '缺少 canvas_id' });
+      const removed = deleteAgentMemory(
+        db,
+        req.authUser?.id || '',
+        canvasId,
+        req.params.kind,
+        req.params.key,
+      );
+      if (!removed) return res.status(404).json({ error: '记忆不存在' });
+      return res.json({ ok: true });
+    });
+    // 每轮的模型/耗时/结局。先给数字，再谈优化。
+    app.get('/api/canvas-agent/metrics', ...protectedRoute, (req, res) => {
+      const days = Math.min(Math.max(Math.floor(Number(req.query.days) || 7), 1), 30);
+      return res.json({
+        days,
+        ...summarizeAgentTurns(db, req.authUser?.id || '', Date.now() - days * 86_400_000),
+      });
+    });
+    // Agent Key：给脚本 / MCP 用的长期凭证。明文只出现一次。
+    app.get('/api/canvas-agent/keys', ...protectedRoute, (req, res) => {
+      return res.json({ keys: listAgentApiKeys(db, req.authUser?.id || '') });
+    });
+    app.post('/api/canvas-agent/keys', ...protectedRoute, (req, res) => {
+      const created = createAgentApiKey(
+        db,
+        req.authUser?.id || '',
+        String(req.body?.name || ''),
+      );
+      if (!created) return res.status(400).json({ error: '创建失败' });
+      return res.json({ token: created.token, key: created.key });
+    });
+    app.delete('/api/canvas-agent/keys/:id', ...protectedRoute, (req, res) => {
+      const revoked = revokeAgentApiKey(db, req.authUser?.id || '', String(req.params.id || ''));
+      if (!revoked) return res.status(404).json({ error: 'Key 不存在或已撤销' });
+      return res.json({ ok: true });
+    });
   }
 
   app.post('/api/canvas-agent/chat', ...(gate ? [gate] : []), async (req, res) => {
@@ -537,6 +631,12 @@ export function registerCanvasAgentRoutes(
     if (db) {
       const canvasId = String(body.canvasId || '').trim().slice(0, 120);
       if (!canvasId) return res.status(400).json({ error: '缺少 canvasId' });
+      // 配额：最近 24 小时真正发起过的轮次。超了直接拒，不花模型钱。
+      const turnLimit = Number(process.env.AGENT_DAILY_TURN_LIMIT || 500);
+      const usedToday = countTurnsSince(db, req.authUser?.id || '', Date.now() - 86_400_000);
+      if (overDailyQuota(usedToday, turnLimit)) {
+        return res.status(429).json({ error: '这一轮的日额度已用完，稍后再试。' });
+      }
       try {
         conversation = resolveCanvasAgentConversation(
           db,
@@ -593,6 +693,16 @@ export function registerCanvasAgentRoutes(
     res.flushHeaders?.();
 
     const model = String(body.model || process.env.TEXT_MODEL || 'gemini-3.5-flash').trim();
+    const turnId = db && conversation
+      ? startAgentTurn(db, {
+        userId: req.authUser?.id || '',
+        canvasId: conversation.canvas_id,
+        conversationId: conversation.id,
+        jobId,
+        model,
+        playbookId: requestedPlaybookId,
+      })
+      : '';
     const controller = new AbortController();
     res.on('close', () => controller.abort());
     sendEvent(res, {
@@ -637,9 +747,13 @@ export function registerCanvasAgentRoutes(
       pendingAsks,
     });
     const stageText = `${canvasAgentStagePrefix(storedStage.playbookId, storedStage.stage, requestedPlaybookId, effectedNodes, parseRunStates(body.runStates))}${changelog ? `\n\n[canvas_changelog]\n${changelog}` : ''}`;
+    // 项目记忆跨会话：角色、锁定风格、用户偏好。够用就停，不做检索。
+    const memoryText = db && conversation
+      ? memoryPromptPrefix(listAgentMemory(db, req.authUser?.id || '', conversation.canvas_id, 12))
+      : '';
     const imageDataUrls = await compressedVisionUrls(visionRoot, body.visionImages);
     const messages: Array<Record<string, unknown>> = [
-      { role: 'system', content: `${SYSTEM_PROMPT}\n${operatingPrompt(message, playbookText)}${stageText}${turnStateText}\n\n${context}` },
+      { role: 'system', content: `${SYSTEM_PROMPT}\n${operatingPrompt(message, playbookText)}${stageText}${turnStateText}${memoryText}\n\n${context}` },
       ...history,
       { role: 'user', content: userContentWithImages(
         askBatch.length ? `askAnswers:${JSON.stringify(askBatch)}` : askAnswer ? `askAnswer:${JSON.stringify(askAnswer)}` : message,
@@ -663,10 +777,29 @@ export function registerCanvasAgentRoutes(
         first = await callModel(model, messages, false, controller.signal);
       }
       const calls = parseToolCalls(first);
+      const toolNames = allCanvasAITools.map((tool) => tool.function.name);
+      // 记忆调用不是画布动作：落库即可，不进提案、不留工具日志。
+      const remembered = calls
+        .filter((call) => call.function.name === 'remember_project_fact')
+        .flatMap((call) => {
+          if (!db || !conversation) return [];
+          const args = safeArgs(call);
+          const saved = upsertAgentMemory(db, req.authUser?.id || '', conversation.canvas_id, {
+            kind: args.kind,
+            key: args.key,
+            value: args.value,
+            source: 'agent',
+          });
+          return saved ? [saved] : [];
+        });
+      // 认不出的工具直接丢，别让它变成一条空提案。
+      const actionCalls = calls
+        .filter((call) => call.function.name !== 'remember_project_fact')
+        .filter((call) => Boolean(toolContract(call.function.name, toolNames)));
       const firstText = extractTextLlmMessageContent(model, first).trim();
       let proposalText = firstText;
-      let interpreted = calls.length ? null : interpretCanvasProposalText(proposalText);
-      if (!calls.length && interpreted?.unknownTypes.length) {
+      let interpreted = actionCalls.length ? null : interpretCanvasProposalText(proposalText);
+      if (!actionCalls.length && interpreted?.unknownTypes.length) {
         const retry = await callModel(model, [
           ...messages,
           { role: 'assistant', content: proposalText },
@@ -684,15 +817,15 @@ export function registerCanvasAgentRoutes(
           };
       }
       let actions = normalizeCanvasActions(
-        calls.length ? calls.flatMap(actionsForTool) : (interpreted?.actions || []),
+        actionCalls.length ? actionCalls.flatMap(actionsForTool) : (interpreted?.actions || []),
       );
       const runCardPending = Boolean(db && conversation && hasPendingRunApproval(db, req.authUser?.id || '', conversation.id));
       const beforeShortYes = actions.length;
       actions = stripCreatesOnShortYes(actions, message);
       const shortYesBlocked = beforeShortYes > 0 && actions.length === 0;
       const asks = collectAskCards(
-        calls.filter((call) => call.function.name === 'ask_user').map((call) => safeArgs(call)),
-        calls.length ? '' : (proposalText || firstText),
+        actionCalls.filter((call) => call.function.name === 'ask_user').map((call) => safeArgs(call)),
+        actionCalls.length ? '' : (proposalText || firstText),
         actions.flatMap((action) => action.type === 'execute_node_skill' ? [action.nodeId] : []),
       );
       const publishAsks = () => {
@@ -707,7 +840,7 @@ export function registerCanvasAgentRoutes(
           : '上一批已完成。您是要继续做下一步，还是要改刚才的分析？\n直接说需求就行。';
         streamText(res, persistedText);
       } else if (actions.length) {
-        calls.forEach((call) => {
+        actionCalls.forEach((call) => {
           const log = {
             id: call.id,
             name: call.function.name,
@@ -724,12 +857,12 @@ export function registerCanvasAgentRoutes(
         if (interpreted?.summary) proposal.summary = interpreted.summary;
         else {
           const reasons = new Set(proposal.actions.map(actionReasonText).filter(Boolean));
-          const rationale = calls
+          const rationale = actionCalls
             .map((call) => String(safeArgs(call).rationale || '').trim())
             .find((item) => item && !reasons.has(item));
           if (rationale) proposal.summary = rationale;
         }
-        if (calls.some((call) => (
+        if (actionCalls.some((call) => (
           call.function.name === 'trigger_skill_execution' || call.function.name.startsWith('run_')
         ))) {
           proposal.generative = true;
@@ -748,7 +881,7 @@ export function registerCanvasAgentRoutes(
           const toolResults = calls.map((call) => ({
             role: 'tool',
             tool_call_id: call.id,
-            content: JSON.stringify({ status: 'queued_for_user_approval' }),
+            content: JSON.stringify(toolResultContent(call.function.name, toolNames)),
           }));
           const followup = await callModel(
             model,
@@ -764,6 +897,9 @@ export function registerCanvasAgentRoutes(
         publishAsks();
       } else if (interpreted?.unknownTypes.length) {
         persistedText = `动作类型无法识别：${interpreted.unknownTypes.join('、')}。这轮没有生成提案。`;
+        streamText(res, persistedText);
+      } else if (remembered.length) {
+        persistedText = firstText || `记下了：${remembered.map((item) => item.key).join('、')}。`;
         streamText(res, persistedText);
       } else {
         persistedText = firstText || '我暂时没有生成可执行的画布建议，请换一种方式描述目标。';
@@ -803,6 +939,13 @@ export function registerCanvasAgentRoutes(
           },
         );
       }
+      if (db && turnId) {
+        finishAgentTurn(db, turnId, {
+          status: 'ok',
+          replyChars: persistedText.length,
+          proposalActions: persistedProposal?.actions.length || 0,
+        });
+      }
       sendEvent(res, { type: 'done' });
       res.end();
     } catch (error) {
@@ -824,6 +967,12 @@ export function registerCanvasAgentRoutes(
           controller.signal.aborted ? 'cancel' : 'fail',
           { error: error instanceof Error ? error.message : String(error) },
         );
+      }
+      if (db && turnId) {
+        finishAgentTurn(db, turnId, {
+          status: controller.signal.aborted ? 'aborted' : 'error',
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
       if (!res.writableEnded) {
         sendEvent(res, {
