@@ -22975,11 +22975,21 @@ async function runVideoReverseNode(nodeId, opts={}){
         if(opts.cascade) throw err;
     }
 }
-/** 上游 Prompt 节点 + 节点内 textarea 合并为同一条生图 prompt */
+/** 上游 Prompt 节点 + 节点内 textarea 合并为同一条生图 prompt。
+ *  {{id}} 只在送出时换成语义名。存储不改，胶囊仍靠记号画。
+ *  语义名按 title、floatTitle、name，文件名不算。没有就删掉记号，句子留下。 */
 function composeGeneratorPrompt(gen, sources){
+    const outbound = (value) => String(value || '').replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, raw) => {
+        const id = String(raw || '').trim();
+        const node = id ? nodes.find(item => item.id === id) : null;
+        const label = [node?.title, node?.floatTitle, node?.name]
+            .map(item => String(item || '').trim())
+            .find(item => item && !/\.(jpe?g|png|webp|gif|bmp|mp4|webm|mov|m4v|mkv)$/i.test(item));
+        return label || '';
+    }).replace(/[ \t]{2,}/g, ' ').trim();
     const parts = [
-        ...(sources || []).map(s => String(s?.prompt || '').trim()).filter(Boolean),
-        String(gen?.prompt || '').trim()
+        ...(sources || []).map(s => outbound(s?.prompt)).filter(Boolean),
+        outbound(gen?.prompt)
     ].filter(Boolean);
     return parts.join('\n\n');
 }

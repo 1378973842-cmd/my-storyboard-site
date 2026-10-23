@@ -911,6 +911,14 @@ html.canvas-image-edit-open .canvas-agent-layer {
   font-size: 11px;
 }
 
+.canvas-agent-menu-mode .canvas-agent-menu-note {
+  margin: 4px 2px 2px;
+  padding: 8px 8px 0;
+  color: #8d8886;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .canvas-agent-submenu button span {
   display: grid;
   gap: 2px;
@@ -1269,4 +1277,232 @@ html.canvas-image-edit-open .canvas-agent-layer {
 .canvas-agent-mentions small {
   color: #a8a3a1;
   font-size: 10px;
+}
+
+.canvas-agent-ask {
+  margin: 14px 0 0;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: #1c1b1b;
+}
+
+.canvas-agent-ask h4 {
+  margin: 0;
+  font-family: "Noto Serif SC", "Noto Serif", serif;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+  color: #e5e2e1;
+}
+
+.canvas-agent-ask-nodes,
+.canvas-agent-ask-answer {
+  margin: 8px 0 0;
+  color: #a8a3a1;
+  font-family: Inter, sans-serif;
+  font-size: 13px;
+}
+
+.canvas-agent-ask-state {
+  flex: none;
+  margin: 8px 0 0;
+  color: #ffb866;
+  font-family: Manrope, Inter, sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.canvas-agent-ask-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.canvas-agent-ask-options button,
+.canvas-agent-ask-write button {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: #2a2928;
+  color: #e5e2e1;
+  font-family: Inter, sans-serif;
+}
+
+.canvas-agent-ask-options button.is-picked {
+  background: color-mix(in srgb, #ffb866 24%, #2a2928);
+  color: #ffb866;
+}
+
+.canvas-agent-ask-write {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.canvas-agent-ask-options input,
+.canvas-agent-ask-write input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: #131313;
+  color: #e5e2e1;
+  font-family: Inter, sans-serif;
+  outline: none;
+}
+
+.canvas-agent-ask-pager,
+.canvas-agent-ask-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.canvas-agent-ask-pager {
+  justify-content: flex-end;
+  margin-bottom: 8px;
+  color: #a8a3a1;
+  font-family: Manrope, sans-serif;
+  letter-spacing: 0.08em;
+}
+
+.canvas-agent-ask-nav {
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.canvas-agent-ask-pager button,
+.canvas-agent-ask-nav button {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: #2a2928;
+  color: #e5e2e1;
+  font-family: Inter, sans-serif;
+}
+
+.canvas-agent-ask-nav button:last-child {
+  background: color-mix(in srgb, #ffb866 24%, #2a2928);
+  color: #ffb866;
+}
+
+.canvas-agent-ask-pager button:disabled,
+.canvas-agent-ask-nav button:disabled {
+  opacity: 0.4;
+}
+
+.canvas-agent-ask.is-pager {
+  padding: 16px;
+  border-radius: 16px;
+}
+
+.canvas-agent-ask-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.canvas-agent-ask-head h4 {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.5;
+}
+
+.is-pager .canvas-agent-ask-pager {
+  flex: none;
+  gap: 2px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.is-pager .canvas-agent-ask-pager button {
+  padding: 0 6px;
+  background: transparent;
+  color: #e5e2e1;
+  font-size: 16px;
+  line-height: 22px;
+}
+
+.canvas-agent-ask-list {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+
+.canvas-agent-ask-list button,
+.canvas-agent-ask-list label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: transparent;
+  color: #e5e2e1;
+  font-family: Inter, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.canvas-agent-ask-list button:hover,
+.canvas-agent-ask-list label:hover {
+  background: #242322;
+}
+
+.canvas-agent-ask-list button.is-picked,
+.canvas-agent-ask-list label.is-picked,
+.canvas-agent-ask-list label:focus-within {
+  background: #2a2928;
+  color: #e5e2e1;
+}
+
+.canvas-agent-ask-list i {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: #2a2928;
+  color: #a8a3a1;
+  font-family: Manrope, sans-serif;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.canvas-agent-ask-list .is-picked i {
+  background: #ffb866;
+  color: #131313;
+}
+
+.canvas-agent-ask-list input {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 13px;
+}
+
+.canvas-agent-ask-list input::placeholder {
+  color: #77726f;
+}
+
+.is-pager .canvas-agent-ask-nav {
+  gap: 4px;
+}
+
+.is-pager .canvas-agent-ask-nav button {
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: transparent;
+  color: #a8a3a1;
+}
+
+.is-pager .canvas-agent-ask-nav button:last-child {
+  background: #e5e2e1;
+  color: #131313;
+  font-weight: 600;
 }

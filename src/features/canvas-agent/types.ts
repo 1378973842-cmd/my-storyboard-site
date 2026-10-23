@@ -1,3 +1,5 @@
+import type { AskAnswer, AskCard } from './core/askCard';
+
 export type JsonSchema = {
   type: string;
   description?: string;
@@ -154,6 +156,10 @@ export type ActionProposal = {
   progress?: { done: number; total: number };
   /** 产生这份提案的用户消息。只有聊天提案有。批准时用它认 @ 点名。 */
   userMessage?: string;
+  /** 这一步落板新建的节点。标签和下一轮「已生效」都读它。 */
+  effectedNodes?: Array<{ id: string; nodeType: string; label?: string }>;
+  changelog?: string;
+  messageId?: string;
 };
 
 export type CanvasContextPayload = {
@@ -171,6 +177,9 @@ export type AgentChatMessage = {
   role: 'user' | 'assistant';
   content: string;
   createdAt: number;
+  askAnswer?: AskAnswer;
+  askAnswers?: AskAnswer[];
+  asks?: AskCard[];
 };
 
 export type AgentToolLog = {
@@ -197,14 +206,18 @@ export type AgentStoredMessage = {
     toolLogs?: AgentToolLog[];
     error?: string;
     elapsedMs?: number;
+    asks?: AskCard[];
+    askAnswer?: AskAnswer;
+    askAnswers?: AskAnswer[];
   };
   created_at: number;
 };
 
 export type CanvasAgentStreamEvent =
-  | { type: 'meta'; model: string; conversationId?: string; citedNodes?: string[] }
+  | { type: 'meta'; model: string; conversationId?: string; citedNodes?: string[]; effectedNodes?: Array<{ id: string; nodeType: string; label?: string }> }
   | { type: 'delta'; text: string }
   | { type: 'tool'; log: AgentToolLog }
   | { type: 'proposal'; proposal: ActionProposal }
   | { type: 'done' }
-  | { type: 'error'; error: string };
+  | { type: 'error'; error: string }
+  | { type: 'ask'; asks: AskCard[] };

@@ -20,6 +20,7 @@ import type {
   ExecuteNodeSkillAction,
 } from '../types';
 import { AGENT_CREATABLE_NODE_TYPES } from '../types';
+import { changelogFromActions, effectedFromApply } from './effectLedger';
 import { citationsForApply, droppedConnectCount, settleReferenceActions } from './referencePrompt';
 import { rejectUnknownCanvasParamKeys } from '../tools/skillRegistry';
 import { normalizeCanvasActions, openBatchProgress } from './proposal';
@@ -238,6 +239,9 @@ export async function batchApplyChanges(
   skippedCount: number;
   failedExecution?: { nodeId: string; message: string; reason?: string };
   droppedConnects: number;
+  idMap: Record<string, string>;
+  effected: ReturnType<typeof effectedFromApply>;
+  changelog: string;
 }> {
   const snapshot = getCanvasSnapshot();
   const normalized = normalizeCanvasActions(actions);
@@ -322,9 +326,12 @@ export async function batchApplyChanges(
     const nodeId = resolveExecutionId(action.nodeId);
     skipExecution(nodeId, `本批最多连续执行 12 个节点，节点 ${nodeId} 未执行。不要重建该节点。`);
   }
+  const landed = getCanvasSnapshot();
+  const effected = effectedFromApply(guarded, result.idMap, landed.nodes);
+  const changelog = changelogFromActions(guarded, result.idMap);
   return failedExecution
-    ? { choices, skippedCount, failedExecution, droppedConnects }
-    : { choices, skippedCount, droppedConnects };
+    ? { choices, skippedCount, failedExecution, droppedConnects, idMap: result.idMap, effected, changelog }
+    : { choices, skippedCount, droppedConnects, idMap: result.idMap, effected, changelog };
 }
 
 export const canvasFacade = {

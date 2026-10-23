@@ -1,6 +1,8 @@
 import type Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
+import { mergeEffectedNodes, parseEffectedNodes, type EffectedNode } from "../core/effectLedger";
 import { citationsInUserMessage } from "../core/referencePrompt";
+import type { AskCard } from "../core/askCard";
 
 export type CanvasAgentConversation = {
   id: string;
@@ -31,7 +33,9 @@ export function initCanvasAgentConversationSchema(
       updated_at INTEGER NOT NULL,
       agent_playbook_id TEXT NOT NULL DEFAULT '',
       agent_stage INTEGER,
-      agent_cited_nodes TEXT NOT NULL DEFAULT ''
+      agent_cited_nodes TEXT NOT NULL DEFAULT '',
+      agent_effected_nodes TEXT NOT NULL DEFAULT '',
+      agent_cancel_marker TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_canvas_agent_conversations_owner
       ON canvas_agent_conversations(user_id, canvas_id, updated_at DESC);
@@ -52,6 +56,8 @@ export function initCanvasAgentConversationSchema(
   ensureConversationColumn(db, "agent_playbook_id", "TEXT NOT NULL DEFAULT ''");
   ensureConversationColumn(db, "agent_stage", "INTEGER");
   ensureConversationColumn(db, "agent_cited_nodes", "TEXT NOT NULL DEFAULT ''");
+  ensureConversationColumn(db, "agent_effected_nodes", "TEXT NOT NULL DEFAULT ''");
+  ensureConversationColumn(db, "agent_cancel_marker", "TEXT NOT NULL DEFAULT ''");
 }
 
 function ensureConversationColumn(
@@ -144,18 +150,196 @@ export function recordConversationCitations(
   return merged;
 }
 
-export function hasPendingCanvasAgentProposal(
+export function readConversationEffected(
+  db: InstanceType<typeof Database>,
+  userId: string,
+  conversationId: string,
+): EffectedNode[] {
+  const row = db.prepare(
+    `SELECT agent_effected_nodes
+     FROM canvas_agent_conversations WHERE id = ? AND user_id = ?`
+  ).get(conversationId, userId) as { agent_effected_nodes?: string } | undefined;
+  return parseEffectedNodes(row?.agent_effected_nodes);
+}
+
+/** 只并这一次落板新建的节点。别的会话的节点不写进来。 */
+export function recordConversationEffected(
+  db: InstanceType<typeof Database>,
+  userId: string,
+  proposalId: string,
+  incoming: EffectedNode[],
+  changelog: string,
+): EffectedNode[] {
+  const row = db.prepare(
+    `SELECT id, conversation_id FROM canvas_agent_messages
+     WHERE user_id = ? AND json_extract(metadata_json, '$.proposal.id') = ?`
+  ).get(userId, proposalId) as { id?: string; conversation_id?: string } | undefined;
+  const conversationId = String(row?.conversation_id || "");
+  if (!conversationId) return [];
+  const merged = mergeEffectedNodes(readConversationEffected(db, userId, conversationId), incoming);
+  db.prepare(
+    `UPDATE canvas_agent_conversations
+     SET agent_effected_nodes = ?
+     WHERE id = ? AND user_id = ?`
+  ).run(JSON.stringify(merged), conversationId, userId);
+  if (row?.id && (incoming.length || changelog)) {
+    db.prepare(
+      `UPDATE canvas_agent_messages
+       SET metadata_json = json_set(
+         metadata_json,
+         '$.proposal.effectedNodes', json(?),
+         '$.proposal.changelog', ?
+       )
+       WHERE id = ? AND user_id = ?`
+    ).run(JSON.stringify(incoming), changelog, row.id, userId);
+  }
+  return merged;
+}
+
+/** 下一轮读一次「刚发生了什么」，读完就标掉，避免后面每轮都复读。 */
+export function takeConversationChangelog(
+  db: InstanceType<typeof Database>,
+  userId: string,
+  conversationId: string,
+): string {
+  const row = db.prepare(
+    `SELECT id, json_extract(metadata_json, '$.proposal.changelog') AS changelog
+     FROM canvas_agent_messages
+     WHERE conversation_id = ? AND user_id = ?
+       AND json_extract(metadata_json, '$.proposal.status') IN ('applied', 'partial', 'exec_failed')
+       AND coalesce(json_extract(metadata_json, '$.proposal.changelogRead'), 0) = 0
+       AND length(coalesce(json_extract(metadata_json, '$.proposal.changelog'), '')) > 0
+     ORDER BY created_at DESC LIMIT 1`
+  ).get(conversationId, userId) as { id?: string; changelog?: string } | undefined;
+  const changelog = String(row?.changelog || "").trim();
+  if (!row?.id || !changelog) return "";
+  db.prepare(
+    `UPDATE canvas_agent_messages
+     SET metadata_json = json_set(metadata_json, '$.proposal.changelogRead', 1)
+     WHERE id = ? AND user_id = ?`
+  ).run(row.id, userId);
+  return changelog;
+}
+
+/** 最近一张审批卡之后，还没有用户在卡上点过批准或拒绝。建、连、改已自动落板，只有这张卡还在等人。 */
+export function hasPendingRunApproval(
   db: InstanceType<typeof Database>,
   userId: string,
   conversationId: string,
 ): boolean {
-  const row = db.prepare(
+  const card = db.prepare(
+    `SELECT created_at FROM canvas_agent_messages
+     WHERE conversation_id = ? AND user_id = ? AND role = 'assistant'
+       AND EXISTS (SELECT 1 FROM json_each(metadata_json, '$.asks') WHERE json_extract(value, '$.mode') = 'approve_run_node')
+     ORDER BY created_at DESC, rowid DESC LIMIT 1`
+  ).get(conversationId, userId) as { created_at?: number } | undefined;
+  if (card?.created_at == null) return false;
+  const answered = db.prepare(
     `SELECT 1 AS ok FROM canvas_agent_messages
-     WHERE conversation_id = ? AND user_id = ?
-       AND json_extract(metadata_json, '$.proposal.status') = 'pending'
+     WHERE conversation_id = ? AND user_id = ? AND role = 'user' AND created_at >= ?
+       AND (json_extract(metadata_json, '$.askAnswer.mode') = 'approve_run_node'
+         OR EXISTS (SELECT 1 FROM json_each(metadata_json, '$.askAnswers') WHERE json_extract(value, '$.mode') = 'approve_run_node'))
      LIMIT 1`
-  ).get(conversationId, userId);
-  return Boolean(row);
+  ).get(conversationId, userId, card.created_at);
+  return !answered;
+}
+
+/**
+ * 最近一条带提问卡的助手消息里，还没有用户答复的题。
+ * 审批卡不算：它走 hasPendingRunApproval，那套是「没点批准就不跑」。
+ * 这里只回答一件事：用户有没有理那张卡。没理不是同意，不能替他按默认值走。
+ */
+export function pendingAskQuestions(
+  db: InstanceType<typeof Database>,
+  userId: string,
+  conversationId: string,
+): string[] {
+  const row = db.prepare(
+    `SELECT id, created_at, metadata_json FROM canvas_agent_messages
+     WHERE conversation_id = ? AND user_id = ? AND role = 'assistant'
+       AND EXISTS (SELECT 1 FROM json_each(metadata_json, '$.asks') WHERE json_extract(value, '$.mode') <> 'approve_run_node')
+     ORDER BY created_at DESC, rowid DESC LIMIT 1`
+  ).get(conversationId, userId) as { id?: string; created_at?: number; metadata_json?: string } | undefined;
+  if (!row?.id) return [];
+  let cards: AskCard[] = [];
+  try {
+    const parsed = JSON.parse(String(row.metadata_json || "{}")) as { asks?: AskCard[] };
+    cards = Array.isArray(parsed.asks) ? parsed.asks : [];
+  } catch {
+    return [];
+  }
+  const questions = cards.filter((card) => (
+    card && card.mode !== "approve_run_node" && String(card.question || "").trim()
+  ));
+  if (!questions.length) return [];
+  const answered = new Set<string>();
+  const later = db.prepare(
+    `SELECT metadata_json FROM canvas_agent_messages
+     WHERE conversation_id = ? AND user_id = ? AND role = 'user' AND created_at >= ?
+     ORDER BY created_at ASC, rowid ASC`
+  ).all(conversationId, userId, Number(row.created_at) || 0) as Array<{ metadata_json?: string }>;
+  later.forEach((item) => {
+    let meta: Record<string, unknown> = {};
+    try {
+      meta = JSON.parse(String(item.metadata_json || "{}")) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    const one = meta.askAnswer && typeof meta.askAnswer === "object" ? [meta.askAnswer] : [];
+    const many = Array.isArray(meta.askAnswers) ? meta.askAnswers : [];
+    [...one, ...many].forEach((answer) => {
+      const cardId = String((answer as { cardId?: string }).cardId || "");
+      if (cardId) answered.add(cardId);
+    });
+  });
+  return questions.filter((card) => !answered.has(card.id)).map((card) => card.question);
+}
+
+export type ConversationCancelMarker = { at: number; messageId: string };
+
+/** 取消只有用户可以发起，所以只能由显式接口写；落在会话上，不落在聊天流里。 */
+export function setConversationCancelMarker(
+  db: InstanceType<typeof Database>,
+  userId: string,
+  conversationId: string,
+): ConversationCancelMarker | null {
+  const row = db.prepare(
+    `SELECT id FROM canvas_agent_conversations WHERE id = ? AND user_id = ?`
+  ).get(conversationId, userId) as { id?: string } | undefined;
+  if (!row?.id) return null;
+  const last = db.prepare(
+    `SELECT id FROM canvas_agent_messages
+     WHERE conversation_id = ? AND user_id = ? AND role = 'user'
+     ORDER BY created_at DESC, rowid DESC LIMIT 1`
+  ).get(conversationId, userId) as { id?: string } | undefined;
+  const marker = { at: Date.now(), messageId: String(last?.id || "") };
+  db.prepare(
+    `UPDATE canvas_agent_conversations SET agent_cancel_marker = ? WHERE id = ? AND user_id = ?`
+  ).run(JSON.stringify(marker), conversationId, userId);
+  return marker;
+}
+
+/** 下一轮读一次「用户取消过」，读完清空，避免后面每轮都复读。 */
+export function takeConversationCancelMarker(
+  db: InstanceType<typeof Database>,
+  userId: string,
+  conversationId: string,
+): ConversationCancelMarker | null {
+  const row = db.prepare(
+    `SELECT agent_cancel_marker FROM canvas_agent_conversations WHERE id = ? AND user_id = ?`
+  ).get(conversationId, userId) as { agent_cancel_marker?: string } | undefined;
+  if (!row) return null;
+  const raw = String(row.agent_cancel_marker || "");
+  if (!raw) return null;
+  db.prepare(
+    `UPDATE canvas_agent_conversations SET agent_cancel_marker = '' WHERE id = ? AND user_id = ?`
+  ).run(conversationId, userId);
+  try {
+    const parsed = JSON.parse(raw) as { at?: number; messageId?: string };
+    return { at: Number(parsed?.at) || 0, messageId: String(parsed?.messageId || "") };
+  } catch {
+    return { at: 0, messageId: "" };
+  }
 }
 
 export function listCanvasAgentConversations(

@@ -1,3 +1,4 @@
+import { effectedLine, type EffectedNode, type MediaRunState } from './effectLedger';
 import type { CanvasAction } from '../types';
 
 // ponytail: 一批落板动作取映射到的最大步骤。同批既改提示词又执行视频时记成执行那一步。
@@ -42,21 +43,33 @@ export function inferAppliedPlaybookStage(
   return Math.max(...steps);
 }
 
-export function canvasAgentStageSegment(playbookId: string, stage: number): string {
+export function canvasAgentStageSegment(
+  playbookId: string,
+  stage: number,
+  effected: readonly EffectedNode[] = [],
+  states: Readonly<Record<string, MediaRunState>> = {},
+): string {
   const title = playbookId === 'canvas-video-piece'
     ? '剧情动画'
     : playbookId === 'canvas-opening-animation'
       ? '开场动画'
       : playbookId;
-  return `## 当前阶段\n技能：${title}\n步骤：${stage}`;
+  const line = effectedLine(effected, states);
+  const head = `技能：${title} / 步骤：${stage}`;
+  return `## 当前阶段\n${line ? `${head}\n${line}` : head}`;
 }
 
-/** 和本次请求的技能不一致、或还没有阶段时，不加这段。 */
+/** 技能对得上才报步骤号。对不上时只报本会话已生效的节点。 */
 export function canvasAgentStagePrefix(
   storedPlaybookId: string,
   stage: number | null,
   requestedPlaybookId: string,
+  effected: readonly EffectedNode[] = [],
+  states: Readonly<Record<string, MediaRunState>> = {},
 ): string {
-  if (!storedPlaybookId || storedPlaybookId !== requestedPlaybookId || stage == null) return '';
-  return `\n\n${canvasAgentStageSegment(storedPlaybookId, stage)}`;
+  const line = effectedLine(effected, states);
+  if (storedPlaybookId && storedPlaybookId === requestedPlaybookId && stage != null) {
+    return `\n\n${canvasAgentStageSegment(storedPlaybookId, stage, effected, states)}`;
+  }
+  return line ? `\n\n## 当前阶段\n${line}` : '';
 }

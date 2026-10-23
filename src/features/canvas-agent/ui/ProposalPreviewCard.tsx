@@ -26,7 +26,9 @@ export function ProposalPreviewCard({
   onToggle?: () => void;
   clampLines?: string[];
 }) {
-  const pending = proposal.status === 'pending';
+  // 只剩运行的提案由审批卡放行，这里的应用按钮挡不过运行闸，不出按钮。
+  const runOnly = proposal.actions.length > 0 && proposal.actions.every((action) => action.type === 'execute_node_skill');
+  const pending = proposal.status === 'pending' && !runOnly;
   const applying = proposal.status === 'applying';
   const settled = proposal.status === 'applied' || proposal.status === 'partial' || proposal.status === 'exec_failed';
   const stepTitle = settled
@@ -50,6 +52,8 @@ export function ProposalPreviewCard({
             ? '失败'
           : applying
             ? '应用中'
+          : runOnly
+            ? '等审批卡'
             : '待确认'}
       </span>
       <h4>{stepTitle}</h4>

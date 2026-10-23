@@ -245,6 +245,40 @@ export const coreCanvasTools: AIToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'ask_user',
+      description: 'Ask with one card per question, same order. Do not also write the question in chat text. Each card needs type text choices and one type input. Do not use this to approve a run.',
+      parameters: objectSchema(
+        {
+          cards: {
+            type: 'array',
+            items: objectSchema(
+              {
+                mode: { type: 'string', enum: ['single', 'multiple'] },
+                question: { type: 'string' },
+                options: {
+                  type: 'array',
+                  items: objectSchema(
+                    {
+                      type: { type: 'string', enum: ['text', 'input'] },
+                      label: { type: 'string' },
+                      placeholder: { type: 'string' },
+                    },
+                    ['type'],
+                  ),
+                },
+                node_key: { type: 'string' },
+              },
+              ['mode', 'question', 'options'],
+            ),
+          },
+        },
+        ['cards'],
+      ),
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'trigger_skill_execution',
       description:
         'Propose running existing node skills. Generation always requires explicit user approval.',

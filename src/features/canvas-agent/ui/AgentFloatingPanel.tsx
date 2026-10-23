@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -42,6 +43,7 @@ import { isInfiniteCanvasEditorOpen, flushCanvasAgentSave, withCanvasAgentNode }
 import { CANVAS_GENERATOR_TYPES, batchApplyChanges, getCanvasSnapshot } from '../core/canvasFacade';
 import { inferAppliedPlaybookStage } from '../core/stageLedger';
 import { referenceClampLabels, mentionTitleToStore, referenceCapsuleLabel } from '../core/referencePrompt';
+import { approveRunCard, parseAskAnswer, parseAskAnswers } from '../core/askCard';
 import { pendingExecutionFeedback, proposalWaitsForClick } from '../core/proposal';
 import {
   deliverProposalDone,
@@ -51,7 +53,7 @@ import {
   runProposalApply,
 } from '../core/proposalPersistence';
 import { serializeCanvasContext } from '../core/contextSerializer';
-import { streamCanvasAgent } from '../core/agentService';
+import { streamCanvasAgent, cancelAgentTurn } from '../core/agentService';
 import {
   deleteAgentConversation,
   listAgentConversations,
@@ -72,6 +74,10 @@ import {
 } from '../core/operatingModel';
 import { agentPlaybooks, canvasSkillRegistry } from '../tools/skillRegistry';
 import { AGENT_CREATABLE_NODE_TYPES } from '../types';
+import { AskCardView } from './AskCardView';
+import { mergeEffectedNodes } from '../core/effectLedger';
+import { AskPager } from './AskPager';
+import { EffectLabels } from './TurnLabels';
 import { ProposalPreviewCard } from './ProposalPreviewCard';
 import { AssistantMarkdown } from './assistantMarkdown';
 import { proposalDefaultOpen, proposalDisplayTier, sortProposalsForDisplay } from './proposalOrder';
@@ -82,6 +88,8 @@ import type {
   AgentToolLog,
   CanvasAgentStreamEvent,
 } from '../types';
+import type { AskAnswer, AskCard } from '../core/askCard';
+import { runScopeDigest, runScopeMatches, actionsReleasedForApproval, type RunScope } from '../core/runApproval';
 import './canvas-agent.css';
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
@@ -94,9 +102,12 @@ function appliedStageOutcome(playbookId: string, current: ActionProposal) {
       (id) => getCanvasSnapshot().nodes.find((node) => node.id === id)?.type || '',
     )
     : null;
+  const landed = current.status === 'applied' || current.status === 'partial' || current.status === 'exec_failed';
   return {
     ...diskProposalOutcome(current),
     ...(stage != null && playbookId ? { playbookId, stage } : {}),
+    ...(landed && current.effectedNodes?.length ? { effectedNodes: current.effectedNodes } : {}),
+    ...(landed && current.changelog ? { changelog: current.changelog } : {}),
   };
 }
 type AgentMode = 'confirm' | 'auto';
@@ -523,8 +534,16 @@ export function AgentFloatingPanel({
   const [conversationId, setConversationId] = useState('');
   const conversationIdRef = useRef('');
   const citedNodesRef = useRef<string[]>([]);
+  const effectedRef = useRef<Array<{ id: string; nodeType: string; label?: string }>>([]);
   const playbookIdRef = useRef('');
+  const sessionPlaybookRef = useRef('');
   const appliedSkillRef = useRef('');
+  const runApprovalRef = useRef<string[] | null>(null);
+  /** 审批卡发出时记下的节点集与内容。只在这一次会话的内存里，刷新即失效。 */
+  const runScopeRef = useRef<Map<string, RunScope>>(new Map());
+  const askHistoryRef = useRef<ChatTurn[]>([]);
+  const askedRef = useRef(new Set<string>());
+  const [askAnswers, setAskAnswers] = useState<Record<string, AskAnswer>>({});
   const [conversations, setConversations] = useState<AgentConversation[]>([]);
   const [renaming, setRenaming] = useState(false);
   const [input, setInput] = useState('');
@@ -540,6 +559,15 @@ export function AgentFloatingPanel({
     proposalsRef.current = resolved;
     setProposals(resolved);
   }, []);
+  /** 记下这张卡发出时指向的节点与内容。卡上是临时 id 时，落板后要再记一次。 */
+  const rememberRunScope = useCallback((messageId: string, card: AskCard) => {
+    const nodeIds = [...(card.node_keys || [])].filter(Boolean);
+    if (!nodeIds.length) return;
+    runScopeRef.current.set(`${messageId}:${card.id}`, {
+      nodeIds,
+      digest: runScopeDigest(getCanvasSnapshot().nodes, nodeIds),
+    });
+  }, []);
   const proposalRows = useMemo(() => {
     const sorted = sortProposalsForDisplay(proposals);
     let tier12Index = 0;
@@ -551,6 +579,8 @@ export function AgentFloatingPanel({
   }, [proposalOpen, proposals]);
   useEffect(() => {
     setProposalOpen({});
+    setLocalRunCards({});
+    runScopeRef.current.clear();
   }, [conversationId]);
   const [toolLogs, setToolLogs] = useState<AgentToolLog[]>([]);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -563,6 +593,8 @@ export function AgentFloatingPanel({
   const [showAppsHint, setShowAppsHint] = useState(true);
   const [notice, setNotice] = useState('');
   const [impactChoice, setImpactChoice] = useState<ImpactChoice[] | null>(null);
+  /** 本地提案（重做）自己出的审批卡。服务端不会为它发卡，卡只活在这一屏。 */
+  const [localRunCards, setLocalRunCards] = useState<Record<string, AskCard>>({});
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
@@ -686,6 +718,11 @@ export function AgentFloatingPanel({
     abortRef.current?.abort();
     conversationIdRef.current = '';
     citedNodesRef.current = [];
+    effectedRef.current = [];
+    sessionPlaybookRef.current = '';
+    askHistoryRef.current = [];
+    askedRef.current = new Set();
+    setAskAnswers({});
     setConversationId('');
     setTitle('探索创作方向');
     setMessages([]);
@@ -702,21 +739,49 @@ export function AgentFloatingPanel({
     const data = await loadAgentConversation(id);
     conversationIdRef.current = data.conversation.id;
     citedNodesRef.current = Array.isArray(data.citedNodes) ? data.citedNodes : [];
+    effectedRef.current = Array.isArray(data.effectedNodes) ? data.effectedNodes : [];
     setConversationId(data.conversation.id);
     setTitle(data.conversation.title);
-    setMessages(
-      data.messages.map((message) => ({
+    const restoredAnswers: Record<string, AskAnswer> = {};
+    const restoredHistory: ChatTurn[] = [];
+    let askMessageId = '';
+    data.messages.forEach((message) => {
+      if (message.role === 'assistant' && message.metadata?.asks?.length) askMessageId = message.id;
+      const batch = parseAskAnswers(message.metadata?.askAnswers);
+      const answer = batch.length ? null : parseAskAnswer(message.metadata?.askAnswer);
+      const answers = batch.length ? batch : answer ? [answer] : [];
+      if (!answers.length) return;
+      answers.forEach((item) => {
+        restoredAnswers[askMessageId ? `${askMessageId}:${item.cardId}` : item.cardId] = item;
+      });
+      restoredHistory.push({
         id: message.id,
-        role: message.role,
-        content: message.content,
+        role: 'user',
+        content: '',
         createdAt: message.created_at,
-        elapsedMs: Number(message.metadata?.elapsedMs) || undefined,
-      })),
+        ...(batch.length ? { askAnswers: batch } : { askAnswer: answer || undefined }),
+      });
+    });
+    askHistoryRef.current = restoredHistory;
+    askedRef.current = new Set(Object.keys(restoredAnswers));
+    setAskAnswers(restoredAnswers);
+    setMessages(
+      data.messages.flatMap((message) => {
+        if (message.role === 'user' && !message.content.trim()) return [];
+        return [{
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          createdAt: message.created_at,
+          elapsedMs: Number(message.metadata?.elapsedMs) || undefined,
+          asks: Array.isArray(message.metadata?.asks) ? message.metadata.asks : undefined,
+        }];
+      }),
     );
     replaceProposals(
       data.messages.flatMap((message) => {
         const proposal = message.metadata?.proposal;
-        return proposal ? [proposalOnReopen(proposal)] : [];
+        return proposal ? [{ ...proposalOnReopen(proposal), messageId: message.id }] : [];
       }),
     );
     setToolLogs(
@@ -795,14 +860,26 @@ export function AgentFloatingPanel({
 
   const applyProposal = useCallback(
     async (proposal: ActionProposal) => {
-      const outcome = await runProposalApply(proposal, {
-        batchApply: (actions, onProgress) => batchApplyChanges(
-          actions,
-          onProgress,
-          proposal.userMessage,
-          conversationIdRef.current,
-          citedNodesRef.current,
-        ),
+      const approval = runApprovalRef.current;
+      runApprovalRef.current = null;
+      const released = new Set(approval || []);
+      const actions = actionsReleasedForApproval(proposal.actions, released);
+      if (!actions.length) return;
+      const outcome = await runProposalApply({ ...proposal, actions }, {
+        batchApply: async (actions, onProgress) => {
+          const result = await batchApplyChanges(
+            actions,
+            onProgress,
+            proposal.userMessage,
+            conversationIdRef.current,
+            [...citedNodesRef.current, ...effectedRef.current.map((node) => node.id)],
+          );
+          if (result.effected.length || result.changelog) {
+            updateProposal(proposal.id, { effectedNodes: result.effected, changelog: result.changelog });
+            effectedRef.current = mergeEffectedNodes(effectedRef.current, result.effected);
+          }
+          return result;
+        },
         update: updateProposal,
         current: () => proposalsRef.current.find((item) => item.id === proposal.id),
         persist: (current) => persistProposalOutcome(
@@ -812,8 +889,21 @@ export function AgentFloatingPanel({
         queue: writeQueueRef.current,
       });
       if (outcome !== 'rejected' && outcome.choices.length) setImpactChoice(outcome.choices);
+      if (!approval && outcome !== 'rejected' && outcome.idMap) {
+        const idMap = outcome.idMap;
+        setMessages((items) => items.map((item) => !item.asks ? item : {
+          ...item,
+          asks: item.asks.map((card) => {
+            if (card.mode !== 'approve_run_node' || !card.node_keys) return card;
+            const next = { ...card, node_keys: card.node_keys.map((id) => idMap[id] || id) };
+            // 临时 id 落成真 id 后，这张卡的授权范围要按新 id 重新记一次。
+            rememberRunScope(item.id, next);
+            return next;
+          }),
+        }));
+      }
     },
-    [updateProposal],
+    [rememberRunScope, updateProposal],
   );
   const applyRef = useRef(applyProposal);
   applyRef.current = applyProposal;
@@ -837,6 +927,11 @@ export function AgentFloatingPanel({
       };
       replaceProposals((items) => [...items, proposal]);
       setImpactChoice(null);
+      // 重做的产出全是运行动作，服务端不会为它发审批卡；这里自己补一张，
+      // 否则提案会停在「等审批卡」而根本没有卡可点。
+      const nodeIds = actions.flatMap((action) => (action.type === 'execute_node_skill' ? [action.nodeId] : []));
+      const card = kind === 'redo' ? approveRunCard(nodeIds) : null;
+      if (card) setLocalRunCards((current) => ({ ...current, [proposal.id]: card }));
       if (kind === 'replace' && modeRef.current === 'auto') void applyRef.current(proposal);
     } catch (choiceError) {
       setError(choiceError instanceof Error ? choiceError.message : String(choiceError));
@@ -847,6 +942,28 @@ export function AgentFloatingPanel({
     (proposal: ActionProposal) => updateProposal(proposal.id, { status: 'discarded' }),
     [updateProposal],
   );
+
+  /**
+   * 本地重做提案自己的审批卡。批准后走和聊天审批卡同一条一次性放行：
+   * runApprovalRef 只给这一次 apply 用，用完即清。拒绝就放弃提案。
+   */
+  const answerLocalRun = useCallback((proposalId: string, approved: boolean) => {
+    const card = localRunCards[proposalId];
+    if (!card) return;
+    setLocalRunCards((current) => {
+      const next = { ...current };
+      delete next[proposalId];
+      return next;
+    });
+    const proposal = proposalsRef.current.find((item) => item.id === proposalId);
+    if (!proposal) return;
+    if (!approved) {
+      discardProposal(proposal);
+      return;
+    }
+    runApprovalRef.current = [...(card.node_keys || [])];
+    void applyRef.current(proposal);
+  }, [discardProposal, localRunCards]);
 
   const finishTurn = useCallback((assistantId: string) => {
     const elapsedMs = Math.max(0, Date.now() - startedAt.current);
@@ -863,14 +980,22 @@ export function AgentFloatingPanel({
           setConversationId(event.conversationId);
         }
         if (Array.isArray(event.citedNodes)) citedNodesRef.current = event.citedNodes;
+        if (Array.isArray(event.effectedNodes)) effectedRef.current = event.effectedNodes;
       } else if (event.type === 'delta') {
         setMessages((items) =>
           items.map((item) =>
             item.id === assistantId ? { ...item, content: `${item.content}${event.text}` } : item,
           ),
         );
+      } else if (event.type === 'ask') {
+        setMessages((items) => items.map((item) => (
+          item.id === assistantId ? { ...item, asks: event.asks } : item
+        )));
+        event.asks.forEach((card) => {
+          if (card.mode === 'approve_run_node') rememberRunScope(assistantId, card);
+        });
       } else if (event.type === 'proposal') {
-        replaceProposals((items) => [...items, event.proposal]);
+        replaceProposals((items) => [...items, { ...event.proposal, messageId: assistantId }]);
         if (!proposalWaitsForClick(modeRef.current, event.proposal)) {
           void applyRef.current(event.proposal);
         }
@@ -896,13 +1021,14 @@ export function AgentFloatingPanel({
         });
       }
     },
-    [finishTurn],
+    [finishTurn, rememberRunScope],
   );
 
   const sendText = useCallback(
     async (raw: string, history: ChatTurn[]) => {
       const text = raw.trim();
       if (streaming || (!text && !playbookId)) return;
+      if (playbookId) sessionPlaybookRef.current = playbookId;
       closeMentionPreviews();
       if (composerRef.current) replaceComposerText(composerRef.current, '');
       const snapshot = getCanvasSnapshot();
@@ -937,17 +1063,20 @@ export function AgentFloatingPanel({
       abortRef.current = controller;
       // 执行反馈只在同一会话内、刷新前有效。重开会话时 proposal 变为 expired 且 error 被删，失败信息不可恢复。这是已知边界，不是遗漏。
       const feedback = pendingExecutionFeedback(proposals);
-      const requestMessages = feedback
-        ? [
-            ...history,
-            {
-              id: uid('feedback'),
-              role: 'user' as const,
-              content: feedback.content,
-              createdAt: Date.now(),
-            },
-          ]
-        : history;
+      const requestMessages = [
+        ...(feedback
+          ? [
+              ...history,
+              {
+                id: uid('feedback'),
+                role: 'user' as const,
+                content: feedback.content,
+                createdAt: Date.now(),
+              },
+            ]
+          : history),
+        ...askHistoryRef.current,
+      ];
       if (feedback) updateProposal(feedback.id, { feedbackDeliveredAt: Date.now() });
       try {
         await streamCanvasAgent({
@@ -983,6 +1112,162 @@ export function AgentFloatingPanel({
       updateProposal,
     ],
   );
+
+  const submitAsk = useCallback((messageId: string, answer: AskAnswer) => {
+    const key = `${messageId}:${answer.cardId}`;
+    if (streaming || askedRef.current.has(key)) return;
+    askedRef.current.add(key);
+    setAskAnswers((current) => ({ ...current, [key]: answer }));
+    const runNodes = answer.mode === 'approve_run_node' && answer.selected[0] === '批准'
+      ? (messages.find((item) => item.id === messageId)?.asks?.find((card) => card.id === answer.cardId)?.node_keys || [])
+      : [];
+    // 批准的对象是「那一刻看到的内容」。卡上的节点集或内容在批准前变过，这张卡就作废，
+    // 不跑、也不假装批过。这一判必须在开流之前，否则会留下一条永不结束的空回复。
+    if (runNodes.length && !runScopeMatches(
+      runScopeRef.current.get(key),
+      getCanvasSnapshot().nodes,
+      runNodes,
+    )) {
+      // 卡上写的「批准」不能留着当已批准。把它标成已过期，并说明为什么没跑。
+      setAskAnswers((current) => ({ ...current, [key]: { ...answer, selected: ['已过期'] } }));
+      setNotice('这张审批卡已过期：页面刷新过，或节点内容在批准前变过。请让 Agent 重新提交运行再批。');
+      return;
+    }
+    const historyItem: ChatTurn = {
+      id: uid('ask'),
+      role: 'user',
+      content: '',
+      createdAt: Date.now(),
+      askAnswer: answer,
+    };
+    const prior = askHistoryRef.current;
+    askHistoryRef.current = [...prior, historyItem];
+    const assistantMessage: ChatTurn = {
+      id: uid('assistant'),
+      role: 'assistant',
+      content: '',
+      createdAt: Date.now(),
+    };
+    setMessages((items) => [...items, assistantMessage]);
+    setStreaming(true);
+    setError('');
+    startedAt.current = Date.now();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const snapshot = getCanvasSnapshot();
+    void (async () => {
+      if (runNodes.length) {
+        const pending = proposalsRef.current.find((proposal) => (
+          proposal.status === 'pending'
+          && proposal.actions.some((action) => action.type === 'execute_node_skill' && runNodes.includes(action.nodeId))
+        ));
+        if (pending) {
+          runApprovalRef.current = runNodes;
+          await applyRef.current(pending);
+        } else {
+          // 混合提案的结构已经落板，没有 pending 提案可挂。上面那张活卡校验保证：
+          // 跑的就是卡上列出的这批节点，且内容仍是发出卡时的那一份。
+          await batchApplyChanges(
+            runNodes.map((nodeId) => ({ type: 'execute_node_skill', nodeId })),
+            undefined,
+            undefined,
+            conversationIdRef.current,
+            [...citedNodesRef.current, ...effectedRef.current.map((node) => node.id)],
+          );
+        }
+      }
+      await streamCanvasAgent({
+        message: '',
+        askAnswer: answer,
+        messages: [...messages, ...prior],
+        snapshot,
+        conversationId: conversationId || undefined,
+        playbookId: sessionPlaybookRef.current || playbookId || undefined,
+        citedNodeIds: citedNodesRef.current,
+        signal: controller.signal,
+        onEvent: (event) => handleAgentEvent(assistantMessage.id, event),
+      });
+    })().catch((streamError) => {
+      if (!controller.signal.aborted) {
+        setError(streamError instanceof Error ? streamError.message : String(streamError));
+      }
+      finishTurn(assistantMessage.id);
+    }).finally(() => {
+      if (abortRef.current === controller) abortRef.current = null;
+      setStreaming(false);
+      void refreshConversations(snapshot.canvasId).catch(() => { /* keep current chat visible */ });
+    });
+  }, [
+    askAnswers,
+    conversationId,
+    finishTurn,
+    handleAgentEvent,
+    messages,
+    playbookId,
+    refreshConversations,
+    streaming,
+  ]);
+
+  const submitAsks = useCallback((messageId: string, answers: AskAnswer[]) => {
+    const keys = answers.map((answer) => `${messageId}:${answer.cardId}`);
+    if (streaming || !answers.length || keys.some((key) => askedRef.current.has(key))) return;
+    keys.forEach((key) => askedRef.current.add(key));
+    setAskAnswers((current) => {
+      const next = { ...current };
+      answers.forEach((answer) => { next[`${messageId}:${answer.cardId}`] = answer; });
+      return next;
+    });
+    const historyItem: ChatTurn = {
+      id: uid('ask'),
+      role: 'user',
+      content: '',
+      createdAt: Date.now(),
+      askAnswers: answers,
+    };
+    const prior = askHistoryRef.current;
+    askHistoryRef.current = [...prior, historyItem];
+    const assistantMessage: ChatTurn = {
+      id: uid('assistant'),
+      role: 'assistant',
+      content: '',
+      createdAt: Date.now(),
+    };
+    setMessages((items) => [...items, assistantMessage]);
+    setStreaming(true);
+    setError('');
+    startedAt.current = Date.now();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const snapshot = getCanvasSnapshot();
+    void streamCanvasAgent({
+      message: '',
+      askAnswers: answers,
+      messages: [...messages, ...prior],
+      snapshot,
+      conversationId: conversationId || undefined,
+      playbookId: sessionPlaybookRef.current || playbookId || undefined,
+      citedNodeIds: citedNodesRef.current,
+      signal: controller.signal,
+      onEvent: (event) => handleAgentEvent(assistantMessage.id, event),
+    }).catch((streamError) => {
+      if (!controller.signal.aborted) {
+        setError(streamError instanceof Error ? streamError.message : String(streamError));
+      }
+      finishTurn(assistantMessage.id);
+    }).finally(() => {
+      if (abortRef.current === controller) abortRef.current = null;
+      setStreaming(false);
+      void refreshConversations(snapshot.canvasId).catch(() => { /* keep current chat visible */ });
+    });
+  }, [
+    conversationId,
+    finishTurn,
+    handleAgentEvent,
+    messages,
+    playbookId,
+    refreshConversations,
+    streaming,
+  ]);
 
   const syncComposer = useCallback(() => {
     const root = composerRef.current;
@@ -1075,9 +1360,14 @@ export function AgentFloatingPanel({
   }, []);
 
   const stopStreaming = useCallback(() => {
+    const wasStreaming = Boolean(abortRef.current);
     abortRef.current?.abort();
     abortRef.current = null;
     setStreaming(false);
+    // 取消要留痕：下一轮读得到，才不会按被取消的旧计划默默续跑。
+    if (wasStreaming && conversationIdRef.current) {
+      void cancelAgentTurn(conversationIdRef.current).catch(() => { /* 留痕失败不阻断本地停止 */ });
+    }
   }, []);
 
   const toggleFloating = useCallback(() => {
@@ -1370,7 +1660,7 @@ export function AgentFloatingPanel({
                 >
                   <Sparkles aria-hidden="true" />
                   <h3>探索创作方向</h3>
-                  <p>描述镜头、节奏或工作流。默认会先给出建议，确认后才改画布。</p>
+                  <p>描述镜头、节奏或工作流。建/连/改按「执行模式」落板；运行一律等审批卡。</p>
                 </motion.div>
               ) : null}
               {messages.map((message) => (
@@ -1378,27 +1668,35 @@ export function AgentFloatingPanel({
                   {message.role === 'user' ? <span>YOU</span> : null}
                   {message.role === 'user' ? (
                     <p>{message.content ? <UserMessageBody content={message.content} /> : null}</p>
+                  ) : message.content ? (
+                    <AssistantMarkdown text={message.content} />
                   ) : (
-                    <AssistantMarkdown text={message.content || (streaming ? '正在构思…' : '')} />
+                    <AssistantMarkdown text={streaming && !message.asks?.length ? '正在构思…' : ''} />
                   )}
-                  {message.role === 'assistant' && message.elapsedMs ? (
-                    <div className="canvas-agent-meta">
-                      <span>总用时 {Math.max(1, Math.round(message.elapsedMs / 1000))}s</span>
-                      {messages.find((item) => item.role === 'user' && item.createdAt <= message.createdAt)
-                        ?.contextRatio ? (
-                        <span>
-                          上下文{' '}
-                          {
-                            [...messages]
-                              .reverse()
-                              .find((item) => item.role === 'user' && item.createdAt <= message.createdAt)
-                              ?.contextRatio
-                          }
-                          %
-                        </span>
-                      ) : null}
-                    </div>
+                  {message.asks?.length ? <p className="canvas-agent-turn-kicker">已询问</p> : null}
+                  {proposals.filter((item) => item.messageId === message.id && item.effectedNodes?.length).map((item) => (
+                    <EffectLabels key={item.id} nodes={item.effectedNodes || []} />
+                  ))}
+                  {message.asks?.some((card) => card.mode !== 'approve_run_node') ? (
+                    <AskPager
+                      cards={message.asks.filter((card) => card.mode !== 'approve_run_node')}
+                      answers={message.asks.filter((card) => card.mode !== 'approve_run_node').every((card) => askAnswers[`${message.id}:${card.id}`])
+                        ? message.asks.filter((card) => card.mode !== 'approve_run_node').flatMap((card) => {
+                          const answer = askAnswers[`${message.id}:${card.id}`];
+                          return answer ? [answer] : [];
+                        })
+                        : undefined}
+                      onSubmit={(answers) => submitAsks(message.id, answers)}
+                    />
                   ) : null}
+                  {message.asks?.filter((card) => card.mode === 'approve_run_node').map((card) => (
+                    <AskCardView
+                      key={card.id}
+                      card={card}
+                      answer={askAnswers[`${message.id}:${card.id}`]}
+                      onSubmit={(answer) => submitAsk(message.id, answer)}
+                    />
+                  ))}
                   {message.role === 'assistant' && message.content ? (
                     <div className="canvas-agent-message-tools">
                       <button
@@ -1464,21 +1762,28 @@ export function AgentFloatingPanel({
                   clampLines = [];
                 }
                 return (
-                  <ProposalPreviewCard
-                    key={proposal.id}
-                    proposal={proposal}
-                    open={open}
-                    clampLines={clampLines}
-                    onToggle={() => setProposalOpen((current) => ({ ...current, [proposal.id]: !open }))}
-                    onApply={applyProposal}
-                    onDiscard={discardProposal}
-                  />
+                  <Fragment key={proposal.id}>
+                    <ProposalPreviewCard
+                      proposal={proposal}
+                      open={open}
+                      clampLines={clampLines}
+                      onToggle={() => setProposalOpen((current) => ({ ...current, [proposal.id]: !open }))}
+                      onApply={applyProposal}
+                      onDiscard={discardProposal}
+                    />
+                    {localRunCards[proposal.id] && proposal.status === 'pending' ? (
+                      <AskCardView
+                        card={localRunCards[proposal.id]}
+                        onSubmit={(answer) => answerLocalRun(proposal.id, answer.selected[0] === '批准')}
+                      />
+                    ) : null}
+                  </Fragment>
                 );
               })}
               {toolLogs.length ? (
                 <div className="canvas-agent-processed">
                   <button type="button" onClick={() => setLogsOpen((value) => !value)}>
-                    已处理
+                    工具调用明细
                     <ChevronDown className={logsOpen ? 'is-open' : ''} aria-hidden="true" />
                   </button>
                   {logsOpen
@@ -1772,7 +2077,7 @@ export function AgentFloatingPanel({
                     <Hand aria-hidden="true" />
                     <span>
                       <strong>手动确认</strong>
-                      <small>Agent 在执行生成前都会寻求您的确认</small>
+                      <small>建节点、连线、改参数也等您点应用</small>
                     </span>
                     {mode === 'confirm' ? <Check aria-hidden="true" /> : null}
                   </button>
@@ -1780,10 +2085,14 @@ export function AgentFloatingPanel({
                     <Sparkles aria-hidden="true" />
                     <span>
                       <strong>自动生成</strong>
-                      <small>结构建议自动落板；生成仍会单独确认</small>
+                      <small>建节点、连线、改参数直接落板；运行仍要批准</small>
                     </span>
                     {mode === 'auto' ? <Check aria-hidden="true" /> : null}
                   </button>
+                  <p className="canvas-agent-menu-note">
+                    开启时建/连/改会停在待确认，点应用才落板；关闭时直接落板。
+                    运行在任何模式下都要审批卡，和这个开关无关。
+                  </p>
                 </div>
               ) : null}
             </footer>

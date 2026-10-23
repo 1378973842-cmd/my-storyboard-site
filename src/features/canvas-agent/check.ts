@@ -19,7 +19,13 @@ import { buildNineGridImagePrompt } from '../../lib/nineGrid/nineGridCore.js';
 import { formatNineGridRefLooksForPhaseA } from '../../services/canvasNineGridBridge';
 import { checkCanvasContentFidelity } from '../../services/canvasContentFidelity';
 import { sortBatchExecutions } from './core/executionOrder';
+import { approveRunCard, defaultAskAnswer, normalizeAskCards, parseAskAnswer, withRunApproval } from './core/askCard';
 import { actionProposalNeedsApproval, derivedStepTitle, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, openBatchProgress, partialBatchUpdate, pendingExecutionFeedback, proposalWaitsForClick, settleBatchProposal, stripCreatesOnShortYes, unknownCanvasActionMessage } from './core/proposal';
+import { actionsReleasedForApproval, runScopeDigest, runScopeMatches } from './core/runApproval';
+import { turnStatePrefix } from './core/turnState';
+import { changelogFromActions, effectedFromApply, effectedLine, mediaRunState, mediaStatusLabel, parseRunStates, turnLabelCollapsed } from './core/effectLedger';
+import { AskCardView } from './ui/AskCardView';
+import { AskPager } from './ui/AskPager';
 import { citationsForApply, citationsInUserMessage, droppedConnectCount, imageModelAcceptsReferenceInput, readableReferencePrompt, REFERENCE_IMAGE_FALLBACK_MODEL, referenceCapsuleLabel, referenceConnectionOrder, mentionTitleToStore, referenceClampLabels, settleReferenceActions } from './core/referencePrompt';
 import {
   deliverProposalDone,
@@ -31,11 +37,18 @@ import {
 import {
   appendCanvasAgentMessage,
   createCanvasAgentConversation,
+  hasPendingRunApproval,
   initCanvasAgentConversationSchema,
+  pendingAskQuestions,
   readConversationCitedNodes,
+  readConversationEffected,
   readConversationStage,
   recordConversationCitations,
+  recordConversationEffected,
   recordConversationStage,
+  setConversationCancelMarker,
+  takeConversationCancelMarker,
+  takeConversationChangelog,
   updateCanvasAgentProposalOutcome,
 } from './server/conversationStore';
 import { ProposalPreviewCard } from './ui/ProposalPreviewCard';
@@ -194,7 +207,8 @@ assert.equal(actionProposalNeedsApproval(actions), true);
 const tool = convertSkillToAITool(canvasSkillRegistry[0]);
 assert.equal(tool.type, 'function');
 assert.match(tool.function.name, /^run_/);
-assert.equal(coreCanvasTools.length, 4);
+assert.equal(coreCanvasTools.length, 5);
+assert.ok(coreCanvasTools.some((item) => item.function.name === 'ask_user'));
 assert.ok(coreCanvasTools.every((item) => item.function.parameters.type === 'object'));
 
 assert.equal(classifyIntake('总结当前画布，不要修改'), 'direct');
@@ -965,21 +979,38 @@ assert.match(updateRunCard, /更新 gen_anchor/);
 assert.match(updateRunCard, /运行 gen_anchor/);
 assert.match(updateRunCard, /一键应用到画布/);
 assert.doesNotMatch(updateRunCard, /已应用/);
+const runOnlyCard = renderToStaticMarkup(createElement(ProposalPreviewCard, {
+  proposal: {
+    id: 'run-only',
+    title: 'Agent 画布操作建议',
+    summary: '运行 1 个技能',
+    actions: [{ type: 'execute_node_skill', nodeId: 'vid_a' }],
+    status: 'pending',
+    requiresApproval: true,
+    generative: true,
+    createdAt: 1,
+  },
+  onApply() {},
+  onDiscard() {},
+}));
+assert.match(runOnlyCard, /等审批卡/);
+assert.doesNotMatch(runOnlyCard, /一键应用到画布/);
+assert.doesNotMatch(runOnlyCard, /放弃/);
 assert.doesNotMatch(updateRunCard, /update node config/);
 assert.equal(proposalWaitsForClick('confirm', {
-  generative: false,
   actions: [{ type: 'update_node_params', nodeId: 'gen_anchor', patch: {} }],
 }), true);
 assert.equal(proposalWaitsForClick('auto', {
-  generative: true,
   actions: [
     { type: 'update_node_params', nodeId: 'gen_anchor', patch: {} },
     { type: 'execute_node_skill', nodeId: 'gen_anchor' },
   ],
-}), true);
+}), false);
 assert.equal(proposalWaitsForClick('auto', {
-  generative: false,
   actions: [{ type: 'update_node_params', nodeId: 'gen_anchor', patch: {} }],
+}), false);
+assert.equal(proposalWaitsForClick('auto', {
+  actions: [{ type: 'execute_node_skill', nodeId: 'gen_anchor' }],
 }), true);
 assert.equal(listedNodeIds({ nodeIds: 'gen_anchor' })[0], 'gen_anchor');
 assert.equal(listedNodeIds({ nodeId: 'gen_anchor' })[0], 'gen_anchor');
@@ -1030,11 +1061,76 @@ const shortYesCreate = [
   { type: 'create_node' as const, tempId: 'v', nodeType: 'video' as const, initialParams: { prompt: '分镜' } },
   { type: 'connect_nodes' as const, sourceNodeId: 'img', targetNodeId: 'v' },
 ];
-const appliedYes = stripCreatesOnShortYes(shortYesCreate, 'applied', '好的');
+const appliedYes = stripCreatesOnShortYes(shortYesCreate, '好的');
 assert.equal(appliedYes.some((action) => action.type === 'create_node'), false);
 assert.equal(appliedYes.length, 0);
-assert.equal(stripCreatesOnShortYes(shortYesCreate, 'pending', '好的').some((action) => action.type === 'create_node'), true);
-assert.equal(stripCreatesOnShortYes(shortYesCreate, 'applied', '改成远景').some((action) => action.type === 'create_node'), true);
+assert.deepEqual(stripCreatesOnShortYes([{ type: 'execute_node_skill', nodeId: 'vid_a' }], '确认'), []);
+assert.equal(stripCreatesOnShortYes([{ type: 'execute_node_skill', nodeId: 'vid_a' }], '符合预期').length, 1);
+assert.equal(stripCreatesOnShortYes(shortYesCreate, '改成远景').some((action) => action.type === 'create_node'), true);
+const cardYes = parseAskAnswer({ cardId: 'c', mode: 'single', selected: ['确认'] });
+const cardGate = cardYes ? '' : '确认';
+assert.equal(cardGate, '');
+assert.equal(stripCreatesOnShortYes(shortYesCreate, cardGate).some((action) => action.type === 'create_node'), true);
+const asked = normalizeAskCards({ mode: 'single', question: '多少秒？', options: [{ type: 'text', label: '6' }] });
+assert.equal(asked[0]?.options.some((item) => item.type === 'input'), true);
+const runCard = withRunApproval([{ ...asked[0], id: 'q' }], ['vid_a', 'vid_b']);
+assert.equal(runCard.at(-1)?.mode, 'approve_run_node');
+assert.deepEqual(runCard.at(-1)?.options, [{ type: 'text', label: '批准' }, { type: 'text', label: '拒绝' }]);
+assert.deepEqual(runCard.at(-1)?.node_keys, ['vid_a', 'vid_b']);
+assert.equal(parseAskAnswer({ cardId: 'ask-run', mode: 'approve_run_node', selected: ['批准'], input: '改一下' }), null);
+assert.equal(approveRunCard([]) , null);
+const askHtml = renderToStaticMarkup(createElement(AskCardView, { card: asked[0], onSubmit() {} }));
+assert.match(askHtml, /自己写/);
+const runHtml = renderToStaticMarkup(createElement(AskCardView, { card: runCard.at(-1)!, onSubmit() {} }));
+assert.match(runHtml, /批准/);
+assert.match(runHtml, /拒绝/);
+assert.doesNotMatch(runHtml, /自己写/);
+assert.doesNotMatch(runHtml, /忽略/);
+const skipped = defaultAskAnswer(asked[0]);
+assert.equal(skipped.selected[0], '用默认');
+assert.equal(parseAskAnswer(skipped)?.selected[0], '用默认');
+assert.notEqual(parseAskAnswer(skipped), null);
+const pagerHtml = renderToStaticMarkup(createElement(AskPager, {
+  cards: [0, 1, 2, 3].map((index) => ({ ...asked[0], id: `ask-${index}`, question: `题${index + 1}` })),
+  onSubmit() {},
+}));
+assert.match(pagerHtml, /1\/4/);
+assert.match(pagerHtml, /忽略/);
+assert.match(pagerHtml, /继续/);
+assert.match(pagerHtml, /自己写/);
+const crowded = renderToStaticMarkup(createElement(AskPager, {
+  cards: [{
+    ...asked[0],
+    options: ['一', '二', '三', '四', '五'].map((label) => ({ type: 'text' as const, label })),
+  }],
+  onSubmit() {},
+}));
+assert.match(crowded, /自己写/);
+assert.match(crowded, />一</);
+assert.match(crowded, />三</);
+assert.doesNotMatch(crowded, />四</);
+assert.doesNotMatch(crowded, />五</);
+assert.equal(mediaStatusLabel('generator', 'created'), '图片节点已创建');
+assert.equal(mediaStatusLabel('generator', 'generated'), '图片已生成');
+assert.equal(mediaStatusLabel('generator', 'failed'), '执行失败');
+assert.equal(mediaStatusLabel('video', 'created'), '视频节点已创建');
+assert.notEqual(mediaStatusLabel('image', 'created'), mediaStatusLabel('image', 'generated'));
+assert.notEqual(mediaStatusLabel('image', 'generated'), mediaStatusLabel('image', 'failed'));
+assert.equal(turnLabelCollapsed('thinking'), true);
+assert.equal(turnLabelCollapsed('tools'), true);
+assert.equal(turnLabelCollapsed('failed'), false);
+assert.equal(turnLabelCollapsed('media'), false);
+assert.equal(turnLabelCollapsed('asked'), false);
+const turnLabelSource = readFileSync(new URL('./ui/TurnLabels.tsx', import.meta.url), 'utf8');
+assert.match(turnLabelSource, /思考过程/);
+assert.match(turnLabelSource, /<details/);
+assert.match(turnLabelSource, /data-collapsed="false"/);
+assert.doesNotMatch(turnLabelSource, /<details[^>]*\bopen\b/);
+assert.equal(mediaRunState({ id: 'gen', type: 'generator', agentLastError: { message: '跑失败' } }), 'failed');
+assert.equal(mediaRunState({ id: 'gen', type: 'generator', url: '/uploads/a.png' }), 'generated');
+assert.equal(mediaRunState({ id: 'gen', type: 'generator' }), 'created');
+assert.equal(mediaStatusLabel('generator', mediaRunState({ id: 'gen', type: 'generator' })), '图片节点已创建');
+assert.notEqual(mediaStatusLabel('generator', mediaRunState({ id: 'gen', type: 'generator' })), '已连线');
 const strippedConnects = [
   { type: 'connect_nodes' as const, sourceNodeId: 'img_a', targetNodeId: 'vid' },
   { type: 'connect_nodes' as const, sourceNodeId: 'img_b', targetNodeId: 'vid' },
@@ -1425,7 +1521,8 @@ const playbookBodies = ['canvas-video-piece', 'canvas-opening-animation'].map((i
   }
   if (step0.includes('参考关系只靠连线')) playbookGaps.push(`${id} 连线句仍停在步骤 0`);
   const step1 = steps.slice(steps.indexOf('### 步骤 1'), steps.indexOf('### 步骤 2'));
-  if (!step1.includes('没有待批准提案时')) playbookGaps.push(`${id} 步骤 1 没有短句肯定禁令`);
+  if (!step1.includes('没有审批卡时')) playbookGaps.push(`${id} 步骤 1 没有短句肯定禁令`);
+  if (step1.includes('有待批准的提案时')) playbookGaps.push(`${id} 短句禁令仍按待批准提案判`);
   const videoFrom = id === 'canvas-video-piece' ? '### 步骤 3' : '### 步骤 1';
   const videoTo = id === 'canvas-video-piece' ? '### 步骤 4' : '### 步骤 2';
   const videoStep = steps.slice(steps.indexOf(videoFrom), steps.indexOf(videoTo));
@@ -1433,6 +1530,13 @@ const playbookBodies = ['canvas-video-piece', 'canvas-opening-animation'].map((i
   const askAt = step1.indexOf('没答就不能建节点、不能写分镜——先问，等回答。');
   const productAt = step1.indexOf('产物：');
   if (askAt < 0 || productAt < 0 || askAt > productAt) playbookGaps.push(`${id} 开工追问不在产物之前`);
+  if (!steps.includes('为什么停在这儿')) playbookGaps.push(`${id} 停点没要求说明为什么`);
+  const cardWhy = '卡不是文字画出来的，是工具调用触发的';
+  if (steps.indexOf(cardWhy) < 0 || steps.indexOf(cardWhy) > steps.indexOf('为什么停在这儿')) {
+    playbookGaps.push(`${id} 卡片那句不在停点说明前面`);
+  }
+  if (!steps.includes('是你的责任不是他的')) playbookGaps.push(`${id} 没要求生成前提醒素材冲突`);
+  if (!step1.includes('用默认')) playbookGaps.push(`${id} 忽略没记成用默认`);
   const refStart = body.indexOf('参考图承载细节');
   const refEnd = body.indexOf('\n### ', refStart + 1);
   const refSection = refStart >= 0 && refEnd > refStart ? body.slice(refStart, refEnd) : '';
@@ -1453,6 +1557,18 @@ const playbookBodies = ['canvas-video-piece', 'canvas-opening-animation'].map((i
     playbookGaps.push(`${id} 分镜行九类或选择表不在产物之前`);
   }
   if (body.includes('和原则 2 的关系')) playbookGaps.push(`${id} 仍用原则编号指外观锚定`);
+  const shotHow = beforeProduct.slice(beforeProduct.indexOf('### 分镜行怎么写'));
+  if (!shotHow.includes('用用户消息的语言写')) playbookGaps.push(`${id} 分镜行没要求用用户消息的语言写`);
+  if (!shotHow.includes('不要把记号放进句子主干')) playbookGaps.push(`${id} 分镜行没拦住把记号放进主干`);
+  if (!beforeProduct.includes('防重复的约束，不是进度报告')) playbookGaps.push(`${id} 已生效清单没写成防重复约束`);
+  const handoffStop = id === 'canvas-video-piece'
+    ? '停点：每段的提示词都可以单独审，审到分镜级。'
+    : '停点：prompt 出来后等用户审，审到分镜级。';
+  const handoffAt = steps.indexOf(handoffStop);
+  const runProductAt = handoffAt < 0 ? -1 : steps.indexOf('批准即成片', handoffAt + handoffStop.length);
+  const handoff = handoffAt >= 0 && runProductAt > handoffAt ? steps.slice(handoffAt, runProductAt) : '';
+  if (!handoff.includes('下一拍直接提交运行')) playbookGaps.push(`${id} 认可后没要求下一拍提交运行`);
+  if (!handoff.includes('不用再等一拍落板')) playbookGaps.push(`${id} 衔接句仍按落板后再等一拍`);
   if (!beforeProduct.includes('不要写分镜1/分镜2/分镜3')) playbookGaps.push(`${id} 一镜到底写法不在产物之前`);
   if (!beforeProduct.includes('必须在同一个提案里做完')) playbookGaps.push(`${id} 建节点和连边没要求同一提案`);
   const axesAt = step1.indexOf('克制不等于一镜到底');
@@ -1527,7 +1643,189 @@ assert.deepEqual(
   ['canvas:img_b', 'img_a', 'img_b'],
 );
 assert.deepEqual(readConversationCitedNodes(stageDb, 'user', otherConversation.id), []);
+assert.deepEqual(readConversationEffected(stageDb, 'user', freshConversation.id), []);
+recordConversationEffected(stageDb, 'user', 'p1', [
+  { id: 'vid_xxx', nodeType: 'video', label: '阿波罗开场 10 秒' },
+], 'createNode: vid_xxx（video）');
+assert.deepEqual(readConversationEffected(stageDb, 'user', freshConversation.id), [
+  { id: 'vid_xxx', nodeType: 'video', label: '阿波罗开场 10 秒' },
+]);
+assert.deepEqual(readConversationEffected(stageDb, 'user', otherConversation.id), []);
+updateCanvasAgentProposalOutcome(stageDb, 'user', 'p1', {
+  status: 'applied',
+  error: null,
+  partialSkipped: null,
+  droppedConnects: null,
+  reason: null,
+});
+assert.equal(takeConversationChangelog(stageDb, 'user', freshConversation.id), 'createNode: vid_xxx（video）');
+assert.equal(takeConversationChangelog(stageDb, 'user', freshConversation.id), '');
+recordConversationCitations(stageDb, 'user', otherConversation.id, '{{img_old}}');
+assert.deepEqual(readConversationEffected(stageDb, 'user', otherConversation.id), []);
 stageDb.close();
+const ledgerLine = canvasAgentStageSegment('canvas-opening-animation', 1, [
+  { id: 'vid_xxx', nodeType: 'video', label: '阿波罗开场 10 秒' },
+]);
+assert.equal(ledgerLine, '## 当前阶段\n技能：开场动画 / 步骤：1\n已生效清单：\nvid_xxx | video | 不在画布上 | 阿波罗开场 10 秒');
+const ledgerRunStates = parseRunStates({ vid_xxx: 'created', gen_yyy: 'generated', bad: 'running' });
+assert.deepEqual(ledgerRunStates, { vid_xxx: 'created', gen_yyy: 'generated' });
+assert.equal(effectedLine([
+  { id: 'vid_xxx', nodeType: 'video', label: '阿波罗10s克制一镜到底开场' },
+  { id: 'gen_yyy', nodeType: 'generator', label: '角色锚点：诸葛亮' },
+], ledgerRunStates), '已生效清单：\nvid_xxx | video | 已创建（未生成） | 阿波罗10s克制一镜到底开场\ngen_yyy | generator | 已生成 | 角色锚点：诸葛亮');
+assert.equal(
+  effectedLine([{ id: 'gen_f', nodeType: 'generator' }], { gen_f: mediaRunState({ id: 'gen_f', type: 'generator', agentLastError: { message: 'x' } }) }),
+  '已生效清单：\ngen_f | generator | 执行失败',
+);
+const approvalDb = new Database(':memory:');
+initCanvasAgentConversationSchema(approvalDb);
+const approvalConversation = createCanvasAgentConversation(approvalDb, 'user', 'canvas', '审批');
+assert.equal(hasPendingRunApproval(approvalDb, 'user', approvalConversation.id), false);
+appendCanvasAgentMessage(approvalDb, 'user', approvalConversation.id, 'assistant', '', {
+  asks: [{ id: 'q', mode: 'single', question: '几秒？', options: [] }],
+});
+assert.equal(hasPendingRunApproval(approvalDb, 'user', approvalConversation.id), false);
+appendCanvasAgentMessage(approvalDb, 'user', approvalConversation.id, 'assistant', '', {
+  asks: [{ id: 'ask-run', mode: 'approve_run_node', question: '批准运行这些节点？', options: [], node_keys: ['vid_a'] }],
+});
+assert.equal(hasPendingRunApproval(approvalDb, 'user', approvalConversation.id), true);
+appendCanvasAgentMessage(approvalDb, 'user', approvalConversation.id, 'user', '好的', {});
+assert.equal(hasPendingRunApproval(approvalDb, 'user', approvalConversation.id), true);
+appendCanvasAgentMessage(approvalDb, 'user', approvalConversation.id, 'user', '', {
+  askAnswer: { cardId: 'ask-run', mode: 'approve_run_node', question: '批准运行这些节点？', selected: ['批准'] },
+});
+assert.equal(hasPendingRunApproval(approvalDb, 'user', approvalConversation.id), false);
+approvalDb.close();
+
+// ---- 审批范围：卡绑的是「那一刻这批节点、这份内容」 ----
+const scopeNodes = [
+  { id: 'gen_a', type: 'generator', prompt: '阿波罗开场', x: 0, y: 0 },
+  { id: 'gen_b', type: 'generator', prompt: '诸葛亮近景' },
+];
+const scope = { nodeIds: ['gen_a', 'gen_b'], digest: runScopeDigest(scopeNodes, ['gen_a', 'gen_b']) };
+assert.equal(runScopeMatches(scope, scopeNodes, ['gen_b', 'gen_a']), true);
+assert.equal(runScopeMatches(undefined, scopeNodes, ['gen_a', 'gen_b']), false);
+assert.equal(runScopeMatches(scope, scopeNodes, ['gen_a']), false);
+assert.equal(runScopeMatches(scope, scopeNodes.map((node) => ({ ...node, x: 900 })), ['gen_a', 'gen_b']), true);
+assert.equal(runScopeMatches(scope, scopeNodes.map((node) => (
+  node.id === 'gen_a' ? { ...node, prompt: '换成夜景' } : node
+)), ['gen_a', 'gen_b']), false);
+const mixedActions = [
+  { type: 'create_node' as const, tempId: 't', nodeType: 'generator', initialParams: { prompt: 'x' } },
+  { type: 'execute_node_skill' as const, nodeId: 't' },
+];
+assert.deepEqual(actionsReleasedForApproval(mixedActions, new Set<string>()), [mixedActions[0]]);
+assert.deepEqual(actionsReleasedForApproval(mixedActions, new Set(['t'])), mixedActions);
+assert.deepEqual(actionsReleasedForApproval(mixedActions, new Set(['other'])), [mixedActions[0]]);
+// 默认 confirm：建 + 跑的混合提案停在待确认；点应用只落结构，运行仍由审批卡放行。
+assert.equal(proposalWaitsForClick('confirm', { actions: mixedActions }), true);
+assert.equal(proposalWaitsForClick('auto', { actions: mixedActions }), false);
+assert.deepEqual(withRunApproval([], ['t']).at(-1)?.node_keys, ['t']);
+const redoCard = approveRunCard(['gen_a']);
+assert.equal(redoCard?.mode, 'approve_run_node');
+assert.deepEqual(redoCard?.node_keys, ['gen_a']);
+assert.equal(approveRunCard([]), null);
+// 重做产出全是运行动作；这张卡必须指向同一批节点，否则又会停在「等审批卡」。
+const redoActions = choiceActions(snapshot, [{ nodeId: 'image-1', label: 'hero', failed: false }], 'redo');
+const redoRunCard = approveRunCard(redoActions.flatMap((action) => (
+  action.type === 'execute_node_skill' ? [action.nodeId] : []
+)));
+assert.deepEqual(redoRunCard?.node_keys, ['image-1']);
+
+// ---- 未答 / 已跳过：没答不等于同意 ----
+const askDb = new Database(':memory:');
+initCanvasAgentConversationSchema(askDb);
+const askConversation = createCanvasAgentConversation(askDb, 'user', 'canvas', '提问');
+assert.deepEqual(pendingAskQuestions(askDb, 'user', askConversation.id), []);
+appendCanvasAgentMessage(askDb, 'user', askConversation.id, 'assistant', '', {
+  asks: [{ id: 'q1', mode: 'single', question: '几秒？', options: [] }],
+});
+assert.deepEqual(pendingAskQuestions(askDb, 'user', askConversation.id), ['几秒？']);
+appendCanvasAgentMessage(askDb, 'user', askConversation.id, 'user', '好的', {});
+assert.deepEqual(pendingAskQuestions(askDb, 'user', askConversation.id), ['几秒？']);
+appendCanvasAgentMessage(askDb, 'user', askConversation.id, 'user', '', {
+  askAnswer: { cardId: 'q1', mode: 'single', question: '几秒？', selected: ['6'] },
+});
+assert.deepEqual(pendingAskQuestions(askDb, 'user', askConversation.id), []);
+appendCanvasAgentMessage(askDb, 'user', askConversation.id, 'assistant', '', {
+  asks: [{ id: 'ask-run', mode: 'approve_run_node', question: '批准运行这些节点？', options: [], node_keys: ['vid_a'] }],
+});
+assert.deepEqual(pendingAskQuestions(askDb, 'user', askConversation.id), [], '审批卡不进提问卡统计');
+appendCanvasAgentMessage(askDb, 'user', askConversation.id, 'assistant', '', {
+  asks: [{ id: 'q2', mode: 'multiple', question: '要哪些镜头？', options: [] }],
+});
+assert.deepEqual(pendingAskQuestions(askDb, 'user', askConversation.id), ['要哪些镜头？']);
+appendCanvasAgentMessage(askDb, 'user', askConversation.id, 'user', '', {
+  askAnswer: defaultAskAnswer({ id: 'q2', mode: 'multiple', question: '要哪些镜头？', options: [] }),
+});
+assert.deepEqual(pendingAskQuestions(askDb, 'user', askConversation.id), [], '点忽略算已答，但记的是用默认');
+askDb.close();
+
+// ---- 取消留痕：写一次、下一轮读一次、读完即清 ----
+const cancelDb = new Database(':memory:');
+initCanvasAgentConversationSchema(cancelDb);
+const cancelConversation = createCanvasAgentConversation(cancelDb, 'user', 'canvas', '取消');
+appendCanvasAgentMessage(cancelDb, 'user', cancelConversation.id, 'user', '做一版 15 秒', {});
+assert.equal(takeConversationCancelMarker(cancelDb, 'user', cancelConversation.id), null);
+const cancelled = setConversationCancelMarker(cancelDb, 'user', cancelConversation.id);
+assert.ok(cancelled);
+assert.ok(cancelled?.messageId);
+assert.equal(takeConversationCancelMarker(cancelDb, 'user', cancelConversation.id)?.messageId, cancelled?.messageId);
+assert.equal(takeConversationCancelMarker(cancelDb, 'user', cancelConversation.id), null, '取消只读一次');
+cancelDb.close();
+
+const approvalPanelSource = readFileSync(new URL('./ui/AgentFloatingPanel.tsx', import.meta.url), 'utf8');
+assert.match(approvalPanelSource, /useState<AgentMode>\('confirm'\)/);
+assert.match(approvalPanelSource, /setMode\('auto'\)/);
+assert.match(approvalPanelSource, /开启时建\/连\/改会停在待确认/);
+assert.match(approvalPanelSource, /运行在任何模式下都要审批卡/);
+assert.match(approvalPanelSource, /approveRunCard\(nodeIds\)/);
+assert.match(approvalPanelSource, /runScopeMatches\(/);
+assert.match(approvalPanelSource, /cancelAgentTurn\(/);
+const approvalRouteSource = readFileSync(new URL('./server/registerCanvasAgentRoutes.ts', import.meta.url), 'utf8');
+assert.match(approvalRouteSource, /app\.post\('\/api\/canvas-agent\/conversations\/:id\/cancel'/);
+assert.match(approvalRouteSource, /turnStatePrefix\(/);
+assert.equal(turnStatePrefix({ cancelled: false, pendingAsks: [] }), '');
+assert.equal(turnStatePrefix({ cancelled: false, pendingAsks: [' ', ''] }), '');
+assert.match(
+  turnStatePrefix({ cancelled: true, pendingAsks: [] }),
+  /\[user_cancelled\]\n上一轮用户取消了，不要默默续跑原计划；把下一条消息当新指示。/,
+);
+assert.match(
+  turnStatePrefix({ cancelled: false, pendingAsks: ['几秒？', '要哪些镜头？'] }),
+  /\[unanswered_asks\]\n上一轮的提问卡还没有答复：「几秒？」、「要哪些镜头？」。没答不等于同意/,
+);
+assert.match(
+  turnStatePrefix({ cancelled: true, pendingAsks: ['几秒？'] }),
+  /\[user_cancelled\][\s\S]*\[unanswered_asks\]/,
+);
+const askCardViewSource = readFileSync(new URL('./ui/AskCardView.tsx', import.meta.url), 'utf8');
+assert.match(askCardViewSource, /待答/);
+assert.match(askCardViewSource, /已跳过（用默认）/);
+assert.equal(canvasAgentStagePrefix('canvas-opening-animation', 1, 'canvas-video-piece', [
+  { id: 'vid_xxx', nodeType: 'video', label: '阿波罗开场 10 秒' },
+]).includes('步骤'), false);
+const keptByLedger = settleReferenceActions([
+  { type: 'connect_nodes', sourceNodeId: 'vid_xxx', targetNodeId: 'vid_new' },
+], [{ id: 'vid_xxx', type: 'video' }], [], citationsForApply('符合预期', ['vid_xxx']), [], 'other-session');
+assert.equal(keptByLedger.some((action) => action.type === 'connect_nodes'), true);
+const droppedWithoutLedger = settleReferenceActions([
+  { type: 'connect_nodes', sourceNodeId: 'vid_xxx', targetNodeId: 'vid_new' },
+], [{ id: 'vid_xxx', type: 'video' }], [], citationsForApply('符合预期', []), [], 'other-session');
+assert.equal(droppedWithoutLedger.some((action) => action.type === 'connect_nodes'), false);
+const namedLedger = effectedFromApply([
+  { type: 'create_node', tempId: 'temp', nodeType: 'video', initialParams: { reason: '模型解释' } },
+], { temp: 'vid_real' }, []);
+assert.equal(namedLedger[0]?.id, 'vid_real');
+assert.equal(namedLedger[0]?.label, '模型解释');
+const untitled = effectedFromApply([
+  { type: 'create_node', tempId: 'temp', nodeType: 'generator', initialParams: {} },
+], { temp: 'gen_real' }, []);
+assert.equal(untitled[0]?.label, undefined);
+assert.match(changelogFromActions([
+  { type: 'create_node', tempId: 'temp', nodeType: 'video' },
+  { type: 'connect_nodes', sourceNodeId: 'img_a', targetNodeId: 'temp' },
+], { temp: 'vid_xxx' }), /createNode: vid_xxx（video）[\s\S]*connectNodes: 1 条（img_a → vid_xxx）/);
 const playbookPanelSource = readFileSync(new URL('./ui/AgentFloatingPanel.tsx', import.meta.url), 'utf8');
 assert.doesNotMatch(playbookPanelSource, /按编排规范|按技能「|画布编排/);
 assert.match(playbookPanelSource, /setPlaybookId\(playbook\.id\)/);
@@ -2465,7 +2763,8 @@ assert.ok(orderAt('flattenModelParamKeys(normalized)') < orderAt('rejectUnknownC
 assert.ok(orderAt('rejectUnknownCanvasParamKeys(') < orderAt('applyRebuildGuards('));
 assert.ok(orderAt('applyRebuildGuards(') < orderAt('invalidationActions('));
 assert.ok(orderAt('assertCanvasVideoShotTimelines(') < orderAt('applyCanvasAgentActions('));
-assert.match(promptSource, /stripCreatesOnShortYes\(actions, proposalStatus, message\)/);
+assert.match(promptSource, /stripCreatesOnShortYes\(actions, message\)/);
+assert.match(promptSource, /runCardPending\s*\?\s*'审批卡还在等您/);
 assert.match(promptSource, /上一批已完成。您是要继续做下一步，还是要改刚才的分析？/);
 assert.doesNotMatch(promptSource, /要做什么，直接说/);
 const landedShots = [
@@ -2535,7 +2834,11 @@ const coerceAt = engineSource.indexOf('coerceReferenceImageModel', runGeneratorA
 const rejectModelAt = engineSource.indexOf('rejectCanvasAgentModelChoice(gen', runGeneratorAt);
 assert.ok(coerceAt > runGeneratorAt && coerceAt < rejectModelAt);
 const agentPanelSource = readFileSync(new URL('./ui/AgentFloatingPanel.tsx', import.meta.url), 'utf8');
-assert.match(agentPanelSource, /batchApplyChanges\(\s*actions,\s*onProgress,\s*proposal\.userMessage,\s*conversationIdRef\.current,\s*citedNodesRef\.current,\s*\)/);
+assert.match(agentPanelSource, /batchApplyChanges\(\s*actions,\s*onProgress,\s*proposal\.userMessage,\s*conversationIdRef\.current,\s*\[\.\.\.citedNodesRef\.current, \.\.\.effectedRef\.current\.map\(\(node\) => node\.id\)\],\s*\)/);
+assert.match(agentPanelSource, /takeConversationChangelog|EffectLabels/);
+assert.match(systemPrompt, /takeConversationChangelog/);
+assert.match(systemPrompt, /canvasAgentStagePrefix\([\s\S]*effectedNodes, parseRunStates\(body\.runStates\)\)/);
+assert.match(systemPrompt, /\[canvas_changelog\]/);
 assert.match(agentPanelSource, /citedNodeIds:\s*citedNodesRef\.current/);
 assert.match(agentPanelSource, /mentionTitleToStore\(input\.value\)/);
 assert.match(agentPanelSource, /node\.title = stored/);
@@ -3035,6 +3338,27 @@ assert.doesNotThrow(() => assertAgentActionContent(
   batchSnapshot,
   GENERATOR_TYPES,
 ));
+
+const apolloId = 'img_6d63229c42dbf8_1792548871759';
+const storedSend = `与 {{${apolloId}}}（金发白袍）的外观完全一致`;
+const sendHost = { id: 'vid_7778026b6446a8_1792654978537', type: 'video', prompt: storedSend };
+reverseHarness.setBoard([
+  { id: apolloId, type: 'image', title: '阿波罗', name: 'canvas-output-1791792460637.jpg' },
+  { id: 'bare', type: 'image', name: 'canvas-output-1.jpg' },
+  sendHost,
+], []);
+const sentPrompt = reverseHarness.composeGeneratorPrompt(sendHost, [{ prompt: '' }]);
+assert.equal(sendHost.prompt, storedSend);
+assert.equal(sentPrompt, '与 阿波罗（金发白袍）的外观完全一致');
+assert.equal(sentPrompt.includes('{{'), false);
+assert.equal(sentPrompt.includes(apolloId), false);
+const unnamedSent = reverseHarness.composeGeneratorPrompt(
+  { prompt: `与 {{bare}}（金发白袍）的外观完全一致` },
+  [],
+);
+assert.equal(unnamedSent, '与 （金发白袍）的外观完全一致');
+assert.equal(unnamedSent.includes('{{'), false);
+assert.equal(unnamedSent.includes('bare'), false);
 
 const libraryAssets = [
   { id: 'red', name: '红发女刑警', url: '/uploads/asset-library/user-b/red.png', category: '角色' },

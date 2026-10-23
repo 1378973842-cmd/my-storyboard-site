@@ -1,4 +1,5 @@
 import { serializeCanvasContext, visionImageUrlsForTurn } from './contextSerializer';
+import { mediaRunState } from './effectLedger';
 import type {
   AgentChatMessage,
   CanvasAgentStreamEvent,
@@ -13,6 +14,8 @@ export type AgentStreamRequest = {
   conversationId?: string;
   playbookId?: string;
   citedNodeIds?: readonly string[];
+  askAnswer?: AgentChatMessage['askAnswer'];
+  askAnswers?: AgentChatMessage['askAnswers'];
   signal?: AbortSignal;
   onEvent: (event: CanvasAgentStreamEvent) => void;
 };
@@ -38,7 +41,15 @@ export async function streamCanvasAgent(request: AgentStreamRequest): Promise<vo
       playbookId: request.playbookId,
       context: serializeCanvasContext(request.snapshot),
       visionImages: visionImageUrlsForTurn(request.snapshot, request.message, request.citedNodeIds),
-      messages: request.messages.map(({ role, content }) => ({ role, content })),
+      runStates: Object.fromEntries(request.snapshot.nodes.map((node) => [node.id, mediaRunState(node)])),
+      messages: request.messages.map(({ role, content, askAnswer, askAnswers }) => ({
+        role,
+        content: askAnswer || askAnswers?.length ? '' : content,
+        ...(askAnswers?.length ? { askAnswers } : askAnswer ? { askAnswer } : {}),
+      })),
+      ...(request.askAnswers?.length
+        ? { askAnswers: request.askAnswers }
+        : request.askAnswer ? { askAnswer: request.askAnswer } : {}),
     }),
     signal: request.signal,
   });
@@ -76,5 +87,18 @@ export async function streamCanvasAgent(request: AgentStreamRequest): Promise<vo
     const data = buffer.replace(/^data:\s*/gm, '').trim();
     const event = parseEvent(data);
     if (event) request.onEvent(event);
+  }
+}
+
+/** 用户主动取消这一轮。走显式接口，不能用连接断开代替：刷新、断网也会断连接。 */
+export async function cancelAgentTurn(conversationId: string): Promise<void> {
+  if (!conversationId) return;
+  const response = await fetch(`/api/canvas-agent/conversations/${encodeURIComponent(conversationId)}/cancel`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(`取消留痕失败 (${response.status})`);
   }
 }

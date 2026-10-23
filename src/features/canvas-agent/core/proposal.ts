@@ -224,36 +224,35 @@ export function interpretCanvasProposalText(text: string): InterpretedCanvasText
   return { actions, summary, prose: located.prose, unknownTypes: [] };
 }
 
-// 正文点名的短句。判据是有没有待批准提案，长句照常可以新建。
+// 正文点名的短句。长句照常可以新建。
 const SHORT_YES = /^(?:好的|确认|行|继续|嗯)[。.!！]?$/u;
 
-/** 待批准时短句肯定留着。applied 或还没有提案时，这句不发放新建，连着新建节点的边一起拿掉。 */
+/**
+ * 建、连、改提案后直接落板，只有运行等审批卡。所以短句肯定从不发放新建，也不发放运行：
+ * 没卡时它没有可批准的东西，有卡时批准只能在卡上点。连着新建节点的边一起拿掉。
+ */
 export function stripCreatesOnShortYes(
   actions: CanvasAction[],
-  proposalStatus: string | null,
   message: string,
 ): CanvasAction[] {
-  if (proposalStatus === 'pending' || !SHORT_YES.test(message.trim())) return actions;
+  if (!SHORT_YES.test(message.trim())) return actions;
   const created = new Set(actions.flatMap((action) => (
     action.type === 'create_node' && action.tempId ? [action.tempId] : []
   )));
   return actions.filter((action) => {
-    if (action.type === 'create_node') return false;
+    if (action.type === 'create_node' || action.type === 'execute_node_skill') return false;
     return action.type !== 'connect_nodes'
       || (!created.has(action.sourceNodeId) && !created.has(action.targetNodeId));
   });
 }
 
-/** 手动确认始终等点击。自动模式只自动落「没有更新、也没有执行」的结构。更新和执行点过才算已应用。 */
+/** 手动确认始终等点击。自动模式下建、连、改直接落板；只剩运行的提案等审批卡，运行本身在落板时被挡住。 */
 export function proposalWaitsForClick(
   mode: 'confirm' | 'auto',
-  proposal: Pick<ActionProposal, 'generative' | 'actions'>,
+  proposal: Pick<ActionProposal, 'actions'>,
 ): boolean {
   if (mode !== 'auto') return true;
-  if (proposal.generative) return true;
-  return proposal.actions.some((action) =>
-    action.type === 'update_node_params' || action.type === 'execute_node_skill',
-  );
+  return proposal.actions.every((action) => action.type === 'execute_node_skill');
 }
 
 export function actionProposalNeedsApproval(actions: CanvasAction[]): boolean {

@@ -104,6 +104,7 @@ type ApplyBatchResult<T> = {
   failedExecution?: { nodeId: string; message: string; reason?: string };
   choices: T[];
   droppedConnects?: number;
+  idMap?: Record<string, string>;
 };
 
 export async function runProposalApply<T>(
@@ -118,15 +119,17 @@ export async function runProposalApply<T>(
     persist: (current: ActionProposal) => Promise<number>;
     queue: ProposalWriteQueue;
   },
-): Promise<{ choices: T[] } | 'rejected'> {
+): Promise<{ choices: T[]; idMap?: Record<string, string> } | 'rejected'> {
   if (proposal.status !== 'pending') return 'rejected';
   deps.update(proposal.id, { status: 'applying', error: '' });
   let choices: T[] = [];
+  let idMap: Record<string, string> | undefined;
   try {
     const result = await deps.batchApply(proposal.actions, (done, total) => {
       deps.update(proposal.id, { progress: { done, total } });
     });
     choices = result.choices;
+    idMap = result.idMap;
     const executionCount = proposal.actions.filter((action) => action.type === 'execute_node_skill').length;
     const droppedConnects = Math.max(0, Math.floor(Number(result.droppedConnects) || 0));
     deps.update(
@@ -143,7 +146,7 @@ export async function runProposalApply<T>(
     });
   }
   const current = deps.current();
-  if (!current) return { choices };
+  if (!current) return { choices, idMap };
   try {
     const changes = await deps.persist(current);
     noteUnpersistedProposal(changes, proposal, deps.queue);
@@ -151,5 +154,5 @@ export async function runProposalApply<T>(
     console.warn('[canvas-agent] proposal 结局写回失败:', error);
     noteUnpersistedProposal(0, proposal, deps.queue);
   }
-  return { choices };
+  return { choices, idMap };
 }

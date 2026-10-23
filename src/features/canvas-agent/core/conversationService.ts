@@ -1,3 +1,4 @@
+import type { EffectedNode } from './effectLedger';
 import type { AgentConversation, AgentStoredMessage } from '../types';
 import type { ProposalDiskOutcome } from './proposalPersistence';
 
@@ -38,7 +39,7 @@ export async function createAgentConversation(
 
 export async function loadAgentConversation(
   conversationId: string,
-): Promise<{ conversation: AgentConversation; messages: AgentStoredMessage[]; citedNodes?: string[] }> {
+): Promise<{ conversation: AgentConversation; messages: AgentStoredMessage[]; citedNodes?: string[]; effectedNodes?: EffectedNode[] }> {
   return requestJson(`/api/canvas-agent/conversations/${encodeURIComponent(conversationId)}/messages`);
 }
 
@@ -55,7 +56,12 @@ export async function renameAgentConversation(
 
 export async function persistProposalOutcome(
   proposalId: string,
-  outcome: ProposalDiskOutcome & { playbookId?: string; stage?: number },
+  outcome: ProposalDiskOutcome & {
+    playbookId?: string;
+    stage?: number;
+    effectedNodes?: EffectedNode[];
+    changelog?: string;
+  },
 ): Promise<number> {
   const data = await requestJson<{ updated: number }>(
     `/api/canvas-agent/proposals/${encodeURIComponent(proposalId)}`,
