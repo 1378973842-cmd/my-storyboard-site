@@ -62,10 +62,18 @@ export function noteUnpersistedProposal(
   return 'queued';
 }
 
-/** pending 才过期。其余状态原样留着，error、partialSkipped 和 reason 不删。竞态没补上的 pending 也在这里收成 expired。 */
-export function proposalOnReopen<T extends { status: string }>(proposal: T): T {
+/**
+ * 只有「已经开始落板」的提案才过期：applying 表示客户端报过开始、结果没写回来，
+ * 再应用可能重复建节点；只剩运行的提案没有结构可复用，也收成 expired。
+ * pending 表示一次都没开始（applyProposal 先写 applying 再动画布），重开时留着，用户还能点。
+ */
+export function proposalOnReopen<T extends { status: string; actions?: ReadonlyArray<{ type: string }> }>(
+  proposal: T,
+): T {
+  if (proposal.status === 'applying') return { ...proposal, status: 'expired' };
   if (proposal.status !== 'pending') return proposal;
-  return { ...proposal, status: 'expired' };
+  const hasStructure = (proposal.actions || []).some((action) => action.type !== 'execute_node_skill');
+  return hasStructure ? proposal : { ...proposal, status: 'expired' };
 }
 
 export function deliverProposalDone(

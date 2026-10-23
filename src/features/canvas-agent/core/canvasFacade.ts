@@ -96,6 +96,20 @@ export function getCanvasSnapshot(): CanvasSnapshot {
   return getCanvasAgentSnapshot() as CanvasSnapshot;
 }
 
+/** 卡片上给用户看的节点名。id 对用户没意义，只在节点找不到时兜底。 */
+export function nodeLabelsFor(ids: readonly string[]): Record<string, string> {
+  const wanted = new Set(ids.filter(Boolean));
+  if (!wanted.size) return {};
+  const labels: Record<string, string> = {};
+  for (const node of getCanvasSnapshot().nodes) {
+    if (!wanted.has(node.id)) continue;
+    const title = String(node.title || node.name || '').trim();
+    const prompt = String(node.prompt || node.text || '').trim();
+    labels[node.id] = title || (prompt ? prompt.slice(0, 14) : '') || String(node.type || node.id);
+  }
+  return labels;
+}
+
 export function createNode(
   type: string,
   initialParams: Record<string, any>,
@@ -228,12 +242,19 @@ function flattenModelParamKeys(actions: CanvasAction[]): CanvasAction[] {
   });
 }
 
+export type BatchStepEvent = {
+  nodeId: string;
+  status: 'done' | 'failed' | 'skipped';
+  message?: string;
+};
+
 export async function batchApplyChanges(
   actions: CanvasAction[],
   onProgress?: (done: number, total: number) => void,
   userMessage?: string,
   conversationId?: string,
   sessionCitedNodes?: readonly string[],
+  onStep?: (step: BatchStepEvent) => void,
 ): Promise<{
   choices: ImpactChoice[];
   skippedCount: number;
@@ -291,6 +312,7 @@ export async function batchApplyChanges(
     skippedCount += 1;
     withCanvasAgentNode(nodeId, (node) => settleAgentStaleAfterExecution(node, false, message));
     flushCanvasAgentSave();
+    onStep?.({ nodeId, status: 'skipped', message });
   };
   // 进度写在提案卡片上。apply 已经在改这份 React state，卡片看得见，保存态也不会来抢。
   // 不要走 setStatus：它写的是 display:none 的节点，而唯一可见的 #saveState 被保存指示器占用。
@@ -314,11 +336,13 @@ export async function batchApplyChanges(
         nodeId,
       );
       await executeAndSettle(nodeId);
+      onStep?.({ nodeId, status: 'done' });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err || '');
       const rawReason = err && typeof err === 'object' && 'reason' in err ? err.reason : undefined;
       const reason = typeof rawReason === 'string' ? rawReason : undefined;
       failedExecution = { nodeId, message, reason };
+      onStep?.({ nodeId, status: 'failed', message });
     }
   }
   for (const action of overflow) {

@@ -20,6 +20,7 @@ import { registerCanvasSiteImageRoutes } from "./canvasSiteImageBridge.js";
 import { registerCanvasLlmRoutes } from "./canvasLlmBridge.js";
 import { agentPlaybooks } from "../features/canvas-agent/tools/skillRegistry.js";
 import { registerCanvasAgentRoutes } from "../features/canvas-agent/server/registerCanvasAgentRoutes.js";
+import { deleteCanvasAgentArtifacts } from "../features/canvas-agent/server/conversationStore.js";
 import { registerCanvasBatchPosterRoutes } from "./canvasBatchPosterBridge.js";
 import { registerCanvasSlotsLoopVideoRoutes } from "./canvasSlotsLoopVideoBridge.js";
 import { mxShellCameraMovesInjection, registerCanvasMxShellPromptRoutes } from "./canvasMxShellPromptBridge.js";
@@ -246,6 +247,8 @@ export function registerInfiniteCanvasRoutes(
     try {
       const result = purgeCanvas(req.params.id, canvasAccessCtx(req));
       pruneCanvasFromAllCollections(req.params.id, canvasAccessCtx(req));
+      // 画布文件删了，Agent 会话留着就是孤儿。软删除不在这儿删：画布还能恢复。
+      if (deps?.db) deleteCanvasAgentArtifacts(deps.db, req.params.id);
       res.json(result);
     } catch (err) {
       canvasError(res, err);

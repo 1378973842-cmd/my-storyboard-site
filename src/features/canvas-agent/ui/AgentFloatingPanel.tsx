@@ -40,7 +40,7 @@ import {
   X,
 } from 'lucide-react';
 import { isInfiniteCanvasEditorOpen, flushCanvasAgentSave, withCanvasAgentNode } from '../../../lib/infiniteCanvas/canvasEngine.js';
-import { CANVAS_GENERATOR_TYPES, batchApplyChanges, getCanvasSnapshot } from '../core/canvasFacade';
+import { CANVAS_GENERATOR_TYPES, batchApplyChanges, getCanvasSnapshot, nodeLabelsFor } from '../core/canvasFacade';
 import { inferAppliedPlaybookStage } from '../core/stageLedger';
 import { referenceClampLabels, mentionTitleToStore, referenceCapsuleLabel } from '../core/referencePrompt';
 import { approveRunCard, parseAskAnswer, parseAskAnswers } from '../core/askCard';
@@ -53,13 +53,18 @@ import {
   runProposalApply,
 } from '../core/proposalPersistence';
 import { serializeCanvasContext } from '../core/contextSerializer';
+import { remainingRunNodes, runNodeIdsOf } from '../core/jobPlan';
 import { streamCanvasAgent, cancelAgentTurn } from '../core/agentService';
 import {
+  ackAgentJob,
   deleteAgentConversation,
   listAgentConversations,
+  listAgentJobs,
   loadAgentConversation,
   persistProposalOutcome,
+  postAgentJobObservation,
   renameAgentConversation,
+  type AgentJobView,
 } from '../core/conversationService';
 import {
   choiceActions,
@@ -539,6 +544,9 @@ export function AgentFloatingPanel({
   const sessionPlaybookRef = useRef('');
   const appliedSkillRef = useRef('');
   const runApprovalRef = useRef<string[] | null>(null);
+  /** 服务端作业 id：这一轮 Agent 任务的账本，不随页面刷新消失。 */
+  const jobIdRef = useRef('');
+  const proposalJobRef = useRef<Map<string, string>>(new Map());
   /** 审批卡发出时记下的节点集与内容。只在这一次会话的内存里，刷新即失效。 */
   const runScopeRef = useRef<Map<string, RunScope>>(new Map());
   const askHistoryRef = useRef<ChatTurn[]>([]);
@@ -563,9 +571,10 @@ export function AgentFloatingPanel({
   const rememberRunScope = useCallback((messageId: string, card: AskCard) => {
     const nodeIds = [...(card.node_keys || [])].filter(Boolean);
     if (!nodeIds.length) return;
+    const snapshot = getCanvasSnapshot();
     runScopeRef.current.set(`${messageId}:${card.id}`, {
       nodeIds,
-      digest: runScopeDigest(getCanvasSnapshot().nodes, nodeIds),
+      digest: runScopeDigest(snapshot.nodes, nodeIds, snapshot.connections),
     });
   }, []);
   const proposalRows = useMemo(() => {
@@ -582,6 +591,26 @@ export function AgentFloatingPanel({
     setLocalRunCards({});
     runScopeRef.current.clear();
   }, [conversationId]);
+
+  // 关页、断网、切标签页之后，靠作业账本把「刚才那轮」找回来。
+  useEffect(() => {
+    if (!open || !conversationId) {
+      setActiveJob(null);
+      return;
+    }
+    let cancelled = false;
+    setJobNoticeHidden(false);
+    void listAgentJobs(conversationId, { activeOnly: true })
+      .then((jobs) => {
+        if (!cancelled) setActiveJob(jobs[0] || null);
+      })
+      .catch(() => {
+        if (!cancelled) setActiveJob(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, conversationId, messages.length]);
   const [toolLogs, setToolLogs] = useState<AgentToolLog[]>([]);
   const [logsOpen, setLogsOpen] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -592,6 +621,9 @@ export function AgentFloatingPanel({
   >('');
   const [showAppsHint, setShowAppsHint] = useState(true);
   const [notice, setNotice] = useState('');
+  /** 打开面板时找回「这轮还没结束」的作业。 */
+  const [activeJob, setActiveJob] = useState<AgentJobView | null>(null);
+  const [jobNoticeHidden, setJobNoticeHidden] = useState(false);
   const [impactChoice, setImpactChoice] = useState<ImpactChoice[] | null>(null);
   /** 本地提案（重做）自己出的审批卡。服务端不会为它发卡，卡只活在这一屏。 */
   const [localRunCards, setLocalRunCards] = useState<Record<string, AskCard>>({});
@@ -865,6 +897,22 @@ export function AgentFloatingPanel({
       const released = new Set(approval || []);
       const actions = actionsReleasedForApproval(proposal.actions, released);
       if (!actions.length) return;
+      const runNodeIds = runNodeIdsOf(actions);
+      // 作业账本：批准即从「等用户」进「执行中」。失败不影响画布操作。
+      const proposalJobId = proposalJobRef.current.get(proposal.id) || '';
+      if (proposalJobId) {
+        void ackAgentJob(proposalJobId, 'execute', {
+          stepTotal: runNodeIds.length || 1,
+          result: { proposalId: proposal.id, runNodeIds },
+        }).catch(() => { /* 账本失败不阻断 */ });
+      }
+      // 先把「已开始」写进库，再动画布：重开时 pending 才是可信的「一次都没开始」。
+      // 写不上就照常应用；最坏情况是重开后这张 pending 复活，由用户自己判断要不要点。
+      try {
+        await persistProposalOutcome(proposal.id, { ...diskProposalOutcome(proposal), status: 'applying' });
+      } catch {
+        /* 留痕失败不阻断落板 */
+      }
       const outcome = await runProposalApply({ ...proposal, actions }, {
         batchApply: async (actions, onProgress) => {
           const result = await batchApplyChanges(
@@ -873,6 +921,18 @@ export function AgentFloatingPanel({
             proposal.userMessage,
             conversationIdRef.current,
             [...citedNodesRef.current, ...effectedRef.current.map((node) => node.id)],
+            // 每跑完一个节点就记一步：关页后从记到的步数继续，不重复执行。
+            (step) => {
+              if (!proposalJobId) return;
+              void postAgentJobObservation(proposalJobId, {
+                proposalId: proposal.id,
+                nodeId: step.nodeId,
+                outcome: step.status === 'failed'
+                  ? 'failed'
+                  : step.status === 'done' ? 'applied' : 'discarded',
+                ...(step.message ? { error: step.message } : {}),
+              }).catch(() => { /* 观察写不上不阻断 */ });
+            },
           );
           if (result.effected.length || result.changelog) {
             updateProposal(proposal.id, { effectedNodes: result.effected, changelog: result.changelog });
@@ -888,6 +948,32 @@ export function AgentFloatingPanel({
         ),
         queue: writeQueueRef.current,
       });
+      // 工具明细不能一直挂着「等」。提案结算成什么，这批日志就跟着收口。
+      const settled = proposalsRef.current.find((item) => item.id === proposal.id)?.status;
+      const logState = settled === 'failed' || settled === 'exec_failed'
+        ? 'failed'
+        : settled === 'applied' || settled === 'partial'
+          ? 'done'
+          : null;
+      if (logState) {
+        setToolLogs((items) => items.map((log) => (
+          log.state === 'queued' ? { ...log, state: logState } : log
+        )));
+      }
+      if (proposalJobId) {
+        void ackAgentJob(proposalJobId, 'finish', {
+          result: { proposalId: proposal.id, status: settled || '' },
+        }).catch(() => { /* 账本失败不阻断 */ });
+        // 有逐步观察时不再写一条总观察，免得步数对不上；只有结构提案才记一条。
+        if (!runNodeIds.length) {
+          void postAgentJobObservation(proposalJobId, {
+            proposalId: proposal.id,
+            outcome: settled === 'failed' || settled === 'exec_failed' ? 'failed' : 'applied',
+            effected: proposalsRef.current.find((item) => item.id === proposal.id)?.effectedNodes?.length || 0,
+          }).catch(() => { /* 观察写不上不阻断 */ });
+        }
+        setActiveJob((current) => (current && current.id === proposalJobId ? null : current));
+      }
       if (outcome !== 'rejected' && outcome.choices.length) setImpactChoice(outcome.choices);
       if (!approval && outcome !== 'rejected' && outcome.idMap) {
         const idMap = outcome.idMap;
@@ -939,7 +1025,20 @@ export function AgentFloatingPanel({
   }, [impactChoice]);
 
   const discardProposal = useCallback(
-    (proposal: ActionProposal) => updateProposal(proposal.id, { status: 'discarded' }),
+    (proposal: ActionProposal) => {
+      updateProposal(proposal.id, { status: 'discarded' });
+      const jobId = proposalJobRef.current.get(proposal.id) || '';
+      if (jobId) {
+        void ackAgentJob(jobId, 'finish', {
+          result: { proposalId: proposal.id, status: 'discarded' },
+        }).catch(() => { /* 账本失败不阻断 */ });
+        void postAgentJobObservation(jobId, {
+          proposalId: proposal.id,
+          outcome: 'discarded',
+        }).catch(() => { /* 观察写不上不阻断 */ });
+        setActiveJob((current) => (current && current.id === jobId ? null : current));
+      }
+    },
     [updateProposal],
   );
 
@@ -981,6 +1080,7 @@ export function AgentFloatingPanel({
         }
         if (Array.isArray(event.citedNodes)) citedNodesRef.current = event.citedNodes;
         if (Array.isArray(event.effectedNodes)) effectedRef.current = event.effectedNodes;
+        if (event.jobId) jobIdRef.current = event.jobId;
       } else if (event.type === 'delta') {
         setMessages((items) =>
           items.map((item) =>
@@ -995,6 +1095,7 @@ export function AgentFloatingPanel({
           if (card.mode === 'approve_run_node') rememberRunScope(assistantId, card);
         });
       } else if (event.type === 'proposal') {
+        if (jobIdRef.current) proposalJobRef.current.set(event.proposal.id, jobIdRef.current);
         replaceProposals((items) => [...items, { ...event.proposal, messageId: assistantId }]);
         if (!proposalWaitsForClick(modeRef.current, event.proposal)) {
           void applyRef.current(event.proposal);
@@ -1029,6 +1130,14 @@ export function AgentFloatingPanel({
       const text = raw.trim();
       if (streaming || (!text && !playbookId)) return;
       if (playbookId) sessionPlaybookRef.current = playbookId;
+      // 上一轮作业如果还挂着，这一条新消息就意味着它已经结束（作业账本不留悬空）。
+      const previousJob = jobIdRef.current;
+      if (previousJob) {
+        jobIdRef.current = '';
+        void ackAgentJob(previousJob, 'finish', { result: { superseded: true } }).catch(() => {});
+      }
+      setActiveJob(null);
+      setJobNoticeHidden(false);
       closeMentionPreviews();
       if (composerRef.current) replaceComposerText(composerRef.current, '');
       const snapshot = getCanvasSnapshot();
@@ -1123,16 +1232,29 @@ export function AgentFloatingPanel({
       : [];
     // 批准的对象是「那一刻看到的内容」。卡上的节点集或内容在批准前变过，这张卡就作废，
     // 不跑、也不假装批过。这一判必须在开流之前，否则会留下一条永不结束的空回复。
-    if (runNodes.length && !runScopeMatches(
-      runScopeRef.current.get(key),
-      getCanvasSnapshot().nodes,
-      runNodes,
-    )) {
-      // 卡上写的「批准」不能留着当已批准。把它标成已过期，并说明为什么没跑。
-      setAskAnswers((current) => ({ ...current, [key]: { ...answer, selected: ['已过期'] } }));
-      setNotice('这张审批卡已过期：页面刷新过，或节点内容在批准前变过。请让 Agent 重新提交运行再批。');
-      return;
+    if (runNodes.length) {
+      const approvalSnapshot = getCanvasSnapshot();
+      const live = runScopeMatches(
+        runScopeRef.current.get(key),
+        approvalSnapshot.nodes,
+        runNodes,
+        approvalSnapshot.connections,
+      );
+      if (!live) {
+        // 卡上写的「批准」不能留着当已批准。把它标成已过期，并说明为什么没跑。
+        setAskAnswers((current) => ({ ...current, [key]: { ...answer, selected: ['已过期'] } }));
+        setNotice('这张审批卡已过期：页面刷新过，或节点内容在批准前变过。请让 Agent 重新提交运行再批。');
+        return;
+      }
     }
+    // 答卡会发一次新请求；上一轮的作业到这里就算结束，别留成永远「等用户」。
+    const previousJob = jobIdRef.current;
+    if (previousJob) {
+      jobIdRef.current = '';
+      void ackAgentJob(previousJob, 'finish', { result: { answered: true } }).catch(() => {});
+    }
+    setActiveJob(null);
+    setJobNoticeHidden(false);
     const historyItem: ChatTurn = {
       id: uid('ask'),
       role: 'user',
@@ -1343,6 +1465,45 @@ export function AgentFloatingPanel({
     },
     [messages, sendText],
   );
+
+  /**
+   * 续跑：只跑观察里还没记到的节点，跑完一项记一步。
+   * 关页面不会丢进度——下一次打开读的是同一份作业。
+   */
+  const resumeJobRun = useCallback(async (job: AgentJobView, nodes: string[]) => {
+    if (!nodes.length || streaming) return;
+    setJobNoticeHidden(true);
+    setStreaming(true);
+    setError('');
+    try {
+      for (const nodeId of nodes) {
+        const result = await batchApplyChanges(
+          [{ type: 'execute_node_skill', nodeId }],
+          undefined,
+          undefined,
+          conversationIdRef.current,
+          [...citedNodesRef.current, ...effectedRef.current.map((node) => node.id)],
+          (step) => {
+            void postAgentJobObservation(job.id, {
+              proposalId: String(job.result?.proposalId || ''),
+              nodeId: step.nodeId,
+              outcome: step.status === 'failed'
+                ? 'failed'
+                : step.status === 'done' ? 'applied' : 'discarded',
+              ...(step.message ? { error: step.message } : {}),
+            }).catch(() => { /* 观察写不上不阻断 */ });
+          },
+        );
+        if (result.failedExecution) break;
+      }
+      void ackAgentJob(job.id, 'finish', { result: { resumed: true } }).catch(() => { /* 账本失败不阻断 */ });
+      setActiveJob(null);
+    } catch (resumeError) {
+      setError(resumeError instanceof Error ? resumeError.message : String(resumeError));
+    } finally {
+      setStreaming(false);
+    }
+  }, [streaming]);
 
   const insertCanvasSelection = useCallback(() => {
     const snapshot = getCanvasSnapshot();
@@ -1663,6 +1824,48 @@ export function AgentFloatingPanel({
                   <p>描述镜头、节奏或工作流。建/连/改按「执行模式」落板；运行一律等审批卡。</p>
                 </motion.div>
               ) : null}
+              {activeJob && !jobNoticeHidden && !streaming ? (() => {
+                const beat = activeJob.heartbeat_at || activeJob.updated_at || 0;
+                const alive = Date.now() - beat < 90_000;
+                const waiting = activeJob.status === 'waiting_approval';
+                const interrupted = !waiting && !alive;
+                const runIds = Array.isArray(activeJob.result?.runNodeIds)
+                  ? (activeJob.result?.runNodeIds as unknown[]).map(String).filter(Boolean)
+                  : [];
+                const remaining = runIds.length ? remainingRunNodes(runIds, activeJob.observations) : [];
+                const resumable = remaining.length > 0 && !waiting;
+                return (
+                  <div className={`canvas-agent-job ${waiting ? 'is-waiting' : resumable || interrupted ? 'is-interrupted' : 'is-running'}`}>
+                    <span>
+                      {waiting
+                        ? '上一轮的提案还在等你确认。'
+                        : resumable
+                          ? `上一轮执行到 ${runIds.length - remaining.length}/${runIds.length}，还剩 ${remaining.length} 个节点。`
+                          : interrupted
+                            ? '上一轮已经中断（很久没有心跳了）。'
+                            : '这一轮还在进行中，可能开在另一个标签页。'}
+                    </span>
+                    {resumable ? (
+                      <button type="button" onClick={() => void resumeJobRun(activeJob, remaining)}>
+                        继续执行
+                      </button>
+                    ) : interrupted ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const lastAssistant = [...messages].reverse().find((item) => item.role === 'assistant');
+                          if (lastAssistant) retryFrom(lastAssistant.id);
+                        }}
+                      >
+                        重试上一轮
+                      </button>
+                    ) : null}
+                    <button type="button" aria-label="忽略" onClick={() => setJobNoticeHidden(true)}>
+                      <X aria-hidden="true" />
+                    </button>
+                  </div>
+                );
+              })() : null}
               {messages.map((message) => (
                 <article key={message.id} className={`canvas-agent-message is-${message.role}`}>
                   {message.role === 'user' ? <span>YOU</span> : null}
@@ -1693,6 +1896,7 @@ export function AgentFloatingPanel({
                     <AskCardView
                       key={card.id}
                       card={card}
+                      nodeLabels={nodeLabelsFor(card.node_keys || [])}
                       answer={askAnswers[`${message.id}:${card.id}`]}
                       onSubmit={(answer) => submitAsk(message.id, answer)}
                     />
@@ -1761,12 +1965,18 @@ export function AgentFloatingPanel({
                 } catch {
                   clampLines = [];
                 }
+                const touchedIds = proposal.actions.flatMap((action) => {
+                  if (action.type === 'execute_node_skill' || action.type === 'update_node_params') return [action.nodeId];
+                  if (action.type === 'connect_nodes') return [action.sourceNodeId, action.targetNodeId];
+                  return [];
+                });
                 return (
                   <Fragment key={proposal.id}>
                     <ProposalPreviewCard
                       proposal={proposal}
                       open={open}
                       clampLines={clampLines}
+                      nodeLabels={nodeLabelsFor(touchedIds)}
                       onToggle={() => setProposalOpen((current) => ({ ...current, [proposal.id]: !open }))}
                       onApply={applyProposal}
                       onDiscard={discardProposal}
@@ -1774,6 +1984,7 @@ export function AgentFloatingPanel({
                     {localRunCards[proposal.id] && proposal.status === 'pending' ? (
                       <AskCardView
                         card={localRunCards[proposal.id]}
+                        nodeLabels={nodeLabelsFor(localRunCards[proposal.id].node_keys || [])}
                         onSubmit={(answer) => answerLocalRun(proposal.id, answer.selected[0] === '批准')}
                       />
                     ) : null}
@@ -1790,7 +2001,9 @@ export function AgentFloatingPanel({
                     ? toolLogs.map((log) => (
                         <div key={log.id}>
                           <span>{log.label}</span>
-                          <small>{log.state === 'queued' ? '等待确认' : log.state}</small>
+                          {log.state === 'queued' ? null : (
+                            <small>{log.state === 'running' ? '运行中' : log.state === 'done' ? '已执行' : '失败'}</small>
+                          )}
                         </div>
                       ))
                     : null}
@@ -1803,7 +2016,7 @@ export function AgentFloatingPanel({
                   {impactChoice.map((choice) => (
                     <div key={choice.nodeId}>
                       <span>{choice.label}</span>
-                      <small>{choice.failed ? '已废弃' : choice.nodeId}</small>
+                      <small title={choice.nodeId}>{choice.failed ? '已废弃' : ''}</small>
                     </div>
                   ))}
                   <div className="canvas-agent-proposal-buttons">

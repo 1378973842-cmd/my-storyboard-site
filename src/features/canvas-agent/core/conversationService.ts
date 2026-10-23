@@ -75,3 +75,63 @@ export async function deleteAgentConversation(conversationId: string): Promise<v
     method: 'DELETE',
   });
 }
+
+/**
+ * 把「我批了 / 跑完了 / 取消」写回服务端作业。
+ * 这是给下一阶段（关页可恢复）铺的路，现在失败也不该影响画布操作。
+ */
+export async function ackAgentJob(
+  jobId: string,
+  event: 'execute' | 'finish' | 'cancel',
+  patch: { result?: Record<string, unknown>; error?: string; stepTotal?: number } = {},
+): Promise<void> {
+  if (!jobId) return;
+  await requestJson(`/api/canvas-agent/jobs/${encodeURIComponent(jobId)}/events`, {
+    method: 'POST',
+    body: JSON.stringify({ event, ...patch }),
+  });
+}
+
+export type AgentJobView = {
+  id: string;
+  status: 'queued' | 'running' | 'waiting_approval' | 'executing' | 'done' | 'failed' | 'cancelled';
+  step: number;
+  step_total: number;
+  request?: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  observations?: Array<Record<string, unknown>>;
+  error?: string;
+  created_at: number;
+  updated_at: number;
+  heartbeat_at: number;
+  finished_at: number | null;
+};
+
+/** 打开面板时找“这轮还没结束”的作业：关页、断网、切标签页之后靠它接上。 */
+export async function listAgentJobs(
+  conversationId: string,
+  options: { activeOnly?: boolean } = {},
+): Promise<AgentJobView[]> {
+  if (!conversationId) return [];
+  const query = `conversation_id=${encodeURIComponent(conversationId)}${options.activeOnly ? '&active=1' : ''}`;
+  const data = await requestJson<{ jobs: AgentJobView[] }>(`/api/canvas-agent/jobs?${query}`);
+  return Array.isArray(data.jobs) ? data.jobs : [];
+}
+
+/** 一步执行完的观察结果。下一步规划（C）和服务端续跑（B）都读它。 */
+export async function postAgentJobObservation(
+  jobId: string,
+  observation: {
+    proposalId?: string;
+    nodeId?: string;
+    outcome: 'applied' | 'failed' | 'discarded';
+    effected?: number;
+    error?: string;
+  },
+): Promise<void> {
+  if (!jobId) return;
+  await requestJson(`/api/canvas-agent/jobs/${encodeURIComponent(jobId)}/observations`, {
+    method: 'POST',
+    body: JSON.stringify(observation),
+  });
+}

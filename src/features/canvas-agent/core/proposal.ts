@@ -94,12 +94,17 @@ function createdHandle(action: Extract<CanvasAction, { type: 'create_node' }>): 
   return title || String(action.tempId || '').trim() || action.nodeType;
 }
 
-export function actionDisplayLabel(action: CanvasAction, actions: CanvasAction[] = []): string {
+export function actionDisplayLabel(
+  action: CanvasAction,
+  actions: CanvasAction[] = [],
+  labelOf?: (id: string) => string,
+): string {
+  const name = (id: string) => labelOf?.(id) || id;
   if (action.type === 'create_node') return `新增 ${createdHandle(action)}`;
-  if (action.type === 'connect_nodes') return `连接 ${action.sourceNodeId} → ${action.targetNodeId}`;
-  if (action.type === 'update_node_params') return `更新 ${action.nodeId}`;
+  if (action.type === 'connect_nodes') return `连接 ${name(action.sourceNodeId)} → ${name(action.targetNodeId)}`;
+  if (action.type === 'update_node_params') return `更新 ${name(action.nodeId)}`;
   const created = actions.find((item) => item.type === 'create_node' && String(item.tempId || '') === action.nodeId);
-  const handle = created && created.type === 'create_node' ? createdHandle(created) : action.nodeId;
+  const handle = created && created.type === 'create_node' ? createdHandle(created) : name(action.nodeId);
   return `运行 ${handle}`;
 }
 

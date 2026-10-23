@@ -936,6 +936,52 @@ html.canvas-image-edit-open .canvas-agent-layer {
   font-size: 12px;
 }
 
+/* 作业横幅：关页回来先看这一行，判断上一轮还在不在。 */
+.canvas-agent-job {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(229, 226, 225, 0.06);
+  color: #c8c4c2;
+  font-size: 12px;
+}
+
+.canvas-agent-job span {
+  flex: 1;
+  min-width: 0;
+}
+
+.canvas-agent-job button {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 8px;
+  color: #e5e2e1;
+  font-size: 12px;
+}
+
+.canvas-agent-job button:hover {
+  background: rgba(229, 226, 225, 0.08);
+}
+
+.canvas-agent-job button[aria-label="忽略"] {
+  width: 24px;
+  padding: 0;
+  color: #8d8886;
+}
+
+.canvas-agent-job.is-waiting {
+  background: rgba(255, 184, 102, 0.1);
+  color: #ffd7a8;
+}
+
+.canvas-agent-job.is-interrupted {
+  background: rgba(240, 168, 168, 0.12);
+  color: #f0c0c0;
+}
+
 .canvas-agent-composer:focus-within {
   outline-color: color-mix(in srgb, var(--strong, #ffb866) 50%, transparent);
 }

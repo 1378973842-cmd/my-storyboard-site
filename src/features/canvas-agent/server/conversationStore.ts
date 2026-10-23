@@ -416,9 +416,50 @@ export function deleteCanvasAgentConversation(
     db.prepare(
       "DELETE FROM canvas_agent_conversations WHERE id = ? AND user_id = ?"
     ).run(conversationId, userId);
+    try {
+      db.prepare("DELETE FROM canvas_agent_jobs WHERE conversation_id = ?").run(conversationId);
+    } catch {
+      /* 老库还没建 jobs 表 */
+    }
     return true;
   });
   return transaction();
+}
+
+/**
+ * 画布被彻底清空时，连它的 Agent 会话一起删。
+ * 软删除不删：画布可以恢复，历史也得跟着回来。
+ */
+export function deleteCanvasAgentArtifacts(
+  db: InstanceType<typeof Database>,
+  canvasId: string
+): number {
+  const id = String(canvasId || "").trim();
+  if (!id) return 0;
+  try {
+    const rows = db.prepare(
+      "SELECT id FROM canvas_agent_conversations WHERE canvas_id = ?"
+    ).all(id) as Array<{ id?: string }>;
+    const ids = rows.map((row) => String(row.id || "")).filter(Boolean);
+    if (!ids.length) return 0;
+    const removeMessages = db.prepare(
+      "DELETE FROM canvas_agent_messages WHERE conversation_id = ?"
+    );
+    const transaction = db.transaction(() => {
+      ids.forEach((conversationId) => removeMessages.run(conversationId));
+      db.prepare("DELETE FROM canvas_agent_conversations WHERE canvas_id = ?").run(id);
+      try {
+        db.prepare("DELETE FROM canvas_agent_jobs WHERE canvas_id = ?").run(id);
+      } catch {
+        /* 老库还没建 jobs 表 */
+      }
+    });
+    transaction();
+    return ids.length;
+  } catch (error) {
+    console.warn("[canvas-agent] 清理画布会话失败:", error);
+    return 0;
+  }
 }
 
 export function listCanvasAgentMessages(

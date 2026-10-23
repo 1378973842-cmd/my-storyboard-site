@@ -18,6 +18,7 @@ export function ProposalPreviewCard({
   open = true,
   onToggle,
   clampLines,
+  nodeLabels,
 }: {
   proposal: ActionProposal;
   onApply: (proposal: ActionProposal) => void;
@@ -25,6 +26,7 @@ export function ProposalPreviewCard({
   open?: boolean;
   onToggle?: () => void;
   clampLines?: string[];
+  nodeLabels?: Record<string, string>;
 }) {
   // 只剩运行的提案由审批卡放行，这里的应用按钮挡不过运行闸，不出按钮。
   const runOnly = proposal.actions.length > 0 && proposal.actions.every((action) => action.type === 'execute_node_skill');
@@ -87,7 +89,7 @@ export function ProposalPreviewCard({
                 <div key={`${action.type}-${index}`} className="canvas-agent-proposal-action">
                   <ActionIcon action={action} />
                   <div className="canvas-agent-proposal-action-copy">
-                    <span>{actionDisplayLabel(action, proposal.actions)}</span>
+                    <span>{actionDisplayLabel(action, proposal.actions, (id) => nodeLabels?.[id] || id)}</span>
                     {reason ? <small>{reason}</small> : null}
                     {clampLines?.[index] ? <small className="canvas-agent-proposal-clamp">{clampLines[index]}</small> : null}
                   </div>

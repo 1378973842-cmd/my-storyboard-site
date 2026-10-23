@@ -214,7 +214,7 @@ export type AgentStoredMessage = {
 };
 
 export type CanvasAgentStreamEvent =
-  | { type: 'meta'; model: string; conversationId?: string; citedNodes?: string[]; effectedNodes?: Array<{ id: string; nodeType: string; label?: string }> }
+  | { type: 'meta'; model: string; conversationId?: string; jobId?: string; citedNodes?: string[]; effectedNodes?: Array<{ id: string; nodeType: string; label?: string }> }
   | { type: 'delta'; text: string }
   | { type: 'tool'; log: AgentToolLog }
   | { type: 'proposal'; proposal: ActionProposal }

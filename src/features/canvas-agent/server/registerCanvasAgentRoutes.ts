@@ -49,6 +49,18 @@ import {
   updateCanvasAgentProposalOutcome,
   type CanvasAgentConversation,
 } from './conversationStore.js';
+import {
+  appendAgentJobObservation,
+  cancelActiveJobsForConversation,
+  createAgentJob,
+  getAgentJob,
+  initCanvasAgentJobSchema,
+  listAgentJobs,
+  setAgentJobSteps,
+  touchAgentJob,
+  transitionAgentJob,
+} from './agentJobStore.js';
+import { isTerminalAgentJob } from '../core/jobState.js';
 
 type ChatBody = {
   message?: string;
@@ -276,6 +288,7 @@ export function registerCanvasAgentRoutes(
 ): void {
   if (db) {
     initCanvasAgentConversationSchema(db);
+    initCanvasAgentJobSchema(db);
     const protectedRoute = gate ? [gate] : [];
     app.get('/api/canvas-agent/conversations', ...protectedRoute, (req, res) => {
       const canvasId = String(req.query.canvas_id || '').trim().slice(0, 120);
@@ -379,7 +392,134 @@ export function registerCanvasAgentRoutes(
         req.params.id,
       );
       if (!marker) return res.status(404).json({ error: 'Agent 会话不存在' });
-      return res.json({ ok: true, marker });
+      const cancelledJobs = cancelActiveJobsForConversation(
+        db,
+        req.authUser?.id || '',
+        req.params.id,
+      );
+      return res.json({ ok: true, marker, cancelledJobs });
+    });
+    // 外部入口（脚本、将来的 MCP）：先建作业再喂消息，聊天接口也可以直接建。
+    app.post('/api/canvas-agent/jobs', ...protectedRoute, (req, res) => {
+      const conversationId = String(req.body?.conversationId || '').trim();
+      if (!conversationId) return res.status(400).json({ error: '缺少 conversationId' });
+      const conversation = getOwnedCanvasAgentConversation(
+        db,
+        req.authUser?.id || '',
+        conversationId,
+      );
+      if (!conversation) return res.status(404).json({ error: 'Agent 会话不存在' });
+      const job = createAgentJob(db, {
+        userId: req.authUser?.id || '',
+        canvasId: conversation.canvas_id,
+        conversationId: conversation.id,
+        request: {
+          message: String(req.body?.message || '').slice(0, 500),
+          source: String(req.body?.source || 'api'),
+        },
+      });
+      transitionAgentJob(db, req.authUser?.id || '', job.id, 'start');
+      return res.json({ job: getAgentJob(db, req.authUser?.id || '', job.id) || job });
+    });
+    app.get('/api/canvas-agent/jobs', ...protectedRoute, (req, res) => {      const conversationId = String(req.query.conversation_id || '').trim();
+      const activeOnly = String(req.query.active || '') === '1';
+      return res.json({
+        jobs: listAgentJobs(db, req.authUser?.id || '', {
+          conversationId: conversationId || undefined,
+          activeOnly,
+        }),
+      });
+    });
+    app.get('/api/canvas-agent/jobs/:id', ...protectedRoute, (req, res) => {
+      const job = getAgentJob(db, req.authUser?.id || '', String(req.params.id || ''));
+      if (!job) return res.status(404).json({ error: 'Agent 作业不存在' });
+      return res.json({ job });
+    });
+    // 客户端只推进「我批了 / 跑完了 / 取消」三种；规划与提问由服务端推。
+    app.post('/api/canvas-agent/jobs/:id/events', ...protectedRoute, (req, res) => {
+      const event = String(req.body?.event || '').trim();
+      if (event !== 'execute' && event !== 'finish' && event !== 'cancel') {
+        return res.status(400).json({ error: '不支持的事件' });
+      }
+      const rawResult = req.body?.result;
+      const job = transitionAgentJob(
+        db,
+        req.authUser?.id || '',
+        String(req.params.id || ''),
+        event,
+        {
+          ...(typeof req.body?.step === 'number' ? { step: req.body.step } : {}),
+          ...(rawResult && typeof rawResult === 'object' && !Array.isArray(rawResult)
+            ? { result: rawResult as Record<string, unknown> }
+            : {}),
+          ...(typeof req.body?.error === 'string' ? { error: req.body.error } : {}),
+        },
+      );
+      if (!job) return res.status(409).json({ error: '作业状态不允许这个事件' });
+      if (typeof req.body?.stepTotal === 'number' && Number.isFinite(req.body.stepTotal)) {
+        setAgentJobSteps(db, req.authUser?.id || '', job.id, req.body.stepTotal);
+      }
+      return res.json({ job: getAgentJob(db, req.authUser?.id || '', job.id) || job });
+    });
+    // 一步跑完的观察。当前一步一批，C（逐节点执行 + 续跑）接在这里。
+    app.post('/api/canvas-agent/jobs/:id/observations', ...protectedRoute, (req, res) => {
+      const outcome = String(req.body?.outcome || '').trim();
+      if (outcome !== 'applied' && outcome !== 'failed' && outcome !== 'discarded') {
+        return res.status(400).json({ error: '不支持的观察结果' });
+      }
+      const job = appendAgentJobObservation(
+        db,
+        req.authUser?.id || '',
+        String(req.params.id || ''),
+        {
+          at: Date.now(),
+          proposalId: String(req.body?.proposalId || ''),
+          nodeId: String(req.body?.nodeId || ''),
+          outcome,
+          effected: Math.max(0, Math.floor(Number(req.body?.effected) || 0)),
+          ...(typeof req.body?.error === 'string' && req.body.error ? { error: req.body.error } : {}),
+        },
+      );
+      if (!job) return res.status(404).json({ error: 'Agent 作业不存在' });
+      return res.json({ job });
+    });
+    // 作业的事件流：关页重连、多端同步都读它。终端态自动收尾。
+    app.get('/api/canvas-agent/jobs/:id/stream', ...protectedRoute, (req, res) => {
+      const userId = req.authUser?.id || '';
+      const jobId = String(req.params.id || '');
+      if (!getAgentJob(db, userId, jobId)) return res.status(404).json({ error: 'Agent 作业不存在' });
+      res.status(200);
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders?.();
+      let last = '';
+      let closed = false;
+      let timer: ReturnType<typeof setInterval> | null = null;
+      const finish = () => {
+        if (closed) return;
+        closed = true;
+        if (timer) clearInterval(timer);
+        if (!res.writableEnded) res.end();
+      };
+      const tick = () => {
+        const job = getAgentJob(db, userId, jobId);
+        if (!job) {
+          res.write(`data: ${JSON.stringify({ type: 'error', error: '作业不存在' })}\n\n`);
+          finish();
+          return;
+        }
+        touchAgentJob(db, userId, jobId);
+        const payload = JSON.stringify({ type: 'job', job });
+        if (payload !== last) {
+          last = payload;
+          res.write(`data: ${payload}\n\n`);
+        }
+        if (isTerminalAgentJob(job.status)) finish();
+      };
+      timer = setInterval(tick, 1000);
+      req.on('close', finish);
+      tick();
     });
   }
 
@@ -393,6 +533,7 @@ export function registerCanvasAgentRoutes(
     let conversation: CanvasAgentConversation | null = null;
     let citedNodes: string[] = [];
     let effectedNodes: ReturnType<typeof readConversationEffected> = [];
+    let jobId = '';
     if (db) {
       const canvasId = String(body.canvasId || '').trim().slice(0, 120);
       if (!canvasId) return res.status(400).json({ error: '缺少 canvasId' });
@@ -419,6 +560,24 @@ export function registerCanvasAgentRoutes(
           message,
         );
         effectedNodes = readConversationEffected(db, req.authUser?.id || '', conversation.id);
+        // 一轮 Agent 任务从请求进来的这一秒开始记账。之后关页面、断线都不影响这行。
+        const job = createAgentJob(db, {
+          userId: req.authUser?.id || '',
+          canvasId,
+          conversationId: conversation.id,
+          request: {
+            message: message.slice(0, 500),
+            askAnswer: askAnswer
+              ? { cardId: askAnswer.cardId, selected: askAnswer.selected }
+              : undefined,
+            askAnswers: askBatch.length
+              ? askBatch.map((item) => ({ cardId: item.cardId, selected: item.selected }))
+              : undefined,
+            playbookId: requestedPlaybookId,
+          },
+        });
+        jobId = job.id;
+        transitionAgentJob(db, req.authUser?.id || '', job.id, 'start');
       } catch (error) {
         const status = Number((error as Error & { status?: number }).status) || 400;
         return res.status(status).json({
@@ -442,6 +601,7 @@ export function registerCanvasAgentRoutes(
       citedNodes,
       effectedNodes,
       ...(conversation ? { conversationId: conversation.id } : {}),
+      ...(jobId ? { jobId } : {}),
     });
 
     const history = (Array.isArray(body.messages) ? body.messages : [])
@@ -623,6 +783,26 @@ export function registerCanvasAgentRoutes(
           },
         );
       }
+      if (db && jobId) {
+        // 有提案/提问卡就停在「等用户」，否则这一轮已经结束。
+        const needsUser = Boolean(persistedProposal) || persistedAsks.length > 0;
+        transitionAgentJob(
+          db,
+          req.authUser?.id || '',
+          jobId,
+          needsUser ? 'ask' : 'finish',
+          {
+            step: 1,
+            result: {
+              ...(persistedProposal
+                ? { proposalId: persistedProposal.id, proposalStatus: persistedProposal.status }
+                : {}),
+              ...(persistedAsks.length ? { asks: persistedAsks.length } : {}),
+              replyChars: persistedText.length,
+            },
+          },
+        );
+      }
       sendEvent(res, { type: 'done' });
       res.end();
     } catch (error) {
@@ -633,6 +813,15 @@ export function registerCanvasAgentRoutes(
           conversation.id,
           'assistant',
           '',
+          { error: error instanceof Error ? error.message : String(error) },
+        );
+      }
+      if (db && jobId) {
+        transitionAgentJob(
+          db,
+          req.authUser?.id || '',
+          jobId,
+          controller.signal.aborted ? 'cancel' : 'fail',
           { error: error instanceof Error ? error.message : String(error) },
         );
       }

@@ -4,10 +4,12 @@ import { ASK_DEFAULT, type AskAnswer, type AskCard } from '../core/askCard';
 export function AskCardView({
   card,
   answer,
+  nodeLabels,
   onSubmit,
 }: {
   card: AskCard;
   answer?: AskAnswer;
+  nodeLabels?: Record<string, string>;
   onSubmit: (answer: AskAnswer) => void;
 }) {
   const [picked, setPicked] = useState<string[]>([]);
@@ -29,7 +31,9 @@ export function AskCardView({
     <section className={`canvas-agent-ask is-${card.mode}`} aria-label={card.question}>
       <h4>{card.question}</h4>
       {card.node_keys?.length ? (
-        <p className="canvas-agent-ask-nodes">{card.node_keys.join('、')}</p>
+        <p className="canvas-agent-ask-nodes" title={card.node_keys.join(' ')}>
+          {card.node_keys.map((id) => nodeLabels?.[id] || id).join('、')}
+        </p>
       ) : null}
       {locked ? (
         <p className="canvas-agent-ask-answer">

@@ -20,7 +20,7 @@ import { formatNineGridRefLooksForPhaseA } from '../../services/canvasNineGridBr
 import { checkCanvasContentFidelity } from '../../services/canvasContentFidelity';
 import { sortBatchExecutions } from './core/executionOrder';
 import { approveRunCard, defaultAskAnswer, normalizeAskCards, parseAskAnswer, withRunApproval } from './core/askCard';
-import { actionProposalNeedsApproval, derivedStepTitle, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, openBatchProgress, partialBatchUpdate, pendingExecutionFeedback, proposalWaitsForClick, settleBatchProposal, stripCreatesOnShortYes, unknownCanvasActionMessage } from './core/proposal';
+import { actionDisplayLabel, actionProposalNeedsApproval, derivedStepTitle, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, openBatchProgress, partialBatchUpdate, pendingExecutionFeedback, proposalWaitsForClick, settleBatchProposal, stripCreatesOnShortYes, unknownCanvasActionMessage } from './core/proposal';
 import { actionsReleasedForApproval, runScopeDigest, runScopeMatches } from './core/runApproval';
 import { turnStatePrefix } from './core/turnState';
 import { changelogFromActions, effectedFromApply, effectedLine, mediaRunState, mediaStatusLabel, parseRunStates, turnLabelCollapsed } from './core/effectLedger';
@@ -37,6 +37,7 @@ import {
 import {
   appendCanvasAgentMessage,
   createCanvasAgentConversation,
+  deleteCanvasAgentArtifacts,
   hasPendingRunApproval,
   initCanvasAgentConversationSchema,
   pendingAskQuestions,
@@ -51,6 +52,24 @@ import {
   takeConversationChangelog,
   updateCanvasAgentProposalOutcome,
 } from './server/conversationStore';
+import {
+  appendAgentJobObservation,
+  cancelActiveJobsForConversation,
+  createAgentJob,
+  getAgentJob,
+  initCanvasAgentJobSchema,
+  isStaleAgentJob,
+  listAgentJobs,
+  setAgentJobSteps,
+  touchAgentJob,
+  transitionAgentJob,
+} from './server/agentJobStore';
+import {
+  isActiveAgentJob,
+  isTerminalAgentJob,
+  nextAgentJobStatus,
+} from './core/jobState';
+import { remainingRunNodes, runNodeIdsOf } from './core/jobPlan';
 import { ProposalPreviewCard } from './ui/ProposalPreviewCard';
 import { AssistantMarkdown } from './ui/assistantMarkdown';
 import { proposalDefaultOpen, PROPOSAL_OPEN_CAP, sortProposalsForDisplay } from './ui/proposalOrder';
@@ -602,9 +621,18 @@ assert.equal(reopenedFailed.status, 'exec_failed');
 assert.equal(reopenedFailed.error, keptError);
 assert.equal(reopenedFailed.partialSkipped, 1);
 const reopenedPending = proposalOnReopen({ status: 'pending' as const, error: '结构错', partialSkipped: null });
-assert.equal(reopenedPending.status, 'expired');
+assert.equal(reopenedPending.status, 'expired', '只剩运行的 pending 重开即过期');
 assert.equal(reopenedPending.error, '结构错');
 assert.equal(reopenedPending.partialSkipped, null);
+// 有结构动作、且一次都没开始过：重开留着，用户还能点。
+const reopenedStructural = proposalOnReopen({
+  status: 'pending' as const,
+  actions: [{ type: 'create_node' }],
+});
+assert.equal(reopenedStructural.status, 'pending');
+// applying 说明报过开始、结果没写回来：再点可能重复建节点，必须过期。
+const reopenedApplying = proposalOnReopen({ status: 'applying' as const, actions: [{ type: 'create_node' }] });
+assert.equal(reopenedApplying.status, 'expired');
 const reopenedApplied = proposalOnReopen({
   status: 'applied' as const,
   error: null,
@@ -1086,6 +1114,23 @@ assert.match(runHtml, /批准/);
 assert.match(runHtml, /拒绝/);
 assert.doesNotMatch(runHtml, /自己写/);
 assert.doesNotMatch(runHtml, /忽略/);
+// 卡上给用户看节点名，不放 id；id 只留在 title 里兜底。
+const labeledRun = renderToStaticMarkup(createElement(AskCardView, {
+  card: runCard.at(-1)!,
+  nodeLabels: { vid_a: '阿波罗开场 10 秒' },
+  onSubmit() {},
+}));
+assert.match(labeledRun, /阿波罗开场 10 秒/);
+assert.doesNotMatch(labeledRun, />vid_a</);
+// 提案动作行也是节点名，不是 id。
+assert.equal(
+  actionDisplayLabel({ type: 'execute_node_skill', nodeId: 'vid_a' }, [], (id) => (id === 'vid_a' ? '阿波罗开场 10 秒' : id)),
+  '运行 阿波罗开场 10 秒',
+);
+assert.equal(
+  actionDisplayLabel({ type: 'connect_nodes', sourceNodeId: 'vid_a', targetNodeId: 'vid_b' }, [], (id) => (id === 'vid_a' ? '上游' : '下游')),
+  '连接 上游 → 下游',
+);
 const skipped = defaultAskAnswer(asked[0]);
 assert.equal(skipped.selected[0], '用默认');
 assert.equal(parseAskAnswer(skipped)?.selected[0], '用默认');
@@ -1537,6 +1582,7 @@ const playbookBodies = ['canvas-video-piece', 'canvas-opening-animation'].map((i
   }
   if (!steps.includes('是你的责任不是他的')) playbookGaps.push(`${id} 没要求生成前提醒素材冲突`);
   if (!step1.includes('用默认')) playbookGaps.push(`${id} 忽略没记成用默认`);
+  need(step1, /不要问抽象档位，问具体参照/, '提问环节没有具体参照引导');
   const refStart = body.indexOf('参考图承载细节');
   const refEnd = body.indexOf('\n### ', refStart + 1);
   const refSection = refStart >= 0 && refEnd > refStart ? body.slice(refStart, refEnd) : '';
@@ -1556,6 +1602,8 @@ const playbookBodies = ['canvas-video-piece', 'canvas-opening-animation'].map((i
   if (shotLineMarks.some((mark) => !beforeProduct.includes(mark))) {
     playbookGaps.push(`${id} 分镜行九类或选择表不在产物之前`);
   }
+  need(beforeProduct, /四层的篇幅配比：风格质量声明 10%、运镜系统 15%、核心画面 60%、技术细节 15%/, '分镜行没写四层篇幅配比');
+  need(body, /## 内容不满意时怎么改/, '缺内容不满意的迭代诊断表');
   if (body.includes('和原则 2 的关系')) playbookGaps.push(`${id} 仍用原则编号指外观锚定`);
   const shotHow = beforeProduct.slice(beforeProduct.indexOf('### 分镜行怎么写'));
   if (!shotHow.includes('用用户消息的语言写')) playbookGaps.push(`${id} 分镜行没要求用用户消息的语言写`);
@@ -1710,6 +1758,22 @@ assert.equal(runScopeMatches(scope, scopeNodes.map((node) => ({ ...node, x: 900 
 assert.equal(runScopeMatches(scope, scopeNodes.map((node) => (
   node.id === 'gen_a' ? { ...node, prompt: '换成夜景' } : node
 )), ['gen_a', 'gen_b']), false);
+// 产物字段不算内容：后台写回 url 不该让等待中的卡失效。
+assert.equal(runScopeMatches(scope, scopeNodes.map((node) => ({ ...node, url: '/out.png' })), ['gen_a', 'gen_b']), true);
+// 上游变了就是输入变了：连线关系、上游正文、上游产出都要让卡作废。
+const scopeEdges = [{ id: 'e1', from: 'gen_a', to: 'gen_b' }];
+const downstreamScope = { nodeIds: ['gen_b'], digest: runScopeDigest(scopeNodes, ['gen_b'], scopeEdges) };
+assert.equal(runScopeMatches(downstreamScope, scopeNodes, ['gen_b'], scopeEdges), true);
+assert.equal(runScopeMatches(downstreamScope, scopeNodes, ['gen_b'], []), false);
+assert.equal(runScopeMatches(downstreamScope, scopeNodes.map((node) => (
+  node.id === 'gen_a' ? { ...node, prompt: '上游改了' } : node
+)), ['gen_b'], scopeEdges), false);
+assert.equal(runScopeMatches(downstreamScope, scopeNodes.map((node) => (
+  node.id === 'gen_a' ? { ...node, url: '/new.png' } : node
+)), ['gen_b'], scopeEdges), false);
+assert.equal(runScopeMatches(downstreamScope, scopeNodes.map((node) => (
+  node.id === 'gen_b' ? { ...node, url: '/out.png' } : node
+)), ['gen_b'], scopeEdges), true);
 const mixedActions = [
   { type: 'create_node' as const, tempId: 't', nodeType: 'generator', initialParams: { prompt: 'x' } },
   { type: 'execute_node_skill' as const, nodeId: 't' },
@@ -1774,6 +1838,115 @@ assert.equal(takeConversationCancelMarker(cancelDb, 'user', cancelConversation.i
 assert.equal(takeConversationCancelMarker(cancelDb, 'user', cancelConversation.id), null, '取消只读一次');
 cancelDb.close();
 
+// ---- 画布清空时，Agent 会话跟着走 ----
+const purgeDb = new Database(':memory:');
+initCanvasAgentConversationSchema(purgeDb);
+const keptConversation = createCanvasAgentConversation(purgeDb, 'user', 'canvas-keep', '留着');
+const purgedConversation = createCanvasAgentConversation(purgeDb, 'user', 'canvas-gone', '删掉');
+appendCanvasAgentMessage(purgeDb, 'user', purgedConversation.id, 'user', '这条要删', {});
+assert.equal(deleteCanvasAgentArtifacts(purgeDb, 'canvas-gone'), 1);
+assert.equal(deleteCanvasAgentArtifacts(purgeDb, 'canvas-gone'), 0);
+assert.equal(
+  (purgeDb.prepare('SELECT COUNT(*) AS c FROM canvas_agent_messages WHERE conversation_id = ?')
+    .get(purgedConversation.id) as { c: number }).c,
+  0,
+);
+assert.equal(
+  (purgeDb.prepare('SELECT COUNT(*) AS c FROM canvas_agent_conversations WHERE canvas_id = ?')
+    .get('canvas-keep') as { c: number }).c,
+  1,
+);
+assert.ok(keptConversation.id);
+purgeDb.close();
+
+// ---- Agent 作业：一轮任务不随连接消失 ----
+assert.equal(nextAgentJobStatus('queued', 'start'), 'running');
+assert.equal(nextAgentJobStatus('running', 'ask'), 'waiting_approval');
+assert.equal(nextAgentJobStatus('waiting_approval', 'execute'), 'executing');
+assert.equal(nextAgentJobStatus('executing', 'finish'), 'done');
+assert.equal(nextAgentJobStatus('running', 'execute'), null);
+assert.equal(nextAgentJobStatus('done', 'finish'), null);
+assert.equal(isActiveAgentJob('waiting_approval'), true);
+assert.equal(isActiveAgentJob('done'), false);
+assert.equal(isTerminalAgentJob('cancelled'), true);
+
+const jobDb = new Database(':memory:');
+initCanvasAgentConversationSchema(jobDb);
+initCanvasAgentJobSchema(jobDb);
+const jobConversation = createCanvasAgentConversation(jobDb, 'user', 'canvas-job', '作业');
+const job = createAgentJob(jobDb, {
+  userId: 'user',
+  canvasId: 'canvas-job',
+  conversationId: jobConversation.id,
+  request: { message: 'hi' },
+});
+assert.equal(job.status, 'queued');
+assert.equal(getAgentJob(jobDb, 'other', job.id), null);
+assert.equal(transitionAgentJob(jobDb, 'user', job.id, 'start')?.status, 'running');
+assert.equal(transitionAgentJob(jobDb, 'user', job.id, 'execute'), null);
+const askedJob = transitionAgentJob(jobDb, 'user', job.id, 'ask', { step: 1, result: { proposalId: 'p1' } });
+assert.equal(askedJob?.status, 'waiting_approval');
+assert.equal(askedJob?.result.proposalId, 'p1');
+assert.equal(listAgentJobs(jobDb, 'user', { activeOnly: true }).length, 1);
+assert.equal(transitionAgentJob(jobDb, 'user', job.id, 'execute')?.status, 'executing');
+const doneJob = transitionAgentJob(jobDb, 'user', job.id, 'finish', { result: { status: 'applied' } });
+assert.equal(doneJob?.status, 'done');
+assert.ok(doneJob?.finished_at);
+assert.equal(doneJob?.result.status, 'applied');
+assert.equal(listAgentJobs(jobDb, 'user', { activeOnly: true }).length, 0);
+const secondJob = createAgentJob(jobDb, {
+  userId: 'user',
+  canvasId: 'canvas-job',
+  conversationId: jobConversation.id,
+  request: {},
+});
+transitionAgentJob(jobDb, 'user', secondJob.id, 'start');
+assert.equal(cancelActiveJobsForConversation(jobDb, 'user', jobConversation.id), 1);
+assert.equal(getAgentJob(jobDb, 'user', secondJob.id)?.status, 'cancelled');
+assert.equal(isStaleAgentJob({ ...job, status: 'running', heartbeat_at: Date.now() - 20 * 60 * 1000 }), true);
+assert.equal(isStaleAgentJob({ ...job, status: 'running', heartbeat_at: Date.now() }), false);
+// 观察与步数：一步一批时 step_total 是 1；拆成多步（C）时按节点数走。
+const obsJob = createAgentJob(jobDb, {
+  userId: 'user',
+  canvasId: 'canvas-job',
+  conversationId: jobConversation.id,
+  request: { message: 'multi' },
+});
+transitionAgentJob(jobDb, 'user', obsJob.id, 'start');
+setAgentJobSteps(jobDb, 'user', obsJob.id, 3);
+const firstObs = appendAgentJobObservation(jobDb, 'user', obsJob.id, { proposalId: 'p1', outcome: 'applied' });
+assert.equal(firstObs?.step_total, 3);
+assert.equal(firstObs?.step, 1);
+assert.equal(firstObs?.observations.length, 1);
+appendAgentJobObservation(jobDb, 'user', obsJob.id, { proposalId: 'p1', outcome: 'failed', error: 'x' });
+appendAgentJobObservation(jobDb, 'user', obsJob.id, { proposalId: 'p1', outcome: 'applied' });
+appendAgentJobObservation(jobDb, 'user', obsJob.id, { proposalId: 'p1', outcome: 'applied' });
+const cappedJob = getAgentJob(jobDb, 'user', obsJob.id);
+assert.equal(cappedJob?.step, 3, '步数不超过 step_total');
+assert.equal(cappedJob?.observations.length, 4);
+assert.equal(cappedJob?.observations[1].outcome, 'failed');
+const beforeTouch = cappedJob?.heartbeat_at || 0;
+touchAgentJob(jobDb, 'user', obsJob.id);
+assert.ok((getAgentJob(jobDb, 'user', obsJob.id)?.heartbeat_at || 0) >= beforeTouch);
+assert.equal(deleteCanvasAgentArtifacts(jobDb, 'canvas-job'), 1);
+assert.equal(listAgentJobs(jobDb, 'user', {}).length, 0, '画布清空时作业跟着走');
+jobDb.close();
+
+// ---- 逐节点执行：步数来自提案，续跑只补没跑到的 ----
+assert.deepEqual(runNodeIdsOf([
+  { type: 'create_node', tempId: 't', nodeType: 'generator' },
+  { type: 'execute_node_skill', nodeId: 'a' },
+  { type: 'execute_node_skill', nodeId: 'b' },
+  { type: 'execute_node_skill', nodeId: 'a' },
+]), ['a', 'b']);
+assert.deepEqual(remainingRunNodes(['a', 'b', 'c'], [
+  { nodeId: 'a', outcome: 'applied' },
+  { nodeId: 'b', outcome: 'failed' },
+]), ['c']);
+assert.deepEqual(remainingRunNodes(['a'], [{ nodeId: 'a', outcome: 'discarded' }]), ['a'], '跳过不算跑过');
+assert.deepEqual(remainingRunNodes(['a'], undefined), ['a']);
+assert.deepEqual(remainingRunNodes([], [{ nodeId: 'a', outcome: 'applied' }]), []);
+
 const approvalPanelSource = readFileSync(new URL('./ui/AgentFloatingPanel.tsx', import.meta.url), 'utf8');
 assert.match(approvalPanelSource, /useState<AgentMode>\('confirm'\)/);
 assert.match(approvalPanelSource, /setMode\('auto'\)/);
@@ -1782,7 +1955,27 @@ assert.match(approvalPanelSource, /运行在任何模式下都要审批卡/);
 assert.match(approvalPanelSource, /approveRunCard\(nodeIds\)/);
 assert.match(approvalPanelSource, /runScopeMatches\(/);
 assert.match(approvalPanelSource, /cancelAgentTurn\(/);
+assert.match(approvalPanelSource, /nodeLabelsFor\(/);
+assert.doesNotMatch(approvalPanelSource, /等待确认/);
+assert.match(approvalPanelSource, /'已执行'/);
+assert.match(approvalPanelSource, /status: 'applying'/);
+assert.match(approvalPanelSource, /ackAgentJob\(/);
+assert.match(approvalPanelSource, /event\.jobId/);
 const approvalRouteSource = readFileSync(new URL('./server/registerCanvasAgentRoutes.ts', import.meta.url), 'utf8');
+assert.match(approvalRouteSource, /initCanvasAgentJobSchema\(db\)/);
+assert.match(approvalRouteSource, /app\.get\('\/api\/canvas-agent\/jobs'/);
+assert.match(approvalRouteSource, /app\.post\('\/api\/canvas-agent\/jobs\/:id\/events'/);
+assert.match(approvalRouteSource, /app\.post\('\/api\/canvas-agent\/jobs'/);
+assert.match(approvalRouteSource, /app\.post\('\/api\/canvas-agent\/jobs\/:id\/observations'/);
+assert.match(approvalRouteSource, /app\.get\('\/api\/canvas-agent\/jobs\/:id\/stream'/);
+assert.match(approvalPanelSource, /postAgentJobObservation\(/);
+assert.match(approvalPanelSource, /listAgentJobs\(/);
+assert.match(approvalPanelSource, /runNodeIdsOf\(/);
+assert.match(approvalPanelSource, /resumeJobRun\(/);
+assert.match(approvalPanelSource, /remainingRunNodes\(/);
+const facadeSourceForSteps = readFileSync(new URL('./core/canvasFacade.ts', import.meta.url), 'utf8');
+assert.match(facadeSourceForSteps, /onStep\?\.\(\{ nodeId, status: 'done' \}\)/);
+assert.match(facadeSourceForSteps, /onStep\?\.\(\{ nodeId, status: 'failed', message \}\)/);
 assert.match(approvalRouteSource, /app\.post\('\/api\/canvas-agent\/conversations\/:id\/cancel'/);
 assert.match(approvalRouteSource, /turnStatePrefix\(/);
 assert.equal(turnStatePrefix({ cancelled: false, pendingAsks: [] }), '');
@@ -2834,7 +3027,7 @@ const coerceAt = engineSource.indexOf('coerceReferenceImageModel', runGeneratorA
 const rejectModelAt = engineSource.indexOf('rejectCanvasAgentModelChoice(gen', runGeneratorAt);
 assert.ok(coerceAt > runGeneratorAt && coerceAt < rejectModelAt);
 const agentPanelSource = readFileSync(new URL('./ui/AgentFloatingPanel.tsx', import.meta.url), 'utf8');
-assert.match(agentPanelSource, /batchApplyChanges\(\s*actions,\s*onProgress,\s*proposal\.userMessage,\s*conversationIdRef\.current,\s*\[\.\.\.citedNodesRef\.current, \.\.\.effectedRef\.current\.map\(\(node\) => node\.id\)\],\s*\)/);
+assert.match(agentPanelSource, /batchApplyChanges\(\s*actions,\s*onProgress,\s*proposal\.userMessage,\s*conversationIdRef\.current,\s*\[\.\.\.citedNodesRef\.current, \.\.\.effectedRef\.current\.map\(\(node\) => node\.id\)\],/);
 assert.match(agentPanelSource, /takeConversationChangelog|EffectLabels/);
 assert.match(systemPrompt, /takeConversationChangelog/);
 assert.match(systemPrompt, /canvasAgentStagePrefix\([\s\S]*effectedNodes, parseRunStates\(body\.runStates\)\)/);
