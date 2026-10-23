@@ -110,6 +110,8 @@ type ChatBody = {
   askAnswer?: unknown;
   askAnswers?: unknown;
   continueJobId?: string;
+  /** 重试上一轮：不重复写一条用户消息。 */
+  regenerate?: boolean;
 };
 
 type ToolCall = {
@@ -746,6 +748,7 @@ export function registerCanvasAgentRoutes(
     const askAnswer = askBatch.length ? null : parseAskAnswer(body.askAnswer);
     const message = askBatch.length || askAnswer ? '' : String(body.message || '').trim();
     const continueJobId = String(body.continueJobId || '').trim();
+    const regenerate = body.regenerate === true;
     const requestedPlaybookId = typeof body.playbookId === 'string' ? body.playbookId.trim() : '';
     if (!message && !requestedPlaybookId && !askAnswer && !askBatch.length && !continueJobId) {
       return res.status(400).json({ error: '缺少消息内容' });
@@ -776,14 +779,17 @@ export function registerCanvasAgentRoutes(
           String(body.conversationId || ''),
           message,
         );
-        appendCanvasAgentMessage(
-          db,
-          req.authUser?.id || '',
-          conversation.id,
-          'user',
-          message || (continueJobId ? '（继续）' : ''),
-          askBatch.length ? { askAnswers: askBatch } : askAnswer ? { askAnswer } : {},
-        );
+        // 重试只重新生成，不再写一条重复的用户消息。
+        if (!regenerate) {
+          appendCanvasAgentMessage(
+            db,
+            req.authUser?.id || '',
+            conversation.id,
+            'user',
+            message || (continueJobId ? '（继续）' : ''),
+            askBatch.length ? { askAnswers: askBatch } : askAnswer ? { askAnswer } : {},
+          );
+        }
         citedNodes = recordConversationCitations(
           db,
           req.authUser?.id || '',
@@ -950,6 +956,8 @@ export function registerCanvasAgentRoutes(
         .filter((call) => call.function.name !== 'remember_project_fact')
         .filter((call) => Boolean(toolContract(call.function.name, toolNames)));
       const firstText = extractTextLlmMessageContent(model, first).trim();
+      // 调工具/提问之前模型说的话先推给用户。以前 asks 分支整段丢掉，只剩卡片。
+      if (calls.length && firstText) streamText(res, firstText);
       let proposalText = firstText;
       let interpreted = actionCalls.length ? null : interpretCanvasProposalText(proposalText);
       if (!actionCalls.length && interpreted?.unknownTypes.length) {
@@ -1046,19 +1054,29 @@ export function registerCanvasAgentRoutes(
           );
           explanation = extractTextLlmMessageContent(model, followup).trim();
         }
-        persistedText = explanation || `已落到画布：${proposal.summary}。运行仍要在审批卡上批准。`;
-        streamText(res, persistedText);
+        persistedText = (
+          calls.length && firstText
+            ? [firstText, explanation].filter(Boolean).join('\n\n')
+            : explanation
+        ) || `已落到画布：${proposal.summary}。运行仍要在审批卡上批准。`;
+        // 前面已经推过 firstText，这里只补后续那段，避免正文重复。
+        if (calls.length) {
+          if (explanation) streamText(res, explanation);
+        } else {
+          streamText(res, persistedText);
+        }
       } else if (asks.length) {
+        persistedText = firstText || '';
         publishAsks();
       } else if (interpreted?.unknownTypes.length) {
         persistedText = `动作类型无法识别：${interpreted.unknownTypes.join('、')}。这轮没有生成提案。`;
         streamText(res, persistedText);
       } else if (remembered.length) {
         persistedText = firstText || `记下了：${remembered.map((item) => item.key).join('、')}。`;
-        streamText(res, persistedText);
+        if (!calls.length) streamText(res, persistedText);
       } else {
         persistedText = firstText || '我暂时没有生成可执行的画布建议，请换一种方式描述目标。';
-        streamText(res, persistedText);
+        if (!calls.length) streamText(res, persistedText);
       }
       if (db && conversation) {
         appendCanvasAgentMessage(

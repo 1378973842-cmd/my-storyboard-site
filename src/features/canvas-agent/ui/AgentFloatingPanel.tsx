@@ -1133,7 +1133,7 @@ export function AgentFloatingPanel({
   );
 
   const sendText = useCallback(
-    async (raw: string, history: ChatTurn[], continueJobId?: string) => {
+    async (raw: string, history: ChatTurn[], continueJobId?: string, regenerate = false) => {
       const text = raw.trim();
       if (streaming || (!text && !playbookId && !continueJobId)) return;
       if (playbookId) sessionPlaybookRef.current = playbookId;
@@ -1167,7 +1167,7 @@ export function AgentFloatingPanel({
         createdAt: Date.now(),
       };
       if (title === '探索创作方向' && text) setTitle(text.slice(0, 16));
-      setMessages((items) => (text ? [...items, userMessage, assistantMessage] : [...items, assistantMessage]));
+      setMessages((items) => (text && !regenerate ? [...items, userMessage, assistantMessage] : [...items, assistantMessage]));
       setInput('');
       setMentionQuery(null);
       setError('');
@@ -1204,6 +1204,7 @@ export function AgentFloatingPanel({
           playbookId: playbookId || undefined,
           citedNodeIds: citedNodesRef.current,
           ...(continueJobId ? { continueJobId } : {}),
+          ...(regenerate ? { regenerate: true } : {}),
           signal: controller.signal,
           onEvent: (event) => handleAgentEvent(assistantMessage.id, event),
         });
@@ -1470,7 +1471,7 @@ export function AgentFloatingPanel({
     (assistantId: string) => {
       const index = messages.findIndex((item) => item.id === assistantId);
       const previous = [...messages.slice(0, index)].reverse().find((item) => item.role === 'user');
-      if (previous) void sendText(previous.content, messages.slice(0, index - 1));
+      if (previous) void sendText(previous.content, messages.slice(0, index - 1), undefined, true);
     },
     [messages, sendText],
   );
@@ -2391,5 +2392,6 @@ export function AgentFloatingPanel({
     portalRoot,
   );
 }
+
 
 

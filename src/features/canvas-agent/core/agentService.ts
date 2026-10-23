@@ -17,6 +17,7 @@ export type AgentStreamRequest = {
   askAnswer?: AgentChatMessage['askAnswer'];
   askAnswers?: AgentChatMessage['askAnswers'];
   continueJobId?: string;
+  regenerate?: boolean;
   signal?: AbortSignal;
   onEvent: (event: CanvasAgentStreamEvent) => void;
 };
@@ -52,6 +53,7 @@ export async function streamCanvasAgent(request: AgentStreamRequest): Promise<vo
         ? { askAnswers: request.askAnswers }
         : request.askAnswer ? { askAnswer: request.askAnswer } : {}),
       ...(request.continueJobId ? { continueJobId: request.continueJobId } : {}),
+      ...(request.regenerate ? { regenerate: true } : {}),
     }),
     signal: request.signal,
   });
