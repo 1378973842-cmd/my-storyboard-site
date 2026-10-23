@@ -34,6 +34,7 @@
 | 生产 APIMart（大陆 ECS） | ✅ 建议 `APIMART_API_BASE=https://api.apib.ai`（见第六节） |
 | 重启后数据 | ✅ 在磁盘；见下方「持久化路径」 |
 | `git reset --hard` 更新 | ✅ 不删未跟踪的 `uploads/`；**勿**再跟踪 `projects.db` / `data/` |
+| `node init.mjs` | ⚠️ 只跑**前端** build + 类型检查 + 自检，**不产出** `dist-server/server.mjs`。上线前必须另跑 `npm run build:server`（或直接用 `npm run build:prod`） |
 
 > **已废弃：** 旧版全站暗号 `ACCESS_CODE`（`siteAccessGate.ts`）**不再用于主线服务**。`.env.example` 里若仍注释提及，可忽略；上线以邮箱登录为准。
 
@@ -45,6 +46,7 @@
 |------|------|
 | `projects.db` | 分镜项目、生图元数据 |
 | `data/canvases/` | 无限画布 JSON |
+| `data/canvas-snapshots/` | 画布 Agent 的提案回滚快照（每个画布最近 30 份，见 5.2） |
 | `data/canvas-workflow-templates/` | 用户工作流模板 |
 | `public/uploads/` | 上传与 AI 落盘图片 |
 
@@ -388,9 +390,14 @@ npm run deploy:safe
 | 路径 | 内容 |
 |------|------|
 | `projects.db` | 分镜、生图元数据 |
-| `data/` | 画布 JSON、工作流模板 |
+| `data/` | 画布 JSON、工作流模板、**Agent 回滚快照** |
 | `public/uploads/` | 上传与 AI 落盘 |
 | `.env` | 线上密钥（勿提交 Git） |
+
+> **Agent 回滚快照在 `data/canvas-snapshots/` 里**：每次画布 Agent 应用提案前拍一份画布文档，服务端每画布只保留最近 30 份（自动淘汰最旧）。
+> 它跟着 `data/` 一起被打包，所以 `backup:remote` 会覆盖到。
+> 换机器、重装、或清理 `data/` 时**必须一起备份/保留**，否则历史提案「撤销这次应用」会失效（接口返回“没有快照”）。
+> 删掉目录本身不会影响画布内容，只是失去回滚能力。
 
 远端保留最近 **3** 份（`/root/studio-backups/studio-YYYYMMDD-HHMMSS.tar.gz`），更旧自动删。40G 云盘上每份约 4–5G，不宜再留 14 份。更长历史请 `--pull` 到本机。
 
