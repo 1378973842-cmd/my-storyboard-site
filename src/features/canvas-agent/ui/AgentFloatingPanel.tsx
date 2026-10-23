@@ -1501,7 +1501,11 @@ export function AgentFloatingPanel({
         setRollbackConfirmId(proposal.id);
         setNotice(
           `撤销会删 ${summary.removedNodes.length} 个节点、恢复 ${summary.restoredNodes.length} 个节点、`
-          + `边 −${summary.removedEdges}/+${summary.restoredEdges}。再点一次确认。`,
+          + `边 −${summary.removedEdges}/+${summary.restoredEdges}。`
+          + (summary.conflicts.length
+            ? `其中 ${summary.conflicts.length} 个节点在应用后改过，撤销会覆盖。`
+            : '')
+          + '再点一次确认。',
         );
         return;
       }

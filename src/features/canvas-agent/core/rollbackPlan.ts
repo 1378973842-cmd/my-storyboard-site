@@ -19,6 +19,8 @@ export type RollbackPlan = {
     restoredNodes: string[];
     removedEdges: number;
     restoredEdges: number;
+    /** 应用之后又被改过的节点：撤销会覆盖这些改动。 */
+    conflicts: string[];
   };
 };
 
@@ -50,9 +52,22 @@ export function rollbackCanvasPlan(input: RollbackInput): RollbackPlan {
   });
 
   const beforeNodes = new Map(input.before.nodes.map((node) => [node.id, node]));
+  const currentById = new Map(input.current.nodes.map((node) => [node.id, node]));
   const currentIds = new Set(input.current.nodes.map((node) => node.id));
   const removedNodes: string[] = [];
   const restoredNodes: string[] = [];
+  // 冲突只算「这份提案写过、但现在值已经对不上」的字段。agent* 是系统自己打的补丁，不算。
+  const conflicts: string[] = [];
+  input.actions.forEach((action) => {
+    if (action.type !== 'update_node_params') return;
+    const current = currentById.get(action.nodeId);
+    if (!current) return;
+    const changed = Object.entries(action.patch || {}).some(([key, value]) => (
+      !key.startsWith('agent')
+      && JSON.stringify(current[key]) !== JSON.stringify(value)
+    ));
+    if (changed && !conflicts.includes(action.nodeId)) conflicts.push(action.nodeId);
+  });
 
   const nodes: CanvasNodeRecord[] = [];
   input.current.nodes.forEach((node) => {
@@ -109,6 +124,6 @@ export function rollbackCanvasPlan(input: RollbackInput): RollbackPlan {
   return {
     nodes,
     connections: kept,
-    summary: { removedNodes, restoredNodes, removedEdges, restoredEdges },
+    summary: { removedNodes, restoredNodes, removedEdges, restoredEdges, conflicts },
   };
 }

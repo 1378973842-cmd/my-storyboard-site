@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
@@ -71,6 +71,7 @@ import {
 } from './core/jobState';
 import { remainingRunNodes, runNodeIdsOf } from './core/jobPlan';
 import { rollbackCanvasPlan } from './core/rollbackPlan';
+import { pruneCanvasSnapshots } from '../../services/infiniteCanvasStore';
 import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from './core/memory';
 import { compactHistory } from './core/history';
 import { actionRequiresApproval, toolContract, toolResultContent } from './core/toolContract';
@@ -2008,6 +2009,21 @@ assert.equal(rollbackPlan.nodes.some((node) => node.id === 'created'), false);
 assert.equal(rollbackPlan.nodes.some((node) => node.id === 'keep'), true, '没碰过的节点保留');
 assert.equal(rollbackPlan.connections.length, 1);
 assert.equal(rollbackPlan.connections[0].id, 'e0');
+// 应用之后又手改过：算冲突，界面要提示会被覆盖。
+const conflictedPlan = rollbackCanvasPlan({
+  before: { nodes: [{ id: 'n1', type: 'generator', prompt: '旧' }], connections: [] },
+  current: { nodes: [{ id: 'n1', type: 'generator', prompt: '用户后来改的' }], connections: [] },
+  actions: [{ type: 'update_node_params', nodeId: 'n1', patch: { prompt: '新' } }],
+  createdNodeIds: [],
+});
+assert.deepEqual(conflictedPlan.summary.conflicts, ['n1']);
+
+// 快照只留最近 N 份
+const pruneDir = mkdtempSync(path.join(tmpdir(), 'canvas-snap-'));
+['a', 'b', 'c', 'd'].forEach((name) => writeFileSync(path.join(pruneDir, `${name}.json`), '{}'));
+assert.equal(pruneCanvasSnapshots(pruneDir, 2), 2);
+assert.equal(readdirSync(pruneDir).filter((name) => name.endsWith('.json')).length, 2);
+rmSync(pruneDir, { recursive: true, force: true });
 
 
 // ---- 记忆 / 指标 / 工具契约 / Agent Key ----

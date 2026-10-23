@@ -82,6 +82,7 @@ import { rollbackCanvasPlan } from '../core/rollbackPlan.js';
 import {
   copyCanvasDocumentTo,
   getCanvas,
+  pruneCanvasSnapshots,
   readCanvasDocumentFile,
   saveCanvas,
 } from '../../../services/infiniteCanvasStore.js';
@@ -461,6 +462,8 @@ export function registerCanvasAgentRoutes(
               `${safePathPart(proposalId)}.json`,
             );
             copyCanvasDocumentTo(rollbackContext.canvasId, target);
+            // 每画布只留最近 30 份，别让快照把数据盘吃满。
+            pruneCanvasSnapshots(path.dirname(target), 30);
           }
         } catch {
           /* 快照失败不阻断落板 */

@@ -81,7 +81,13 @@ export async function rollbackProposal(
   proposalId: string,
   dryRun: boolean,
 ): Promise<{
-  summary: { removedNodes: string[]; restoredNodes: string[]; removedEdges: number; restoredEdges: number };
+  summary: {
+    removedNodes: string[];
+    restoredNodes: string[];
+    removedEdges: number;
+    restoredEdges: number;
+    conflicts: string[];
+  };
 }> {
   return requestJson(`/api/canvas-agent/proposals/${encodeURIComponent(proposalId)}/rollback`, {
     method: 'POST',

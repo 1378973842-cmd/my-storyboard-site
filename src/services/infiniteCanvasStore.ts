@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 
@@ -424,6 +424,35 @@ export function readCanvasDocumentFile(
     };
   } catch {
     return null;
+  }
+}
+
+/** 每个画布只留最近 keep 份回滚快照，防止数据盘被历史副本吃满。 */
+export function pruneCanvasSnapshots(dir: string, keep = 30): number {
+  try {
+    const names = readdirSync(dir).filter((name) => name.endsWith(".json"));
+    if (names.length <= keep) return 0;
+    const stamped = names.map((name) => {
+      const full = path.join(dir, name);
+      let mtime = 0;
+      try {
+        mtime = statSync(full).mtimeMs;
+      } catch {
+        /* ignore */
+      }
+      return { full, mtime };
+    }).sort((a, b) => b.mtime - a.mtime);
+    const drop = stamped.slice(Math.max(1, Math.floor(keep)));
+    drop.forEach((item) => {
+      try {
+        unlinkSync(item.full);
+      } catch {
+        /* ignore */
+      }
+    });
+    return drop.length;
+  } catch {
+    return 0;
   }
 }
 
