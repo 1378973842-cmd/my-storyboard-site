@@ -70,7 +70,8 @@ import {
   nextAgentJobStatus,
 } from './core/jobState';
 import { remainingRunNodes, runNodeIdsOf } from './core/jobPlan';
-import { memoryPromptPrefix } from './core/memory';
+import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from './core/memory';
+import { compactHistory } from './core/history';
 import { actionRequiresApproval, toolContract, toolResultContent } from './core/toolContract';
 import {
   initCanvasAgentMemorySchema,
@@ -2040,6 +2041,36 @@ assert.equal(resolveAgentApiKeyOwner(metaDb, apiKey!.token)?.id, 'user');
 assert.equal(revokeAgentApiKey(metaDb, 'user', apiKey!.key.id), true);
 assert.equal(resolveAgentApiKeyOwner(metaDb, apiKey!.token), null);
 assert.equal(resolveAgentApiKeyOwner(metaDb, 'agt_nope'), null);
+
+// 作用域：只读 Key 不能写
+const readOnlyKey = createAgentApiKey(metaDb, 'user', 'reader', ['read']);
+assert.deepEqual(readOnlyKey?.key.scopes, ['read']);
+assert.deepEqual(resolveAgentApiKeyOwner(metaDb, readOnlyKey!.token)?.scopes, ['read']);
+const fullKey = createAgentApiKey(metaDb, 'user', 'all', ['read', 'run', 'write']);
+assert.deepEqual(fullKey?.key.scopes, ['read', 'run', 'write']);
+const fallbackKey = createAgentApiKey(metaDb, 'user', 'fallback', ['nonsense']);
+assert.deepEqual(fallbackKey?.key.scopes, ['read', 'run', 'write']);
+
+// 历史压缩与记忆命中
+const historyTurns = Array.from({ length: 12 }, (_, index) => ({
+  role: index % 2 ? 'assistant' as const : 'user' as const,
+  content: `第${index}条`,
+}));
+const compacted = compactHistory(historyTurns, 10);
+assert.equal(compacted.kept.length, 10);
+assert.match(compacted.digest, /更早的对话（2 条）/);
+assert.match(compacted.digest, /第0条/);
+assert.equal(compactHistory(historyTurns.slice(0, 3), 10).digest, '');
+assert.equal(compactHistory([], 10).kept.length, 0);
+assert.deepEqual(searchMemoryHits([], '银发'), []);
+const memoryHits = searchMemoryHits([
+  { kind: 'fact', key: '主角', value: '银发少年 红色披风' },
+  { kind: 'preference', key: '默认时长', value: '15s' },
+], '银发 披风', 5);
+assert.equal(memoryHits.length, 1);
+assert.equal(memoryHits[0].key, '主角');
+assert.match(memoryHitsPrompt(memoryHits), /\[memory_hits\]/);
+assert.equal(memoryHitsPrompt([]), '');
 metaDb.close();
 
 
@@ -2138,7 +2169,7 @@ assert.equal(playbookContextSource.includes('operatingPrompt('), false);
 const playbookRouteSource = readFileSync(new URL('./server/registerCanvasAgentRoutes.ts', import.meta.url), 'utf8');
 assert.equal(playbookRouteSource.includes('projectRoot'), false);
 assert.equal(playbookRouteSource.includes('readFileSync'), false);
-assert.match(playbookRouteSource, /operatingPrompt\(message, playbookText\)/);
+assert.match(playbookRouteSource, /operatingPrompt\(turnMessage, playbookText\)/);
 assert.match(playbookRouteSource, /readPlaybookText\(requestedPlaybookId\)/);
 assert.doesNotMatch(playbookRouteSource, /body\.path/);
 assert.match(playbookPanelSource, /setPlaybookId\(playbook\.id\)/);

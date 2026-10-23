@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "note": "闸门基线：改 prompt / 改审批规则后跑这一组，确认原地不动的行为没被改坏。",
+  "cases": [
+    {
+      "id": "short-yes-never-creates-or-runs",
+      "message": "好的",
+      "mode": "confirm",
+      "actions": [
+        { "type": "create_node", "tempId": "t", "nodeType": "generator" },
+        { "type": "connect_nodes", "sourceNodeId": "t", "targetNodeId": "n1" },
+        { "type": "execute_node_skill", "nodeId": "n1" }
+      ],
+      "expect": { "afterShortYes": 0 }
+    },
+    {
+      "id": "mixed-proposal-waits-in-confirm",
+      "message": "做一段开场",
+      "mode": "confirm",
+      "actions": [
+        { "type": "create_node", "tempId": "t", "nodeType": "video" },
+        { "type": "execute_node_skill", "nodeId": "t" }
+      ],
+      "expect": { "waits": true, "requiresApproval": true }
+    },
+    {
+      "id": "structure-lands-in-auto",
+      "message": "加一个提示词节点",
+      "mode": "auto",
+      "actions": [
+        { "type": "create_node", "tempId": "t", "nodeType": "prompt" }
+      ],
+      "expect": { "waits": false, "requiresApproval": false }
+    },
+    {
+      "id": "run-only-waits-in-auto",
+      "message": "跑一下这个节点",
+      "mode": "auto",
+      "actions": [
+        { "type": "execute_node_skill", "nodeId": "n1" }
+      ],
+      "expect": { "waits": true, "requiresApproval": true }
+    },
+    {
+      "id": "mixed-proposal-land-structure-only-without-release",
+      "message": "建了再跑",
+      "mode": "auto",
+      "actions": [
+        { "type": "create_node", "tempId": "t", "nodeType": "generator" },
+        { "type": "execute_node_skill", "nodeId": "t" }
+      ],
+      "expect": { "releasedWithoutApproval": 1, "releasedWithApproval": 2 }
+    },
+    {
+      "id": "short-yes-keeps-update",
+      "message": "嗯",
+      "mode": "confirm",
+      "actions": [
+        { "type": "update_node_params", "nodeId": "n1", "patch": { "prompt": "改一下" } }
+      ],
+      "expect": { "afterShortYes": 1 }
+    }
+  ]
+}

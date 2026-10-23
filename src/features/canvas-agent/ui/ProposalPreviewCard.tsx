@@ -19,6 +19,8 @@ export function ProposalPreviewCard({
   onToggle,
   clampLines,
   nodeLabels,
+  canContinue = false,
+  onContinue,
 }: {
   proposal: ActionProposal;
   onApply: (proposal: ActionProposal) => void;
@@ -27,6 +29,8 @@ export function ProposalPreviewCard({
   onToggle?: () => void;
   clampLines?: string[];
   nodeLabels?: Record<string, string>;
+  canContinue?: boolean;
+  onContinue?: () => void;
 }) {
   // 只剩运行的提案由审批卡放行，这里的应用按钮挡不过运行闸，不出按钮。
   const runOnly = proposal.actions.length > 0 && proposal.actions.every((action) => action.type === 'execute_node_skill');
@@ -115,6 +119,13 @@ export function ProposalPreviewCard({
               <button type="button" onClick={() => onDiscard(proposal)} disabled={applying}>
                 <X aria-hidden="true" />
                 放弃
+              </button>
+            </div>
+          ) : null}
+          {canContinue && onContinue && settled ? (
+            <div className="canvas-agent-proposal-buttons">
+              <button type="button" onClick={onContinue}>
+                继续下一步
               </button>
             </div>
           ) : null}

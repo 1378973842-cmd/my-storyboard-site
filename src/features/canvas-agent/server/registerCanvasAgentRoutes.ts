@@ -74,7 +74,8 @@ import {
   listAgentMemory,
   upsertAgentMemory,
 } from './agentMemoryStore.js';
-import { memoryPromptPrefix } from '../core/memory.js';
+import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from '../core/memory.js';
+import { compactHistory } from '../core/history.js';
 import { toolContract, toolResultContent } from '../core/toolContract.js';
 import {
   createAgentApiKey,
@@ -97,6 +98,7 @@ type ChatBody = {
   runStates?: unknown;
   askAnswer?: unknown;
   askAnswers?: unknown;
+  continueJobId?: string;
 };
 
 type ToolCall = {
@@ -316,12 +318,25 @@ export function registerCanvasAgentRoutes(
     initCanvasAgentMemorySchema(db);
     initCanvasAgentApiKeySchema(db);
     // 双入口：浏览器走 cookie，脚本/MCP 走 Bearer（Agent Key）。
+    const requiredScope = (method: string, path: string): "read" | "run" | "write" => {
+      if (method === "GET") return "read";
+      if (method === "POST" && (
+        path === "/api/canvas-agent/chat"
+        || path === "/api/canvas-agent/jobs"
+        || /^\/api\/canvas-agent\/jobs\/[^/]+\/(events|observations|continue)$/.test(path)
+      )) return "run";
+      return "write";
+    };
     const bearerAuth: RequestHandler = (req, res, next) => {
       if (req.authUser) return next();
       const match = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization || ""));
       if (!match) return gate ? gate(req, res, next) : next();
       const owner = resolveAgentApiKeyOwner(db, match[1]);
       if (!owner) return res.status(401).json({ error: "Agent Key 无效或已撤销" });
+      const scope = requiredScope(req.method, String(req.originalUrl || req.path).split("?")[0]);
+      if (!owner.scopes.includes(scope)) {
+        return res.status(403).json({ error: `这个 Key 没有 ${scope} 权限` });
+      }
       req.authUser = owner;
       return next();
     };
@@ -497,6 +512,12 @@ export function registerCanvasAgentRoutes(
       }
       return res.json({ job: getAgentJob(db, req.authUser?.id || '', job.id) || job });
     });
+    // 继续下一步：同一份作业回到 running，再规划一步。
+    app.post('/api/canvas-agent/jobs/:id/continue', ...protectedRoute, (req, res) => {
+      const job = transitionAgentJob(db, req.authUser?.id || '', String(req.params.id || ''), 'continue');
+      if (!job) return res.status(409).json({ error: '作业状态不允许继续' });
+      return res.json({ job });
+    });
     // 一步跑完的观察。当前一步一批，C（逐节点执行 + 续跑）接在这里。
     app.post('/api/canvas-agent/jobs/:id/observations', ...protectedRoute, (req, res) => {
       const outcome = String(req.body?.outcome || '').trim();
@@ -606,6 +627,7 @@ export function registerCanvasAgentRoutes(
         db,
         req.authUser?.id || '',
         String(req.body?.name || ''),
+        req.body?.scopes,
       );
       if (!created) return res.status(400).json({ error: '创建失败' });
       return res.json({ token: created.token, key: created.key });
@@ -622,8 +644,16 @@ export function registerCanvasAgentRoutes(
     const askBatch = parseAskAnswers(body.askAnswers);
     const askAnswer = askBatch.length ? null : parseAskAnswer(body.askAnswer);
     const message = askBatch.length || askAnswer ? '' : String(body.message || '').trim();
+    const continueJobId = String(body.continueJobId || '').trim();
     const requestedPlaybookId = typeof body.playbookId === 'string' ? body.playbookId.trim() : '';
-    if (!message && !requestedPlaybookId && !askAnswer && !askBatch.length) return res.status(400).json({ error: '缺少消息内容' });
+    if (!message && !requestedPlaybookId && !askAnswer && !askBatch.length && !continueJobId) {
+      return res.status(400).json({ error: '缺少消息内容' });
+    }
+    // 继续下一步：这一轮没有用户原话，给模型一句明确的续跑指令。
+    const turnMessage = message
+      || (continueJobId
+        ? '（继续）上一批结构已经落板。如果还差结构步骤就继续提交；不要提交运行；没有可做的就只回复完成。'
+        : '');
     let conversation: CanvasAgentConversation | null = null;
     let citedNodes: string[] = [];
     let effectedNodes: ReturnType<typeof readConversationEffected> = [];
@@ -650,7 +680,7 @@ export function registerCanvasAgentRoutes(
           req.authUser?.id || '',
           conversation.id,
           'user',
-          message,
+          message || (continueJobId ? '（继续）' : ''),
           askBatch.length ? { askAnswers: askBatch } : askAnswer ? { askAnswer } : {},
         );
         citedNodes = recordConversationCitations(
@@ -660,24 +690,37 @@ export function registerCanvasAgentRoutes(
           message,
         );
         effectedNodes = readConversationEffected(db, req.authUser?.id || '', conversation.id);
-        // 一轮 Agent 任务从请求进来的这一秒开始记账。之后关页面、断线都不影响这行。
-        const job = createAgentJob(db, {
-          userId: req.authUser?.id || '',
-          canvasId,
-          conversationId: conversation.id,
-          request: {
-            message: message.slice(0, 500),
-            askAnswer: askAnswer
-              ? { cardId: askAnswer.cardId, selected: askAnswer.selected }
-              : undefined,
-            askAnswers: askBatch.length
-              ? askBatch.map((item) => ({ cardId: item.cardId, selected: item.selected }))
-              : undefined,
-            playbookId: requestedPlaybookId,
-          },
-        });
-        jobId = job.id;
-        transitionAgentJob(db, req.authUser?.id || '', job.id, 'start');
+        // 继续下一步：沿用同一份作业，只把它推回 running，步数 +1。
+        const resumedJob = continueJobId
+          ? transitionAgentJob(db, req.authUser?.id || '', continueJobId, 'continue', {
+            step: (getAgentJob(db, req.authUser?.id || '', continueJobId)?.step || 0) + 1,
+          })
+          : null;
+        if (continueJobId) {
+          if (!resumedJob || resumedJob.conversation_id !== conversation.id) {
+            return res.status(409).json({ error: '作业已经结束，不能继续' });
+          }
+          jobId = resumedJob.id;
+        } else {
+          // 一轮 Agent 任务从请求进来的这一秒开始记账。之后关页面、断线都不影响这行。
+          const job = createAgentJob(db, {
+            userId: req.authUser?.id || '',
+            canvasId,
+            conversationId: conversation.id,
+            request: {
+              message: message.slice(0, 500),
+              askAnswer: askAnswer
+                ? { cardId: askAnswer.cardId, selected: askAnswer.selected }
+                : undefined,
+              askAnswers: askBatch.length
+                ? askBatch.map((item) => ({ cardId: item.cardId, selected: item.selected }))
+                : undefined,
+              playbookId: requestedPlaybookId,
+            },
+          });
+          jobId = job.id;
+          transitionAgentJob(db, req.authUser?.id || '', job.id, 'start');
+        }
       } catch (error) {
         const status = Number((error as Error & { status?: number }).status) || 400;
         return res.status(status).json({
@@ -714,8 +757,7 @@ export function registerCanvasAgentRoutes(
       ...(jobId ? { jobId } : {}),
     });
 
-    const history = (Array.isArray(body.messages) ? body.messages : [])
-      .slice(-16)
+    const mappedHistory = (Array.isArray(body.messages) ? body.messages : [])
       .map((item) => {
         const earlierBatch = parseAskAnswers(item.askAnswers);
         if (earlierBatch.length) return { role: 'user' as const, content: `askAnswers:${JSON.stringify(earlierBatch)}` };
@@ -727,6 +769,10 @@ export function registerCanvasAgentRoutes(
         };
       })
       .filter((item) => item.content.trim());
+    // 超过 10 轮就压缩：更早的折成摘要，别让历史无限吃 token。
+    const compacted = compactHistory(mappedHistory, 10);
+    const history = compacted.kept;
+    const earlierText = compacted.digest ? `\n\n[earlier_turns]\n${compacted.digest}` : '';
     const context = String(body.context || '');
     const playbookText = requestedPlaybookId && readPlaybookText ? readPlaybookText(requestedPlaybookId) : '';
     const storedStage = db && conversation
@@ -747,16 +793,20 @@ export function registerCanvasAgentRoutes(
       pendingAsks,
     });
     const stageText = `${canvasAgentStagePrefix(storedStage.playbookId, storedStage.stage, requestedPlaybookId, effectedNodes, parseRunStates(body.runStates))}${changelog ? `\n\n[canvas_changelog]\n${changelog}` : ''}`;
-    // 项目记忆跨会话：角色、锁定风格、用户偏好。够用就停，不做检索。
-    const memoryText = db && conversation
-      ? memoryPromptPrefix(listAgentMemory(db, req.authUser?.id || '', conversation.canvas_id, 12))
-      : '';
+    // 项目记忆跨会话：最近 12 条常驻，命中的再补一段；够用就停，不做向量检索。
+    const allMemory = db && conversation
+      ? listAgentMemory(db, req.authUser?.id || '', conversation.canvas_id, 60)
+      : [];
+    const recentMemory = allMemory.slice(0, 12);
+    const memoryHits = searchMemoryHits(allMemory, turnMessage, 5)
+      .filter((hit) => !recentMemory.some((fact) => fact.kind === hit.kind && fact.key === hit.key));
+    const memoryText = memoryPromptPrefix(recentMemory) + memoryHitsPrompt(memoryHits);
     const imageDataUrls = await compressedVisionUrls(visionRoot, body.visionImages);
     const messages: Array<Record<string, unknown>> = [
-      { role: 'system', content: `${SYSTEM_PROMPT}\n${operatingPrompt(message, playbookText)}${stageText}${turnStateText}${memoryText}\n\n${context}` },
+      { role: 'system', content: `${SYSTEM_PROMPT}\n${operatingPrompt(turnMessage, playbookText)}${stageText}${turnStateText}${earlierText}${memoryText}\n\n${context}` },
       ...history,
       { role: 'user', content: userContentWithImages(
-        askBatch.length ? `askAnswers:${JSON.stringify(askBatch)}` : askAnswer ? `askAnswer:${JSON.stringify(askAnswer)}` : message,
+        askBatch.length ? `askAnswers:${JSON.stringify(askBatch)}` : askAnswer ? `askAnswer:${JSON.stringify(askAnswer)}` : turnMessage,
         imageDataUrls,
       ) },
     ];
@@ -984,3 +1034,4 @@ export function registerCanvasAgentRoutes(
     }
   });
 }
+

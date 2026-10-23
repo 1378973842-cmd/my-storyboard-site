@@ -16,7 +16,7 @@ export const AGENT_JOB_STATUSES = [
 ] as const;
 
 export type AgentJobStatus = (typeof AGENT_JOB_STATUSES)[number];
-export type AgentJobEvent = 'start' | 'ask' | 'execute' | 'finish' | 'fail' | 'cancel';
+export type AgentJobEvent = 'start' | 'ask' | 'execute' | 'continue' | 'finish' | 'fail' | 'cancel';
 
 type Transition = { from: readonly AgentJobStatus[]; to: AgentJobStatus };
 
@@ -24,6 +24,8 @@ const TRANSITIONS: Record<AgentJobEvent, Transition> = {
   start: { from: ['queued'], to: 'running' },
   ask: { from: ['running'], to: 'waiting_approval' },
   execute: { from: ['waiting_approval'], to: 'executing' },
+  // 观察完、用户点「继续下一步」：同一份作业回到 running，再规划一步。
+  continue: { from: ['executing', 'waiting_approval'], to: 'running' },
   finish: { from: ['running', 'waiting_approval', 'executing'], to: 'done' },
   fail: { from: ['queued', 'running', 'waiting_approval', 'executing'], to: 'failed' },
   cancel: { from: ['queued', 'running', 'waiting_approval', 'executing'], to: 'cancelled' },

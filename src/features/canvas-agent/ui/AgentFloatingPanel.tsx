@@ -547,6 +547,7 @@ export function AgentFloatingPanel({
   /** 服务端作业 id：这一轮 Agent 任务的账本，不随页面刷新消失。 */
   const jobIdRef = useRef('');
   const proposalJobRef = useRef<Map<string, string>>(new Map());
+  const continueCountRef = useRef<Map<string, number>>(new Map());
   /** 审批卡发出时记下的节点集与内容。只在这一次会话的内存里，刷新即失效。 */
   const runScopeRef = useRef<Map<string, RunScope>>(new Map());
   const askHistoryRef = useRef<ChatTurn[]>([]);
@@ -1126,13 +1127,14 @@ export function AgentFloatingPanel({
   );
 
   const sendText = useCallback(
-    async (raw: string, history: ChatTurn[]) => {
+    async (raw: string, history: ChatTurn[], continueJobId?: string) => {
       const text = raw.trim();
-      if (streaming || (!text && !playbookId)) return;
+      if (streaming || (!text && !playbookId && !continueJobId)) return;
       if (playbookId) sessionPlaybookRef.current = playbookId;
       // 上一轮作业如果还挂着，这一条新消息就意味着它已经结束（作业账本不留悬空）。
+      // 但「继续下一步」是在同一份作业上推进，不能把它收掉。
       const previousJob = jobIdRef.current;
-      if (previousJob) {
+      if (previousJob && previousJob !== continueJobId) {
         jobIdRef.current = '';
         void ackAgentJob(previousJob, 'finish', { result: { superseded: true } }).catch(() => {});
       }
@@ -1195,6 +1197,7 @@ export function AgentFloatingPanel({
           conversationId: conversationId || undefined,
           playbookId: playbookId || undefined,
           citedNodeIds: citedNodesRef.current,
+          ...(continueJobId ? { continueJobId } : {}),
           signal: controller.signal,
           onEvent: (event) => handleAgentEvent(assistantMessage.id, event),
         });
@@ -1465,6 +1468,23 @@ export function AgentFloatingPanel({
     },
     [messages, sendText],
   );
+
+  /**
+   * 观察完、用户点「继续下一步」：同一份作业回到 running，再规划一步。
+   * 不自动续跑：每一步都由人点，和取消标记那套语义一致。
+   */
+  const continueJob = useCallback((proposal: ActionProposal) => {
+    if (streaming) return;
+    const jobId = proposalJobRef.current.get(proposal.id) || '';
+    if (!jobId) return;
+    const used = continueCountRef.current.get(jobId) || 0;
+    if (used >= 3) {
+      setNotice('这一轮已经连续推进 3 步了。直接说下一步要做什么，比继续更准。');
+      return;
+    }
+    continueCountRef.current.set(jobId, used + 1);
+    void sendText('', messages, jobId);
+  }, [messages, sendText, streaming]);
 
   /**
    * 续跑：只跑观察里还没记到的节点，跑完一项记一步。
@@ -1977,6 +1997,8 @@ export function AgentFloatingPanel({
                       open={open}
                       clampLines={clampLines}
                       nodeLabels={nodeLabelsFor(touchedIds)}
+                      canContinue={Boolean(proposalJobRef.current.get(proposal.id))}
+                      onContinue={() => continueJob(proposal)}
                       onToggle={() => setProposalOpen((current) => ({ ...current, [proposal.id]: !open }))}
                       onApply={applyProposal}
                       onDiscard={discardProposal}

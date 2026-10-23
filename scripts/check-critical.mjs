@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+﻿import { spawnSync } from "node:child_process";
 
 const checks = [
   ["node", ["scripts/check-canvas-task-isolation.mjs"]],
@@ -7,6 +7,7 @@ const checks = [
   ["node", ["scripts/check-undo-force-render.mjs"]],
   ["node", ["--import", "tsx", "scripts/check-canvas-agent-precondition.mjs"]],
   ["npx", ["tsx", "src/features/canvas-agent/check.ts"]],
+  ["npx", ["tsx", "scripts/check-canvas-agent-evals.ts"]],
   ["npx", ["tsx", "scripts/check-fake-text-llm.ts"]],
   ["npx", ["tsx", "scripts/check-canvas-task-ledger.ts"]],
   ["npx", ["tsx", "scripts/check-canvas-content-fidelity.ts"]],
@@ -31,3 +32,5 @@ for (const [command, args] of checks) {
 }
 
 console.log(`critical checks: ${checks.length}/${checks.length} passed`);
+
+
