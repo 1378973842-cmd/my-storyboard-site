@@ -61,6 +61,7 @@ import {
   setAgentJobSteps,
   touchAgentJob,
   transitionAgentJob,
+  isStaleAgentJob,
 } from './agentJobStore.js';
 import {
   countTurnsSince,
@@ -558,7 +559,20 @@ export function registerCanvasAgentRoutes(
       transitionAgentJob(db, req.authUser?.id || '', job.id, 'start');
       return res.json({ job: getAgentJob(db, req.authUser?.id || '', job.id) || job });
     });
-    app.get('/api/canvas-agent/jobs', ...protectedRoute, (req, res) => {      const conversationId = String(req.query.conversation_id || '').trim();
+    // 服务端重启/页面关掉后，running 作业会永远停在 running。读列表时顺手收尸。
+    const sweepStaleJobs = (userId: string) => {
+      const now = Date.now();
+      listAgentJobs(db, userId, {})
+        .filter((job) => job.status === 'running' && isStaleAgentJob(job, now))
+        .forEach((job) => {
+          transitionAgentJob(db, userId, job.id, 'fail', {
+            error: '太久没有心跳：服务端重启或页面已关闭',
+          });
+        });
+    };
+    app.get('/api/canvas-agent/jobs', ...protectedRoute, (req, res) => {
+      sweepStaleJobs(req.authUser?.id || '');
+      const conversationId = String(req.query.conversation_id || '').trim();
       const activeOnly = String(req.query.active || '') === '1';
       return res.json({
         jobs: listAgentJobs(db, req.authUser?.id || '', {
@@ -568,6 +582,7 @@ export function registerCanvasAgentRoutes(
       });
     });
     app.get('/api/canvas-agent/jobs/:id', ...protectedRoute, (req, res) => {
+      sweepStaleJobs(req.authUser?.id || '');
       const job = getAgentJob(db, req.authUser?.id || '', String(req.params.id || ''));
       if (!job) return res.status(404).json({ error: 'Agent 作业不存在' });
       return res.json({ job });
