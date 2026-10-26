@@ -1159,6 +1159,11 @@ export function AgentFloatingPanel({
         });
       } else if (event.type === 'error') {
         setError(event.error);
+        // 模型侧失败（比如余额不足）时别再挂「这一轮还在进行中」。
+        setActiveJob(null);
+        jobIdRef.current = '';
+        setStreaming(false);
+        finishTurn(assistantId);
       } else if (event.type === 'done') {
         deliverProposalDone(assistantId, finishTurn, () => {
           flushProposalWriteQueue(
