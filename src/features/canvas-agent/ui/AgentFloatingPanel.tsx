@@ -1,4 +1,4 @@
-﻿import {
+import {
   Fragment,
   useCallback,
   useEffect,
@@ -83,7 +83,7 @@ import { AGENT_CREATABLE_NODE_TYPES } from '../types';
 import { AskCardView } from './AskCardView';
 import { mergeEffectedNodes } from '../core/effectLedger';
 import { AskPager } from './AskPager';
-import { EffectLabels } from './TurnLabels';
+import { EffectLabels, ThinkingFold } from './TurnLabels';
 import { ProposalPreviewCard } from './ProposalPreviewCard';
 import { AssistantMarkdown } from './assistantMarkdown';
 import { proposalDefaultOpen, proposalDisplayTier, sortProposalsForDisplay } from './proposalOrder';
@@ -621,7 +621,7 @@ export function AgentFloatingPanel({
   const [logsOpen, setLogsOpen] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState('');
-  const [mode, setMode] = useState<AgentMode>('confirm');
+  const [mode, setMode] = useState<AgentMode>('auto');
   const [menu, setMenu] = useState<
     'plus' | 'mode' | 'more' | 'history' | 'skills' | 'apps' | ''
   >('');
@@ -813,6 +813,7 @@ export function AgentFloatingPanel({
           content: message.content,
           createdAt: message.created_at,
           elapsedMs: Number(message.metadata?.elapsedMs) || undefined,
+          thinking: typeof message.metadata?.thinking === 'string' ? message.metadata.thinking : undefined,
           asks: Array.isArray(message.metadata?.asks) ? message.metadata.asks : undefined,
         }];
       }),
@@ -1094,6 +1095,10 @@ export function AgentFloatingPanel({
             item.id === assistantId ? { ...item, content: `${item.content}${event.text}` } : item,
           ),
         );
+      } else if (event.type === 'thinking') {
+        setMessages((items) => items.map((item) => (item.id === assistantId
+          ? { ...item, thinking: `${item.thinking || ''}${event.text}` }
+          : item)));
       } else if (event.type === 'ask') {
         setMessages((items) => items.map((item) => (
           item.id === assistantId ? { ...item, asks: event.asks } : item
@@ -1925,6 +1930,11 @@ export function AgentFloatingPanel({
               {messages.map((message) => (
                 <article key={message.id} className={`canvas-agent-message is-${message.role}`}>
                   {message.role === 'user' ? <span>YOU</span> : null}
+                  {message.role === 'assistant' && message.thinking ? (
+                    <ThinkingFold text={message.thinking}>
+                      <AssistantMarkdown text={message.thinking} />
+                    </ThinkingFold>
+                  ) : null}
                   {message.role === 'user' ? (
                     <p>{message.content ? <UserMessageBody content={message.content} /> : null}</p>
                   ) : message.content ? (
@@ -2350,21 +2360,21 @@ export function AgentFloatingPanel({
                   <button type="button" onClick={() => { setMode('confirm'); setMenu(''); }}>
                     <Hand aria-hidden="true" />
                     <span>
-                      <strong>手动确认</strong>
-                      <small>建节点、连线、改参数也等您点应用</small>
+                      <strong>手动确认（只批生成）</strong>
+                      <small>建/连/改自动落板，只有生成等审批卡</small>
                     </span>
                     {mode === 'confirm' ? <Check aria-hidden="true" /> : null}
                   </button>
                   <button type="button" onClick={() => { setMode('auto'); setMenu(''); }}>
                     <Sparkles aria-hidden="true" />
                     <span>
-                      <strong>自动生成</strong>
-                      <small>建节点、连线、改参数直接落板；运行仍要批准</small>
+                      <strong>逐步确认</strong>
+                      <small>建/连/改也停在待确认，点应用才落板</small>
                     </span>
                     {mode === 'auto' ? <Check aria-hidden="true" /> : null}
                   </button>
                   <p className="canvas-agent-menu-note">
-                    开启时建/连/改会停在待确认，点应用才落板；关闭时直接落板。
+                    手动确认：建/连/改直接落板，只有运行等审批卡。逐步确认：每一步都停在待确认。
                     运行在任何模式下都要审批卡，和这个开关无关。
                   </p>
                 </div>

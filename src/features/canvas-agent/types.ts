@@ -182,6 +182,8 @@ export type AgentChatMessage = {
   askAnswer?: AskAnswer;
   askAnswers?: AskAnswer[];
   asks?: AskCard[];
+  /** 模型的思考过程（取不到就没有）。 */
+  thinking?: string;
 };
 
 export type AgentToolLog = {
@@ -208,6 +210,7 @@ export type AgentStoredMessage = {
     toolLogs?: AgentToolLog[];
     error?: string;
     elapsedMs?: number;
+    thinking?: string;
     asks?: AskCard[];
     askAnswer?: AskAnswer;
     askAnswers?: AskAnswer[];
@@ -218,6 +221,7 @@ export type AgentStoredMessage = {
 export type CanvasAgentStreamEvent =
   | { type: 'meta'; model: string; conversationId?: string; jobId?: string; citedNodes?: string[]; effectedNodes?: Array<{ id: string; nodeType: string; label?: string }> }
   | { type: 'delta'; text: string }
+  | { type: 'thinking'; text: string }
   | { type: 'tool'; log: AgentToolLog }
   | { type: 'proposal'; proposal: ActionProposal }
   | { type: 'done' }

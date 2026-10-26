@@ -71,6 +71,7 @@ import {
 } from './core/jobState';
 import { remainingRunNodes, runNodeIdsOf } from './core/jobPlan';
 import { rollbackCanvasPlan } from './core/rollbackPlan';
+import { extractReasoningText } from './core/reasoning';
 import { pruneCanvasSnapshots } from '../../services/infiniteCanvasStore';
 import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from './core/memory';
 import { compactHistory } from './core/history';
@@ -1533,7 +1534,7 @@ assert.equal(
   withPlaybookBody,
   intakePrompt.replace('Playbooks loaded: none.', 'Playbooks loaded: 正文甲.'),
 );
-assert.equal(agentPlaybooks.length, 2);
+assert.equal(agentPlaybooks.length, 3);
 assert.equal(agentPlaybooks[0]?.id, 'canvas-video-piece');
 assert.equal(agentPlaybooks[0]?.title, '剧情动画');
 assert.equal(agentPlaybooks[0]?.when, '用户要多段剧情片时（每段 25–40 秒，分 2–3 段，主角跨段存活）');
@@ -1542,6 +1543,9 @@ assert.notEqual(agentPlaybooks[0]?.path, 'prompts/mx_shell_prompt_system.md');
 assert.equal(agentPlaybooks[1]?.id, 'canvas-opening-animation');
 assert.equal(agentPlaybooks[1]?.title, '开场动画');
 assert.equal(agentPlaybooks[1]?.path, 'prompts/playbook_opening_animation.md');
+assert.equal(agentPlaybooks[2]?.id, 'canvas-combat-fx');
+assert.equal(agentPlaybooks[2]?.title, '特效打斗');
+assert.equal(agentPlaybooks[2]?.path, 'prompts/playbook_combat_fx.md');
 const playbookStepEnd: Record<string, string> = {
   'canvas-video-piece': '## 时长规则',
   'canvas-opening-animation': '## 核心原则',
@@ -2020,6 +2024,18 @@ const conflictedPlan = rollbackCanvasPlan({
 });
 assert.deepEqual(conflictedPlan.summary.conflicts, ['n1']);
 
+// 思考过程：各家字段不一，取不到就空
+assert.equal(
+  extractReasoningText({ choices: [{ message: { reasoning_content: '先看资产，再定机位' } }] }),
+  '先看资产，再定机位',
+);
+assert.equal(
+  extractReasoningText({ choices: [{ message: { content: [{ type: 'thinking', text: '甲' }, { type: 'text', text: '乙' }] } }] }),
+  '甲',
+);
+assert.equal(extractReasoningText({ choices: [{ message: { content: '正文' } }] }), '');
+assert.equal(extractReasoningText({}), '');
+
 // 快照只留最近 N 份
 const pruneDir = mkdtempSync(path.join(tmpdir(), 'canvas-snap-'));
 ['a', 'b', 'c', 'd'].forEach((name) => writeFileSync(path.join(pruneDir, `${name}.json`), '{}'));
@@ -2131,9 +2147,9 @@ metaDb.close();
 
 
 const approvalPanelSource = readFileSync(new URL('./ui/AgentFloatingPanel.tsx', import.meta.url), 'utf8');
-assert.match(approvalPanelSource, /useState<AgentMode>\('confirm'\)/);
+assert.match(approvalPanelSource, /useState<AgentMode>\('auto'\)/);
 assert.match(approvalPanelSource, /setMode\('auto'\)/);
-assert.match(approvalPanelSource, /开启时建\/连\/改会停在待确认/);
+assert.match(approvalPanelSource, /手动确认：建\/连\/改直接落板/);
 assert.match(approvalPanelSource, /运行在任何模式下都要审批卡/);
 assert.match(approvalPanelSource, /approveRunCard\(nodeIds\)/);
 assert.match(approvalPanelSource, /runScopeMatches\(/);
@@ -2156,6 +2172,8 @@ assert.match(approvalRouteSource, /Bearer/);
 assert.match(approvalRouteSource, /remember_project_fact/);
 assert.match(approvalRouteSource, /\/api\/canvas-agent\/metrics/);
 assert.match(approvalRouteSource, /\/api\/canvas-agent\/memory/);
+assert.match(approvalRouteSource, /type: 'thinking'/);
+assert.match(approvalPanelSource, /ThinkingFold text/);
 assert.match(approvalRouteSource, /proposal\.jobId = jobId/);
 assert.match(approvalRouteSource, /if \(calls\.length && firstText\) streamText\(res, firstText\)/);
 assert.match(approvalRouteSource, /if \(!regenerate\) \{/);

@@ -330,4 +330,10 @@ export const agentPlaybooks: AgentPlaybook[] = [
     when: '用户要一条游戏开场动画时（单段，15 秒内，可选配乐）',
     path: 'prompts/playbook_opening_animation.md',
   },
+  {
+    id: 'canvas-combat-fx',
+    title: '特效打斗',
+    when: '用户要角色战斗、技能特效或打斗视频时（单段 10–15 秒，分镜 + 冲击帧 + 四层提示词）',
+    path: 'prompts/playbook_combat_fx.md',
+  },
 ];
