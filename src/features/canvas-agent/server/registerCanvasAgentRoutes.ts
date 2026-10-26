@@ -1207,7 +1207,24 @@ export function registerCanvasAgentRoutes(
         persistedText = stageGate.notice;
         streamText(res, stageGate.notice);
       } else if (asks.length) {
-        persistedText = '';
+        // 强制 ask_user 时模型常常只给卡片、不写正文；补一段分析，别让用户只看到问题。
+        let lead = '';
+        if (!persistedThinking) {
+          try {
+            const written = await callModel(model, [
+              ...messages,
+              {
+                role: 'user',
+                content: '用中文写一段 120-200 字的分析：说明你从参考图/画布里看到了什么，以及为什么这一步需要这些确认。不要列选项，不要提问，不要提工具名。',
+              },
+            ], false, controller.signal);
+            lead = extractTextLlmMessageContent(model, written).trim();
+          } catch {
+            /* 补写失败就只发卡片 */
+          }
+        }
+        persistedText = lead;
+        if (lead) streamText(res, lead);
         publishAsks();
       } else if (interpreted?.unknownTypes.length) {
         persistedText = `动作类型无法识别：${interpreted.unknownTypes.join('、')}。这轮没有生成提案。`;

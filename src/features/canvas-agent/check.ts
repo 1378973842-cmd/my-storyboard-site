@@ -2266,6 +2266,8 @@ assert.match(approvalRouteSource, /\[stage_rule\] 第一张提问卡先确认主
 assert.match(approvalRouteSource, /forceAsk/);
 assert.match(approvalRouteSource, /tool_choice: forceAsk/);
 assert.match(approvalRouteSource, /Never ask questions in prose/);
+assert.match(approvalRouteSource, /120-200 字的分析/);
+assert.match(combatPlaybookSource, /分镜写进 prompt 节点时用表格/);
 // 新建可生成节点：同轮补运行请求，用户只在卡片上批准
 const autoRun = appendRunProposalForNewGenerativeNodes('canvas-combat-fx', [
   { type: 'create_node', tempId: 'img1', nodeType: 'image' },
