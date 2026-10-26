@@ -1299,6 +1299,8 @@ export function AgentFloatingPanel({
         setNotice('这张审批卡已过期：页面刷新过，或节点内容在批准前变过。请让 Agent 重新提交运行再批。');
         return;
       }
+      // 批准后立刻给反馈：运行已经开始了，别让用户以为没点上。
+      setNotice('已批准，开始生成…');
     }
     // 答卡会发一次新请求；上一轮的作业到这里就算结束，别留成永远「等用户」。
     const previousJob = jobIdRef.current;

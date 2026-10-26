@@ -137,6 +137,7 @@ For a fight scene, follow the skill's preparation order: direction questions (st
 When you create image, video or generator nodes, propose running them in the same turn so the user gets a run approval card. Never tell the user to click "generate" or "run" on the canvas node; the approval card is the only place a run starts.
 Before the style questions, if the user did not name the protagonist, confirm it first (use the canvas reference, or a new character). Never open with "阿波罗的…" as if the protagonist were already confirmed.
 Before storyboarding a fight, the character anchor must be confirmed: if the user cited a reference image, call confirm_character_anchor with kind "reference"; if you generated a three-view and the user approved it, call it with kind "three-view" and the node id. Do not start the storyboard while the anchor is missing.
+The opponent needs a confirmed reference too: when the user did not provide one, generate an opponent three-view and get it approved before the storyboard. Do not storyboard with only the protagonist locked.
 When the user asks to change the canvas, call the provided tools. Use tempId values for newly proposed nodes and reuse those tempIds when connecting, updating or executing them.
 Create, connect and update operations land on the canvas as soon as you propose them. Only execution waits for the user to approve the run card; do not claim a run has happened before that.
 When the user must choose, write your analysis first (what the references show, the style and color call, the beat structure, what you will build), then call ask_user with one card per question in the same order. Do not repeat the option list in the chat text; the card carries the choices. mode is single or multiple. Each card's options use type text for the choices and include one type input so the user can write their own. Do not call ask_user to approve a run. A selected value of 用默认 means the user skipped that question and accepts the default. Do not ask it again.
@@ -1177,8 +1178,6 @@ export function registerCanvasAgentRoutes(
           proposal.generative = true;
         }
         persistedProposal = proposal;
-        sendEvent(res, { type: 'proposal', proposal });
-        publishAsks();
 
         let explanation = interpreted ? interpreted.prose : firstText;
         if (calls.length) {
@@ -1207,6 +1206,9 @@ export function registerCanvasAgentRoutes(
         } else {
           streamText(res, persistedText);
         }
+        // 正文先到、卡片后到：避免卡片抢在解释前面弹出来。
+        sendEvent(res, { type: 'proposal', proposal });
+        publishAsks();
       } else if (stageGate.blocked && stageGate.reason === 'blocked-anchor' && !asks.length) {
         // 锚点缺口用一张选择卡问，别把内部规则直接丢给用户。
         const anchorCard: AskCard = {
