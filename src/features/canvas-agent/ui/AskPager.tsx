@@ -16,7 +16,11 @@ export function AskPager({
   const [draft, setDraft] = useState('');
   const [writing, setWriting] = useState(false);
   if (!cards.length) return null;
-  if (answers && answers.length === cards.length) {
+  const answeredAll = Boolean(answers && cards.every((card) => answers.some((answer) => (
+    answer.cardId === card.id
+    && ((answer.selected?.length || 0) > 0 || Boolean(answer.input?.trim()))
+  ))));
+  if (answeredAll && answers) {
     return (
       <section className="canvas-agent-ask" aria-label="已询问">
         {cards.map((card) => {

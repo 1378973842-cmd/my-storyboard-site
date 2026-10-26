@@ -142,8 +142,9 @@ When the user asks to change the canvas, call the provided tools. Use tempId val
 Create, connect and update operations land on the canvas as soon as you propose them. Only execution waits for the user to approve the run card; do not claim a run has happened before that.
 When the user must choose, write your analysis first (what the references show, the style and color call, the beat structure, what you will build), then call ask_user with one card per question in the same order. Do not repeat the option list in the chat text; the card carries the choices. mode is single or multiple. Each card's options use type text for the choices and include one type input so the user can write their own. Do not call ask_user to approve a run. A selected value of 用默认 means the user skipped that question and accepts the default. Do not ask it again.
 Never ask questions in prose. If you are about to write "请告诉我", "请选择" or "您希望哪一张", stop and call ask_user instead; a preparation stage without cards is a failed turn.
+Card questions and options must be written in Chinese; never paste an English instruction or prompt into a card.
 Never ask the user to confirm an image before it is actually generated; if the node is still running, say it is still generating. Do not repeat analysis you already gave in an earlier turn; if nothing changed, answer in one line.
-Messages whose text starts with [[自动]] are automatic system notes about generation finishing, not user speech. Treat them as status updates: inspect the result, then let the user confirm or continue.
+Messages whose text starts with [[自动]] are automatic system notes about generation finishing, not user speech. Treat them as status updates: inspect the result, then let the user confirm or continue. Never claim the user asked to redesign, replace or modify anything unless their own message says so.
 For a new task your first reply is an analysis, not a proposal: read every attached reference, name the style and color grammar, lay out the shot beats with time ranges, state what you will build and what is still uncertain, then ask 1-3 concrete questions. Do not create nodes before those answers when the task is open-ended. When you do propose, explain in prose what each node is for and how the shots connect; reserve one-line replies for yes/no questions.
 Always write user-facing prose in the same language the user wrote in (Chinese when they write Chinese). Never open with English meta-commentary such as "Wait, let's..." and never switch languages mid-turn.
 If a skill playbook is supplied below, follow its workflow gates and question templates before building nodes.
@@ -914,9 +915,14 @@ export function registerCanvasAgentRoutes(
         if (earlierBatch.length) return { role: 'user' as const, content: `askAnswers:${JSON.stringify(earlierBatch)}` };
         const earlier = parseAskAnswer(item.askAnswer);
         if (earlier) return { role: 'user' as const, content: `askAnswer:${JSON.stringify(earlier)}` };
+        const text = String(item.content || '').slice(0, 6000);
+        // 自动生成通知不是用户发言，转成 system，避免模型把它当成修改要求。
+        if (item.role !== 'assistant' && text.startsWith('[[自动]]')) {
+          return { role: 'system' as const, content: `[系统通知] 生成状态更新（不是用户发言，不代表用户提出修改）：${text.slice(6)}` };
+        }
         return {
           role: item.role === 'assistant' ? 'assistant' as const : 'user' as const,
-          content: String(item.content || '').slice(0, 6000),
+          content: text,
         };
       })
       .filter((item) => item.content.trim());
@@ -1001,7 +1007,7 @@ export function registerCanvasAgentRoutes(
     const messages: Array<Record<string, unknown>> = [
       { role: 'system', content: `${SYSTEM_PROMPT}\n${operatingPrompt(turnMessage, playbookText)}${stageText}${turnStateText}${stageRule}${earlierText}${memoryText}\n\n${context}` },
       ...history,
-      { role: 'user', content: userContentWithImages(
+      { role: turnMessage.startsWith('[[自动]]') ? 'system' : 'user', content: userContentWithImages(
         askBatch.length ? `askAnswers:${JSON.stringify(askBatch)}` : askAnswer ? `askAnswer:${JSON.stringify(askAnswer)}` : turnMessage,
         imageDataUrls,
       ) },
@@ -1301,7 +1307,7 @@ export function registerCanvasAgentRoutes(
               ...messages,
               {
                 role: 'user',
-                content: '用中文写一段 120-200 字的分析：说明你从参考图/画布里看到了什么，以及为什么这一步需要这些确认。不要列选项，不要提问，不要提工具名。',
+                content: '用中文写 80-120 字：只说明这一步做了什么、下一步要确认什么。不要重复参考图/画布的描写，不要列选项，不要提问，不要提工具名。',
               },
             ], false, controller.signal);
             lead = extractTextLlmMessageContent(model, written).trim();

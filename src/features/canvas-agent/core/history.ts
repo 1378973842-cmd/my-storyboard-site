@@ -2,7 +2,7 @@
  * 会话压缩：只保留最近 N 轮原文，更早的折成一行一条摘要。
  * 不调模型——摘要只记「谁说了什么」，不编造内容。
  */
-export type HistoryTurn = { role: 'user' | 'assistant'; content: string };
+export type HistoryTurn = { role: 'user' | 'assistant' | 'system'; content: string };
 
 export type CompactedHistory = {
   kept: HistoryTurn[];
@@ -27,7 +27,7 @@ export function compactHistory(
   const older = turns.slice(0, turns.length - keep);
   const kept = turns.slice(turns.length - keep);
   const lines = older.map((turn) => (
-    `- ${turn.role === 'user' ? '用户' : '助手'}：${clip(turn.content, DIGEST_ITEM_MAX)}`
+    `- ${turn.role === 'user' ? '用户' : turn.role === 'system' ? '系统' : '助手'}：${clip(turn.content, DIGEST_ITEM_MAX)}`
   ));
   let digest = `更早的对话（${older.length} 条）：\n${lines.join('\n')}`;
   if (digest.length > DIGEST_MAX) {

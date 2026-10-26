@@ -14,7 +14,7 @@ export function AskCardView({
 }) {
   const [picked, setPicked] = useState<string[]>([]);
   const [draft, setDraft] = useState('');
-  const locked = Boolean(answer);
+  const locked = Boolean(answer && ((answer.selected?.length || 0) > 0 || answer.input?.trim()));
   const texts = card.options.filter((item) => item.type === 'text');
   const inputs = card.options.filter((item) => item.type === 'input');
   const send = (selected: string[], input = '') => {

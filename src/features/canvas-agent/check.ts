@@ -2274,7 +2274,13 @@ assert.match(approvalRouteSource, /\[stage_rule\] 第一张提问卡先确认主
 assert.match(approvalRouteSource, /forceAsk/);
 assert.match(approvalRouteSource, /tool_choice: forceAsk/);
 assert.match(approvalRouteSource, /Never ask questions in prose/);
-assert.match(approvalRouteSource, /120-200 字的分析/);
+assert.match(approvalRouteSource, /80-120 字/);
+assert.match(approvalRouteSource, /Card questions and options must be written in Chinese/);
+assert.match(approvalRouteSource, /Never claim the user asked to redesign/);
+const askPagerSource2 = readFileSync(new URL('./ui/AskPager.tsx', import.meta.url), 'utf8');
+assert.match(askPagerSource2, /answeredAll/);
+const askCardSource = readFileSync(new URL('./ui/AskCardView.tsx', import.meta.url), 'utf8');
+assert.match(askCardSource, /answer\.selected\?\.length/);
 assert.match(combatPlaybookSource, /对手也要锚点/);
 assert.match(approvalRouteSource, /opponent-anchor-/);
 assert.match(approvalRouteSource, /opponent_anchor/);
