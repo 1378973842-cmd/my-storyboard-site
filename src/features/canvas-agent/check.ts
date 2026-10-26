@@ -1198,7 +1198,8 @@ const turnLabelSource = readFileSync(new URL('./ui/TurnLabels.tsx', import.meta.
 assert.match(turnLabelSource, /思考过程/);
 assert.match(turnLabelSource, /<details/);
 assert.match(turnLabelSource, /data-collapsed="false"/);
-assert.doesNotMatch(turnLabelSource, /<details[^>]*\bopen\b/);
+// 思考过程和参考平台一样默认展开，用户能直接看到分析。
+assert.match(turnLabelSource, /<details[^>]*\bopen\b/);
 assert.equal(mediaRunState({ id: 'gen', type: 'generator', agentLastError: { message: '跑失败' } }), 'failed');
 assert.equal(mediaRunState({ id: 'gen', type: 'generator', url: '/uploads/a.png' }), 'generated');
 assert.equal(mediaRunState({ id: 'gen', type: 'generator' }), 'created');

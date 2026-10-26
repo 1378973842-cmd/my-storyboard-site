@@ -127,6 +127,19 @@ function uid(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/** 消息头的时间：今天只给时分，更早给月/日。 */
+function formatTurnTime(value: number): string {
+  const date = new Date(Number(value) || Date.now());
+  const now = new Date();
+  const sameDay = date.getFullYear() === now.getFullYear()
+    && date.getMonth() === now.getMonth()
+    && date.getDate() === now.getDate();
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  if (sameDay) return `${hh}:${mm}`;
+  return `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')} ${hh}:${mm}`;
+}
+
 function stopEvent(event: SyntheticEvent): void {
   if ('button' in event && event.button === 1) return;
   event.stopPropagation();
@@ -1929,7 +1942,20 @@ export function AgentFloatingPanel({
               })() : null}
               {messages.map((message) => (
                 <article key={message.id} className={`canvas-agent-message is-${message.role}`}>
-                  {message.role === 'user' ? <span>YOU</span> : null}
+                  <div className="canvas-agent-message-head">
+                    {message.role === 'assistant' ? (
+                      <span className="canvas-agent-avatar is-agent" aria-hidden="true">
+                        <Sparkles />
+                      </span>
+                    ) : null}
+                    <span className="canvas-agent-message-name">
+                      {message.role === 'user' ? 'YOU' : 'Agent'}
+                    </span>
+                    <span className="canvas-agent-message-time">{formatTurnTime(message.createdAt)}</span>
+                    {message.role === 'user' ? (
+                      <span className="canvas-agent-avatar is-user" aria-hidden="true">我</span>
+                    ) : null}
+                  </div>
                   {message.role === 'assistant' && message.thinking ? (
                     <ThinkingFold text={message.thinking}>
                       <AssistantMarkdown text={message.thinking} />

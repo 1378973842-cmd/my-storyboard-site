@@ -1552,3 +1552,154 @@ html.canvas-image-edit-open .canvas-agent-layer {
   color: #131313;
   font-weight: 600;
 }
+
+/* —— 消息头：头像 / 名称 / 时间 —— */
+.canvas-agent-message-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.canvas-agent-message.is-user .canvas-agent-message-head {
+  justify-content: flex-end;
+}
+
+.canvas-agent-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.canvas-agent-avatar svg {
+  width: 12px;
+  height: 12px;
+}
+
+.canvas-agent-avatar.is-agent {
+  background: linear-gradient(140deg, #ffb866, #a86a24);
+  color: #1a1206;
+}
+
+.canvas-agent-avatar.is-user {
+  background: #2a2928;
+  color: #c8c4c2;
+}
+
+.canvas-agent-message-name {
+  color: #8d8886;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.canvas-agent-message-time {
+  color: #6f6a68;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* —— 思考过程 / 节点状态 —— */
+.canvas-agent-turn-label {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card, #1c1b1b) 68%, transparent);
+}
+
+details.canvas-agent-turn-label {
+  padding: 0;
+  background: #171616;
+}
+
+details.canvas-agent-turn-label > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  color: #a8a3a1;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+details.canvas-agent-turn-label > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.canvas-agent-turn-label > summary::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--strong, #ffb866);
+}
+
+details.canvas-agent-turn-label > summary::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-right: 1.5px solid #8d8886;
+  border-bottom: 1.5px solid #8d8886;
+  transform: rotate(-45deg);
+  transition: transform 0.18s ease;
+}
+
+details.canvas-agent-turn-label[open] > summary::after {
+  transform: rotate(45deg);
+}
+
+details.canvas-agent-turn-label > .canvas-agent-md {
+  padding: 0 12px 12px;
+  color: #b9b4b2;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.canvas-agent-turn-label > p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #a8a3a1;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.canvas-agent-turn-label > p::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--strong, #ffb866);
+  flex: none;
+}
+
+.canvas-agent-turn-thumb {
+  width: 100%;
+  max-height: 140px;
+  border-radius: 12px;
+  background: #131313;
+  object-fit: cover;
+}
+
+.canvas-agent-turn-error {
+  color: #ff9a8a;
+  font-size: 11.5px;
+}
+
+.canvas-agent-turn-kicker {
+  margin: 0;
+  color: #8d8886;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
