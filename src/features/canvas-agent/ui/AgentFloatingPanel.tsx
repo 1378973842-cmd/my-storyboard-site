@@ -82,6 +82,7 @@ import { agentPlaybooks, canvasSkillRegistry } from '../tools/skillRegistry';
 import { AGENT_CREATABLE_NODE_TYPES } from '../types';
 import { AskCardView } from './AskCardView';
 import { mergeEffectedNodes } from '../core/effectLedger';
+import { replaceNodeTokens } from '../core/displayText';
 import { AskPager } from './AskPager';
 import { EffectLabels, ThinkingFold } from './TurnLabels';
 import { ProposalPreviewCard } from './ProposalPreviewCard';
@@ -1981,13 +1982,13 @@ export function AgentFloatingPanel({
                   </div>
                   {message.role === 'assistant' && message.thinking ? (
                     <ThinkingFold text={message.thinking}>
-                      <AssistantMarkdown text={message.thinking} />
+                      <AssistantMarkdown text={replaceNodeTokens(message.thinking, getCanvasSnapshot().nodes)} />
                     </ThinkingFold>
                   ) : null}
                   {message.role === 'user' ? (
                     <p>{message.content ? <UserMessageBody content={message.content} /> : null}</p>
                   ) : message.content ? (
-                    <AssistantMarkdown text={message.content} />
+                    <AssistantMarkdown text={replaceNodeTokens(message.content, getCanvasSnapshot().nodes)} />
                   ) : (
                     <AssistantMarkdown text={streaming && !message.asks?.length ? '正在构思…' : ''} />
                   )}

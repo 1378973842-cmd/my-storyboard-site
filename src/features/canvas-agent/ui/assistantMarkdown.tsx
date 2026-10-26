@@ -14,10 +14,10 @@ function isHr(line: string): boolean {
   return /^ {0,3}(?:-{3,}|\*{3,}|_{3,})[ \t]*$/.test(line);
 }
 
-function headingOf(line: string): { level: 1 | 2 | 3; text: string } | null {
-  const match = /^(#{1,3})[ \t]+(.+?)\s*$/.exec(line);
+function headingOf(line: string): { level: 1 | 2 | 3 | 4; text: string } | null {
+  const match = /^(#{1,4})[ \t]+(.+?)\s*$/.exec(line);
   if (!match) return null;
-  const level = match[1].length as 1 | 2 | 3;
+  const level = match[1].length as 1 | 2 | 3 | 4;
   return { level, text: match[2].replace(/\s+#+\s*$/, '') };
 }
 
@@ -35,7 +35,7 @@ function listItem(line: string): { ordered: boolean; text: string } | null {
   return { ordered: /^\d/.test(line.trim()), text: match[1] };
 }
 
-function Heading({ level, text, index }: { level: 1 | 2 | 3; text: string; index: number }) {
+function Heading({ level, text, index }: { level: 1 | 2 | 3 | 4; text: string; index: number }) {
   const body = inlineNodes(text, `h${index}`);
   if (level === 1) return <h2>{body}</h2>;
   if (level === 2) return <h3>{body}</h3>;

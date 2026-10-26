@@ -72,6 +72,7 @@ import {
 import { remainingRunNodes, runNodeIdsOf } from './core/jobPlan';
 import { rollbackCanvasPlan } from './core/rollbackPlan';
 import { extractReasoningText } from './core/reasoning';
+import { replaceNodeTokens } from './core/displayText';
 import { pruneCanvasSnapshots } from '../../services/infiniteCanvasStore';
 import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from './core/memory';
 import { compactHistory } from './core/history';
@@ -1248,6 +1249,16 @@ assert.match(markdownSample, /<th>镜<\/th>/);
 assert.match(markdownSample, /<td>0-3<\/td>/);
 assert.match(markdownSample, /<hr\/>/);
 assert.match(markdownSample, /<code>\{\{img_a\}\}<\/code>/);
+const h4Sample = renderToStaticMarkup(createElement(AssistantMarkdown, { text: '#### 四级标题' }));
+assert.match(h4Sample, /<h4>四级标题<\/h4>/);
+assert.doesNotMatch(h4Sample, /####/);
+// 聊天正文里的 {{节点}} 显示成可读名字
+assert.equal(
+  replaceNodeTokens('主角 {{img_a}} 与 {{img_missing}}', [
+    { id: 'img_a', type: 'image', title: '阿波罗' },
+  ]),
+  '主角 阿波罗 与 {{img_missing}}',
+);
 const tempCard = renderToStaticMarkup(createElement(ProposalPreviewCard, {
   proposal: sameSentence,
   onApply() {},
@@ -2187,11 +2198,14 @@ assert.match(approvalPanelSource, /appliedSkillRef\.current = '';\n\s+setPlayboo
 assert.match(approvalRouteSource, /text\/prompt nodes must hold plain prose/);
 assert.match(approvalRouteSource, /available references, not the default subject/);
 assert.match(approvalRouteSource, /never by \{\{node-id\}\} tokens/);
+assert.match(approvalRouteSource, /do not write shot-by-shot beats or camera plans before both combatants are confirmed/);
 const combatPlaybookSource = readFileSync(new URL('../../../prompts/playbook_combat_fx.md', import.meta.url), 'utf8');
 assert.match(combatPlaybookSource, /分镜剧本写进 prompt 节点/);
 assert.match(combatPlaybookSource, /不要写 `\{\{节点\}\}` 引用/);
 // 共享运镜词典不能压过技能自身的分镜/节奏
 assert.match(combatPlaybookSource, /两者冲突时\*\*以本技能为准\*\*/);
+assert.match(combatPlaybookSource, /打斗至少两个角色/);
+assert.match(combatPlaybookSource, /对手没确认之前.*不写分镜、不写运镜/);
 const cameraBridgeSource = readFileSync(new URL('../../services/canvasMxShellPromptBridge.ts', import.meta.url), 'utf8');
 assert.match(cameraBridgeSource, /运镜词典（写法参考）/);
 assert.match(cameraBridgeSource, /技能正文的分镜结构、节奏与特效层优先/);
