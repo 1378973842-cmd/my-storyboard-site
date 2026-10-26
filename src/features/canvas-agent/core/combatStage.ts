@@ -45,8 +45,9 @@ const NEXT_STAGE: Record<CombatStage, CombatStage | null> = {
 
 export const COMBAT_STAGE_NOTICES: Record<CombatStage, string> = {
   direction: [
-    '先把方向定下来，再动画面。挑 3–4 个维度问，不要一次全抛：',
+    '先把主角和方向定下来，再动画面。',
     '',
+    '0. 主角：用画布里的参考（比如阿波罗），还是新角色？用户没点名时先问这个，不要默认。',
     '1. 画风：偏写实（真人质感）还是偏二次元（国漫/日漫/3D 卡通）',
     '2. 特效风格：有没有喜欢的游戏/动漫技能参考（鬼灭呼吸、原神元素爆发等）',
     '3. 动作风格：快速连击 / 蓄力一击 / 舞步式 / 野蛮压制',
