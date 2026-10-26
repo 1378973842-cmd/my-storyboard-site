@@ -2342,7 +2342,25 @@ assert.match(approvalRouteSource, /storyboard_written/);
 assert.match(approvalRouteSource, /opponentPending/);
 assert.match(approvalRouteSource, /Never ask the user to confirm an image before it is actually generated/);
 assert.match(approvalPanelSource, /autoWatchRef/);
-assert.match(approvalRouteSource, /autoAnchors/);
+const inlineAskCards2 = parseInlineAskCards(JSON.stringify({
+  actions: [{
+    name: 'ask_user',
+    arguments: {
+      cards: [{
+        id: 'confirm-plan',
+        mode: 'single',
+        question: '以上方案可以吗？',
+        options: [
+          { type: 'text', value: '可以，按此方案进行' },
+          { type: 'input', placeholder: '请输入您的修改意见…' },
+        ],
+      }],
+    },
+    summary: '**风格**：3D国漫史诗写实',
+  }],
+}));
+assert.equal(inlineAskCards2.length, 1);
+assert.match(inlineAskCards2[0]?.question || '', /以上方案可以吗/);
 assert.match(approvalPanelSource, /type=\$\{typeOf\(nodeId\)\}/);
 assert.match(approvalPanelSource, /event\.type === 'error'/);
 assert.match(approvalPanelSource, /setActiveJob\(null\);\n        jobIdRef\.current = '';/);

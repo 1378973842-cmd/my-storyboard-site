@@ -126,14 +126,35 @@ export function parseInlineAskCards(text: string): AskCard[] {
   const cards: AskCard[] = [];
   actions.forEach((item, index) => {
     const action = record(item);
-    if (String(action.type || '') !== 'ask_user') return;
-    const card = oneCard({ ...action, mode: action.mode || 'single' }, index);
-    if (card) cards.push(card);
+    // 两种形态都认：{type:'ask_user',question,...} 和
+    // {name:'ask_user',arguments:{cards:[...]}}（OpenAI function-call 形状）
+    const name = String(action.type || action.name || '');
+    if (name !== 'ask_user') return;
+    let args: unknown = action.arguments ?? action;
+    if (typeof args === 'string') {
+      try {
+        args = JSON.parse(args);
+      } catch {
+        return;
+      }
+    }
+    const argsRecord = record(args);
+    const list = Array.isArray(argsRecord.cards)
+      ? argsRecord.cards
+      : Array.isArray(argsRecord.asks)
+        ? argsRecord.asks
+        : [argsRecord];
+    list.forEach((entry, offset) => {
+      const raw = record(entry);
+      const card = oneCard({ ...raw, mode: raw.mode || 'single' }, index + offset);
+      if (card) cards.push(card);
+    });
   });
   return cards;
 }
 
-export function approveRunCard(nodeKeys: string[]): AskCard | null {  const keys = [...new Set(nodeKeys.map((item) => item.trim()).filter(Boolean))];
+export function approveRunCard(nodeKeys: string[]): AskCard | null {
+  const keys = [...new Set(nodeKeys.map((item) => item.trim()).filter(Boolean))];
   if (!keys.length) return null;
   return {
     id: 'ask-run',
