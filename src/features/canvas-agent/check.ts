@@ -76,6 +76,7 @@ import { rollbackCanvasPlan } from './core/rollbackPlan';
 import { extractReasoningText } from './core/reasoning';
 import { replaceNodeTokens } from './core/displayText';
 import { COMBAT_ANCHOR_NOTICE, combatStageDecision } from './core/combatStage';
+import { appendRunProposalForNewGenerativeNodes } from './core/runProposal';
 import { pruneCanvasSnapshots } from '../../services/infiniteCanvasStore';
 import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from './core/memory';
 import { compactHistory } from './core/history';
@@ -2261,6 +2262,27 @@ assert.match(combatPlaybookSource, /两者冲突时\*\*以本技能为准\*\*/);
 assert.match(combatPlaybookSource, /打斗至少两个角色/);
 assert.match(combatPlaybookSource, /六项没确认之前，只做分析和提问/);
 assert.match(approvalRouteSource, /\[stage_rule\] 第一张提问卡先确认主角/);
+// 新建可生成节点：同轮补运行请求，用户只在卡片上批准
+const autoRun = appendRunProposalForNewGenerativeNodes('canvas-combat-fx', [
+  { type: 'create_node', tempId: 'img1', nodeType: 'image' },
+]);
+assert.equal(autoRun.length, 2);
+assert.equal(autoRun[1]?.type, 'execute_node_skill');
+assert.equal(autoRun[1]?.nodeId, 'img1');
+assert.equal(
+  appendRunProposalForNewGenerativeNodes('canvas-combat-fx', [
+    { type: 'create_node', tempId: 'img1', nodeType: 'image' },
+    { type: 'execute_node_skill', nodeId: 'img1' },
+  ]).length,
+  2,
+);
+assert.equal(
+  appendRunProposalForNewGenerativeNodes('canvas-video-piece', [
+    { type: 'create_node', tempId: 'img1', nodeType: 'image' },
+  ]).length,
+  1,
+);
+assert.match(approvalRouteSource, /appendRunProposalForNewGenerativeNodes/);
 assert.match(approvalRouteSource, /角色参考怎么定/);
 assert.match(approvalRouteSource, /action\.type === 'create_node' && action\.nodeType === 'image'/);
 assert.doesNotMatch(COMBAT_ANCHOR_NOTICE, /confirm_character_anchor/);
