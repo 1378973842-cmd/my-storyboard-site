@@ -1309,8 +1309,9 @@ export function AgentFloatingPanel({
       if (waiting) return;
       autoWatchRef.current.clear();
       const labelOf = (nodeId: string) => nodes.find((node) => node.id === nodeId)?.title || nodeId;
+      const typeOf = (nodeId: string) => String(nodes.find((node) => node.id === nodeId)?.type || '');
       const parts = [
-        ...done.map((nodeId) => `已生成：${labelOf(nodeId)}`),
+        ...done.map((nodeId) => `已生成：${labelOf(nodeId)}（id=${nodeId}，type=${typeOf(nodeId)}）`),
         ...failed.map((nodeId) => `生成失败：${labelOf(nodeId)}`),
       ];
       if (!parts.length) return;

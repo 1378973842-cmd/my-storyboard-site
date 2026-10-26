@@ -2342,6 +2342,8 @@ assert.match(approvalRouteSource, /storyboard_written/);
 assert.match(approvalRouteSource, /opponentPending/);
 assert.match(approvalRouteSource, /Never ask the user to confirm an image before it is actually generated/);
 assert.match(approvalPanelSource, /autoWatchRef/);
+assert.match(approvalRouteSource, /autoAnchors/);
+assert.match(approvalPanelSource, /type=\$\{typeOf\(nodeId\)\}/);
 assert.match(approvalPanelSource, /event\.type === 'error'/);
 assert.match(approvalPanelSource, /setActiveJob\(null\);\n        jobIdRef\.current = '';/);
 assert.match(approvalPanelSource, /\[\[自动\]\]/);

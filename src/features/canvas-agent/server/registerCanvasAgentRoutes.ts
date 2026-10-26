@@ -964,6 +964,27 @@ export function registerCanvasAgentRoutes(
     const stageData = db && conversation
       ? readConversationStageData(db, req.authUser?.id || '', conversation.id)
       : { stage: '', facts: {} };
+    // 生成完成通知里带节点 id/type：按标题把三视图/对手/场景补成锚点，
+    // 别因为模型没调 confirm_character_anchor 又把同一张卡问一遍。
+    const autoAnchors: { protagonist?: string; opponent?: string; scene?: string } = {};
+    if (turnMessage.startsWith('[[自动]]')) {
+      for (const match of turnMessage.matchAll(/已生成：(.+?)（id=([\w-]+)，type=([\w-]+)）/g)) {
+        const [, title, nodeId, nodeType] = match;
+        if (nodeType !== 'generator' && nodeType !== 'image') continue;
+        if (/对手|反派|敌方|魔尊|邪修|boss/i.test(title)) autoAnchors.opponent ||= `three-view:${nodeId}`;
+        else if (/场景|背景|废墟|神殿|庭院|环境/.test(title)) autoAnchors.scene ||= `three-view:${nodeId}`;
+        else if (/三视图|主角|角色/.test(title)) autoAnchors.protagonist ||= `three-view:${nodeId}`;
+      }
+      if (Object.keys(autoAnchors).length && db && conversation) {
+        writeConversationStageData(db, req.authUser?.id || '', conversation.id, {
+          facts: {
+            ...(autoAnchors.protagonist ? { character_anchor: autoAnchors.protagonist, character_quality: 'good' } : {}),
+            ...(autoAnchors.opponent ? { opponent_anchor: autoAnchors.opponent, opponent_quality: 'good' } : {}),
+            ...(autoAnchors.scene ? { scene_anchor: autoAnchors.scene, scene_quality: 'good' } : {}),
+          },
+        });
+      }
+    }
     // 服务端下发的锚点选择卡：主角 `anchor-*`，对手 `opponent-anchor-*`
     const selectionsOf = (prefix: string) => [
       ...(askAnswer && String(askAnswer.cardId || '').startsWith(prefix) ? askAnswer.selected : []),
@@ -997,13 +1018,16 @@ export function registerCanvasAgentRoutes(
     }
     const hasAnchor = (anchorWantsReference
       || Boolean(stageData.facts.character_anchor)
+      || Boolean(autoAnchors.protagonist)
       || citedNodes.length > 0)
       && stageData.facts.character_quality !== 'low';
     const hasOpponentAnchor = (opponentWantsReference
-      || Boolean(stageData.facts.opponent_anchor))
+      || Boolean(stageData.facts.opponent_anchor)
+      || Boolean(autoAnchors.opponent))
       && stageData.facts.opponent_quality !== 'low';
     const hasSceneAnchor = (sceneWantsReference
-      || Boolean(stageData.facts.scene_anchor))
+      || Boolean(stageData.facts.scene_anchor)
+      || Boolean(autoAnchors.scene))
       && stageData.facts.scene_quality !== 'low';
     // 技能芯片被清掉也不该逃出打斗闸：会话里有阶段数据就仍按特效打斗处理。
     const combatSession = requestedPlaybookId === 'canvas-combat-fx'
