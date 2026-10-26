@@ -1585,12 +1585,20 @@ assert.equal(
   'production',
 );
 assert.equal(
-  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'storyboard', message: '', answering: false, hasAnchor: true }).blocked,
-  false,
-);
-assert.equal(
   combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'storyboard', message: '', answering: false, hasAnchor: false }).blocked,
   true,
+);
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'storyboard', message: '', answering: false, hasAnchor: true, hasOpponentAnchor: false }).reason,
+  'blocked-opponent-anchor',
+);
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '', answering: true, hasAnchor: true, hasOpponentAnchor: false }).reason,
+  'blocked-opponent-anchor',
+);
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '', answering: true, hasAnchor: true, hasOpponentAnchor: true }).advanceTo,
+  'storyboard',
 );
 assert.equal(
   combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '对手是宙斯', answering: false, hasAnchor: false }).blocked,
@@ -2268,7 +2276,10 @@ assert.match(approvalRouteSource, /tool_choice: forceAsk/);
 assert.match(approvalRouteSource, /Never ask questions in prose/);
 assert.match(approvalRouteSource, /120-200 字的分析/);
 assert.match(combatPlaybookSource, /对手也要锚点/);
-assert.match(approvalRouteSource, /The opponent needs a confirmed reference too/);
+assert.match(approvalRouteSource, /opponent-anchor-/);
+assert.match(approvalRouteSource, /opponent_anchor/);
+assert.match(approvalRouteSource, /blocked-opponent-anchor/);
+assert.match(approvalRouteSource, /role "opponent"/);
 assert.match(approvalPanelSource, /已批准，开始生成…/);
 // 新建可生成节点：同轮补运行请求，用户只在卡片上批准
 const autoRun = appendRunProposalForNewGenerativeNodes('canvas-combat-fx', [

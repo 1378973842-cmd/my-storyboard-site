@@ -24,7 +24,8 @@ export type CombatStageReason =
   | 'escape'
   | 'blocked-direction'
   | 'blocked-params'
-  | 'blocked-anchor';
+  | 'blocked-anchor'
+  | 'blocked-opponent-anchor';
 
 export type CombatStageDecision = {
   blocked: boolean;
@@ -79,13 +80,23 @@ export const COMBAT_ANCHOR_NOTICE = [
   '2. 先让我出一张三视图（正面/侧面/背面），你确认后我再往下走',
 ].join('\n');
 
+export const COMBAT_OPPONENT_NOTICE = [
+  '主角参考已确认，但对手还没有参考。',
+  '',
+  '两个选择：',
+  '1. 用画布里的对手图（在消息里 @ 它）',
+  '2. 先让我出对手三视图，你确认后再写分镜',
+].join('\n');
+
 export function combatStageDecision(input: {
   playbookId: string;
   stage: string;
   message: string;
   answering: boolean;
-  /** 角色锚点是否已确认（参考图或已确认的三视图） */
+  /** 主角锚点是否已确认（参考图或已确认的三视图） */
   hasAnchor: boolean;
+  /** 对手锚点是否已确认；不传视为已确认（兼容旧调用） */
+  hasOpponentAnchor?: boolean;
 }): CombatStageDecision {
   const stage = (COMBAT_STAGES as readonly string[]).includes(input.stage)
     ? input.stage as CombatStage
@@ -100,6 +111,9 @@ export function combatStageDecision(input: {
   if (stage === 'storyboard' && !input.hasAnchor) {
     return { blocked: true, advanceTo: null, reason: 'blocked-anchor', notice: COMBAT_ANCHOR_NOTICE };
   }
+  if (stage === 'storyboard' && input.hasOpponentAnchor === false) {
+    return { blocked: true, advanceTo: null, reason: 'blocked-opponent-anchor', notice: COMBAT_OPPONENT_NOTICE };
+  }
   if (stage === 'storyboard') {
     return { blocked: false, advanceTo: null, reason: 'storyboard', notice };
   }
@@ -109,6 +123,9 @@ export function combatStageDecision(input: {
   if (input.answering) {
     if (!input.hasAnchor) {
       return { blocked: true, advanceTo: null, reason: 'blocked-anchor', notice: COMBAT_ANCHOR_NOTICE };
+    }
+    if (input.hasOpponentAnchor === false) {
+      return { blocked: true, advanceTo: null, reason: 'blocked-opponent-anchor', notice: COMBAT_OPPONENT_NOTICE };
     }
     // 每答完一轮提问，往前推一段：方向 → 参数 → 分镜
     return { blocked: false, advanceTo: NEXT_STAGE[stage], reason: 'answered', notice };

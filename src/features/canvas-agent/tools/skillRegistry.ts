@@ -299,13 +299,15 @@ export const coreCanvasTools: AIToolDefinition[] = [
     function: {
       name: 'confirm_character_anchor',
       description:
-        'Mark the confirmed character anchor before storyboarding. '
+        'Mark a confirmed character anchor before storyboarding. '
         + 'Use kind=reference when the user cited an existing reference image, '
-        + 'kind=three-view after the user approves a generated three-view node.',
+        + 'kind=three-view after the user approves a generated three-view node. '
+        + 'role=opponent marks the opponent anchor instead of the protagonist.',
       parameters: objectSchema(
         {
           kind: { type: 'string', enum: ['reference', 'three-view'] },
           nodeId: { type: 'string' },
+          role: { type: 'string', enum: ['protagonist', 'opponent'] },
         },
         ['kind'],
       ),

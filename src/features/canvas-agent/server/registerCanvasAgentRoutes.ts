@@ -81,7 +81,7 @@ import {
 } from './agentMemoryStore.js';
 import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from '../core/memory.js';
 import { compactHistory } from '../core/history.js';
-import { COMBAT_ANCHOR_NOTICE, combatStageDecision } from '../core/combatStage.js';
+import { COMBAT_ANCHOR_NOTICE, COMBAT_OPPONENT_NOTICE, combatStageDecision } from '../core/combatStage.js';
 import { appendRunProposalForNewGenerativeNodes } from '../core/runProposal.js';
 import { extractReasoningText } from '../core/reasoning.js';
 import { rollbackCanvasPlan } from '../core/rollbackPlan.js';
@@ -136,7 +136,7 @@ Canvas media are available references, not the default subject: when the user ha
 For a fight scene, follow the skill's preparation order: direction questions (style, effect grammar, action rhythm, narrative) → a personalized direction the user confirms → six parameters (character asset, opponent, ratio, resolution, scene, duration, intensity). Do not plan shots or create nodes before those are confirmed. Never invent the opponent or treat a canvas reference image as a confirmed combatant.
 When you create image, video or generator nodes, propose running them in the same turn so the user gets a run approval card. Never tell the user to click "generate" or "run" on the canvas node; the approval card is the only place a run starts.
 Before the style questions, if the user did not name the protagonist, confirm it first (use the canvas reference, or a new character). Never open with "阿波罗的…" as if the protagonist were already confirmed.
-Before storyboarding a fight, the character anchor must be confirmed: if the user cited a reference image, call confirm_character_anchor with kind "reference"; if you generated a three-view and the user approved it, call it with kind "three-view" and the node id. Do not start the storyboard while the anchor is missing.
+Before storyboarding a fight, the character anchor must be confirmed: if the user cited a reference image, call confirm_character_anchor with kind "reference"; if you generated a three-view and the user approved it, call it with kind "three-view" and the node id. For the opponent pass role "opponent". Do not start the storyboard while either anchor is missing.
 The opponent needs a confirmed reference too: when the user did not provide one, generate an opponent three-view and get it approved before the storyboard. Do not storyboard with only the protagonist locked.
 When the user asks to change the canvas, call the provided tools. Use tempId values for newly proposed nodes and reuse those tempIds when connecting, updating or executing them.
 Create, connect and update operations land on the canvas as soon as you propose them. Only execution waits for the user to approve the run card; do not claim a run has happened before that.
@@ -944,25 +944,36 @@ export function registerCanvasAgentRoutes(
     const stageData = db && conversation
       ? readConversationStageData(db, req.authUser?.id || '', conversation.id)
       : { stage: '', facts: {} };
-    // 服务端下发的锚点选择卡：用参考图 / 先出三视图
-    const anchorSelections = [
-      ...(askAnswer && String(askAnswer.cardId || '').startsWith('anchor-') ? askAnswer.selected : []),
+    // 服务端下发的锚点选择卡：主角 `anchor-*`，对手 `opponent-anchor-*`
+    const selectionsOf = (prefix: string) => [
+      ...(askAnswer && String(askAnswer.cardId || '').startsWith(prefix) ? askAnswer.selected : []),
       ...askBatch
-        .filter((item) => String(item.cardId || '').startsWith('anchor-'))
+        .filter((item) => String(item.cardId || '').startsWith(prefix))
         .flatMap((item) => item.selected),
     ].map((value) => String(value || ''));
-    const anchorWantsReference = anchorSelections.some((value) => value.includes('参考'));
-    const anchorWantsThreeView = anchorSelections.some((value) => value.includes('三视图'));
-    if ((anchorWantsReference || anchorWantsThreeView) && db && conversation) {
+    const anchorSelections = selectionsOf('anchor-');
+    const opponentSelections = selectionsOf('opponent-anchor-');
+    const wantsReference = (values: string[]) => values.some((value) => value.includes('参考'));
+    const wantsThreeView = (values: string[]) => values.some((value) => value.includes('三视图'));
+    const anchorWantsReference = wantsReference(anchorSelections);
+    const anchorWantsThreeView = wantsThreeView(anchorSelections);
+    const opponentWantsReference = wantsReference(opponentSelections);
+    const opponentWantsThreeView = wantsThreeView(opponentSelections);
+    if ((anchorWantsReference || anchorWantsThreeView || opponentWantsReference || opponentWantsThreeView) && db && conversation) {
       writeConversationStageData(db, req.authUser?.id || '', conversation.id, {
-        facts: anchorWantsReference
-          ? { character_anchor: 'reference:user' }
-          : { anchor_choice: 'three-view' },
+        facts: {
+          ...(anchorWantsReference ? { character_anchor: 'reference:user' } : {}),
+          ...(anchorWantsThreeView ? { anchor_choice: 'three-view' } : {}),
+          ...(opponentWantsReference ? { opponent_anchor: 'reference:user' } : {}),
+          ...(opponentWantsThreeView ? { opponent_choice: 'three-view' } : {}),
+        },
       });
     }
     const hasAnchor = anchorWantsReference
       || Boolean(stageData.facts.character_anchor)
       || citedNodes.length > 0;
+    const hasOpponentAnchor = opponentWantsReference
+      || Boolean(stageData.facts.opponent_anchor);
     // 技能芯片被清掉也不该逃出打斗闸：会话里有阶段数据就仍按特效打斗处理。
     const combatSession = requestedPlaybookId === 'canvas-combat-fx'
       || Boolean(stageData.stage)
@@ -1045,17 +1056,18 @@ export function registerCanvasAgentRoutes(
           return saved ? [saved] : [];
         });
       // 认不出的工具直接丢，别让它变成一条空提案。
-      // 角色锚点确认：写进阶段数据，分镜阶段靠它放行。
+      // 角色锚点确认：写进阶段数据，分镜阶段靠它放行。role=opponent 写对手锚点。
       calls
         .filter((call) => call.function.name === 'confirm_character_anchor')
         .forEach((call) => {
           if (!db || !conversation) return;
           const args = safeArgs(call);
+          const anchor = `${String(args.kind || 'reference')}:${String(args.nodeId || '')}`;
+          const opponent = String(args.role || '') === 'opponent';
           writeConversationStageData(db, req.authUser?.id || '', conversation.id, {
-            facts: {
-              character_anchor: `${String(args.kind || 'reference')}:${String(args.nodeId || '')}`,
-              character_anchor_at: Date.now(),
-            },
+            facts: opponent
+              ? { opponent_anchor: anchor, opponent_anchor_at: Date.now() }
+              : { character_anchor: anchor, character_anchor_at: Date.now() },
           });
         });
       const actionCalls = calls
@@ -1097,6 +1109,7 @@ export function registerCanvasAgentRoutes(
         message: turnMessage,
         answering: Boolean(askBatch.length || askAnswer),
         hasAnchor,
+        hasOpponentAnchor,
       });
       if (stageGate.advanceTo && db && conversation) {
         writeConversationStageData(db, req.authUser?.id || '', conversation.id, { stage: stageGate.advanceTo });
@@ -1104,7 +1117,7 @@ export function registerCanvasAgentRoutes(
       if (stageGate.blocked) {
         // 锚点缺口：允许先建「图片生成节点」（三视图用 generator 或 image），
         // 其它动作照旧丢掉。generator 是只有提示词、点生成才出图的节点。
-        actions = stageGate.reason === 'blocked-anchor'
+        actions = (stageGate.reason === 'blocked-anchor' || stageGate.reason === 'blocked-opponent-anchor')
           ? actions
             .filter((action) => (
               action.type === 'create_node'
@@ -1225,6 +1238,21 @@ export function registerCanvasAgentRoutes(
         persistedText = COMBAT_ANCHOR_NOTICE;
         streamText(res, COMBAT_ANCHOR_NOTICE);
         sendEvent(res, { type: 'ask', asks: [anchorCard] });
+      } else if (stageGate.blocked && stageGate.reason === 'blocked-opponent-anchor' && !asks.length) {
+        const opponentCard: AskCard = {
+          id: `opponent-anchor-${Date.now()}`,
+          mode: 'single',
+          question: '对手参考怎么定？',
+          options: [
+            { type: 'text', label: '用画布里的对手图' },
+            { type: 'text', label: '先让我生成对手三视图' },
+            { type: 'input', placeholder: '自己写（可留空）' },
+          ],
+        };
+        persistedAsks = [opponentCard];
+        persistedText = COMBAT_OPPONENT_NOTICE;
+        streamText(res, COMBAT_OPPONENT_NOTICE);
+        sendEvent(res, { type: 'ask', asks: [opponentCard] });
       } else if (stageGate.blocked && !asks.length) {
         // 动作被阶段闸拦下，模型又没给提问卡：由服务端把当前阶段该问的列出来。
         persistedText = stageGate.notice;
