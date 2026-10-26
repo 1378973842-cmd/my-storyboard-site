@@ -1694,6 +1694,12 @@ console.log(`system prompt with opening stage: ${openingAssembled.length}`);
 const stageDb = new Database(':memory:');
 initCanvasAgentConversationSchema(stageDb);
 const freshConversation = createCanvasAgentConversation(stageDb, 'user', 'canvas', '新对话');
+// 标题里不能留着 {{节点}} 这类引用，读起来像乱码
+const refTitled = createCanvasAgentConversation(stageDb, 'user', 'canvas', '{{img_abc_123}} 神殿参考 10s 开场');
+assert.equal(refTitled.title, '神殿参考 10s 开场');
+// 标题被 80 字截断时可能留下半个引用
+const halfRefTitle = createCanvasAgentConversation(stageDb, 'user', 'canvas', '{{img_abc_123');
+assert.equal(halfRefTitle.title, '未命名对话');
 assert.deepEqual(readConversationStage(stageDb, 'user', freshConversation.id), { playbookId: '', stage: null });
 appendCanvasAgentMessage(stageDb, 'user', freshConversation.id, 'assistant', '提案', {
   proposal: { id: 'p1', actions: [] },

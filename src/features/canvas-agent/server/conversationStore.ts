@@ -632,7 +632,16 @@ export function resolveCanvasAgentConversation(
 }
 
 function normalizeTitle(value: string): string {
-  return String(value || "").replace(/\s+/g, " ").trim().slice(0, 80) || "未命名对话";
+  const cleaned = String(value || "")
+    // 标题里不要出现 {{节点}} 引用，读起来像乱码
+    .replace(/\{\{[^{}]*\}\}/g, " ")
+    .replace(/\{\{[^{}]*$/, " ")
+    .replace(/@\S+/g, " ")
+    .replace(/^[\s，,。.、:：;；\-–—]+/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+  return cleaned || "未命名对话";
 }
 
 function parseMetadata(value: string): Record<string, unknown> {

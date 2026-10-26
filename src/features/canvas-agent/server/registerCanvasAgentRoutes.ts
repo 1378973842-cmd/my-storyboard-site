@@ -132,6 +132,7 @@ When the user asks to change the canvas, call the provided tools. Use tempId val
 Create, connect and update operations land on the canvas as soon as you propose them. Only execution waits for the user to approve the run card; do not claim a run has happened before that.
 When the user must choose, write your analysis first (what the references show, the style and color call, the beat structure, what you will build), then call ask_user with one card per question in the same order. Do not repeat the option list in the chat text; the card carries the choices. mode is single or multiple. Each card's options use type text for the choices and include one type input so the user can write their own. Do not call ask_user to approve a run. A selected value of 用默认 means the user skipped that question and accepts the default. Do not ask it again.
 For a new task your first reply is an analysis, not a proposal: read every attached reference, name the style and color grammar, lay out the shot beats with time ranges, state what you will build and what is still uncertain, then ask 1-3 concrete questions. Do not create nodes before those answers when the task is open-ended. When you do propose, explain in prose what each node is for and how the shots connect; reserve one-line replies for yes/no questions.
+Always write user-facing prose in the same language the user wrote in (Chinese when they write Chinese). Never open with English meta-commentary such as "Wait, let's..." and never switch languages mid-turn.
 If a skill playbook is supplied below, follow its workflow gates and question templates before building nodes.
 If native tool calling is unavailable, return strict JSON shaped as {"actions":[...],"summary":"..."} with action types create_node, connect_nodes, update_node_params or execute_node_skill.`;
 
@@ -262,13 +263,19 @@ async function callModel(
   const body = augmentChatCompletionsBody(model, {
     model,
     messages,
-    max_tokens: Number(process.env.CANVAS_AGENT_MAX_TOKENS || 4096),
+    max_tokens: Number(process.env.CANVAS_AGENT_MAX_TOKENS || 8192),
     stream: false,
     ...(tools ? { tools: allCanvasAITools, tool_choice: 'auto' } : {}),
   });
   const response = await postTextLlm(model, apiBase, apiKey, body, { signal });
   const raw = await response.text();
   const data = parseTextLlmResponseBody(raw);
+  // 被截断时把 finish_reason 打出来，方便判断是 token 预算还是上游问题。
+  const choices = Array.isArray(data.choices) ? data.choices : [];
+  const finishReason = (choices[0] as { finish_reason?: unknown } | undefined)?.finish_reason;
+  if (typeof finishReason === 'string' && finishReason && finishReason !== 'stop') {
+    console.warn('[canvas-agent] finish_reason', finishReason, data.usage || {});
+  }
   if (!response.ok) {
     const error = data.error as { message?: unknown } | undefined;
     throw new Error(String(error?.message || `上游接口错误 (${response.status})`));
@@ -357,6 +364,17 @@ export function registerCanvasAgentRoutes(
       return next();
     };
     const protectedRoute = [bearerAuth];
+    // 进程重启时，上一进程里 running 的作业已经没人推进了。开机就收尸，别让面板挂 15 分钟。
+    try {
+      const orphans = db.prepare("SELECT id, user_id FROM canvas_agent_jobs WHERE status = 'running'").all() as Array<{ id: string; user_id: string }>;
+      orphans.forEach((row) => {
+        transitionAgentJob(db, row.user_id, row.id, 'fail', {
+          error: '服务端重启，上一轮已中断',
+        });
+      });
+    } catch {
+      /* 老库还没建 jobs 表 */
+    }
     // 画布文档在服务端（线上是阿里云那台），快照就存在同一块盘上。
     const snapshotRoot = path.join(path.dirname(String(db.name || '.')), 'data', 'canvas-snapshots');
     const safePathPart = (value: string) => String(value || '').replace(/[^a-zA-Z0-9_-]/g, '');

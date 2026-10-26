@@ -624,25 +624,29 @@ export function AgentFloatingPanel({
     runScopeRef.current.clear();
   }, [conversationId]);
 
+  /**
+   * 重新读作业状态。流结束后作业在服务端可能已经 done/ waiting，
+   * 不刷新的话本地还留着 running，90 秒后就会误报「上一轮已经中断」。
+   */
+  const refreshActiveJob = useCallback(() => {
+    if (!conversationId) {
+      setActiveJob(null);
+      return;
+    }
+    void listAgentJobs(conversationId, { activeOnly: true })
+      .then((jobs) => setActiveJob(jobs[0] || null))
+      .catch(() => setActiveJob(null));
+  }, [conversationId]);
+
   // 关页、断网、切标签页之后，靠作业账本把「刚才那轮」找回来。
   useEffect(() => {
     if (!open || !conversationId) {
       setActiveJob(null);
       return;
     }
-    let cancelled = false;
     setJobNoticeHidden(false);
-    void listAgentJobs(conversationId, { activeOnly: true })
-      .then((jobs) => {
-        if (!cancelled) setActiveJob(jobs[0] || null);
-      })
-      .catch(() => {
-        if (!cancelled) setActiveJob(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, conversationId, messages.length]);
+    refreshActiveJob();
+  }, [open, conversationId, messages.length, refreshActiveJob]);
   const [toolLogs, setToolLogs] = useState<AgentToolLog[]>([]);
   const [logsOpen, setLogsOpen] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -1158,9 +1162,11 @@ export function AgentFloatingPanel({
             ),
           );
         });
+        // 流结束就重读作业：done / waiting_approval 要立刻反映到横幅上。
+        refreshActiveJob();
       }
     },
-    [finishTurn, rememberRunScope],
+    [finishTurn, refreshActiveJob, rememberRunScope],
   );
 
   const sendText = useCallback(
