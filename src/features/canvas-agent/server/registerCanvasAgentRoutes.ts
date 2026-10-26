@@ -140,6 +140,7 @@ Before storyboarding a fight, the character anchor must be confirmed: if the use
 When the user asks to change the canvas, call the provided tools. Use tempId values for newly proposed nodes and reuse those tempIds when connecting, updating or executing them.
 Create, connect and update operations land on the canvas as soon as you propose them. Only execution waits for the user to approve the run card; do not claim a run has happened before that.
 When the user must choose, write your analysis first (what the references show, the style and color call, the beat structure, what you will build), then call ask_user with one card per question in the same order. Do not repeat the option list in the chat text; the card carries the choices. mode is single or multiple. Each card's options use type text for the choices and include one type input so the user can write their own. Do not call ask_user to approve a run. A selected value of 用默认 means the user skipped that question and accepts the default. Do not ask it again.
+Never ask questions in prose. If you are about to write "请告诉我", "请选择" or "您希望哪一张", stop and call ask_user instead; a preparation stage without cards is a failed turn.
 For a new task your first reply is an analysis, not a proposal: read every attached reference, name the style and color grammar, lay out the shot beats with time ranges, state what you will build and what is still uncertain, then ask 1-3 concrete questions. Do not create nodes before those answers when the task is open-ended. When you do propose, explain in prose what each node is for and how the shots connect; reserve one-line replies for yes/no questions.
 Always write user-facing prose in the same language the user wrote in (Chinese when they write Chinese). Never open with English meta-commentary such as "Wait, let's..." and never switch languages mid-turn.
 If a skill playbook is supplied below, follow its workflow gates and question templates before building nodes.
@@ -266,6 +267,7 @@ async function callModel(
   messages: Array<Record<string, unknown>>,
   tools: boolean,
   signal: AbortSignal,
+  forceAsk = false,
 ): Promise<Record<string, unknown>> {
   const { apiBase, apiKey } = resolveTextLlmEnv(model);
   if (!apiBase || !apiKey) throw new Error(textLlmConfigError(model));
@@ -274,7 +276,14 @@ async function callModel(
     messages,
     max_tokens: Number(process.env.CANVAS_AGENT_MAX_TOKENS || 8192),
     stream: false,
-    ...(tools ? { tools: allCanvasAITools, tool_choice: 'auto' } : {}),
+    ...(tools
+      ? {
+        tools: allCanvasAITools,
+        tool_choice: forceAsk
+          ? { type: 'function', function: { name: 'ask_user' } }
+          : 'auto',
+      }
+      : {}),
   });
   const response = await postTextLlm(model, apiBase, apiKey, body, { signal });
   const raw = await response.text();
@@ -985,14 +994,26 @@ export function registerCanvasAgentRoutes(
       let persistedText = '';
       let persistedThinking = '';
       let first: Record<string, unknown>;
+      // 准备阶段强制走提问卡：不让模型把问题写成一大段正文。
+      const forceAsk = requestedPlaybookId === 'canvas-combat-fx'
+        && !hasAnchor
+        && (stageData.stage === '' || stageData.stage === 'direction' || stageData.stage === 'params');
       try {
-        first = await callModel(model, messages, true, controller.signal);
+        first = await callModel(model, messages, true, controller.signal, forceAsk);
       } catch (toolCallError) {
         console.warn(
-          '[canvas-agent] native tools unavailable, retrying structured fallback:',
+          '[canvas-agent] forced ask_user unavailable, retrying auto tools:',
           toolCallError instanceof Error ? toolCallError.message : String(toolCallError),
         );
-        first = await callModel(model, messages, false, controller.signal);
+        try {
+          first = await callModel(model, messages, true, controller.signal);
+        } catch (fallbackError) {
+          console.warn(
+            '[canvas-agent] native tools unavailable, retrying structured fallback:',
+            fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+          );
+          first = await callModel(model, messages, false, controller.signal);
+        }
       }
       const calls = parseToolCalls(first);
       // 有思考过程就先推给前端，折叠展示；没有就不编。

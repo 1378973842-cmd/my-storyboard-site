@@ -2262,6 +2262,10 @@ assert.match(combatPlaybookSource, /两者冲突时\*\*以本技能为准\*\*/);
 assert.match(combatPlaybookSource, /打斗至少两个角色/);
 assert.match(combatPlaybookSource, /六项没确认之前，只做分析和提问/);
 assert.match(approvalRouteSource, /\[stage_rule\] 第一张提问卡先确认主角/);
+// 准备阶段强制 ask_user：问题只能走卡片
+assert.match(approvalRouteSource, /forceAsk/);
+assert.match(approvalRouteSource, /tool_choice: forceAsk/);
+assert.match(approvalRouteSource, /Never ask questions in prose/);
 // 新建可生成节点：同轮补运行请求，用户只在卡片上批准
 const autoRun = appendRunProposalForNewGenerativeNodes('canvas-combat-fx', [
   { type: 'create_node', tempId: 'img1', nodeType: 'image' },
