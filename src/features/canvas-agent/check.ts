@@ -2181,6 +2181,8 @@ assert.match(approvalRouteSource, /\/api\/canvas-agent\/metrics/);
 assert.match(approvalRouteSource, /\/api\/canvas-agent\/memory/);
 assert.match(approvalRouteSource, /type: 'thinking'/);
 assert.match(approvalPanelSource, /ThinkingFold text/);
+// 新对话要清技能芯片，否则上一轮技能继续生效
+assert.match(approvalPanelSource, /appliedSkillRef\.current = '';\n\s+setPlaybookId\(''\);/);
 assert.match(approvalRouteSource, /text\/prompt nodes must hold plain prose/);
 const combatPlaybookSource = readFileSync(new URL('../../../prompts/playbook_combat_fx.md', import.meta.url), 'utf8');
 assert.match(combatPlaybookSource, /分镜剧本写进 prompt 节点/);

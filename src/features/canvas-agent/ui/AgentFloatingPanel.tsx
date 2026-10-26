@@ -802,6 +802,10 @@ export function AgentFloatingPanel({
     setStreaming(false);
     setRenaming(false);
     setMenu('');
+    // 新对话 = 新任务：技能芯片跟着清掉，避免上一轮的技能继续生效。
+    appliedSkillRef.current = '';
+    setPlaybookId('');
+    if (composerRef.current) ensureSkillChip(composerRef.current, null);
   }, []);
 
   const showConversation = useCallback(async (id: string) => {
