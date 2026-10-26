@@ -2185,6 +2185,8 @@ assert.match(approvalPanelSource, /ThinkingFold text/);
 // 新对话要清技能芯片，否则上一轮技能继续生效
 assert.match(approvalPanelSource, /appliedSkillRef\.current = '';\n\s+setPlaybookId\(''\);/);
 assert.match(approvalRouteSource, /text\/prompt nodes must hold plain prose/);
+assert.match(approvalRouteSource, /available references, not the default subject/);
+assert.match(approvalRouteSource, /never by \{\{node-id\}\} tokens/);
 const combatPlaybookSource = readFileSync(new URL('../../../prompts/playbook_combat_fx.md', import.meta.url), 'utf8');
 assert.match(combatPlaybookSource, /分镜剧本写进 prompt 节点/);
 assert.match(combatPlaybookSource, /不要写 `\{\{节点\}\}` 引用/);
