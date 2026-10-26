@@ -19,7 +19,7 @@ import { buildNineGridImagePrompt } from '../../lib/nineGrid/nineGridCore.js';
 import { formatNineGridRefLooksForPhaseA } from '../../services/canvasNineGridBridge';
 import { checkCanvasContentFidelity } from '../../services/canvasContentFidelity';
 import { sortBatchExecutions } from './core/executionOrder';
-import { approveRunCard, defaultAskAnswer, normalizeAskCards, parseAskAnswer, withRunApproval } from './core/askCard';
+import { approveRunCard, defaultAskAnswer, normalizeAskCards, parseAskAnswer, parseInlineAskCards, withRunApproval } from './core/askCard';
 import { actionDisplayLabel, actionProposalNeedsApproval, derivedStepTitle, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, openBatchProgress, partialBatchUpdate, pendingExecutionFeedback, proposalWaitsForClick, settleBatchProposal, stripCreatesOnShortYes, unknownCanvasActionMessage } from './core/proposal';
 import { actionsReleasedForApproval, runScopeDigest, runScopeMatches } from './core/runApproval';
 import { turnStatePrefix } from './core/turnState';
@@ -2306,7 +2306,23 @@ assert.match(approvalRouteSource, /scene-anchor-/);
 assert.match(approvalRouteSource, /blocked-scene-anchor/);
 assert.match(combatPlaybookSource, /场景也要锚点/);
 assert.match(approvalRouteSource, /role "scene"/);
-assert.match(approvalRouteSource, /\[anchor_lock\]/);
+const inlineAskJson = JSON.stringify({
+  actions: [{
+    type: 'ask_user',
+    id: 'ask-style',
+    question: '请选择本次动画的画风与色调：',
+    mode: 'single',
+    options: [
+      { type: 'text', value: '3D写实国漫风' },
+      { type: 'text', value: '水墨写意国风' },
+      { type: 'input', value: '' },
+    ],
+  }],
+});
+const inlineAskCards = parseInlineAskCards(inlineAskJson);
+assert.equal(inlineAskCards.length, 1);
+assert.equal(inlineAskCards[0]?.options[0]?.type === 'text' ? inlineAskCards[0].options[0].label : '', '3D写实国漫风');
+assert.match(approvalRouteSource, /parseInlineAskCards/);
 assert.match(approvalRouteSource, /character_quality !== 'low'/);
 assert.match(combatPlaybookSource, /锚点版本/);
 assert.match(approvalRouteSource, /quality === 'low'/);

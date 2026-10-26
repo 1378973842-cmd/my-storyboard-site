@@ -43,7 +43,7 @@ function optionList(value: unknown): AskOption[] {
       const placeholder = String(raw.placeholder || '').trim();
       options.push(placeholder ? { type: 'input', placeholder } : { type: 'input' });
     } else if (type === 'text') {
-      const label = String(raw.label || '').trim();
+      const label = String(raw.label || raw.value || '').trim();
       if (label) options.push({ type: 'text', label });
     }
   }
@@ -86,8 +86,7 @@ function oneCard(value: unknown, index: number): AskCard | null {
   };
 }
 
-export function normalizeAskCards(input: unknown): AskCard[] {
-  const raw = record(input);
+export function normalizeAskCards(input: unknown): AskCard[] {  const raw = record(input);
   const list = Array.isArray(input)
     ? input
     : Array.isArray(raw.cards)
@@ -105,8 +104,34 @@ export function normalizeAskCards(input: unknown): AskCard[] {
   return cards;
 }
 
-export function approveRunCard(nodeKeys: string[]): AskCard | null {
-  const keys = [...new Set(nodeKeys.map((item) => item.trim()).filter(Boolean))];
+/**
+ * 模型有时不走原生 tool call，而是把 {"actions":[{"type":"ask_user",...}]}
+ * 当正文吐出来。这里把它捞成卡片，避免用户看到一屏 JSON。
+ */
+export function parseInlineAskCards(text: string): AskCard[] {
+  const source = String(text || '').trim();
+  if (!source.includes('"ask_user"')) return [];
+  const start = source.indexOf('{');
+  const end = source.lastIndexOf('}');
+  if (start < 0 || end <= start) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source.slice(start, end + 1));
+  } catch {
+    return [];
+  }
+  const actions = Array.isArray(record(parsed).actions) ? record(parsed).actions as unknown[] : [];
+  const cards: AskCard[] = [];
+  actions.forEach((item, index) => {
+    const action = record(item);
+    if (String(action.type || '') !== 'ask_user') return;
+    const card = oneCard({ ...action, mode: action.mode || 'single' }, index);
+    if (card) cards.push(card);
+  });
+  return cards;
+}
+
+export function approveRunCard(nodeKeys: string[]): AskCard | null {  const keys = [...new Set(nodeKeys.map((item) => item.trim()).filter(Boolean))];
   if (!keys.length) return null;
   return {
     id: 'ask-run',

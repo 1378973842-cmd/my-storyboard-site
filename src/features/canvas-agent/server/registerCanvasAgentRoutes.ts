@@ -14,7 +14,7 @@ import {
   readImageBufferForGemini,
 } from '../../../services/canvasReplicaAgentBridge.js';
 import { agentPlaybooks, allCanvasAITools, canvasSkillRegistry } from '../tools/skillRegistry.js';
-import { collectAskCards, parseAskAnswer, parseAskAnswers, type AskCard } from '../core/askCard.js';
+import { collectAskCards, parseAskAnswer, parseAskAnswers, parseInlineAskCards, type AskCard } from '../core/askCard.js';
 import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, stripCreatesOnShortYes, unknownCanvasActionMessage } from '../core/proposal.js';
 import { operatingPrompt } from '../core/operatingModel.js';
 import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
@@ -1121,13 +1121,15 @@ export function registerCanvasAgentRoutes(
         .filter((call) => call.function.name !== 'confirm_character_anchor')
         .filter((call) => Boolean(toolContract(call.function.name, toolNames)));
       const firstText = extractTextLlmMessageContent(model, first).trim();
+      // 模型偶尔把 ask_user 的 JSON 当正文吐出来：捞成卡片，别把 JSON 推给用户。
+      const inlineAsks = parseInlineAskCards(firstText);
       // 调工具之前的那段是模型的推演，归到「思考过程」折叠里；正文只放后续说明。
-      if (calls.length && firstText) {
+      if (calls.length && firstText && !inlineAsks.length) {
         persistedThinking = [persistedThinking, firstText].filter(Boolean).join('\n\n').slice(0, 6000);
         sendEvent(res, { type: 'thinking', text: firstText });
       }
-      let proposalText = firstText;
-      let interpreted = actionCalls.length ? null : interpretCanvasProposalText(proposalText);
+      let proposalText = inlineAsks.length ? '' : firstText;
+      let interpreted = actionCalls.length || inlineAsks.length ? null : interpretCanvasProposalText(proposalText);
       if (!actionCalls.length && interpreted?.unknownTypes.length) {
         const retry = await callModel(model, [
           ...messages,
@@ -1191,7 +1193,7 @@ export function registerCanvasAgentRoutes(
       if (!shortYesBlocked) {
         actions = appendRunProposalForNewGenerativeNodes(effectivePlaybookId, actions);
       }
-      let asks = collectAskCards(
+      let asks = inlineAsks.length ? inlineAsks : collectAskCards(
         actionCalls.filter((call) => call.function.name === 'ask_user').map((call) => safeArgs(call)),
         actionCalls.length ? '' : (proposalText || firstText),
         actions.flatMap((action) => action.type === 'execute_node_skill' ? [action.nodeId] : []),
