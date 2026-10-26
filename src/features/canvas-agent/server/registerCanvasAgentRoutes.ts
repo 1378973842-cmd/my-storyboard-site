@@ -1095,9 +1095,13 @@ export function registerCanvasAgentRoutes(
         writeConversationStageData(db, req.authUser?.id || '', conversation.id, { stage: stageGate.advanceTo });
       }
       if (stageGate.blocked) {
-        // 锚点缺口：允许先建一张图片节点（三视图），其它动作照旧丢掉
+        // 锚点缺口：允许先建「图片生成节点」（三视图用 generator 或 image），
+        // 其它动作照旧丢掉。generator 是只有提示词、点生成才出图的节点。
         actions = stageGate.reason === 'blocked-anchor'
-          ? actions.filter((action) => action.type === 'create_node' && action.nodeType === 'image')
+          ? actions.filter((action) => (
+            action.type === 'create_node'
+            && (action.nodeType === 'image' || action.nodeType === 'generator')
+          ))
           : [];
       }
       const runCardPending = Boolean(db && conversation && hasPendingRunApproval(db, req.authUser?.id || '', conversation.id));

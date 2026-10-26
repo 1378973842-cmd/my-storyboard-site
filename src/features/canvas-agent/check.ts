@@ -2290,7 +2290,7 @@ assert.equal(
 );
 assert.match(approvalRouteSource, /appendRunProposalForNewGenerativeNodes/);
 assert.match(approvalRouteSource, /角色参考怎么定/);
-assert.match(approvalRouteSource, /action\.type === 'create_node' && action\.nodeType === 'image'/);
+assert.match(approvalRouteSource, /action\.nodeType === 'image' \|\| action\.nodeType === 'generator'/);
 assert.doesNotMatch(COMBAT_ANCHOR_NOTICE, /confirm_character_anchor/);
 assert.match(combatPlaybookSource, /第一个问题先确认主角/);
 assert.match(combatPlaybookSource, /confirm_character_anchor/);
