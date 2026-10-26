@@ -1009,6 +1009,17 @@ export function registerCanvasAgentRoutes(
       : combatSession && stageData.stage === 'proposal'
         ? '\n\n[stage_rule] 方向已答完：先给一套具体方案（风格/特效/动作节奏/叙事结构 + 1-2 个建议），让用户确认这个方向；确认后再收六项参数，不要跳步。'
         : '';
+    // 锚点版本锁：生成节点必须引用当前锚点，不能再用旧版本。
+    const anchorEntries = [
+      ['主角', 'character_anchor'],
+      ['对手', 'opponent_anchor'],
+      ['场景', 'scene_anchor'],
+    ]
+      .map(([label, key]) => [label, String(stageData.facts[key] || '')] as const)
+      .filter(([, value]) => value);
+    const anchorLock = anchorEntries.length
+      ? `\n\n[anchor_lock] 当前锚点（生成节点必须引用这些，不要用旧版本）：${anchorEntries.map(([label, value]) => `${label}=${value}`).join('；')}`
+      : '';
     const stageText = `${canvasAgentStagePrefix(storedStage.playbookId, storedStage.stage, requestedPlaybookId, effectedNodes, parseRunStates(body.runStates))}${changelog ? `\n\n[canvas_changelog]\n${changelog}` : ''}`;
     // 项目记忆跨会话：最近 12 条常驻，命中的再补一段；够用就停，不做向量检索。
     const allMemory = db && conversation
@@ -1020,7 +1031,7 @@ export function registerCanvasAgentRoutes(
     const memoryText = memoryPromptPrefix(recentMemory) + memoryHitsPrompt(memoryHits);
     const imageDataUrls = await compressedVisionUrls(visionRoot, body.visionImages);
     const messages: Array<Record<string, unknown>> = [
-      { role: 'system', content: `${SYSTEM_PROMPT}\n${operatingPrompt(turnMessage, playbookText)}${stageText}${turnStateText}${stageRule}${earlierText}${memoryText}\n\n${context}` },
+      { role: 'system', content: `${SYSTEM_PROMPT}\n${operatingPrompt(turnMessage, playbookText)}${stageText}${turnStateText}${stageRule}${anchorLock}${earlierText}${memoryText}\n\n${context}` },
       ...history,
       { role: turnMessage.startsWith('[[自动]]') ? 'system' : 'user', content: userContentWithImages(
         askBatch.length ? `askAnswers:${JSON.stringify(askBatch)}` : askAnswer ? `askAnswer:${JSON.stringify(askAnswer)}` : turnMessage,
@@ -1090,8 +1101,11 @@ export function registerCanvasAgentRoutes(
           const key = role === 'opponent' ? 'opponent_anchor' : role === 'scene' ? 'scene_anchor' : 'character_anchor';
           const qualityKey = key.replace('_anchor', '_quality');
           const quality = String(args.quality || '');
+          // 锚点版本管理：记下旧版本，后续生成只认最新锚点。
+          const previous = String(stageData.facts[key] || '');
           // 参考图质量不足：不给锚点放行，转成「先生成三视图」的待办。
           const facts: Record<string, unknown> = { [key]: anchor, [`${key}_at`]: Date.now() };
+          if (previous && previous !== anchor) facts[`${key}_prev`] = previous;
           if (quality === 'low') {
             facts[qualityKey] = 'low';
             if (role !== 'opponent' && role !== 'scene') facts.anchor_choice = 'three-view';
