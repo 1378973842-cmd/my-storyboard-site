@@ -2291,6 +2291,14 @@ assert.equal(
 assert.match(approvalRouteSource, /appendRunProposalForNewGenerativeNodes/);
 assert.match(approvalRouteSource, /角色参考怎么定/);
 assert.match(approvalRouteSource, /action\.nodeType === 'image' \|\| action\.nodeType === 'generator'/);
+assert.match(approvalRouteSource, /params\.ratio = '16:9'/);
+assert.match(approvalRouteSource, /const effectivePlaybookId/);
+const autoRunGenerator = appendRunProposalForNewGenerativeNodes('canvas-combat-fx', [
+  { type: 'create_node', tempId: 'gen1', nodeType: 'generator' },
+]);
+assert.equal(autoRunGenerator.length, 2);
+assert.equal(autoRunGenerator[1]?.type, 'execute_node_skill');
+assert.equal((autoRunGenerator[1] as { nodeId?: string }).nodeId, 'gen1');
 assert.doesNotMatch(COMBAT_ANCHOR_NOTICE, /confirm_character_anchor/);
 assert.match(combatPlaybookSource, /第一个问题先确认主角/);
 assert.match(combatPlaybookSource, /confirm_character_anchor/);

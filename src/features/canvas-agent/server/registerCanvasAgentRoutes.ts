@@ -962,8 +962,14 @@ export function registerCanvasAgentRoutes(
     const hasAnchor = anchorWantsReference
       || Boolean(stageData.facts.character_anchor)
       || citedNodes.length > 0;
+    // 技能芯片被清掉也不该逃出打斗闸：会话里有阶段数据就仍按特效打斗处理。
+    const combatSession = requestedPlaybookId === 'canvas-combat-fx'
+      || Boolean(stageData.stage)
+      || Boolean(stageData.facts.anchor_choice)
+      || Boolean(stageData.facts.character_anchor);
+    const effectivePlaybookId = combatSession ? 'canvas-combat-fx' : requestedPlaybookId;
     // 方向阶段、还没锚点：强制第一张卡先确认主角，别默认画布里的阿波罗。
-    const stageRule = requestedPlaybookId === 'canvas-combat-fx'
+    const stageRule = combatSession
       && (stageData.stage === '' || stageData.stage === 'direction')
       && !hasAnchor
       ? '\n\n[stage_rule] 第一张提问卡先确认主角：用画布里的参考，还是新角色。确认前不要问画风、特效或对手。'
@@ -995,7 +1001,7 @@ export function registerCanvasAgentRoutes(
       let persistedThinking = '';
       let first: Record<string, unknown>;
       // 准备阶段强制走提问卡：不让模型把问题写成一大段正文。
-      const forceAsk = requestedPlaybookId === 'canvas-combat-fx'
+      const forceAsk = combatSession
         && !hasAnchor
         && (stageData.stage === '' || stageData.stage === 'direction' || stageData.stage === 'params');
       try {
@@ -1085,7 +1091,7 @@ export function registerCanvasAgentRoutes(
       );
       // 特效打斗：准备阶段先拦下建/连/改/运行，逼模型把主角和对手问清楚。
       const stageGate = combatStageDecision({
-        playbookId: requestedPlaybookId,
+        playbookId: effectivePlaybookId,
         stage: stageData.stage,
         message: turnMessage,
         answering: Boolean(askBatch.length || askAnswer),
@@ -1098,10 +1104,21 @@ export function registerCanvasAgentRoutes(
         // 锚点缺口：允许先建「图片生成节点」（三视图用 generator 或 image），
         // 其它动作照旧丢掉。generator 是只有提示词、点生成才出图的节点。
         actions = stageGate.reason === 'blocked-anchor'
-          ? actions.filter((action) => (
-            action.type === 'create_node'
-            && (action.nodeType === 'image' || action.nodeType === 'generator')
-          ))
+          ? actions
+            .filter((action) => (
+              action.type === 'create_node'
+              && (action.nodeType === 'image' || action.nodeType === 'generator')
+            ))
+            .map((action) => {
+              if (action.type !== 'create_node' || action.nodeType !== 'generator') return action;
+              // 三视图默认 16:9，同时把提示词里的 --ar 改掉，避免参数打架。
+              const params = { ...(action.initialParams || {}) };
+              params.ratio = '16:9';
+              if (typeof params.prompt === 'string') {
+                params.prompt = params.prompt.replace(/--ar\s+\S+/gi, '--ar 16:9');
+              }
+              return { ...action, initialParams: params };
+            })
           : [];
       }
       const runCardPending = Boolean(db && conversation && hasPendingRunApproval(db, req.authUser?.id || '', conversation.id));
@@ -1111,7 +1128,7 @@ export function registerCanvasAgentRoutes(
       // 特效打斗：新建了可生成节点就把运行请求一起提出来，用户在卡片上批准；
       // 不要再让用户去画布上点「生成」。
       if (!shortYesBlocked) {
-        actions = appendRunProposalForNewGenerativeNodes(requestedPlaybookId, actions);
+        actions = appendRunProposalForNewGenerativeNodes(effectivePlaybookId, actions);
       }
       const asks = collectAskCards(
         actionCalls.filter((call) => call.function.name === 'ask_user').map((call) => safeArgs(call)),
