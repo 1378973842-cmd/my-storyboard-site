@@ -26,7 +26,8 @@ export type CombatStageReason =
   | 'blocked-direction'
   | 'blocked-params'
   | 'blocked-anchor'
-  | 'blocked-opponent-anchor';
+  | 'blocked-opponent-anchor'
+  | 'blocked-scene-anchor';
 
 export type CombatStageDecision = {
   blocked: boolean;
@@ -99,6 +100,14 @@ export const COMBAT_OPPONENT_NOTICE = [
   '2. 先让我出对手三视图，你确认后再写分镜',
 ].join('\n');
 
+export const COMBAT_SCENE_NOTICE = [
+  '场景参考还没确认。',
+  '',
+  '两个选择：',
+  '1. 用画布里的场景图（在消息里 @ 它，我会做视觉分析）',
+  '2. 让我生成一张场景图，你确认后再写分镜',
+].join('\n');
+
 export function combatStageDecision(input: {
   playbookId: string;
   stage: string;
@@ -108,6 +117,8 @@ export function combatStageDecision(input: {
   hasAnchor: boolean;
   /** 对手锚点是否已确认；不传视为已确认（兼容旧调用） */
   hasOpponentAnchor?: boolean;
+  /** 场景锚点是否已确认；不传视为已确认（兼容旧调用） */
+  hasSceneAnchor?: boolean;
 }): CombatStageDecision {
   const stage = (COMBAT_STAGES as readonly string[]).includes(input.stage)
     ? input.stage as CombatStage
@@ -125,6 +136,9 @@ export function combatStageDecision(input: {
   if (stage === 'storyboard' && input.hasOpponentAnchor === false) {
     return { blocked: true, advanceTo: null, reason: 'blocked-opponent-anchor', notice: COMBAT_OPPONENT_NOTICE };
   }
+  if (stage === 'storyboard' && input.hasSceneAnchor === false) {
+    return { blocked: true, advanceTo: null, reason: 'blocked-scene-anchor', notice: COMBAT_SCENE_NOTICE };
+  }
   if (stage === 'storyboard') {
     return { blocked: false, advanceTo: null, reason: 'storyboard', notice };
   }
@@ -137,6 +151,9 @@ export function combatStageDecision(input: {
     }
     if (input.hasOpponentAnchor === false) {
       return { blocked: true, advanceTo: null, reason: 'blocked-opponent-anchor', notice: COMBAT_OPPONENT_NOTICE };
+    }
+    if (input.hasSceneAnchor === false) {
+      return { blocked: true, advanceTo: null, reason: 'blocked-scene-anchor', notice: COMBAT_SCENE_NOTICE };
     }
     // 每答完一轮提问，往前推一段：方向 → 参数 → 分镜
     return { blocked: false, advanceTo: NEXT_STAGE[stage], reason: 'answered', notice };

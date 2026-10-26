@@ -302,12 +302,13 @@ export const coreCanvasTools: AIToolDefinition[] = [
         'Mark a confirmed character anchor before storyboarding. '
         + 'Use kind=reference when the user cited an existing reference image, '
         + 'kind=three-view after the user approves a generated three-view node. '
-        + 'role=opponent marks the opponent anchor instead of the protagonist.',
+        + 'role=opponent marks the opponent anchor instead of the protagonist; '
+        + 'role=scene marks the scene reference.',
       parameters: objectSchema(
         {
           kind: { type: 'string', enum: ['reference', 'three-view'] },
           nodeId: { type: 'string' },
-          role: { type: 'string', enum: ['protagonist', 'opponent'] },
+          role: { type: 'string', enum: ['protagonist', 'opponent', 'scene'] },
         },
         ['kind'],
       ),

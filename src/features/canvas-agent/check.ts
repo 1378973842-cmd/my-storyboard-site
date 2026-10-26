@@ -1597,11 +1597,15 @@ assert.equal(
   'blocked-opponent-anchor',
 );
 assert.equal(
-  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '', answering: true, hasAnchor: true, hasOpponentAnchor: false }).reason,
-  'blocked-opponent-anchor',
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'storyboard', message: '', answering: false, hasAnchor: true, hasOpponentAnchor: true, hasSceneAnchor: false }).reason,
+  'blocked-scene-anchor',
 );
 assert.equal(
-  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '', answering: true, hasAnchor: true, hasOpponentAnchor: true }).advanceTo,
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '', answering: true, hasAnchor: true, hasOpponentAnchor: true, hasSceneAnchor: false }).reason,
+  'blocked-scene-anchor',
+);
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '', answering: true, hasAnchor: true, hasOpponentAnchor: true, hasSceneAnchor: true }).advanceTo,
   'storyboard',
 );
 assert.equal(
@@ -2289,6 +2293,10 @@ assert.match(combatPlaybookSource, /对手也要锚点/);
 assert.match(approvalRouteSource, /opponent-anchor-/);
 assert.match(approvalRouteSource, /opponent_anchor/);
 assert.match(approvalRouteSource, /blocked-opponent-anchor/);
+assert.match(approvalRouteSource, /scene-anchor-/);
+assert.match(approvalRouteSource, /blocked-scene-anchor/);
+assert.match(combatPlaybookSource, /场景也要锚点/);
+assert.match(approvalRouteSource, /role "scene"/);
 assert.match(approvalRouteSource, /role "opponent"/);
 assert.match(approvalRouteSource, /storyboardAskBlocked/);
 assert.match(approvalRouteSource, /storyboard_written/);
