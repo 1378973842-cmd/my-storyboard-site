@@ -2280,6 +2280,10 @@ assert.match(approvalRouteSource, /opponent-anchor-/);
 assert.match(approvalRouteSource, /opponent_anchor/);
 assert.match(approvalRouteSource, /blocked-opponent-anchor/);
 assert.match(approvalRouteSource, /role "opponent"/);
+assert.match(approvalRouteSource, /storyboardAskBlocked/);
+assert.match(approvalRouteSource, /storyboard_written/);
+assert.match(approvalRouteSource, /opponentPending/);
+assert.match(approvalRouteSource, /Never ask the user to confirm an image before it is actually generated/);
 assert.match(approvalPanelSource, /已批准，开始生成…/);
 // 新建可生成节点：同轮补运行请求，用户只在卡片上批准
 const autoRun = appendRunProposalForNewGenerativeNodes('canvas-combat-fx', [

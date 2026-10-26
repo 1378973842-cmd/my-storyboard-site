@@ -142,6 +142,7 @@ When the user asks to change the canvas, call the provided tools. Use tempId val
 Create, connect and update operations land on the canvas as soon as you propose them. Only execution waits for the user to approve the run card; do not claim a run has happened before that.
 When the user must choose, write your analysis first (what the references show, the style and color call, the beat structure, what you will build), then call ask_user with one card per question in the same order. Do not repeat the option list in the chat text; the card carries the choices. mode is single or multiple. Each card's options use type text for the choices and include one type input so the user can write their own. Do not call ask_user to approve a run. A selected value of 用默认 means the user skipped that question and accepts the default. Do not ask it again.
 Never ask questions in prose. If you are about to write "请告诉我", "请选择" or "您希望哪一张", stop and call ask_user instead; a preparation stage without cards is a failed turn.
+Never ask the user to confirm an image before it is actually generated; if the node is still running, say it is still generating. Do not repeat analysis you already gave in an earlier turn; if nothing changed, answer in one line.
 For a new task your first reply is an analysis, not a proposal: read every attached reference, name the style and color grammar, lay out the shot beats with time ranges, state what you will build and what is still uncertain, then ask 1-3 concrete questions. Do not create nodes before those answers when the task is open-ended. When you do propose, explain in prose what each node is for and how the shots connect; reserve one-line replies for yes/no questions.
 Always write user-facing prose in the same language the user wrote in (Chinese when they write Chinese). Never open with English meta-commentary such as "Wait, let's..." and never switch languages mid-turn.
 If a skill playbook is supplied below, follow its workflow gates and question templates before building nodes.
@@ -1144,11 +1145,29 @@ export function registerCanvasAgentRoutes(
       if (!shortYesBlocked) {
         actions = appendRunProposalForNewGenerativeNodes(effectivePlaybookId, actions);
       }
-      const asks = collectAskCards(
+      let asks = collectAskCards(
         actionCalls.filter((call) => call.function.name === 'ask_user').map((call) => safeArgs(call)),
         actionCalls.length ? '' : (proposalText || firstText),
         actions.flatMap((action) => action.type === 'execute_node_skill' ? [action.nodeId] : []),
       );
+      // 分镜还没写进节点就来问「是否满意」：拦下这个提问，先让模型把分镜落板。
+      const storyboardNode = actions.some((action) => (
+        action.type === 'create_node'
+        && action.nodeType === 'prompt'
+        && /分镜/.test(String((action.initialParams || {}).text || (action.initialParams || {}).title || ''))
+      ));
+      if (storyboardNode && db && conversation) {
+        writeConversationStageData(db, req.authUser?.id || '', conversation.id, {
+          facts: { storyboard_written: true },
+        });
+      }
+      const storyboardStage = stageData.stage === 'storyboard' || stageGate.reason === 'storyboard';
+      const asksAboutStoryboard = asks.some((card) => /分镜|剧本|满意/.test(card.question));
+      const storyboardAskBlocked = storyboardStage
+        && asksAboutStoryboard
+        && !storyboardNode
+        && !Boolean(stageData.facts.storyboard_written);
+      if (storyboardAskBlocked) asks = [];
       const publishAsks = () => {
         if (!asks.length) return;
         persistedAsks = asks;
@@ -1223,40 +1242,55 @@ export function registerCanvasAgentRoutes(
         sendEvent(res, { type: 'proposal', proposal });
         publishAsks();
       } else if (stageGate.blocked && stageGate.reason === 'blocked-anchor' && !asks.length) {
-        // 锚点缺口用一张选择卡问，别把内部规则直接丢给用户。
-        const anchorCard: AskCard = {
-          id: `anchor-${Date.now()}`,
-          mode: 'single',
-          question: '角色参考怎么定？',
-          options: [
-            { type: 'text', label: '用画布里的参考图' },
-            { type: 'text', label: '先让我生成三视图' },
-            { type: 'input', placeholder: '自己写（可留空）' },
-          ],
-        };
-        persistedAsks = [anchorCard];
-        persistedText = COMBAT_ANCHOR_NOTICE;
-        streamText(res, COMBAT_ANCHOR_NOTICE);
-        sendEvent(res, { type: 'ask', asks: [anchorCard] });
+        // 锚点缺口用一张选择卡问；已经在生成三视图就不要再重复发卡。
+        const protagonistPending = stageData.facts.anchor_choice === 'three-view';
+        persistedText = protagonistPending
+          ? '主角三视图还在生成或等批准，生成完请点确认，我先不重复发卡。'
+          : COMBAT_ANCHOR_NOTICE;
+        streamText(res, persistedText);
+        if (!protagonistPending) {
+          const anchorCard: AskCard = {
+            id: `anchor-${Date.now()}`,
+            mode: 'single',
+            question: '角色参考怎么定？',
+            options: [
+              { type: 'text', label: '用画布里的参考图' },
+              { type: 'text', label: '先让我生成三视图' },
+              { type: 'input', placeholder: '自己写（可留空）' },
+            ],
+          };
+          persistedAsks = [anchorCard];
+          sendEvent(res, { type: 'ask', asks: [anchorCard] });
+        }
       } else if (stageGate.blocked && stageGate.reason === 'blocked-opponent-anchor' && !asks.length) {
-        const opponentCard: AskCard = {
-          id: `opponent-anchor-${Date.now()}`,
-          mode: 'single',
-          question: '对手参考怎么定？',
-          options: [
-            { type: 'text', label: '用画布里的对手图' },
-            { type: 'text', label: '先让我生成对手三视图' },
-            { type: 'input', placeholder: '自己写（可留空）' },
-          ],
-        };
-        persistedAsks = [opponentCard];
-        persistedText = COMBAT_OPPONENT_NOTICE;
-        streamText(res, COMBAT_OPPONENT_NOTICE);
-        sendEvent(res, { type: 'ask', asks: [opponentCard] });
+        // 已经在生成对手三视图时不要再发同一张卡，等生成完确认即可。
+        const opponentPending = stageData.facts.opponent_choice === 'three-view';
+        persistedText = opponentPending
+          ? '对手三视图还在生成或等批准，生成完请点确认，我先不重复发卡。'
+          : COMBAT_OPPONENT_NOTICE;
+        streamText(res, persistedText);
+        if (!opponentPending) {
+          const opponentCard: AskCard = {
+            id: `opponent-anchor-${Date.now()}`,
+            mode: 'single',
+            question: '对手参考怎么定？',
+            options: [
+              { type: 'text', label: '用画布里的对手图' },
+              { type: 'text', label: '先让我生成对手三视图' },
+              { type: 'input', placeholder: '自己写（可留空）' },
+            ],
+          };
+          persistedAsks = [opponentCard];
+          sendEvent(res, { type: 'ask', asks: [opponentCard] });
+        }
       } else if (stageGate.blocked && !asks.length) {
         // 动作被阶段闸拦下，模型又没给提问卡：由服务端把当前阶段该问的列出来。
         persistedText = stageGate.notice;
         streamText(res, stageGate.notice);
+      } else if (storyboardAskBlocked) {
+        // 分镜还没落板就先别问「是否满意」，先把剧本写进节点。
+        persistedText = '分镜剧本还没落进节点，先让我把分镜表写出来，你再确认满不满意。';
+        streamText(res, persistedText);
       } else if (asks.length) {
         // 强制 ask_user 时模型常常只给卡片、不写正文；补一段分析，别让用户只看到问题。
         let lead = '';
