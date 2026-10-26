@@ -303,12 +303,15 @@ export const coreCanvasTools: AIToolDefinition[] = [
         + 'Use kind=reference when the user cited an existing reference image, '
         + 'kind=three-view after the user approves a generated three-view node. '
         + 'role=opponent marks the opponent anchor instead of the protagonist; '
-        + 'role=scene marks the scene reference.',
+        + 'role=scene marks the scene reference. '
+        + 'When the user provides a reference, assess it first: pass quality="good" if it is clear and shows enough detail/angles, '
+        + 'quality="low" if it is blurry, cropped or missing views; low quality forces a three-view regeneration.',
       parameters: objectSchema(
         {
           kind: { type: 'string', enum: ['reference', 'three-view'] },
           nodeId: { type: 'string' },
           role: { type: 'string', enum: ['protagonist', 'opponent', 'scene'] },
+          quality: { type: 'string', enum: ['good', 'low'] },
         },
         ['kind'],
       ),

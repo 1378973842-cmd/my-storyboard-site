@@ -135,6 +135,7 @@ Use the supplied canvas context as the source of truth. Never invent existing no
 Canvas media are available references, not the default subject: when the user has not named or cited them, say which ones you are assuming or ask before building the story around them. In chat prose refer to nodes by their visible title (for example 阿波罗), never by {{node-id}} tokens; tokens belong only inside generation prompts.
 For a fight scene, follow the skill's preparation order: direction questions (style, effect grammar, action rhythm, narrative) → a personalized direction the user confirms → six parameters (character asset, opponent, ratio, resolution, scene, duration, intensity). Do not plan shots or create nodes before those are confirmed. Never invent the opponent or treat a canvas reference image as a confirmed combatant.
 The scene needs a confirmed reference too. If the user provides a scene image, actually look at it first (light, weather, materials, interactable elements) and call confirm_character_anchor with role "scene" and kind "reference"; if they do not have one, generate a scene image and confirm it before the storyboard.
+Before using a user-supplied reference as an anchor, assess its quality (clarity, detail, front/side/back angles). If it is blurry, cropped or missing views, call confirm_character_anchor with kind "reference" and quality "low", then generate a three-view and confirm that instead; if it is good, pass quality "good".
 When you create image, video or generator nodes, propose running them in the same turn so the user gets a run approval card. Never tell the user to click "generate" or "run" on the canvas node; the approval card is the only place a run starts.
 Before the style questions, if the user did not name the protagonist, confirm it first (use the canvas reference, or a new character). Never open with "阿波罗的…" as if the protagonist were already confirmed.
 Before storyboarding a fight, the character anchor must be confirmed: if the user cited a reference image, call confirm_character_anchor with kind "reference"; if you generated a three-view and the user approved it, call it with kind "three-view" and the node id. For the opponent pass role "opponent". Do not start the storyboard while either anchor is missing.
@@ -984,13 +985,16 @@ export function registerCanvasAgentRoutes(
         },
       });
     }
-    const hasAnchor = anchorWantsReference
+    const hasAnchor = (anchorWantsReference
       || Boolean(stageData.facts.character_anchor)
-      || citedNodes.length > 0;
-    const hasOpponentAnchor = opponentWantsReference
-      || Boolean(stageData.facts.opponent_anchor);
-    const hasSceneAnchor = sceneWantsReference
-      || Boolean(stageData.facts.scene_anchor);
+      || citedNodes.length > 0)
+      && stageData.facts.character_quality !== 'low';
+    const hasOpponentAnchor = (opponentWantsReference
+      || Boolean(stageData.facts.opponent_anchor))
+      && stageData.facts.opponent_quality !== 'low';
+    const hasSceneAnchor = (sceneWantsReference
+      || Boolean(stageData.facts.scene_anchor))
+      && stageData.facts.scene_quality !== 'low';
     // 技能芯片被清掉也不该逃出打斗闸：会话里有阶段数据就仍按特效打斗处理。
     const combatSession = requestedPlaybookId === 'canvas-combat-fx'
       || Boolean(stageData.stage)
@@ -1084,9 +1088,19 @@ export function registerCanvasAgentRoutes(
           const anchor = `${String(args.kind || 'reference')}:${String(args.nodeId || '')}`;
           const role = String(args.role || 'protagonist');
           const key = role === 'opponent' ? 'opponent_anchor' : role === 'scene' ? 'scene_anchor' : 'character_anchor';
-          writeConversationStageData(db, req.authUser?.id || '', conversation.id, {
-            facts: { [key]: anchor, [`${key}_at`]: Date.now() },
-          });
+          const qualityKey = key.replace('_anchor', '_quality');
+          const quality = String(args.quality || '');
+          // 参考图质量不足：不给锚点放行，转成「先生成三视图」的待办。
+          const facts: Record<string, unknown> = { [key]: anchor, [`${key}_at`]: Date.now() };
+          if (quality === 'low') {
+            facts[qualityKey] = 'low';
+            if (role !== 'opponent' && role !== 'scene') facts.anchor_choice = 'three-view';
+            if (role === 'opponent') facts.opponent_choice = 'three-view';
+            if (role === 'scene') facts.scene_choice = 'generate';
+          } else if (quality === 'good' || args.kind === 'three-view') {
+            facts[qualityKey] = 'good';
+          }
+          writeConversationStageData(db, req.authUser?.id || '', conversation.id, { facts });
         });
       const actionCalls = calls
         .filter((call) => call.function.name !== 'remember_project_fact')
