@@ -81,7 +81,7 @@ import {
 import { agentPlaybooks, canvasSkillRegistry } from '../tools/skillRegistry';
 import { AGENT_CREATABLE_NODE_TYPES } from '../types';
 import { AskCardView } from './AskCardView';
-import { mergeEffectedNodes } from '../core/effectLedger';
+import { mediaRunState, mergeEffectedNodes } from '../core/effectLedger';
 import { replaceNodeTokens } from '../core/displayText';
 import { AskPager } from './AskPager';
 import { EffectLabels, ThinkingFold } from './TurnLabels';
@@ -585,6 +585,8 @@ export function AgentFloatingPanel({
   const runScopeRef = useRef<Map<string, RunScope>>(new Map());
   const askHistoryRef = useRef<ChatTurn[]>([]);
   const askedRef = useRef(new Set<string>());
+  // 批准后正在生成的节点：全部出结果后自动发一条系统通知，让模型接着往下走。
+  const autoWatchRef = useRef(new Set<string>());
   const [askAnswers, setAskAnswers] = useState<Record<string, AskAnswer>>({});
   const [conversations, setConversations] = useState<AgentConversation[]>([]);
   const [renaming, setRenaming] = useState(false);
@@ -1275,6 +1277,37 @@ export function AgentFloatingPanel({
     ],
   );
 
+  // 批准后盯着运行结果：全部生成完/失败后自动给模型发一条系统通知，
+  // 避免模型在图片还没出来时就问「是否满意」。
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!autoWatchRef.current.size || streaming) return;
+      const nodes = getCanvasSnapshot().nodes;
+      const done: string[] = [];
+      const failed: string[] = [];
+      let waiting = 0;
+      for (const nodeId of autoWatchRef.current) {
+        const state = mediaRunState(nodes.find((node) => node.id === nodeId));
+        if (state === 'generated') done.push(nodeId);
+        else if (state === 'failed') failed.push(nodeId);
+        else waiting += 1;
+      }
+      if (waiting) return;
+      autoWatchRef.current.clear();
+      const labelOf = (nodeId: string) => nodes.find((node) => node.id === nodeId)?.title || nodeId;
+      const parts = [
+        ...done.map((nodeId) => `已生成：${labelOf(nodeId)}`),
+        ...failed.map((nodeId) => `生成失败：${labelOf(nodeId)}`),
+      ];
+      if (!parts.length) return;
+      void sendText(
+        `[[自动]] ${parts.join('；')}。请检查结果并让用户确认，或继续下一步；不要重复之前的分析。`,
+        messages,
+      );
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [messages, sendText, streaming]);
+
   const submitAsk = useCallback((messageId: string, answer: AskAnswer) => {
     const key = `${messageId}:${answer.cardId}`;
     if (streaming || askedRef.current.has(key)) return;
@@ -1301,6 +1334,7 @@ export function AgentFloatingPanel({
       }
       // 批准后立刻给反馈：运行已经开始了，别让用户以为没点上。
       setNotice('已批准，开始生成…');
+      runNodes.forEach((nodeId) => autoWatchRef.current.add(nodeId));
     }
     // 答卡会发一次新请求；上一轮的作业到这里就算结束，别留成永远「等用户」。
     const previousJob = jobIdRef.current;
@@ -1925,7 +1959,7 @@ export function AgentFloatingPanel({
                   <p>描述镜头、节奏或工作流。建/连/改按「执行模式」落板；运行一律等审批卡。</p>
                 </motion.div>
               ) : null}
-              {messages.map((message) => (
+              {messages.filter((message) => !(message.role === 'user' && message.content.startsWith('[[自动]]'))).map((message) => (
                 <article key={message.id} className={`canvas-agent-message is-${message.role}`}>
                   <div className="canvas-agent-message-head">
                     {message.role === 'assistant' ? (
