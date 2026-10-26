@@ -2318,6 +2318,9 @@ assert.match(askCardViewSource, /is-asking/);
 assert.match(askCardViewSource, /已跳过（用默认）/);
 const askPagerSource = readFileSync(new URL('./ui/AskPager.tsx', import.meta.url), 'utf8');
 assert.match(askPagerSource, /询问中…/);
+// 自己写：点一下先点亮再输入，单选时清掉其它选项
+assert.match(askPagerSource, /writing \|\| draft\.trim\(\)/);
+assert.match(askPagerSource, /setWriting\(true\)/);
 // 作业横幅放在正文末尾，不再置顶
 assert.ok(
   approvalPanelSource.indexOf('{activeJob && !jobNoticeHidden') > approvalPanelSource.indexOf('{notice ? <div className="canvas-agent-notice"'),

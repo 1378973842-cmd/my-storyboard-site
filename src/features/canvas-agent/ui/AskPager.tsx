@@ -14,6 +14,7 @@ export function AskPager({
   const [chosen, setChosen] = useState<AskAnswer[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
   const [draft, setDraft] = useState('');
+  const [writing, setWriting] = useState(false);
   if (!cards.length) return null;
   if (answers && answers.length === cards.length) {
     return (
@@ -40,6 +41,7 @@ export function AskPager({
   const show = (answer: AskAnswer | undefined) => {
     setPicked(answer && answer.selected[0] !== ASK_DEFAULT ? answer.selected : []);
     setDraft(answer?.input || '');
+    setWriting(Boolean(answer?.input));
   };
   const remember = (answer: AskAnswer) => {
     const next = chosen.slice(0, index);
@@ -79,6 +81,7 @@ export function AskPager({
               className={picked.includes(item.label) ? 'is-picked' : ''}
               onClick={() => {
                 setDraft('');
+                setWriting(false);
                 if (card.mode === 'multiple') {
                   setPicked((current) => (
                     current.includes(item.label)
@@ -92,15 +95,40 @@ export function AskPager({
             ><i>{order + 1}</i><span>{item.label}</span></button>
           ) : null
         ))}
-        <label className={draft.trim() ? 'is-picked' : ''}>
+        <label
+          className={writing || draft.trim() ? 'is-picked' : ''}
+          onClick={() => {
+            setWriting(true);
+            if (card.mode === 'single') setPicked([]);
+          }}
+        >
           <i>{texts.length + 1}</i>
           <input
             value={draft}
             placeholder={placeholder}
             aria-label={placeholder}
+            onFocus={() => {
+              setWriting(true);
+              if (card.mode === 'single') setPicked([]);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return;
+              event.preventDefault();
+              const input = draft.trim();
+              if (!input) return;
+              remember({
+                cardId: card.id,
+                mode: card.mode,
+                question: card.question,
+                selected: input && card.mode === 'single' ? [] : picked,
+                ...(input ? { input } : {}),
+              });
+            }}
             onChange={(event) => {
               setDraft(event.target.value);
-              if (event.target.value.trim()) setPicked([]);
+              setWriting(true);
+              // 单选时选了“自己写”就取消其它选项；多选可以同时保留
+              if (card.mode === 'single') setPicked([]);
             }}
           />
         </label>
