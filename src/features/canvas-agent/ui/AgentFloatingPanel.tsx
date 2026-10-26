@@ -85,6 +85,7 @@ import { mergeEffectedNodes } from '../core/effectLedger';
 import { replaceNodeTokens } from '../core/displayText';
 import { AskPager } from './AskPager';
 import { EffectLabels, ThinkingFold } from './TurnLabels';
+import { TurnTimeline } from './TurnTimeline';
 import { ProposalPreviewCard } from './ProposalPreviewCard';
 import { AssistantMarkdown } from './assistantMarkdown';
 import { proposalDefaultOpen, proposalDisplayTier, sortProposalsForDisplay } from './proposalOrder';
@@ -1938,6 +1939,24 @@ export function AgentFloatingPanel({
                       <span className="canvas-agent-avatar is-user" aria-hidden="true">我</span>
                     ) : null}
                   </div>
+                  {message.role === 'assistant' ? (() => {
+                    const own = proposals.filter((item) => item.messageId === message.id);
+                    const cards = message.asks?.filter((card) => card.mode !== 'approve_run_node') || [];
+                    const answered = cards.length > 0
+                      && cards.every((card) => Boolean(askAnswers[`${message.id}:${card.id}`]));
+                    const steps = [
+                      ...(message.thinking ? [{ label: '思考', state: 'done' as const }] : []),
+                      ...(message.content ? [{ label: '分析', state: 'done' as const }] : []),
+                      ...(cards.length
+                        ? [{ label: answered ? '提问完成' : '提问中', state: answered ? 'done' as const : 'active' as const }]
+                        : []),
+                      ...own.map((item) => ({
+                        label: `提案 ${item.actions.length} 项`,
+                        state: (item.status === 'applied' ? 'done' : item.status === 'failed' ? 'failed' : 'active') as 'done' | 'failed' | 'active',
+                      })),
+                    ];
+                    return <TurnTimeline steps={steps} />;
+                  })() : null}
                   {message.role === 'assistant' && message.thinking ? (
                     <ThinkingFold text={message.thinking}>
                       <AssistantMarkdown text={replaceNodeTokens(message.thinking, getCanvasSnapshot().nodes)} />

@@ -1004,8 +1004,11 @@ export function registerCanvasAgentRoutes(
         .filter((call) => call.function.name !== 'confirm_character_anchor')
         .filter((call) => Boolean(toolContract(call.function.name, toolNames)));
       const firstText = extractTextLlmMessageContent(model, first).trim();
-      // 调工具/提问之前模型说的话先推给用户。以前 asks 分支整段丢掉，只剩卡片。
-      if (calls.length && firstText) streamText(res, firstText);
+      // 调工具之前的那段是模型的推演，归到「思考过程」折叠里；正文只放后续说明。
+      if (calls.length && firstText) {
+        persistedThinking = [persistedThinking, firstText].filter(Boolean).join('\n\n').slice(0, 6000);
+        sendEvent(res, { type: 'thinking', text: firstText });
+      }
       let proposalText = firstText;
       let interpreted = actionCalls.length ? null : interpretCanvasProposalText(proposalText);
       if (!actionCalls.length && interpreted?.unknownTypes.length) {
@@ -1117,12 +1120,8 @@ export function registerCanvasAgentRoutes(
           );
           explanation = extractTextLlmMessageContent(model, followup).trim();
         }
-        persistedText = (
-          calls.length && firstText
-            ? [firstText, explanation].filter(Boolean).join('\n\n')
-            : explanation
-        ) || `已落到画布：${proposal.summary}。运行仍要在审批卡上批准。`;
-        // 前面已经推过 firstText，这里只补后续那段，避免正文重复。
+        persistedText = explanation || `已落到画布：${proposal.summary}。运行仍要在审批卡上批准。`;
+        // 前面的推演已经在思考过程里，这里只推后续说明。
         if (calls.length) {
           if (explanation) streamText(res, explanation);
         } else {
@@ -1130,10 +1129,10 @@ export function registerCanvasAgentRoutes(
         }
       } else if (stageGate.blocked && !asks.length) {
         // 动作被阶段闸拦下，模型又没给提问卡：由服务端把当前阶段该问的列出来。
-        persistedText = firstText ? `${firstText}\n\n${stageGate.notice}` : stageGate.notice;
+        persistedText = stageGate.notice;
         streamText(res, stageGate.notice);
       } else if (asks.length) {
-        persistedText = firstText || '';
+        persistedText = '';
         publishAsks();
       } else if (interpreted?.unknownTypes.length) {
         persistedText = `动作类型无法识别：${interpreted.unknownTypes.join('、')}。这轮没有生成提案。`;

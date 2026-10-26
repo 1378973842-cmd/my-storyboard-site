@@ -1796,3 +1796,55 @@ details.canvas-agent-turn-label > .canvas-agent-md {
     opacity: 0.8;
   }
 }
+/* —— 本轮进度：分析 → 提问 → 提案 —— */
+.canvas-agent-timeline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.canvas-agent-timeline li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #6f6a68;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.canvas-agent-timeline li + li::before {
+  content: '';
+  width: 12px;
+  height: 1px;
+  margin: 0 6px;
+  background: rgba(229, 226, 225, 0.16);
+}
+
+.canvas-agent-timeline-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: #4a4644;
+}
+
+.canvas-agent-timeline li.is-done .canvas-agent-timeline-dot {
+  background: #8f8a88;
+}
+
+.canvas-agent-timeline li.is-active {
+  color: #c8c4c2;
+}
+
+.canvas-agent-timeline li.is-active .canvas-agent-timeline-dot {
+  background: var(--strong, #ffb866);
+  animation: canvas-agent-asking 1.6s ease-in-out infinite;
+}
+
+.canvas-agent-timeline li.is-failed .canvas-agent-timeline-dot {
+  background: #ff9a8a;
+}
