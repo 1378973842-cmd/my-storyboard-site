@@ -2284,6 +2284,15 @@ assert.match(approvalRouteSource, /tool_choice: forceAsk/);
 assert.match(approvalRouteSource, /Never ask questions in prose/);
 assert.match(approvalRouteSource, /80-120 字/);
 assert.match(approvalRouteSource, /Card questions and options must be written in Chinese/);
+assert.match(approvalRouteSource, /以上方案/);
+assert.match(approvalRouteSource, /完整的个性化方案/);
+const mappedQuestion = normalizeAskCards([{
+  id: 'q1',
+  mode: 'single',
+  question: '您是否确认以下【个性化打斗导演方案】？',
+  options: [{ type: 'text', label: '确认' }],
+}]);
+assert.match(mappedQuestion[0]?.question || '', /以上/);
 assert.equal(
   combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'direction', message: '', answering: true, hasAnchor: false }).advanceTo,
   'proposal',

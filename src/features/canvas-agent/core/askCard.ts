@@ -54,7 +54,9 @@ function oneCard(value: unknown, index: number): AskCard | null {
   const raw = record(value);
   const mode = String(raw.mode || '').trim();
   if (mode !== 'single' && mode !== 'multiple' && mode !== 'approve_run_node') return null;
-  const question = String(raw.question || '').trim();
+  const question = String(raw.question || '').trim()
+    // 方案/方向/分镜在卡片上方，模型常误写成「以下方案」。
+    .replace(/以下(?=[^。！？]*(?:方案|方向|分镜))/, '以上');
   if (!question) return null;
   const nodeKey = String(raw.node_key || '').trim();
   const nodeKeys = Array.isArray(raw.node_keys)
