@@ -300,6 +300,15 @@ async function callModel(
   if (typeof finishReason === 'string' && finishReason && finishReason !== 'stop') {
     console.warn('[canvas-agent] finish_reason', finishReason, data.usage || {});
   }
+  // 每次调用都打 usage：排查「提示词大 → 烧钱」时看这一行就够。
+  const usage = (data as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).usage;
+  if (usage) {
+    console.log('[canvas-agent] usage', model, {
+      prompt: usage.prompt_tokens,
+      completion: usage.completion_tokens,
+      total: usage.total_tokens,
+    });
+  }
   if (!response.ok) {
     const error = data.error as { message?: unknown } | undefined;
     throw new Error(String(error?.message || `上游接口错误 (${response.status})`));
