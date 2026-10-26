@@ -1848,3 +1848,22 @@ details.canvas-agent-turn-label > .canvas-agent-md {
 .canvas-agent-timeline li.is-failed .canvas-agent-timeline-dot {
   background: #ff9a8a;
 }
+/* 「自己写」行：不要用选项数字，避免看起来像第三个选项 */
+.canvas-agent-ask-list .canvas-agent-ask-list-write {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: #2a2928;
+  color: #a8a3a1;
+  font-family: Manrope, sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.canvas-agent-ask-list .is-picked .canvas-agent-ask-list-write {
+  background: #ffb866;
+  color: #131313;
+}

@@ -2295,7 +2295,7 @@ assert.equal(
 assert.match(approvalRouteSource, /dir-hero-/);
 assert.match(approvalRouteSource, /blocked-direction/);
 const askPagerSource2 = readFileSync(new URL('./ui/AskPager.tsx', import.meta.url), 'utf8');
-assert.match(askPagerSource2, /answeredAll/);
+assert.match(askPagerSource2, /canvas-agent-ask-list-write/);
 const askCardSource = readFileSync(new URL('./ui/AskCardView.tsx', import.meta.url), 'utf8');
 assert.match(askCardSource, /answer\.selected\?\.length/);
 assert.match(combatPlaybookSource, /对手也要锚点/);

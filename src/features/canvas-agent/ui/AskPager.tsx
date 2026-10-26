@@ -106,7 +106,7 @@ export function AskPager({
             if (card.mode === 'single') setPicked([]);
           }}
         >
-          <i>{texts.length + 1}</i>
+          <span className="canvas-agent-ask-list-write">自己写</span>
           <input
             value={draft}
             placeholder={placeholder}
