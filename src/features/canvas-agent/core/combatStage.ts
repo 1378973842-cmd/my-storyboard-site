@@ -23,7 +23,8 @@ export type CombatStageReason =
   | 'answered'
   | 'escape'
   | 'blocked-direction'
-  | 'blocked-params';
+  | 'blocked-params'
+  | 'blocked-anchor';
 
 export type CombatStageDecision = {
   blocked: boolean;
@@ -69,11 +70,22 @@ export const COMBAT_STAGE_NOTICES: Record<CombatStage, string> = {
   production: '制作阶段：提示词与生成。运行仍然要审批卡。',
 };
 
+export const COMBAT_ANCHOR_NOTICE = [
+  '角色锚点还没确认，先别写分镜：',
+  '',
+  '- 有参考图：在消息里 @ 引用它，或让我调用 confirm_character_anchor(kind=reference)',
+  '- 没参考图：先出一张三视图（正面/侧面/背面），你确认后我再调用 confirm_character_anchor(kind=three-view, nodeId)',
+  '',
+  '锚点确认前，我不写分镜、不建视频节点。',
+].join('\n');
+
 export function combatStageDecision(input: {
   playbookId: string;
   stage: string;
   message: string;
   answering: boolean;
+  /** 角色锚点是否已确认（参考图或已确认的三视图） */
+  hasAnchor: boolean;
 }): CombatStageDecision {
   const stage = (COMBAT_STAGES as readonly string[]).includes(input.stage)
     ? input.stage as CombatStage
@@ -85,6 +97,9 @@ export function combatStageDecision(input: {
   if (stage === 'production') {
     return { blocked: false, advanceTo: null, reason: 'production', notice };
   }
+  if (stage === 'storyboard' && !input.hasAnchor) {
+    return { blocked: true, advanceTo: null, reason: 'blocked-anchor', notice: COMBAT_ANCHOR_NOTICE };
+  }
   if (stage === 'storyboard') {
     return { blocked: false, advanceTo: null, reason: 'storyboard', notice };
   }
@@ -92,6 +107,9 @@ export function combatStageDecision(input: {
     return { blocked: false, advanceTo: 'production', reason: 'escape', notice };
   }
   if (input.answering) {
+    if (!input.hasAnchor) {
+      return { blocked: true, advanceTo: null, reason: 'blocked-anchor', notice: COMBAT_ANCHOR_NOTICE };
+    }
     // 每答完一轮提问，往前推一段：方向 → 参数 → 分镜
     return { blocked: false, advanceTo: NEXT_STAGE[stage], reason: 'answered', notice };
   }

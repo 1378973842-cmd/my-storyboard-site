@@ -297,6 +297,23 @@ export const coreCanvasTools: AIToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'confirm_character_anchor',
+      description:
+        'Mark the confirmed character anchor before storyboarding. '
+        + 'Use kind=reference when the user cited an existing reference image, '
+        + 'kind=three-view after the user approves a generated three-view node.',
+      parameters: objectSchema(
+        {
+          kind: { type: 'string', enum: ['reference', 'three-view'] },
+          nodeId: { type: 'string' },
+        },
+        ['kind'],
+      ),
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'trigger_skill_execution',
       description:
         'Propose running existing node skills. Generation always requires explicit user approval.',

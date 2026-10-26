@@ -66,6 +66,14 @@ const CORE_CONTRACTS: ToolContract[] = [
     idempotent: true,
     resultStatus: 'stored',
   },
+  {
+    name: 'confirm_character_anchor',
+    scope: 'meta',
+    mutatesCanvas: false,
+    requiresApproval: false,
+    idempotent: true,
+    resultStatus: 'stored',
+  },
 ];
 
 const BY_NAME = new Map(CORE_CONTRACTS.map((item) => [item.name, item]));

@@ -257,7 +257,8 @@ assert.equal(actionProposalNeedsApproval(actions), true);
 const tool = convertSkillToAITool(canvasSkillRegistry[0]);
 assert.equal(tool.type, 'function');
 assert.match(tool.function.name, /^run_/);
-assert.equal(coreCanvasTools.length, 6);
+assert.equal(coreCanvasTools.length, 7);
+assert.ok(coreCanvasTools.some((item) => item.function.name === 'confirm_character_anchor'));
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'ask_user'));
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'remember_project_fact'));
 assert.ok(coreCanvasTools.every((item) => item.function.parameters.type === 'object'));
@@ -1561,33 +1562,41 @@ assert.equal(agentPlaybooks[1]?.path, 'prompts/playbook_opening_animation.md');
 assert.equal(agentPlaybooks[2]?.id, 'canvas-combat-fx');
 assert.equal(agentPlaybooks[2]?.title, '特效打斗');
 assert.equal(agentPlaybooks[2]?.path, 'prompts/playbook_combat_fx.md');
-// 打斗阶段闸：方向 → 参数 → 分镜，之前不许建节点
+// 打斗阶段闸：方向 → 参数 → 分镜，之前不许建节点；角色锚点没确认也不放行
 assert.equal(
-  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: '', message: '给我设计一个打斗动画', answering: false }).blocked,
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: '', message: '给我设计一个打斗动画', answering: false, hasAnchor: false }).blocked,
   true,
 );
 assert.equal(
-  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'direction', message: '', answering: true }).advanceTo,
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'direction', message: '', answering: true, hasAnchor: true }).advanceTo,
   'params',
 );
 assert.equal(
-  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '', answering: true }).advanceTo,
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '', answering: true, hasAnchor: true }).advanceTo,
   'storyboard',
 );
 assert.equal(
-  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: '', message: '跳过准备', answering: false }).advanceTo,
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '', answering: true, hasAnchor: false }).reason,
+  'blocked-anchor',
+);
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: '', message: '跳过准备', answering: false, hasAnchor: false }).advanceTo,
   'production',
 );
 assert.equal(
-  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'storyboard', message: '', answering: false }).blocked,
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'storyboard', message: '', answering: false, hasAnchor: true }).blocked,
   false,
 );
 assert.equal(
-  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '对手是宙斯', answering: false }).blocked,
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'storyboard', message: '', answering: false, hasAnchor: false }).blocked,
   true,
 );
 assert.equal(
-  combatStageDecision({ playbookId: 'canvas-video-piece', stage: '', message: '做一段剧情', answering: false }).blocked,
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '对手是宙斯', answering: false, hasAnchor: false }).blocked,
+  true,
+);
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-video-piece', stage: '', message: '做一段剧情', answering: false, hasAnchor: false }).blocked,
   false,
 );
 const playbookStepEnd: Record<string, string> = {
@@ -2252,6 +2261,8 @@ assert.match(combatPlaybookSource, /两者冲突时\*\*以本技能为准\*\*/);
 assert.match(combatPlaybookSource, /打斗至少两个角色/);
 assert.match(combatPlaybookSource, /六项没确认之前，只做分析和提问/);
 assert.match(combatPlaybookSource, /准备阶段按 skill 原顺序/);
+assert.match(combatPlaybookSource, /confirm_character_anchor/);
+assert.match(approvalRouteSource, /confirm_character_anchor/);
 assert.match(approvalRouteSource, /follow the skill's preparation order/);
 const cameraBridgeSource = readFileSync(new URL('../../services/canvasMxShellPromptBridge.ts', import.meta.url), 'utf8');
 assert.match(cameraBridgeSource, /运镜词典（写法参考）/);
