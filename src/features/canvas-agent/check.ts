@@ -1561,26 +1561,30 @@ assert.equal(agentPlaybooks[1]?.path, 'prompts/playbook_opening_animation.md');
 assert.equal(agentPlaybooks[2]?.id, 'canvas-combat-fx');
 assert.equal(agentPlaybooks[2]?.title, '特效打斗');
 assert.equal(agentPlaybooks[2]?.path, 'prompts/playbook_combat_fx.md');
-// 打斗阶段闸：准备阶段先问，不许直接建节点
+// 打斗阶段闸：方向 → 参数 → 分镜，之前不许建节点
 assert.equal(
   combatStageDecision({ playbookId: 'canvas-combat-fx', stage: '', message: '给我设计一个打斗动画', answering: false }).blocked,
   true,
 );
 assert.equal(
-  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: '', message: '对手是宙斯', answering: false }).advanceTo,
-  'build',
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'direction', message: '', answering: true }).advanceTo,
+  'params',
+);
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '', answering: true }).advanceTo,
+  'storyboard',
 );
 assert.equal(
   combatStageDecision({ playbookId: 'canvas-combat-fx', stage: '', message: '跳过准备', answering: false }).advanceTo,
-  'build',
+  'production',
 );
 assert.equal(
-  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: '', message: '', answering: true }).advanceTo,
-  'build',
-);
-assert.equal(
-  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'build', message: '', answering: false }).blocked,
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'storyboard', message: '', answering: false }).blocked,
   false,
+);
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '对手是宙斯', answering: false }).blocked,
+  true,
 );
 assert.equal(
   combatStageDecision({ playbookId: 'canvas-video-piece', stage: '', message: '做一段剧情', answering: false }).blocked,
@@ -2237,18 +2241,18 @@ assert.match(approvalPanelSource, /appliedSkillRef\.current = '';\n\s+setPlayboo
 assert.match(approvalRouteSource, /text\/prompt nodes must hold plain prose/);
 assert.match(approvalRouteSource, /available references, not the default subject/);
 assert.match(approvalRouteSource, /never by \{\{node-id\}\} tokens/);
-assert.match(approvalRouteSource, /do not write shot-by-shot beats or camera plans before both combatants are confirmed/);
+assert.match(approvalRouteSource, /Do not plan shots or create nodes before those are confirmed/);
 assert.match(approvalRouteSource, /combatStageDecision\(/);
-assert.match(approvalRouteSource, /COMBAT_STAGE_NOTICE/);
+assert.match(approvalRouteSource, /stageGate\.notice/);
 const combatPlaybookSource = readFileSync(new URL('../../../prompts/playbook_combat_fx.md', import.meta.url), 'utf8');
 assert.match(combatPlaybookSource, /分镜剧本写进 prompt 节点/);
 assert.match(combatPlaybookSource, /不要写 `\{\{节点\}\}` 引用/);
 // 共享运镜词典不能压过技能自身的分镜/节奏
 assert.match(combatPlaybookSource, /两者冲突时\*\*以本技能为准\*\*/);
 assert.match(combatPlaybookSource, /打斗至少两个角色/);
-assert.match(combatPlaybookSource, /对手没确认之前.*不写分镜、不写运镜/);
-assert.match(combatPlaybookSource, /第一个问题先确认主角/);
-assert.match(approvalRouteSource, /confirm the protagonist/);
+assert.match(combatPlaybookSource, /六项没确认之前，只做分析和提问/);
+assert.match(combatPlaybookSource, /准备阶段按 skill 原顺序/);
+assert.match(approvalRouteSource, /follow the skill's preparation order/);
 const cameraBridgeSource = readFileSync(new URL('../../services/canvasMxShellPromptBridge.ts', import.meta.url), 'utf8');
 assert.match(cameraBridgeSource, /运镜词典（写法参考）/);
 assert.match(cameraBridgeSource, /技能正文的分镜结构、节奏与特效层优先/);

@@ -1,67 +1,107 @@
 /**
  * 特效打斗的阶段闸。
  *
- * 只做一件事：在「准备」阶段拦下建节点/连线/改参数/运行，逼模型先把
- * 主角、对手、风格、时长问清楚。其它技能完全不受影响。
+ * 按 skill 原设计分四段：
+ *   direction   风格定向（画风 / 特效风格 / 动作风格 / 叙事节奏）
+ *   params      六项参数（角色资产、比例、分辨率、场景、时长、强度；打斗再加对手）
+ *   storyboard  分镜
+ *   production  提示词与生成
  *
- * 逃生口：用户明确说「跳过/直接做/不用问」，或在消息里点名了对手。
+ * 服务端只做一件事：没到 storyboard 之前，丢掉建/连/改/运行的动作。
+ * 其它技能完全不受影响。
+ *
+ * 逃生口：用户明确说「跳过准备 / 直接做 / 不用问」→ 直接 production。
  */
 export const COMBAT_PLAYBOOK_ID = 'canvas-combat-fx';
-export const COMBAT_STAGE_PREPARE = 'prepare';
-export const COMBAT_STAGE_BUILD = 'build';
+export const COMBAT_STAGES = ['direction', 'params', 'storyboard', 'production'] as const;
+export type CombatStage = typeof COMBAT_STAGES[number];
 
 export type CombatStageReason =
   | 'not-combat'
-  | 'building'
+  | 'production'
+  | 'storyboard'
   | 'answered'
-  | 'explicit-opponent'
   | 'escape'
-  | 'blocked';
+  | 'blocked-direction'
+  | 'blocked-params';
 
 export type CombatStageDecision = {
-  /** true = 这一轮的动作全部丢掉 */
   blocked: boolean;
-  /** 有值就把会话阶段推进到它 */
-  advanceTo: typeof COMBAT_STAGE_BUILD | null;
+  advanceTo: CombatStage | null;
   reason: CombatStageReason;
+  /** 被拦时给用户的话（带当前阶段该问什么） */
+  notice: string;
 };
 
 const ESCAPE = /跳过(准备|提问)?|直接做|直接来|不用问|别问|不要问/;
-const OPPONENT = /对手\s*[:：是]|敌人\s*[:：是]|反派\s*[:：是]|对战\s*[:：]?\s*\S/;
+
+const NEXT_STAGE: Record<CombatStage, CombatStage | null> = {
+  direction: 'params',
+  params: 'storyboard',
+  storyboard: 'production',
+  production: null,
+};
+
+export const COMBAT_STAGE_NOTICES: Record<CombatStage, string> = {
+  direction: [
+    '先把方向定下来，再动画面。挑 3–4 个维度问，不要一次全抛：',
+    '',
+    '1. 画风：偏写实（真人质感）还是偏二次元（国漫/日漫/3D 卡通）',
+    '2. 特效风格：有没有喜欢的游戏/动漫技能参考（鬼灭呼吸、原神元素爆发等）',
+    '3. 动作风格：快速连击 / 蓄力一击 / 舞步式 / 野蛮压制',
+    '4. 叙事节奏：完整故事弧（建立→蓄力→爆发→收束）还是直接上高潮',
+    '',
+    '回答后我会整合成一套具体方案，再和你确认。',
+  ].join('\n'),
+  params: [
+    '方向定了，收最后六项参数——这些必须你明确回答，不能由我推断：',
+    '',
+    '1. 角色资产：用画布里的参考图，还是先出三视图给你确认',
+    '2. 对手（打斗至少两个角色）',
+    '3. 画面比例：1:1 / 16:9 / 9:16',
+    '4. 分辨率：480p / 720p / 1080p',
+    '5. 场景：你指定，还是我来设计',
+    '6. 时长与特效强度：10s / 15s / 20s，轻微 / 中等 / 极致',
+    '',
+    '六项齐了我就进分镜。不想走准备阶段，直接说「跳过准备」。',
+  ].join('\n'),
+  storyboard: '分镜阶段：先排 SB-01～04 和节拍，再写提示词。',
+  production: '制作阶段：提示词与生成。运行仍然要审批卡。',
+};
 
 export function combatStageDecision(input: {
   playbookId: string;
   stage: string;
   message: string;
-  /** 这一轮是在回答提问卡 */
   answering: boolean;
 }): CombatStageDecision {
+  const stage = (COMBAT_STAGES as readonly string[]).includes(input.stage)
+    ? input.stage as CombatStage
+    : 'direction';
+  const notice = COMBAT_STAGE_NOTICES[stage];
   if (input.playbookId !== COMBAT_PLAYBOOK_ID) {
-    return { blocked: false, advanceTo: null, reason: 'not-combat' };
+    return { blocked: false, advanceTo: null, reason: 'not-combat', notice };
   }
-  if (input.stage === COMBAT_STAGE_BUILD) {
-    return { blocked: false, advanceTo: null, reason: 'building' };
+  if (stage === 'production') {
+    return { blocked: false, advanceTo: null, reason: 'production', notice };
   }
-  if (input.answering) {
-    return { blocked: false, advanceTo: COMBAT_STAGE_BUILD, reason: 'answered' };
+  if (stage === 'storyboard') {
+    return { blocked: false, advanceTo: null, reason: 'storyboard', notice };
   }
   if (ESCAPE.test(input.message)) {
-    return { blocked: false, advanceTo: COMBAT_STAGE_BUILD, reason: 'escape' };
+    return { blocked: false, advanceTo: 'production', reason: 'escape', notice };
   }
-  if (OPPONENT.test(input.message)) {
-    return { blocked: false, advanceTo: COMBAT_STAGE_BUILD, reason: 'explicit-opponent' };
+  if (input.answering) {
+    // 每答完一轮提问，往前推一段：方向 → 参数 → 分镜
+    return { blocked: false, advanceTo: NEXT_STAGE[stage], reason: 'answered', notice };
   }
-  return { blocked: true, advanceTo: null, reason: 'blocked' };
+  return {
+    blocked: true,
+    advanceTo: null,
+    reason: stage === 'direction' ? 'blocked-direction' : 'blocked-params',
+    notice,
+  };
 }
 
-/** 被拦下时给用户的话。有提问卡时由卡承载问题，这句只做说明。 */
-export const COMBAT_STAGE_NOTICE = [
-  '打斗至少需要两个角色，我先把该确认的确认掉，再动画面。',
-  '',
-  '1. 主角是谁（用画布里的阿波罗，还是新角色）',
-  '2. 对手是谁（这一项不能由我替你编）',
-  '3. 风格与色调（金白神圣 / 冷灰写实 / 其他）',
-  '4. 时长与强度（例如 10 秒、炫技）',
-  '',
-  '确认完我就按「分镜 → 关键帧 → 视频」往下走。不想走准备阶段的话，直接说「跳过准备」。',
-].join('\n');
+/** 兼容旧引用：默认阶段提示。 */
+export const COMBAT_STAGE_NOTICE = COMBAT_STAGE_NOTICES.direction;
