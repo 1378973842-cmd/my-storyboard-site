@@ -1675,13 +1675,18 @@ details.canvas-agent-turn-label > .canvas-agent-md {
   line-height: 1.5;
 }
 
-.canvas-agent-turn-label > p::before {
-  content: '';
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--strong, #ffb866);
+.canvas-agent-turn-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  color: var(--strong, #ffb866);
   flex: none;
+}
+
+.canvas-agent-turn-icon svg {
+  width: 15px;
+  height: 15px;
 }
 
 .canvas-agent-turn-thumb {
@@ -1702,4 +1707,73 @@ details.canvas-agent-turn-label > .canvas-agent-md {
   color: #8d8886;
   font-size: 11px;
   letter-spacing: 0.06em;
+}
+/* —— 用户消息里的参考图：横向小卡 —— */
+.canvas-agent-user-body {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+  min-width: 0;
+}
+
+.canvas-agent-user-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.canvas-agent-user-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 9px 4px 4px;
+  border-radius: 12px;
+  background: #131313;
+}
+
+.canvas-agent-user-ref-thumb {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #2a2928;
+}
+
+.canvas-agent-user-ref-label {
+  max-width: 150px;
+  overflow: hidden;
+  color: #c8c4c2;
+  font-size: 11.5px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-agent-user-text {
+  white-space: pre-wrap;
+}
+
+@media (max-width: 640px) {
+  .canvas-agent-panel {
+    top: 64px;
+    right: 8px;
+    bottom: 8px;
+    width: calc(100vw - 16px);
+    min-width: 0;
+    border-radius: 18px;
+  }
+
+  .canvas-agent-message p {
+    max-width: 100%;
+  }
+
+  .canvas-agent-avatar {
+    width: 20px;
+    height: 20px;
+  }
+
+  .canvas-agent-turn-thumb {
+    max-height: 120px;
+  }
 }

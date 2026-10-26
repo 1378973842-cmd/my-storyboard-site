@@ -490,35 +490,48 @@ function UserMessageBody({ content }: { content: string }) {
     mentionModelCandidates(snapshot.availableModels).map((item) => [item.id, item.label]),
   );
   const pieces = historyPieces(content);
-  if (!pieces.some((piece) => piece.type !== 'text')) return <>{content}</>;
+  const nodePieces = pieces.filter((piece) => piece.type === 'node');
+  if (!nodePieces.length) return <>{content}</>;
+  const inlinePieces = pieces.filter((piece) => piece.type !== 'node');
+  const refLabel = (piece: { id: string }, index: number) => {
+    const node = nodes.get(piece.id);
+    if (!node) return piece.id;
+    const attr = node as unknown as { title?: unknown; name?: unknown };
+    const named = String(attr.title || attr.name || '').trim();
+    if (named) return named.slice(0, 32);
+    if (node.type === 'image') return `参考图 ${index + 1}`;
+    if (node.type === 'video') return `视频 ${index + 1}`;
+    return `节点 ${index + 1}`;
+  };
   return (
-    <>
-      {pieces.map((piece, index) => {
-        if (piece.type === 'text') return <span key={index}>{piece.text}</span>;
-        const named = piece.type === 'node' && nodes.has(piece.id) ? mentionLook(nodes.get(piece.id)!) : null;
-        const label = named?.label
-          || (piece.type === 'model' ? (models.get(piece.id) || piece.id) : piece.id);
-        const src = named?.media === 'image' ? (named.thumb || named.preview || '') : '';
-        return (
-          <span key={index} className="canvas-agent-skill-chip canvas-agent-mention-pill">
-            {src ? (
-              <img
-                className="canvas-agent-mention-pill-thumb"
-                alt=""
-                src={src}
-                onError={(event) => {
-                  const image = event.currentTarget;
-                  if (image.dataset.fallback || !named?.preview) return;
-                  image.dataset.fallback = '1';
-                  image.src = named.preview;
-                }}
-              />
-            ) : null}
-            <span className="canvas-agent-mention-pill-label">{label}</span>
-          </span>
-        );
-      })}
-    </>
+    <span className="canvas-agent-user-body">
+      <span className="canvas-agent-user-refs">
+        {nodePieces.map((piece, index) => {
+          const node = nodes.get(piece.id);
+          const named = node ? mentionLook(node) : null;
+          const src = named?.media === 'image' ? (named.thumb || named.preview || '') : '';
+          return (
+            <span className="canvas-agent-user-ref" key={`${piece.id}-${index}`}>
+              {src ? <img className="canvas-agent-user-ref-thumb" src={src} alt="" /> : null}
+              <span className="canvas-agent-user-ref-label">{refLabel(piece, index)}</span>
+            </span>
+          );
+        })}
+      </span>
+      <span className="canvas-agent-user-text">
+        {inlinePieces.map((piece, index) => (
+          piece.type === 'text' ? (
+            <span key={index}>{piece.text}</span>
+          ) : (
+            <span key={index} className="canvas-agent-skill-chip canvas-agent-mention-pill">
+              <span className="canvas-agent-mention-pill-label">
+                {models.get(piece.id) || piece.id}
+              </span>
+            </span>
+          )
+        ))}
+      </span>
+    </span>
   );
 }
 
