@@ -2247,6 +2247,8 @@ assert.match(combatPlaybookSource, /不要写 `\{\{节点\}\}` 引用/);
 assert.match(combatPlaybookSource, /两者冲突时\*\*以本技能为准\*\*/);
 assert.match(combatPlaybookSource, /打斗至少两个角色/);
 assert.match(combatPlaybookSource, /对手没确认之前.*不写分镜、不写运镜/);
+assert.match(combatPlaybookSource, /第一个问题先确认主角/);
+assert.match(approvalRouteSource, /confirm the protagonist/);
 const cameraBridgeSource = readFileSync(new URL('../../services/canvasMxShellPromptBridge.ts', import.meta.url), 'utf8');
 assert.match(cameraBridgeSource, /运镜词典（写法参考）/);
 assert.match(cameraBridgeSource, /技能正文的分镜结构、节奏与特效层优先/);
