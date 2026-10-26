@@ -1351,9 +1351,70 @@ export function registerCanvasAgentRoutes(
           sendEvent(res, { type: 'ask', asks: [sceneCard] });
         }
       } else if (stageGate.blocked && !asks.length) {
-        // 动作被阶段闸拦下，模型又没给提问卡：由服务端把当前阶段该问的列出来。
-        persistedText = stageGate.notice;
-        streamText(res, stageGate.notice);
+        // 模型没给提问卡时，方向阶段由服务端补一套（按 skill 的维度）。
+        if (stageGate.reason === 'blocked-direction') {
+          const directionCards: AskCard[] = [
+            {
+              id: `dir-hero-${Date.now()}`,
+              mode: 'single',
+              question: '主角用谁？',
+              options: [
+                { type: 'text', label: '用画布里的参考（在消息里 @）' },
+                { type: 'text', label: '新角色' },
+                { type: 'input', placeholder: '自己写（可留空）' },
+              ],
+            },
+            {
+              id: `dir-style-${Date.now()}`,
+              mode: 'single',
+              question: '画风偏哪种？',
+              options: [
+                { type: 'text', label: '偏写实（真人质感）' },
+                { type: 'text', label: '偏二次元（国漫/日漫/3D卡通）' },
+                { type: 'input', placeholder: '自己写（可留空）' },
+              ],
+            },
+            {
+              id: `dir-fx-${Date.now()}`,
+              mode: 'single',
+              question: '特效风格偏哪种？',
+              options: [
+                { type: 'text', label: '写意飘逸（仙侠剑气）' },
+                { type: 'text', label: '硬核爆炸（冲击波震地）' },
+                { type: 'input', placeholder: '有具体作品参考就写这里' },
+              ],
+            },
+            {
+              id: `dir-action-${Date.now()}`,
+              mode: 'single',
+              question: '动作节奏偏哪种？',
+              options: [
+                { type: 'text', label: '快速连击' },
+                { type: 'text', label: '蓄力一击' },
+                { type: 'text', label: '舞步式' },
+                { type: 'text', label: '野蛮压制' },
+              ],
+            },
+            {
+              id: `dir-story-${Date.now()}`,
+              mode: 'single',
+              question: '叙事节奏要哪种？',
+              options: [
+                { type: 'text', label: '完整故事弧（建立→蓄力→爆发→收束）' },
+                { type: 'text', label: '直接上高潮' },
+                { type: 'input', placeholder: '自己写（可留空）' },
+              ],
+            },
+          ];
+          persistedAsks = directionCards;
+          persistedText = '先定方向，五个问题一次问完：';
+          streamText(res, persistedText);
+          sendEvent(res, { type: 'ask', asks: directionCards });
+        } else {
+          // 其它阶段：由服务端把当前阶段该问的列出来。
+          persistedText = stageGate.notice;
+          streamText(res, stageGate.notice);
+        }
       } else if (storyboardAskBlocked) {
         // 分镜还没落板就先别问「是否满意」，先把剧本写进节点。
         persistedText = '分镜剧本还没落进节点，先让我把分镜表写出来，你再确认满不满意。';

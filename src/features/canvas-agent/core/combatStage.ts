@@ -146,16 +146,19 @@ export function combatStageDecision(input: {
     return { blocked: false, advanceTo: 'production', reason: 'escape', notice };
   }
   if (input.answering) {
-    if (!input.hasAnchor) {
-      return { blocked: true, advanceTo: null, reason: 'blocked-anchor', notice: COMBAT_ANCHOR_NOTICE };
+    // 锚点是「参数 → 分镜」的门槛；方向/方案阶段先放行，别在第一步就卡角色图。
+    if (stage === 'params') {
+      if (!input.hasAnchor) {
+        return { blocked: true, advanceTo: null, reason: 'blocked-anchor', notice: COMBAT_ANCHOR_NOTICE };
+      }
+      if (input.hasOpponentAnchor === false) {
+        return { blocked: true, advanceTo: null, reason: 'blocked-opponent-anchor', notice: COMBAT_OPPONENT_NOTICE };
+      }
+      if (input.hasSceneAnchor === false) {
+        return { blocked: true, advanceTo: null, reason: 'blocked-scene-anchor', notice: COMBAT_SCENE_NOTICE };
+      }
     }
-    if (input.hasOpponentAnchor === false) {
-      return { blocked: true, advanceTo: null, reason: 'blocked-opponent-anchor', notice: COMBAT_OPPONENT_NOTICE };
-    }
-    if (input.hasSceneAnchor === false) {
-      return { blocked: true, advanceTo: null, reason: 'blocked-scene-anchor', notice: COMBAT_SCENE_NOTICE };
-    }
-    // 每答完一轮提问，往前推一段：方向 → 参数 → 分镜
+    // 每答完一轮提问，往前推一段：方向 → 方案 → 参数 → 分镜
     return { blocked: false, advanceTo: NEXT_STAGE[stage], reason: 'answered', notice };
   }
   return {
