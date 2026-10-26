@@ -1282,6 +1282,15 @@ export function AgentFloatingPanel({
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (!autoWatchRef.current.size || streaming) return;
+      // 还有没答完的提问卡时别插一条自动通知，否则会把新一轮回复怼到用户答题中间。
+      const waitingForAnswer = messages.some((message) => (
+        message.role === 'assistant'
+        && (message.asks || []).some((card) => (
+          card.mode !== 'approve_run_node'
+          && !askAnswers[`${message.id}:${card.id}`]
+        ))
+      ));
+      if (waitingForAnswer) return;
       const nodes = getCanvasSnapshot().nodes;
       const done: string[] = [];
       const failed: string[] = [];
@@ -1306,7 +1315,7 @@ export function AgentFloatingPanel({
       );
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [messages, sendText, streaming]);
+  }, [askAnswers, messages, sendText, streaming]);
 
   const submitAsk = useCallback((messageId: string, answer: AskAnswer) => {
     const key = `${messageId}:${answer.cardId}`;

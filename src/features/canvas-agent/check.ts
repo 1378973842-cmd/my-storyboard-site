@@ -2285,6 +2285,7 @@ assert.match(approvalRouteSource, /storyboard_written/);
 assert.match(approvalRouteSource, /opponentPending/);
 assert.match(approvalRouteSource, /Never ask the user to confirm an image before it is actually generated/);
 assert.match(approvalPanelSource, /autoWatchRef/);
+assert.match(approvalPanelSource, /waitingForAnswer/);
 assert.match(approvalPanelSource, /\[\[自动\]\]/);
 assert.match(approvalRouteSource, /Messages whose text starts with \[\[自动\]\]/);
 // 新建可生成节点：同轮补运行请求，用户只在卡片上批准
