@@ -41,6 +41,8 @@ import {
   readConversationCitedNodes,
   readConversationEffected,
   readConversationStage,
+  readConversationStageData,
+  writeConversationStageData,
   readProposalRollbackContext,
   recordConversationCitations,
   recordConversationEffected,
@@ -79,6 +81,7 @@ import {
 } from './agentMemoryStore.js';
 import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from '../core/memory.js';
 import { compactHistory } from '../core/history.js';
+import { COMBAT_STAGE_NOTICE, combatStageDecision } from '../core/combatStage.js';
 import { extractReasoningText } from '../core/reasoning.js';
 import { rollbackCanvasPlan } from '../core/rollbackPlan.js';
 import {
@@ -1010,6 +1013,20 @@ export function registerCanvasAgentRoutes(
       let actions = normalizeCanvasActions(
         actionCalls.length ? actionCalls.flatMap(actionsForTool) : (interpreted?.actions || []),
       );
+      // 特效打斗：准备阶段先拦下建/连/改/运行，逼模型把主角和对手问清楚。
+      const stageData = db && conversation
+        ? readConversationStageData(db, req.authUser?.id || '', conversation.id)
+        : { stage: '', facts: {} };
+      const stageGate = combatStageDecision({
+        playbookId: requestedPlaybookId,
+        stage: stageData.stage,
+        message: turnMessage,
+        answering: Boolean(askBatch.length || askAnswer),
+      });
+      if (stageGate.advanceTo && db && conversation) {
+        writeConversationStageData(db, req.authUser?.id || '', conversation.id, { stage: stageGate.advanceTo });
+      }
+      if (stageGate.blocked) actions = [];
       const runCardPending = Boolean(db && conversation && hasPendingRunApproval(db, req.authUser?.id || '', conversation.id));
       const beforeShortYes = actions.length;
       actions = stripCreatesOnShortYes(actions, message);
@@ -1095,6 +1112,10 @@ export function registerCanvasAgentRoutes(
         } else {
           streamText(res, persistedText);
         }
+      } else if (stageGate.blocked && !asks.length) {
+        // 动作被阶段闸拦下，模型又没给提问卡：由服务端把该问的列出来。
+        persistedText = firstText ? `${firstText}\n\n${COMBAT_STAGE_NOTICE}` : COMBAT_STAGE_NOTICE;
+        streamText(res, COMBAT_STAGE_NOTICE);
       } else if (asks.length) {
         persistedText = firstText || '';
         publishAsks();

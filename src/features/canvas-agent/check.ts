@@ -44,6 +44,8 @@ import {
   readConversationCitedNodes,
   readConversationEffected,
   readConversationStage,
+  readConversationStageData,
+  writeConversationStageData,
   recordConversationCitations,
   recordConversationEffected,
   recordConversationStage,
@@ -73,6 +75,7 @@ import { remainingRunNodes, runNodeIdsOf } from './core/jobPlan';
 import { rollbackCanvasPlan } from './core/rollbackPlan';
 import { extractReasoningText } from './core/reasoning';
 import { replaceNodeTokens } from './core/displayText';
+import { combatStageDecision } from './core/combatStage';
 import { pruneCanvasSnapshots } from '../../services/infiniteCanvasStore';
 import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from './core/memory';
 import { compactHistory } from './core/history';
@@ -1558,6 +1561,31 @@ assert.equal(agentPlaybooks[1]?.path, 'prompts/playbook_opening_animation.md');
 assert.equal(agentPlaybooks[2]?.id, 'canvas-combat-fx');
 assert.equal(agentPlaybooks[2]?.title, '特效打斗');
 assert.equal(agentPlaybooks[2]?.path, 'prompts/playbook_combat_fx.md');
+// 打斗阶段闸：准备阶段先问，不许直接建节点
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: '', message: '给我设计一个打斗动画', answering: false }).blocked,
+  true,
+);
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: '', message: '对手是宙斯', answering: false }).advanceTo,
+  'build',
+);
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: '', message: '跳过准备', answering: false }).advanceTo,
+  'build',
+);
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: '', message: '', answering: true }).advanceTo,
+  'build',
+);
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'build', message: '', answering: false }).blocked,
+  false,
+);
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-video-piece', stage: '', message: '做一段剧情', answering: false }).blocked,
+  false,
+);
 const playbookStepEnd: Record<string, string> = {
   'canvas-video-piece': '## 时长规则',
   'canvas-opening-animation': '## 核心原则',
@@ -1722,6 +1750,17 @@ assert.deepEqual(readConversationStage(stageDb, 'user', freshConversation.id), {
   stage: 1,
 });
 const otherConversation = createCanvasAgentConversation(stageDb, 'user', 'canvas', '另一条');
+// 阶段数据：默认空，写入后能合并事实
+assert.deepEqual(readConversationStageData(stageDb, 'user', otherConversation.id), { stage: '', facts: {} });
+writeConversationStageData(stageDb, 'user', otherConversation.id, {
+  stage: 'build',
+  facts: { opponent: '宙斯' },
+});
+assert.equal(readConversationStageData(stageDb, 'user', otherConversation.id).stage, 'build');
+writeConversationStageData(stageDb, 'user', otherConversation.id, { facts: { style: '金白' } });
+const stageDataAfter = readConversationStageData(stageDb, 'user', otherConversation.id);
+assert.equal(stageDataAfter.facts.opponent, '宙斯');
+assert.equal(stageDataAfter.facts.style, '金白');
 assert.equal(readConversationStage(stageDb, 'user', otherConversation.id).stage, null);
 assert.deepEqual(readConversationCitedNodes(stageDb, 'user', freshConversation.id), []);
 assert.deepEqual(
@@ -2199,6 +2238,8 @@ assert.match(approvalRouteSource, /text\/prompt nodes must hold plain prose/);
 assert.match(approvalRouteSource, /available references, not the default subject/);
 assert.match(approvalRouteSource, /never by \{\{node-id\}\} tokens/);
 assert.match(approvalRouteSource, /do not write shot-by-shot beats or camera plans before both combatants are confirmed/);
+assert.match(approvalRouteSource, /combatStageDecision\(/);
+assert.match(approvalRouteSource, /COMBAT_STAGE_NOTICE/);
 const combatPlaybookSource = readFileSync(new URL('../../../prompts/playbook_combat_fx.md', import.meta.url), 'utf8');
 assert.match(combatPlaybookSource, /分镜剧本写进 prompt 节点/);
 assert.match(combatPlaybookSource, /不要写 `\{\{节点\}\}` 引用/);

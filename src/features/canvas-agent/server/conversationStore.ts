@@ -36,6 +36,7 @@ export function initCanvasAgentConversationSchema(
       updated_at INTEGER NOT NULL,
       agent_playbook_id TEXT NOT NULL DEFAULT '',
       agent_stage INTEGER,
+      agent_stage_data TEXT NOT NULL DEFAULT '',
       agent_cited_nodes TEXT NOT NULL DEFAULT '',
       agent_effected_nodes TEXT NOT NULL DEFAULT '',
       agent_cancel_marker TEXT NOT NULL DEFAULT ''
@@ -61,6 +62,7 @@ export function initCanvasAgentConversationSchema(
   ensureConversationColumn(db, "agent_cited_nodes", "TEXT NOT NULL DEFAULT ''");
   ensureConversationColumn(db, "agent_effected_nodes", "TEXT NOT NULL DEFAULT ''");
   ensureConversationColumn(db, "agent_cancel_marker", "TEXT NOT NULL DEFAULT ''");
+  ensureConversationColumn(db, "agent_stage_data", "TEXT NOT NULL DEFAULT ''");
 }
 
 function ensureConversationColumn(
@@ -74,8 +76,48 @@ function ensureConversationColumn(
   }
 }
 
-export function readConversationStage(
+/** 技能阶段数据（目前只有特效打斗用）：stage + 已确认的事实。 */
+export function readConversationStageData(
   db: InstanceType<typeof Database>,
+  userId: string,
+  conversationId: string,
+): { stage: string; facts: Record<string, unknown> } {
+  const row = db.prepare(
+    "SELECT agent_stage_data FROM canvas_agent_conversations WHERE id = ? AND user_id = ?"
+  ).get(conversationId, userId) as { agent_stage_data?: string } | undefined;
+  const raw = String(row?.agent_stage_data || "").trim();
+  if (!raw) return { stage: "", facts: {} };
+  try {
+    const parsed = JSON.parse(raw) as { stage?: unknown; facts?: unknown };
+    return {
+      stage: typeof parsed.stage === "string" ? parsed.stage : "",
+      facts: parsed.facts && typeof parsed.facts === "object" && !Array.isArray(parsed.facts)
+        ? parsed.facts as Record<string, unknown>
+        : {},
+    };
+  } catch {
+    return { stage: "", facts: {} };
+  }
+}
+
+export function writeConversationStageData(
+  db: InstanceType<typeof Database>,
+  userId: string,
+  conversationId: string,
+  next: { stage?: string; facts?: Record<string, unknown> },
+): void {
+  const current = readConversationStageData(db, userId, conversationId);
+  const merged = {
+    stage: next.stage ?? current.stage,
+    facts: { ...current.facts, ...(next.facts || {}) },
+    updatedAt: Date.now(),
+  };
+  db.prepare(
+    "UPDATE canvas_agent_conversations SET agent_stage_data = ? WHERE id = ? AND user_id = ?"
+  ).run(JSON.stringify(merged), conversationId, userId);
+}
+
+export function readConversationStage(  db: InstanceType<typeof Database>,
   userId: string,
   conversationId: string,
 ): { playbookId: string; stage: number | null } {
