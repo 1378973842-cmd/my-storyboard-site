@@ -56,7 +56,7 @@ export function AskPager({
     <section className="canvas-agent-ask is-pager" aria-label={card.question}>
       <div className="canvas-agent-ask-head">
         <h4>{card.question}</h4>
-        <span className="canvas-agent-ask-state">待答</span>
+        <span className="canvas-agent-ask-state is-asking">询问中…</span>
         <div className="canvas-agent-ask-pager">
           <button type="button" onClick={() => {
             if (!index) return;

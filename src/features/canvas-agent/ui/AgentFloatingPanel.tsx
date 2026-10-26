@@ -1922,48 +1922,6 @@ export function AgentFloatingPanel({
                   <p>描述镜头、节奏或工作流。建/连/改按「执行模式」落板；运行一律等审批卡。</p>
                 </motion.div>
               ) : null}
-              {activeJob && !jobNoticeHidden && !streaming ? (() => {
-                const beat = activeJob.heartbeat_at || activeJob.updated_at || 0;
-                const alive = Date.now() - beat < 90_000;
-                const waiting = activeJob.status === 'waiting_approval';
-                const interrupted = !waiting && !alive;
-                const runIds = Array.isArray(activeJob.result?.runNodeIds)
-                  ? (activeJob.result?.runNodeIds as unknown[]).map(String).filter(Boolean)
-                  : [];
-                const remaining = runIds.length ? remainingRunNodes(runIds, activeJob.observations) : [];
-                const resumable = remaining.length > 0 && !waiting;
-                return (
-                  <div className={`canvas-agent-job ${waiting ? 'is-waiting' : resumable || interrupted ? 'is-interrupted' : 'is-running'}`}>
-                    <span>
-                      {waiting
-                        ? '上一轮的提案还在等你确认。'
-                        : resumable
-                          ? `上一轮执行到 ${runIds.length - remaining.length}/${runIds.length}，还剩 ${remaining.length} 个节点。`
-                          : interrupted
-                            ? '上一轮已经中断（很久没有心跳了）。'
-                            : '这一轮还在进行中，可能开在另一个标签页。'}
-                    </span>
-                    {resumable ? (
-                      <button type="button" onClick={() => void resumeJobRun(activeJob, remaining)}>
-                        继续执行
-                      </button>
-                    ) : interrupted ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const lastAssistant = [...messages].reverse().find((item) => item.role === 'assistant');
-                          if (lastAssistant) retryFrom(lastAssistant.id);
-                        }}
-                      >
-                        重试上一轮
-                      </button>
-                    ) : null}
-                    <button type="button" aria-label="忽略" onClick={() => setJobNoticeHidden(true)}>
-                      <X aria-hidden="true" />
-                    </button>
-                  </div>
-                );
-              })() : null}
               {messages.map((message) => (
                 <article key={message.id} className={`canvas-agent-message is-${message.role}`}>
                   <div className="canvas-agent-message-head">
@@ -1992,7 +1950,16 @@ export function AgentFloatingPanel({
                   ) : (
                     <AssistantMarkdown text={streaming && !message.asks?.length ? '正在构思…' : ''} />
                   )}
-                  {message.asks?.length ? <p className="canvas-agent-turn-kicker">已询问</p> : null}
+                  {message.asks?.length ? (() => {
+                    const pending = message.asks.some((card) => (
+                      card.mode !== 'approve_run_node' && !askAnswers[`${message.id}:${card.id}`]
+                    ));
+                    return (
+                      <p className={`canvas-agent-turn-kicker${pending ? ' is-asking' : ''}`}>
+                        {pending ? '询问中…' : '已回答'}
+                      </p>
+                    );
+                  })() : null}
                   {proposals.filter((item) => item.messageId === message.id && item.effectedNodes?.length).map((item) => (
                     <EffectLabels key={item.id} nodes={item.effectedNodes || []} />
                   ))}
@@ -2151,6 +2118,48 @@ export function AgentFloatingPanel({
               ) : null}
               {error ? <div className="canvas-agent-error">{error}</div> : null}
               {notice ? <div className="canvas-agent-notice">{notice}</div> : null}
+              {activeJob && !jobNoticeHidden && !streaming ? (() => {
+                const beat = activeJob.heartbeat_at || activeJob.updated_at || 0;
+                const alive = Date.now() - beat < 90_000;
+                const waiting = activeJob.status === 'waiting_approval';
+                const interrupted = !waiting && !alive;
+                const runIds = Array.isArray(activeJob.result?.runNodeIds)
+                  ? (activeJob.result?.runNodeIds as unknown[]).map(String).filter(Boolean)
+                  : [];
+                const remaining = runIds.length ? remainingRunNodes(runIds, activeJob.observations) : [];
+                const resumable = remaining.length > 0 && !waiting;
+                return (
+                  <div className={`canvas-agent-job ${waiting ? 'is-waiting' : resumable || interrupted ? 'is-interrupted' : 'is-running'}`}>
+                    <span>
+                      {waiting
+                        ? '上一轮的提案还在等你确认。'
+                        : resumable
+                          ? `上一轮执行到 ${runIds.length - remaining.length}/${runIds.length}，还剩 ${remaining.length} 个节点。`
+                          : interrupted
+                            ? '上一轮已经中断（很久没有心跳了）。'
+                            : '这一轮还在进行中，可能开在另一个标签页。'}
+                    </span>
+                    {resumable ? (
+                      <button type="button" onClick={() => void resumeJobRun(activeJob, remaining)}>
+                        继续执行
+                      </button>
+                    ) : interrupted ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const lastAssistant = [...messages].reverse().find((item) => item.role === 'assistant');
+                          if (lastAssistant) retryFrom(lastAssistant.id);
+                        }}
+                      >
+                        重试上一轮
+                      </button>
+                    ) : null}
+                    <button type="button" aria-label="忽略" onClick={() => setJobNoticeHidden(true)}>
+                      <X aria-hidden="true" />
+                    </button>
+                  </div>
+                );
+              })() : null}
             </div>
 
             <footer className="canvas-agent-dock">

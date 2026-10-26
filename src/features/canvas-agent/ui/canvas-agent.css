@@ -1777,3 +1777,22 @@ details.canvas-agent-turn-label > .canvas-agent-md {
     max-height: 120px;
   }
 }
+/* —— 询问中：透明度呼吸 —— */
+.canvas-agent-ask-state.is-asking,
+.canvas-agent-turn-kicker.is-asking {
+  color: var(--strong, #ffb866);
+  animation: canvas-agent-asking 1.6s ease-in-out infinite;
+}
+
+@keyframes canvas-agent-asking {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-agent-ask-state.is-asking,
+  .canvas-agent-turn-kicker.is-asking {
+    animation: none;
+    opacity: 0.8;
+  }
+}

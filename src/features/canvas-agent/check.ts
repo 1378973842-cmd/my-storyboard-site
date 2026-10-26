@@ -2291,8 +2291,16 @@ assert.match(
   /\[user_cancelled\][\s\S]*\[unanswered_asks\]/,
 );
 const askCardViewSource = readFileSync(new URL('./ui/AskCardView.tsx', import.meta.url), 'utf8');
-assert.match(askCardViewSource, /待答/);
+assert.match(askCardViewSource, /询问中…/);
+assert.match(askCardViewSource, /is-asking/);
 assert.match(askCardViewSource, /已跳过（用默认）/);
+const askPagerSource = readFileSync(new URL('./ui/AskPager.tsx', import.meta.url), 'utf8');
+assert.match(askPagerSource, /询问中…/);
+// 作业横幅放在正文末尾，不再置顶
+assert.ok(
+  approvalPanelSource.indexOf('{activeJob && !jobNoticeHidden') > approvalPanelSource.indexOf('{notice ? <div className="canvas-agent-notice"'),
+  '作业横幅应在 notice 之后（正文底部）',
+);
 assert.equal(canvasAgentStagePrefix('canvas-opening-animation', 1, 'canvas-video-piece', [
   { id: 'vid_xxx', nodeType: 'video', label: '阿波罗开场 10 秒' },
 ]).includes('步骤'), false);

@@ -42,7 +42,7 @@ export function AskCardView({
         </p>
       ) : (
         <>
-          <p className="canvas-agent-ask-state">待答</p>
+          <p className="canvas-agent-ask-state is-asking">询问中…</p>
           <div className="canvas-agent-ask-options">
             {texts.map((item) => (
               item.type === 'text' ? (
