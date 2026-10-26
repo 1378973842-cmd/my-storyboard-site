@@ -253,7 +253,11 @@ function loadMxShellCameraMoves(projectRoot: string): string {
 export function mxShellCameraMovesInjection(projectRoot: string): string {
   const cameraMoves = loadMxShellCameraMoves(projectRoot);
   if (!cameraMoves) return "";
-  return `---\n\n## 运镜词典（强制参考）\n\n${cameraMoves}`;
+  return `---\n\n## 运镜词典（写法参考）\n\n`
+    + `> 优先级：技能正文的分镜结构、节奏与特效层优先；本词典只约束运镜的命名、方向、速度和动机。\n`
+    + `> 「四件套」只用于有运镜的镜头；静止的冲击帧/定格帧写景别、角度和冲击点即可，不硬凑运镜。\n`
+    + `> 同一分镜内技能明确写出的「主运镜 + 变奏」以技能时间轴为准；词典的「一个主运镜」是默认，不是禁令。\n\n`
+    + cameraMoves;
 }
 
 const MX_SHELL_POLISH_API_OVERRIDE = `

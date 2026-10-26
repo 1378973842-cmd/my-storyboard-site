@@ -1658,7 +1658,8 @@ const playbookBodies = ['canvas-video-piece', 'canvas-opening-animation'].map((i
 assert.deepEqual(playbookGaps, []);
 const playbookLoaded = ['canvas-video-piece', 'canvas-opening-animation'].map((id) => readPlaybookForAgent('.', id));
 const cameraInjection = playbookLoaded[0].slice(playbookBodies[0].length);
-assert.match(cameraInjection, /^\n\n---\n\n## 运镜词典（强制参考）\n\n/);
+assert.match(cameraInjection, /^\n\n---\n\n## 运镜词典（写法参考）\n\n/);
+assert.match(cameraInjection, /技能正文的分镜结构、节奏与特效层优先/);
 assert.equal(playbookLoaded[1].slice(playbookBodies[1].length), cameraInjection);
 assert.match(cameraInjection, /甩镜/);
 assert.equal(inferAppliedPlaybookStage('canvas-video-piece', [
@@ -2187,6 +2188,11 @@ assert.match(approvalRouteSource, /text\/prompt nodes must hold plain prose/);
 const combatPlaybookSource = readFileSync(new URL('../../../prompts/playbook_combat_fx.md', import.meta.url), 'utf8');
 assert.match(combatPlaybookSource, /分镜剧本写进 prompt 节点/);
 assert.match(combatPlaybookSource, /不要写 `\{\{节点\}\}` 引用/);
+// 共享运镜词典不能压过技能自身的分镜/节奏
+assert.match(combatPlaybookSource, /两者冲突时\*\*以本技能为准\*\*/);
+const cameraBridgeSource = readFileSync(new URL('../../services/canvasMxShellPromptBridge.ts', import.meta.url), 'utf8');
+assert.match(cameraBridgeSource, /运镜词典（写法参考）/);
+assert.match(cameraBridgeSource, /技能正文的分镜结构、节奏与特效层优先/);
 assert.match(approvalRouteSource, /proposal\.jobId = jobId/);
 assert.match(approvalRouteSource, /if \(calls\.length && firstText\) streamText\(res, firstText\)/);
 assert.match(approvalRouteSource, /if \(!regenerate\) \{/);
