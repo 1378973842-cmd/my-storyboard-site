@@ -985,7 +985,28 @@ export function registerCanvasAgentRoutes(
         });
       }
     }
-    // 服务端下发的锚点选择卡：主角 `anchor-*`，对手 `opponent-anchor-*`
+    // 三个锚点到齐且还在参数阶段：自动推进到分镜，别等一条不是「答题」的消息。
+    const mergedFacts = {
+      ...stageData.facts,
+      ...(autoAnchors.protagonist ? { character_anchor: autoAnchors.protagonist } : {}),
+      ...(autoAnchors.opponent ? { opponent_anchor: autoAnchors.opponent } : {}),
+      ...(autoAnchors.scene ? { scene_anchor: autoAnchors.scene } : {}),
+    };
+    if (db && conversation
+      && stageData.stage === 'params'
+      && mergedFacts.character_anchor && mergedFacts.opponent_anchor && mergedFacts.scene_anchor) {
+      writeConversationStageData(db, req.authUser?.id || '', conversation.id, { stage: 'storyboard' });
+      stageData.stage = 'storyboard';
+    }
+    // 客户端上报的节点运行状态：还在生成时别重复发锚点卡。
+    const runStates = parseRunStates(body.runStates);
+    const pendingGeneration = effectedNodes.some((node) => {
+      const type = String(node.nodeType || '');
+      if (type !== 'generator' && type !== 'image') return false;
+      // 只盯锚点类节点（三视图/对手/场景），别被无关节点拖住。
+      if (!/三视图|主角|角色|对手|反派|邪修|场景|背景|神殿|废墟/.test(String(node.label || ''))) return false;
+      return runStates[node.id] === 'created';
+    });
     const selectionsOf = (prefix: string) => [
       ...(askAnswer && String(askAnswer.cardId || '').startsWith(prefix) ? askAnswer.selected : []),
       ...askBatch
@@ -1243,10 +1264,8 @@ export function registerCanvasAgentRoutes(
           facts: { storyboard_written: true },
         });
       }
-      const storyboardStage = stageData.stage === 'storyboard' || stageGate.reason === 'storyboard';
       const asksAboutStoryboard = asks.some((card) => /分镜|剧本|满意/.test(card.question));
-      const storyboardAskBlocked = storyboardStage
-        && asksAboutStoryboard
+      const storyboardAskBlocked = asksAboutStoryboard
         && !storyboardNode
         && !Boolean(stageData.facts.storyboard_written);
       if (storyboardAskBlocked) asks = [];
@@ -1325,7 +1344,7 @@ export function registerCanvasAgentRoutes(
         publishAsks();
       } else if (stageGate.blocked && stageGate.reason === 'blocked-anchor' && !asks.length) {
         // 锚点缺口用一张选择卡问；已经在生成三视图就不要再重复发卡。
-        const protagonistPending = stageData.facts.anchor_choice === 'three-view';
+        const protagonistPending = stageData.facts.anchor_choice === 'three-view' || pendingGeneration;
         persistedText = protagonistPending
           ? '主角三视图还在生成或等批准，生成完请点确认，我先不重复发卡。'
           : COMBAT_ANCHOR_NOTICE;
@@ -1346,7 +1365,7 @@ export function registerCanvasAgentRoutes(
         }
       } else if (stageGate.blocked && stageGate.reason === 'blocked-opponent-anchor' && !asks.length) {
         // 已经在生成对手三视图时不要再发同一张卡，等生成完确认即可。
-        const opponentPending = stageData.facts.opponent_choice === 'three-view';
+        const opponentPending = stageData.facts.opponent_choice === 'three-view' || pendingGeneration;
         persistedText = opponentPending
           ? '对手三视图还在生成或等批准，生成完请点确认，我先不重复发卡。'
           : COMBAT_OPPONENT_NOTICE;
@@ -1367,7 +1386,7 @@ export function registerCanvasAgentRoutes(
         }
       } else if (stageGate.blocked && stageGate.reason === 'blocked-scene-anchor' && !asks.length) {
         // 场景图：有就用用户的（做视觉分析），没有就让 agent 生成。
-        const scenePending = stageData.facts.scene_choice === 'generate';
+        const scenePending = stageData.facts.scene_choice === 'generate' || pendingGeneration;
         persistedText = scenePending
           ? '场景图还在生成或等批准，生成完请点确认，我先不重复发卡。'
           : COMBAT_SCENE_NOTICE;
