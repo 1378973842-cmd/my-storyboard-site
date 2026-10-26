@@ -1570,6 +1570,10 @@ assert.equal(
 );
 assert.equal(
   combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'direction', message: '', answering: true, hasAnchor: true }).advanceTo,
+  'proposal',
+);
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'proposal', message: '', answering: true, hasAnchor: true }).advanceTo,
   'params',
 );
 assert.equal(

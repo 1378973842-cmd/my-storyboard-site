@@ -1,8 +1,9 @@
 /**
  * 特效打斗的阶段闸。
  *
- * 按 skill 原设计分四段：
+ * 按 skill 原设计分四段（外加方案确认）：
  *   direction   风格定向（画风 / 特效风格 / 动作风格 / 叙事节奏）
+ *   proposal    整合成个性化方案，让用户确认方向（skill STEP 2）
  *   params      六项参数（角色资产、比例、分辨率、场景、时长、强度；打斗再加对手）
  *   storyboard  分镜
  *   production  提示词与生成
@@ -13,7 +14,7 @@
  * 逃生口：用户明确说「跳过准备 / 直接做 / 不用问」→ 直接 production。
  */
 export const COMBAT_PLAYBOOK_ID = 'canvas-combat-fx';
-export const COMBAT_STAGES = ['direction', 'params', 'storyboard', 'production'] as const;
+export const COMBAT_STAGES = ['direction', 'proposal', 'params', 'storyboard', 'production'] as const;
 export type CombatStage = typeof COMBAT_STAGES[number];
 
 export type CombatStageReason =
@@ -38,7 +39,8 @@ export type CombatStageDecision = {
 const ESCAPE = /跳过(准备|提问)?|直接做|直接来|不用问|别问|不要问/;
 
 const NEXT_STAGE: Record<CombatStage, CombatStage | null> = {
-  direction: 'params',
+  direction: 'proposal',
+  proposal: 'params',
   params: 'storyboard',
   storyboard: 'production',
   production: null,
@@ -55,6 +57,15 @@ export const COMBAT_STAGE_NOTICES: Record<CombatStage, string> = {
     '4. 叙事节奏：完整故事弧（建立→蓄力→爆发→收束）还是直接上高潮',
     '',
     '回答后我会整合成一套具体方案，再和你确认。',
+  ].join('\n'),
+  proposal: [
+    '把刚才的回答整合成一套具体方案，先让用户确认方向：',
+    '',
+    '- 风格 / 特效 / 动作节奏 / 叙事结构各一句',
+    '- 主动给 1-2 个创意建议',
+    '- 只问「这个方向可以吗」，确认后再收六项参数',
+    '',
+    '方向确认前，不建节点、不写分镜。',
   ].join('\n'),
   params: [
     '方向定了，收最后六项参数——这些必须你明确回答，不能由我推断：',

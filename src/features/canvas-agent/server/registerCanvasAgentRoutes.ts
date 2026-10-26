@@ -993,7 +993,9 @@ export function registerCanvasAgentRoutes(
       && (stageData.stage === '' || stageData.stage === 'direction')
       && !hasAnchor
       ? '\n\n[stage_rule] 第一张提问卡先确认主角：用画布里的参考，还是新角色。确认前不要问画风、特效或对手。'
-      : '';
+      : combatSession && stageData.stage === 'proposal'
+        ? '\n\n[stage_rule] 方向已答完：先给一套具体方案（风格/特效/动作节奏/叙事结构 + 1-2 个建议），让用户确认这个方向；确认后再收六项参数，不要跳步。'
+        : '';
     const stageText = `${canvasAgentStagePrefix(storedStage.playbookId, storedStage.stage, requestedPlaybookId, effectedNodes, parseRunStates(body.runStates))}${changelog ? `\n\n[canvas_changelog]\n${changelog}` : ''}`;
     // 项目记忆跨会话：最近 12 条常驻，命中的再补一段；够用就停，不做向量检索。
     const allMemory = db && conversation
