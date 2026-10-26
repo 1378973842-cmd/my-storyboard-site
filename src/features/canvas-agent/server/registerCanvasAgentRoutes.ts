@@ -81,7 +81,7 @@ import {
 } from './agentMemoryStore.js';
 import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from '../core/memory.js';
 import { compactHistory } from '../core/history.js';
-import { combatStageDecision } from '../core/combatStage.js';
+import { COMBAT_ANCHOR_NOTICE, combatStageDecision } from '../core/combatStage.js';
 import { extractReasoningText } from '../core/reasoning.js';
 import { rollbackCanvasPlan } from '../core/rollbackPlan.js';
 import {
@@ -932,7 +932,25 @@ export function registerCanvasAgentRoutes(
     const stageData = db && conversation
       ? readConversationStageData(db, req.authUser?.id || '', conversation.id)
       : { stage: '', facts: {} };
-    const hasAnchor = Boolean(stageData.facts.character_anchor) || citedNodes.length > 0;
+    // 服务端下发的锚点选择卡：用参考图 / 先出三视图
+    const anchorSelections = [
+      ...(askAnswer && String(askAnswer.cardId || '').startsWith('anchor-') ? askAnswer.selected : []),
+      ...askBatch
+        .filter((item) => String(item.cardId || '').startsWith('anchor-'))
+        .flatMap((item) => item.selected),
+    ].map((value) => String(value || ''));
+    const anchorWantsReference = anchorSelections.some((value) => value.includes('参考'));
+    const anchorWantsThreeView = anchorSelections.some((value) => value.includes('三视图'));
+    if ((anchorWantsReference || anchorWantsThreeView) && db && conversation) {
+      writeConversationStageData(db, req.authUser?.id || '', conversation.id, {
+        facts: anchorWantsReference
+          ? { character_anchor: 'reference:user' }
+          : { anchor_choice: 'three-view' },
+      });
+    }
+    const hasAnchor = anchorWantsReference
+      || Boolean(stageData.facts.character_anchor)
+      || citedNodes.length > 0;
     // 方向阶段、还没锚点：强制第一张卡先确认主角，别默认画布里的阿波罗。
     const stageRule = requestedPlaybookId === 'canvas-combat-fx'
       && (stageData.stage === '' || stageData.stage === 'direction')
@@ -1053,7 +1071,12 @@ export function registerCanvasAgentRoutes(
       if (stageGate.advanceTo && db && conversation) {
         writeConversationStageData(db, req.authUser?.id || '', conversation.id, { stage: stageGate.advanceTo });
       }
-      if (stageGate.blocked) actions = [];
+      if (stageGate.blocked) {
+        // 锚点缺口：允许先建一张图片节点（三视图），其它动作照旧丢掉
+        actions = stageGate.reason === 'blocked-anchor'
+          ? actions.filter((action) => action.type === 'create_node' && action.nodeType === 'image')
+          : [];
+      }
       const runCardPending = Boolean(db && conversation && hasPendingRunApproval(db, req.authUser?.id || '', conversation.id));
       const beforeShortYes = actions.length;
       actions = stripCreatesOnShortYes(actions, message);
@@ -1135,6 +1158,22 @@ export function registerCanvasAgentRoutes(
         } else {
           streamText(res, persistedText);
         }
+      } else if (stageGate.blocked && stageGate.reason === 'blocked-anchor' && !asks.length) {
+        // 锚点缺口用一张选择卡问，别把内部规则直接丢给用户。
+        const anchorCard: AskCard = {
+          id: `anchor-${Date.now()}`,
+          mode: 'single',
+          question: '角色参考怎么定？',
+          options: [
+            { type: 'text', label: '用画布里的参考图' },
+            { type: 'text', label: '先让我生成三视图' },
+            { type: 'input', placeholder: '自己写（可留空）' },
+          ],
+        };
+        persistedAsks = [anchorCard];
+        persistedText = COMBAT_ANCHOR_NOTICE;
+        streamText(res, COMBAT_ANCHOR_NOTICE);
+        sendEvent(res, { type: 'ask', asks: [anchorCard] });
       } else if (stageGate.blocked && !asks.length) {
         // 动作被阶段闸拦下，模型又没给提问卡：由服务端把当前阶段该问的列出来。
         persistedText = stageGate.notice;

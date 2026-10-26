@@ -72,12 +72,11 @@ export const COMBAT_STAGE_NOTICES: Record<CombatStage, string> = {
 };
 
 export const COMBAT_ANCHOR_NOTICE = [
-  '角色锚点还没确认，先别写分镜：',
+  '角色参考还没确认，先别写分镜。',
   '',
-  '- 有参考图：在消息里 @ 引用它，或让我调用 confirm_character_anchor(kind=reference)',
-  '- 没参考图：先出一张三视图（正面/侧面/背面），你确认后我再调用 confirm_character_anchor(kind=three-view, nodeId)',
-  '',
-  '锚点确认前，我不写分镜、不建视频节点。',
+  '两个选择：',
+  '1. 用画布里的参考图（在消息里 @ 它）',
+  '2. 先让我出一张三视图（正面/侧面/背面），你确认后我再往下走',
 ].join('\n');
 
 export function combatStageDecision(input: {
