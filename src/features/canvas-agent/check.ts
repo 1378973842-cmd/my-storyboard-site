@@ -2364,7 +2364,12 @@ assert.match(inlineAskCards2[0]?.question || '', /以上方案可以吗/);
 assert.match(approvalRouteSource, /pendingGeneration/);
 assert.match(approvalRouteSource, /detectedAnchors/);
 assert.match(approvalRouteSource, /askOnly/);
-assert.match(approvalRouteSource, /proposal-ok-/);
+assert.match(approvalRouteSource, /assetGuardNotice/);
+assert.match(approvalRouteSource, /blockedAssetTitles/);
+assert.match(approvalRouteSource, /Never create an image node from an asset-library/);
+const serializerSource = readFileSync(new URL('./core/contextSerializer.ts', import.meta.url), 'utf8');
+assert.match(serializerSource, /availableAssets 只是用户素材库的清单/);
+assert.match(serializerSource, /map\(\(\{ url: _url, \.\.\.rest \}\)/);
 assert.match(approvalRouteSource, /!inlineAsks\.length/);
 assert.match(approvalRouteSource, /storyboardReady/);
 assert.match(approvalRouteSource, /runApprovalIds/);
@@ -4045,12 +4050,14 @@ const assetSnapshot: CanvasSnapshot = {
 const assetContext = collectCanvasContext(assetSnapshot);
 assert.equal(assetContext.availableAssets?.length, 20);
 assert.equal(assetContext.availableAssets?.[0]?.name, '红发女刑警');
+assert.equal('url' in (assetContext.availableAssets?.[0] || {}), false);
 assert.equal(assetContext.availableAssetsOmission, '[素材库还有 5 条未列出]');
 const assetText = serializeCanvasContext(assetSnapshot);
 assert.equal(assetText.includes('[素材库还有 5 条未列出]'), true);
-assert.equal(assetText.includes(libraryAssets[0].url), true);
+// 安全策略：素材库 url 不再进上下文，也不能被 agent 直接搬成 image 节点。
+assert.equal(assetText.includes(libraryAssets[0].url), false);
 assert.equal(assetText.includes(libraryAssets[20].url), false);
-assert.equal(assetText.includes('不要把 url 写进生成节点的 initialParams'), true);
+assert.equal(assetText.includes('禁止把素材库文件或外部 URL 直接建成 image 节点'), true);
 assert.ok(assetText.length <= 14000);
 
 const timed = flattenAssetLibrary({

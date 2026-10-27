@@ -13,7 +13,8 @@ export const VISION_IMAGE_CAP = 8;
 
 function presentAvailableAssets(list: CanvasSnapshot['availableAssets'] | undefined) {
   if (!list) return {};
-  const shown = list.slice(0, ASSET_LIST_CAP);
+  // 只给名字/分类，不给可直接搬运的 url：素材必须先经用户 @ 或明确指定。
+  const shown = list.slice(0, ASSET_LIST_CAP).map(({ url: _url, ...rest }) => rest);
   const hidden = list.length - shown.length;
   return {
     availableAssets: shown,
@@ -374,7 +375,7 @@ export function serializeCanvasContext(snapshot: CanvasSnapshot): string {
   // 猜错的后果是产出质量差一档，用户看得见、能重跑。
   // 和 stale 不清、时序断裂、DOM 覆盖那类静默坏产出不同，所以不升级成门禁。
   // 如果真实验收发现模型仍然瞎猜，升级路径是加 ambiguous: true 字段，不是加提示词。
-  const direction = 'connections 为 [from, to] 对，from 是上游产出节点，to 是消费该产出的下游节点。生成时 to 节点读取 from 节点的产出。agentSources 是该节点生成时会用到的来源摘要，顺序即消费顺序，视频节点的首尾帧按此顺序取。upstreamLineage 包含所有连到选中节点的上游，包括已禁用的。enabled 为 false 的上游不会参与生成，agentSources 里不会出现它们。agentLastError 表示该节点上一次执行失败。后台任务可能仍在运行并稍后写回产出。不要因为这个字段重建节点；如需确认，检查它的产出。如果一个节点同时满足：lifecycle 为 created、有产出、且带 agentLastError——那是上次执行超时后后台把产出写回来了。这个节点的产出是新的，不要重建，也不要因为它是 created 就重跑。agentLastError 里如果出现「可选值见上下文的 availableModels」，说明该节点上次因模型值无效被拒绝。换一个 availableModels 里列出的值重新提交即可，不需要重建节点。availableModels 是当前配置的可选模型清单，按 image / chat / video 分组。填 model 时只能用对应分组的值；不在清单里的图片/文本模型会被拒绝，视频模型由服务端判断。availableAssets 是用户素材库的内容，带可直接使用的 url。要用某个素材当参考图：建一个 image 节点、把 url 填进 initialParams.url、再连到生成节点。不要把 url 写进生成节点的 initialParams——生成节点运行时不读节点上的 reference_images，参考图只从已连接的上游节点来。当有多个候选、而上下文信息不足以区分用户指的是哪一个时，先问用户，不要猜。适用于：availableAssets 里 name 和 category 相同的多条素材；roles 里有多张图片、而用户没有指明哪张是构图参考时。或者您可以描述一下您想复刻的那张图的主体，我来帮您判断该标成 background 还是 character。agentParamClamped 表示某个参数被供应商取值范围改掉了。原值不是模型填错，是目标模型不支持该值。需要更短的时长或别的分辨率时，换一个支持该值的模型，或向用户说明参数会随之变化。';
+  const direction = 'connections 为 [from, to] 对，from 是上游产出节点，to 是消费该产出的下游节点。生成时 to 节点读取 from 节点的产出。agentSources 是该节点生成时会用到的来源摘要，顺序即消费顺序，视频节点的首尾帧按此顺序取。upstreamLineage 包含所有连到选中节点的上游，包括已禁用的。enabled 为 false 的上游不会参与生成，agentSources 里不会出现它们。agentLastError 表示该节点上一次执行失败。后台任务可能仍在运行并稍后写回产出。不要因为这个字段重建节点；如需确认，检查它的产出。如果一个节点同时满足：lifecycle 为 created、有产出、且带 agentLastError——那是上次执行超时后后台把产出写回来了。这个节点的产出是新的，不要重建，也不要因为它是 created 就重跑。agentLastError 里如果出现「可选值见上下文的 availableModels」，说明该节点上次因模型值无效被拒绝。换一个 availableModels 里列出的值重新提交即可，不需要重建节点。availableModels 是当前配置的可选模型清单，按 image / chat / video 分组。填 model 时只能用对应分组的值；不在清单里的图片/文本模型会被拒绝，视频模型由服务端判断。availableAssets 只是用户素材库的清单（名字/分类，不含 url）。禁止把素材库文件或外部 URL 直接建成 image 节点；只有用户明确点名或 @ 某个素材时才可以使用，需要时先问用户。当有多个候选、而上下文信息不足以区分用户指的是哪一个时，先问用户，不要猜。适用于：availableAssets 里 name 和 category 相同的多条素材；roles 里有多张图片、而用户没有指明哪张是构图参考时。或者您可以描述一下您想复刻的那张图的主体，我来帮您判断该标成 background 还是 character。agentParamClamped 表示某个参数被供应商取值范围改掉了。原值不是模型填错，是目标模型不支持该值。需要更短的时长或别的分辨率时，换一个支持该值的模型，或向用户说明参数会随之变化。';
   const upstream = upstreamNodes(snapshot, snapshot.selectedNodeIds);
   let kept = upstream.slice();
   let omitted = 0;
