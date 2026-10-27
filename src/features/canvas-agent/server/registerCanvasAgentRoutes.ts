@@ -19,7 +19,8 @@ import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRec
 import { operatingPrompt } from '../core/operatingModel.js';
 import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
 import { canvasAgentStagePrefix } from '../core/stageLedger.js';
-import { completeTaskStep, ensureTask, readTaskState, setTaskCursor, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
+import { completeTaskStep, ensureTask, readTaskArtifact, readTaskState, setTaskCursor, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
+import { checkStoryboardAgainstDraft } from '../core/planCheck.js';
 import { turnStatePrefix } from '../core/turnState.js';
 import { VISION_IMAGE_CAP } from '../core/contextSerializer.js';
 import type {
@@ -149,7 +150,7 @@ When the user asks to change the canvas, call the provided tools. Use tempId val
 Create, connect and update operations land on the canvas as soon as you propose them. Only execution waits for the user to approve the run card; do not claim a run has happened before that.
 Before you act, think through: (1) which skill stage you are in and what it requires next; (2) what the references actually show and whether their quality is sufficient; (3) what is specific to this user's character and project rather than a generic template; (4) the exact cards/actions for this turn, including what you recommend and why. Keep this in the thinking channel, then call the tools; never narrate the tool call in prose.
 Decide first: direct or production. If the work needs multiple generations with consistent characters/scenes or production assets (draft, anchors, storyboard), call start_production_task before creating nodes; direct one-shot edits do not need a task. Once a task exists, its first unchecked todo is the current position: write draft/index/anchors/storyboard with write_task_artifact, mark a finished step with complete_task_step. Files are the source of truth, not chat or memory; do not claim a step is done without completing it. Write long storyboards in chunks with append so the output budget does not truncate them.
-Planning files: draft.md is the only content baseline (user text verbatim, or an approved rewrite); index.md holds the total table (final-cut account, model/continuation choice, ratio, one global style sentence reused by every shot, user time requirement); anchors.md holds the full anchor registry; storyboard.md holds source fragments, anchor refs, estimated durations, stage/shot and continuation marks. At the review step, read draft.md and storyboard.md from files (not memory), check the source fragments concatenate to the draft word-for-word, check total duration and anti-fragmentation, write the conclusions into index.md, then complete_task_step('review').
+Planning files: draft.md is the only content baseline (user text verbatim, or an approved rewrite); index.md holds the total table (final-cut account, model/continuation choice, ratio, one global style sentence reused by every shot, user time requirement); anchors.md holds the full anchor registry; storyboard.md holds source fragments, anchor refs, estimated durations, stage/shot and continuation marks. Every storyboard entry must contain 原文：「逐字片段」 and 时长：N秒; without them the review gate cannot pass. At the review step, read draft.md and storyboard.md from files (not memory), check the source fragments concatenate to the draft word-for-word, check total duration and anti-fragmentation, write the conclusions into index.md, then complete_task_step('review').
 Batch derivation follows references, not guessing: run anchor images before any storyboard video whose prompt references them; never propose a storyboard video run while its anchor has no generated image. Parallelize only independent storyboards. One task produces exactly one final cut; do not create multiple final video nodes unless the user explicitly asks for separate segments.
 When the user must choose, write your analysis first (what the references show, the style and color call, the beat structure, what you will build), then call ask_user with one card per question in the same order. Do not repeat the option list in the chat text; the card carries the choices. mode is single or multiple. Each card's options use type text for the choices and include one type input so the user can write their own. Do not call ask_user to approve a run. A selected value of 用默认 means the user skipped that question and accepts the default. Do not ask it again.
 Never ask questions in prose. If you are about to write "请告诉我", "请选择" or "您希望哪一张", stop and call ask_user instead; a preparation stage without cards is a failed turn.
@@ -1350,9 +1351,21 @@ export function registerCanvasAgentRoutes(
               taskNotice = `已写入 ${kind}.md（${written.chars} 字）。当前位置：${stepLabel(written.state.current)}。`;
             } else {
               const step = String(args.step || '') as TaskStep;
-              const state = completeTaskStep(conversation.id, step);
-              label = `文件账本：完成「${stepLabel(step)}」`;
-              taskNotice = `已完成「${stepLabel(step)}」。当前位置：${stepLabel(state.current)}。`;
+              if (step === 'review') {
+                // 规划核对是硬闸：文件里拼不出创作稿就不许完成这一步。
+                const check = checkStoryboardAgainstDraft(
+                  readTaskArtifact(conversation.id, 'draft'),
+                  readTaskArtifact(conversation.id, 'storyboard'),
+                );
+                if (!check.ok) throw new Error(`${check.reason}：${check.detail}`);
+                const state = completeTaskStep(conversation.id, step);
+                label = `文件账本：规划核对通过（${check.fragments} 条 / ${check.draftChars} 字）`;
+                taskNotice = `规划核对通过：${check.detail}。已完成「${stepLabel(step)}」。当前位置：${stepLabel(state.current)}。`;
+              } else {
+                const state = completeTaskStep(conversation.id, step);
+                label = `文件账本：完成「${stepLabel(step)}」`;
+                taskNotice = `已完成「${stepLabel(step)}」。当前位置：${stepLabel(state.current)}。`;
+              }
             }
             const log = {
               id: `task-ledger-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,

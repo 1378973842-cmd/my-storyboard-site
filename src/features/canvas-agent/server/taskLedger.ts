@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import { checkStoryboardAgainstDraft } from '../core/planCheck.js';
 
 /**
  * 制作任务账本：文件是权威源，数据库只做渲染缓存。
@@ -261,8 +262,17 @@ export function taskStatePrompt(state: TaskState | null): string {
     ? `\n- 分镜游标：已登记 ${state.cursor.registered} 条；原文末 12 字「${state.cursor.lastLine}」；文件 ${state.cursor.file}`
     : '';
   // 规划核对必须回读文件：把创作稿与分镜表原文附在提示里，不能凭记忆核对。
+  const reviewCheck = state.current === 'review'
+    ? checkStoryboardAgainstDraft(
+      readTaskArtifact(state.conversationId, 'draft'),
+      readTaskArtifact(state.conversationId, 'storyboard'),
+    )
+    : null;
+  const reviewStatus = reviewCheck
+    ? `\n- 核对器：${reviewCheck.ok ? '通过' : '未通过'}（${reviewCheck.reason}；${reviewCheck.detail}）`
+    : '';
   const reviewFiles = state.current === 'review'
     ? `\n\n[review_files]\n<draft>\n${readTaskArtifact(state.conversationId, 'draft').slice(0, 20_000)}\n</draft>\n<storyboard>\n${readTaskArtifact(state.conversationId, 'storyboard').slice(0, 20_000)}\n</storyboard>\n逐字核对：分镜的原文片段拼起来是否等于创作稿全文；再核对总时长与反碎化。结论写进 index.md 的「规划核对」分节，再 complete_task_step('review')。`
     : '';
-  return `\n\n[task_state]\n- 任务：${state.title}（${state.id}）\n- 当前位置（第一条未划掉）：${TASK_STEPS.find((item) => item.step === state.current)?.label || state.current}\n- todo：${todo}${cursor}\n- 产物：${artifacts || '（尚未写入）'}\n- 文件是唯一权威源：写产物用 write_task_artifact，完成一步用 complete_task_step；核对所需的创作稿/分镜会自动附上，不要凭记忆推进。${reviewFiles}`;
+  return `\n\n[task_state]\n- 任务：${state.title}（${state.id}）\n- 当前位置（第一条未划掉）：${TASK_STEPS.find((item) => item.step === state.current)?.label || state.current}\n- todo：${todo}${cursor}\n- 产物：${artifacts || '（尚未写入）'}${reviewStatus}\n- 文件是唯一权威源：写产物用 write_task_artifact，完成一步用 complete_task_step；核对所需的创作稿/分镜会自动附上，不要凭记忆推进。${reviewFiles}`;
 }

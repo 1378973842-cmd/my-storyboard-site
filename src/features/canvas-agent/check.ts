@@ -23,6 +23,7 @@ import { approveRunCard, defaultAskAnswer, normalizeAskCards, parseAskAnswer, pa
 import { actionDisplayLabel, actionProposalNeedsApproval, derivedStepTitle, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, openBatchProgress, partialBatchUpdate, pendingExecutionFeedback, proposalWaitsForClick, settleBatchProposal, stripCreatesOnShortYes, unknownCanvasActionMessage } from './core/proposal';
 import { actionsReleasedForApproval, runScopeDigest, runScopeMatches } from './core/runApproval';
 import { turnStatePrefix } from './core/turnState';
+import { checkStoryboardAgainstDraft } from './core/planCheck';
 import { completeTaskStep, ensureTask, readTaskState, setTaskCursor, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE } from './server/taskLedger';
 import { changelogFromActions, effectedFromApply, effectedLine, mediaRunState, mediaStatusLabel, parseRunStates, turnLabelCollapsed } from './core/effectLedger';
 import { AskCardView } from './ui/AskCardView';
@@ -257,6 +258,22 @@ const actions = normalizeCanvasActions([
 assert.equal(actions.length, 3);
 assert.equal(actions[0]?.type, 'create_node');
 assert.equal(actionProposalNeedsApproval(actions), true);
+
+const planDraft = '第一段。第二段。';
+const planStoryboard = '原文：「第一段。」\n时长：5秒\n原文：「第二段。」\n时长：6秒';
+const planPass = checkStoryboardAgainstDraft(planDraft, planStoryboard);
+assert.equal(planPass.ok, true);
+assert.equal(planPass.fragments, 2);
+assert.equal(planPass.totalDuration, 11);
+const planMissing = checkStoryboardAgainstDraft('第一段。第二段。第三段。', planStoryboard);
+assert.equal(planMissing.ok, false);
+assert.match(planMissing.reason, /不等于创作稿/);
+const planNoFragment = checkStoryboardAgainstDraft(planDraft, '分镜一：两人对峙');
+assert.equal(planNoFragment.ok, false);
+assert.match(planNoFragment.reason, /缺少「原文：」片段/);
+const planNoDuration = checkStoryboardAgainstDraft(planDraft, '原文：「第一段。」\n原文：「第二段。」');
+assert.equal(planNoDuration.ok, false);
+assert.match(planNoDuration.reason, /缺少时长/);
 
 const tool = convertSkillToAITool(canvasSkillRegistry[0]);
 assert.equal(tool.type, 'function');
@@ -2540,7 +2557,8 @@ assert.match(approvalRouteSource, /!inlineAsks\.length/);
 assert.match(approvalRouteSource, /storyboardReady/);
 assert.match(approvalRouteSource, /runApprovalIds/);
 assert.match(approvalRouteSource, /TASK_STAGE\[taskBefore\.current\]/);
-assert.match(approvalRouteSource, /锚点图还没生成完/);
+assert.match(approvalRouteSource, /规划核对是硬闸/);
+assert.match(approvalRouteSource, /Every storyboard entry must contain 原文/);
 assert.match(approvalRouteSource, /One task produces exactly one final cut/);
 assert.match(approvalPanelSource, /type=\$\{typeOf\(nodeId\)\}/);
 assert.match(approvalPanelSource, /event\.type === 'error'/);
