@@ -389,6 +389,20 @@ export const coreCanvasTools: AIToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'read_skill_file',
+      description:
+        'Read one knowledge file of the current skill in full (no paging). Use when you need detail the auto-selected knowledge did not include. Pass a file path or basename from the load table; unknown files return the legal list.',
+      parameters: objectSchema(
+        {
+          file: { type: 'string' },
+        },
+        ['file'],
+      ),
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'trigger_skill_execution',
       description:
         'Propose running existing node skills. Generation always requires explicit user approval.',

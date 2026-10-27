@@ -135,8 +135,7 @@ export function readRegisteredPlaybookText(projectRoot: string, playbookId: stri
 }
 
 // 正文先读完。词典是后接的基础设施，不写进 md，也不占正文上限。
-export function readPlaybookKnowledge(projectRoot: string, playbookId: string): string {
-  const item = agentPlaybooks.find((entry) => entry.id === String(playbookId || "").trim());
+export function readPlaybookKnowledge(projectRoot: string, playbookId: string): string {  const item = agentPlaybooks.find((entry) => entry.id === String(playbookId || "").trim());
   if (!item) return "";
   const files = item.knowledgeFiles?.length
     ? item.knowledgeFiles.map((entry) => ({ path: entry.path, use: entry.use }))
@@ -152,6 +151,29 @@ export function readPlaybookKnowledge(projectRoot: string, playbookId: string): 
     })
     .filter(Boolean)
     .join("\n\n");
+}
+
+export function readPlaybookSkillFile(projectRoot: string, playbookId: string, fileInput: string): string {
+  const item = agentPlaybooks.find((entry) => entry.id === String(playbookId || "").trim());
+  const paths = item?.knowledgeFiles?.length
+    ? item.knowledgeFiles.map((entry) => entry.path)
+    : item?.knowledgePath
+      ? [item.knowledgePath]
+      : [];
+  const file = String(fileInput || "").trim();
+  const target = paths.find((entry) => (
+    entry === file
+    || path.basename(entry) === file
+    || entry.endsWith(`/${file}`)
+    || entry.endsWith(file)
+  ));
+  if (!target) {
+    const legal = paths.map((entry) => path.basename(entry)).join("、") || "（当前技能没有知识文件）";
+    throw new Error(`read_skill_file 的文件不合法：${file || "（空）"}。合法值：${legal}。请传加载表里的文件名。`);
+  }
+  const body = readPromptFile(target, projectRoot).trim();
+  if (!body) throw new Error(`知识文件为空：${path.basename(target)}。先补内容再读。`);
+  return body;
 }
 
 // 骨架常驻。知识不在这里拼：只有本轮动作含 video create/update 时才由路由按元素拼。
@@ -488,7 +510,7 @@ export function registerInfiniteCanvasRoutes(
   }
 
   registerCanvasLlmRoutes(app, projectRoot, gate);
-  registerCanvasAgentRoutes(app, gate, deps?.db, (playbookId) => readPlaybookForAgent(projectRoot, playbookId), (playbookId) => readPlaybookKnowledge(projectRoot, playbookId));
+  registerCanvasAgentRoutes(app, gate, deps?.db, (playbookId) => readPlaybookForAgent(projectRoot, playbookId), (playbookId) => readPlaybookKnowledge(projectRoot, playbookId), (playbookId, file) => readPlaybookSkillFile(projectRoot, playbookId, file));
   registerCanvasVideoRoutes(app, {
     projectRoot,
     requireGate: gate,

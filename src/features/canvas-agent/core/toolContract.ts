@@ -106,6 +106,14 @@ const CORE_CONTRACTS: ToolContract[] = [
     idempotent: true,
     resultStatus: 'read',
   },
+  {
+    name: 'read_skill_file',
+    scope: 'meta',
+    mutatesCanvas: false,
+    requiresApproval: false,
+    idempotent: true,
+    resultStatus: 'read',
+  },
 ];
 
 const BY_NAME = new Map(CORE_CONTRACTS.map((item) => [item.name, item]));

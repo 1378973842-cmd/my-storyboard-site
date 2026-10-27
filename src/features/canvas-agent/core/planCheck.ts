@@ -29,8 +29,9 @@ export function parseModelCapacities(text: string): ModelCapacity[] {
   const rows: ModelCapacity[] = [];
   for (const line of String(text || '').split(/\r?\n/)) {
     const table = line.match(/^\|\s*([^|]+?)\s*\|\s*(\d+(?:\.\d+)?)\s*(?:s|秒)?\s*\|\s*(\d+(?:\.\d+)?)\s*(?:s|秒)?\s*\|/i);
-    if (table && !/模型|model/i.test(table[1])) {
-      rows.push({ model: table[1].trim(), min: Number(table[2]), max: Number(table[3]) });
+    if (table && !/^\s*(模型|model)\s*$/i.test(table[1])) {
+      // duration.md 表形状：| 模型 | 上限 | 下限 |
+      rows.push({ model: table[1].trim(), max: Number(table[2]), min: Number(table[3]) });
       continue;
     }
     const bullet = line.match(/(?:^|\s)([^：:]{2,30})[：:]\s*单次\s*(\d+(?:\.\d+)?)\s*[-–~]\s*(\d+(?:\.\d+)?)\s*(?:s|秒)/i);
@@ -135,6 +136,7 @@ export function checkStoryboardAgainstDraft(
   const durationTarget = parseDurationTarget(indexText);
   const productionSegments = parseProductionSegments(indexText);
   const capacity = resolveCapacity(indexText, capacityText);
+  const allCapacities = parseModelCapacities(capacityText);
   const base = {
     fragments: fragments.length,
     entries: fragments.length,
@@ -161,6 +163,15 @@ export function checkStoryboardAgainstDraft(
   if (durationTarget !== null) {
     const capacityMax = capacity?.max ?? null;
     if (capacityMax !== null && durationTarget > capacityMax && !productionSegments.length) {
+      const alternative = allCapacities.find((item) => item.max >= durationTarget && item.model !== capacity?.model);
+      if (alternative) {
+        return {
+          ...base,
+          ok: false,
+          reason: '目标时长超过当前模型上限，先换模型',
+          detail: `用户要求 ${durationTarget} 秒，${capacity?.model || '当前模型'} 上限 ${capacityMax} 秒；可换 ${alternative.model}（上限 ${alternative.max} 秒）。先改总表模型，再重新核对。`,
+        };
+      }
       return {
         ...base,
         ok: false,

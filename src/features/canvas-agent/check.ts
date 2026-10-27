@@ -111,7 +111,7 @@ import { ProposalPreviewCard } from './ui/ProposalPreviewCard';
 import { AssistantMarkdown } from './ui/assistantMarkdown';
 import { proposalDefaultOpen, PROPOSAL_OPEN_CAP, sortProposalsForDisplay } from './ui/proposalOrder';
 import { agentPlaybooks, convertSkillToAITool, canvasSkillRegistry, coreCanvasTools, CREATE_PARAM_KEYS, UPDATE_PARAM_KEYS, describeCreateCanvasNodes, describeUpdateNodeConfig, rejectUnknownCanvasParamKeys } from './tools/skillRegistry';
-import { readPlaybookForAgent, readPlaybookKnowledge, readRegisteredPlaybookText } from '../../services/infiniteCanvasRoutes';
+import { readPlaybookForAgent, readPlaybookKnowledge, readPlaybookSkillFile, readRegisteredPlaybookText } from '../../services/infiniteCanvasRoutes';
 import { downstreamImpactPaths, invalidationActions, nodeHasGeneratedOutput, upstreamDigest } from './core/invalidation';
 import {
   applyRebuildGuards,
@@ -278,11 +278,21 @@ assert.match(planNoDuration.reason, /缺少时长/);
 const planTargetMismatch = checkStoryboardAgainstDraft(planDraft, planStoryboard, '要求时长：15s');
 assert.equal(planTargetMismatch.ok, false);
 assert.match(planTargetMismatch.reason, /总时长与用户要求不一致/);
-const capacityText = '| 模型 | 单次下限 | 单次上限 |\n|---|---|---|\n| 海螺 H3 | 5s | 15s |\n| Seedance 2.0 | 4s | 15s |';
+const capacityText = '| 模型 | 上限 | 下限 |\n|---|---|---|\n| hailuo-h3 | 15 | 5 |\n| seedance-2.0 | 15 | 4 |';
 const planOverCapacity = checkStoryboardAgainstDraft(planDraft, planStoryboard, '要求时长：30s', capacityText);
 assert.equal(planOverCapacity.ok, false);
 assert.match(planOverCapacity.reason, /没有制作清单/);
 assert.equal(planOverCapacity.capacityMax, 15);
+const switchCapacity = '| 模型 | 上限 | 下限 |\n|---|---|---|\n| short-model | 10 | 4 |\n| long-model | 15 | 4 |';
+const planSwitch = checkStoryboardAgainstDraft(
+  planDraft,
+  '原文：「第一段。」\n时长：6秒\n原文：「第二段。」\n时长：6秒',
+  '模型：short-model\n要求时长：12s',
+  switchCapacity,
+);
+assert.equal(planSwitch.ok, false);
+assert.match(planSwitch.reason, /先换模型/);
+assert.match(planSwitch.detail, /long-model/);
 const planTargetOk = checkStoryboardAgainstDraft(
   '第一段。第二段。',
   '原文：「第一段。」\n时长：7秒\n原文：「第二段。」\n时长：8秒',
@@ -300,7 +310,7 @@ assert.equal(planList.ok, true);
 const tool = convertSkillToAITool(canvasSkillRegistry[0]);
 assert.equal(tool.type, 'function');
 assert.match(tool.function.name, /^run_/);
-assert.equal(coreCanvasTools.length, 11);
+assert.equal(coreCanvasTools.length, 12);
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'confirm_character_anchor'));
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'ask_user'));
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'remember_project_fact'));
@@ -308,6 +318,9 @@ assert.ok(coreCanvasTools.some((item) => item.function.name === 'start_productio
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'write_task_artifact'));
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'complete_task_step'));
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'read_task_artifact'));
+assert.ok(coreCanvasTools.some((item) => item.function.name === 'read_skill_file'));
+assert.equal(toolContract('read_skill_file')?.scope, 'meta');
+assert.equal(toolContract('read_skill_file')?.resultStatus, 'read');
 assert.ok(coreCanvasTools.every((item) => item.function.parameters.type === 'object'));
 assert.equal(toolContract('start_production_task')?.scope, 'meta');
 assert.equal(toolContract('write_task_artifact')?.requiresApproval, false);
@@ -1889,6 +1902,13 @@ for (const item of combatKnowledgeFiles) {
   assert.ok(readFileSync(item.path, 'utf8').length > 0, `知识文件为空：${item.path}`);
 }
 // 骨架里所有反引号 .md 指针都能唯一匹配加载表里的一行。
+const colorKnowledge = readPlaybookSkillFile('.', 'canvas-combat-fx', 'knowledge.md');
+assert.match(colorKnowledge, /元素色彩语义体系/);
+assert.match(colorKnowledge, /火|冰|雷/);
+assert.throws(
+  () => readPlaybookSkillFile('.', 'canvas-combat-fx', 'nope.md'),
+  /read_skill_file 的文件不合法.*合法值：.*knowledge\.md/,
+);
 const loadTablePaths = combatLoaded
   .split(/\r?\n/)
   .filter((line) => line.startsWith('| `'))
@@ -2392,8 +2412,16 @@ const historyTurns = Array.from({ length: 12 }, (_, index) => ({
 }));
 const compacted = compactHistory(historyTurns, 10);
 assert.equal(compacted.kept.length, 10);
-assert.match(compacted.digest, /更早的对话（2 条）/);
+assert.match(compacted.digest, /\[history_summary\]/);
 assert.match(compacted.digest, /第0条/);
+const decisionTurns = [
+  { role: 'user' as const, content: '确认用炫技档' },
+  ...Array.from({ length: 18 }, (_, index) => ({ role: 'assistant' as const, content: `填充${index}` })),
+  { role: 'user' as const, content: '现在该用什么档？' },
+];
+const decisionDigest = compactHistory(decisionTurns, 16).digest;
+assert.match(decisionDigest, /炫技档/);
+assert.match(decisionDigest, /以更晚的为准/);
 assert.equal(compactHistory(historyTurns.slice(0, 3), 10).digest, '');
 assert.equal(compactHistory([], 10).kept.length, 0);
 assert.deepEqual(searchMemoryHits([], '银发'), []);

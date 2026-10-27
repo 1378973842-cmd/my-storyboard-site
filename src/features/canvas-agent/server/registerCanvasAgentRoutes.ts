@@ -218,6 +218,7 @@ const TOOL_ARG_SHAPES: Record<string, string> = {
   write_task_artifact: '{"kind":"draft|index|anchors|storyboard","content":"..."}',
   complete_task_step: '{"step":"draft|anchors|storyboard|review|anchor_runs|storyboard_runs|compose"}',
   read_task_artifact: '{"kind":"draft|index|anchors|storyboard","offset":0,"length":8000}',
+  read_skill_file: '{"file":"knowledge.md"}',
   start_production_task: '{"title":"...","goal":"..."}',
 };
 
@@ -442,6 +443,7 @@ export function registerCanvasAgentRoutes(
   db?: InstanceType<typeof Database>,
   readPlaybookText?: (playbookId: string) => string,
   readPlaybookKnowledgeText?: (playbookId: string) => string,
+  readSkillFile?: (playbookId: string, file: string) => string,
   visionRoot = '',
 ): void {
   if (db) {
@@ -1018,8 +1020,8 @@ export function registerCanvasAgentRoutes(
         };
       })
       .filter((item) => item.content.trim());
-    // 超过 10 轮就压缩：更早的折成摘要，别让历史无限吃 token。
-    const compacted = compactHistory(mappedHistory, 10);
+    // 16 条窗口；更早的只压「用户答应过什么」，状态类信息在账本里。
+    const compacted = compactHistory(mappedHistory, 16);
     const history = compacted.kept;
     const earlierText = compacted.digest ? `\n\n[earlier_turns]\n${compacted.digest}` : '';
     const context = String(body.context || '');
@@ -1290,11 +1292,31 @@ export function registerCanvasAgentRoutes(
       for (let readRound = 0; readRound < MAX_READ_ROUNDS; readRound += 1) {
         const probeCalls = parseToolCalls(first);
         const onlyReads = probeCalls.length > 0
-          && probeCalls.every((call) => call.function.name === 'read_task_artifact');
+          && probeCalls.every((call) => ['read_task_artifact', 'read_skill_file'].includes(call.function.name));
         if (!onlyReads) break;
         const toolResults = probeCalls.map((call) => {
           const args = safeArgs(call);
           try {
+            if (call.function.name === 'read_skill_file') {
+              const file = String(args.file || '');
+              const content = readSkillFile && requestedPlaybookId
+                ? readSkillFile(requestedPlaybookId, file)
+                : '';
+              if (!content) throw new Error('read_skill_file 当前不可用：没有加载技能知识文件。');
+              const log = {
+                id: `read-skill-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                name: 'read_skill_file',
+                label: `读知识文件：${file}（${content.length} 字）`,
+                state: 'done' as const,
+              };
+              persistedToolLogs.push(log);
+              sendEvent(res, { type: 'tool', log });
+              return {
+                role: 'tool',
+                tool_call_id: call.id,
+                content: JSON.stringify({ status: 'ok', file, chars: content.length, content }),
+              };
+            }
             const slice = readTaskArtifactSlice(
               conversation?.id || '',
               String(args.kind || ''),
@@ -1318,7 +1340,7 @@ export function registerCanvasAgentRoutes(
             const message = err instanceof Error ? err.message : String(err);
             const log = {
               id: `read-fail-${Date.now()}`,
-              name: 'read_task_artifact',
+              name: call.function.name,
               label: `读回失败：${message}`,
               state: 'failed' as const,
             };
@@ -1495,7 +1517,7 @@ export function registerCanvasAgentRoutes(
       // 文件账本：任务/产物/步骤落文件，数据库只做缓存。
       let taskNotice = '';
       calls
-        .filter((call) => ['start_production_task', 'write_task_artifact', 'complete_task_step', 'read_task_artifact'].includes(call.function.name))
+        .filter((call) => ['start_production_task', 'write_task_artifact', 'complete_task_step', 'read_task_artifact', 'read_skill_file'].includes(call.function.name))
         .forEach((call) => {
           if (!conversation) return;
           const args = safeArgs(call);
@@ -1527,9 +1549,9 @@ export function registerCanvasAgentRoutes(
               }
               label = `文件账本：已写入 ${kind}.md（${written.chars} 字）`;
               taskNotice = `已写入 ${kind}.md（${written.chars} 字）。当前位置：${stepLabel(written.state.current)}。`;
-            } else if (call.function.name === 'read_task_artifact') {
+            } else if (call.function.name === 'read_task_artifact' || call.function.name === 'read_skill_file') {
               // 读回要和写/推进分开调用：混在同一批时，文件内容没法安全地回给模型。
-              throw new Error('read_task_artifact 要单独调用，不要和 write/complete 放在同一批工具里。');
+              throw new Error(`${call.function.name} 要单独调用，不要和 write/complete 放在同一批工具里。`);
             } else {
               const step = String(args.step || '') as TaskStep;
               if (step === 'review') {
@@ -1591,7 +1613,7 @@ export function registerCanvasAgentRoutes(
       const actionCalls = calls
         .filter((call) => call.function.name !== 'remember_project_fact')
         .filter((call) => call.function.name !== 'confirm_character_anchor')
-        .filter((call) => !['start_production_task', 'write_task_artifact', 'complete_task_step', 'read_task_artifact'].includes(call.function.name))
+        .filter((call) => !['start_production_task', 'write_task_artifact', 'complete_task_step', 'read_task_artifact', 'read_skill_file'].includes(call.function.name))
         .filter((call) => Boolean(toolContract(call.function.name, toolNames)));
       // 阶段 5（新判据）：骨架已常驻；只有本轮真实动作含 video create/update 时，
       // 才把对应元素的知识拼进「写 prompt」的二次调用。判据是动作，不是阶段格。

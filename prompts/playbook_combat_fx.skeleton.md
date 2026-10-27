@@ -3,6 +3,7 @@
 > 本文件只写流程、顺序、判据、停点、授权和输出约束。具体模型、时长、词汇、配比、示例、诊断全部在知识文件里。
 > 裁决规则：知识文件只提供词汇和判断标准，不提供流程；知识里的规则如果规定了什么时候问、什么时候停、要不要批准、用什么模型、拆不拆段，以本骨架为准。
 > 读不懂是正常的：需要知识的地方只写「按 X 文件」，不写规则本身。
+> 加载表负责自动拼常见情况；需要更多细节时，模型可主动用 `read_skill_file` 读整份知识文件，不改变本表条件。
 
 ## 加载表
 
@@ -93,6 +94,7 @@
 - `write_task_artifact`：写四类产物之一；可只写不推进。
 - `complete_task_step`：划 todo；review 走核对器。
 - `read_task_artifact`：按 kind + offset/length 分段读；单独调用。
+- `read_skill_file`：按文件名整份读知识文件；单独调用，用于自动拼不够细时。
 - `create_canvas_nodes` / `connect_workflow_edges` / `update_node_config` / `trigger_skill_execution`：画布动作；运行仍要审批卡。
 - `ask_user`：卡片提问；一次一批。
 - 需要知识时按上方加载表；不要猜文件名。
