@@ -2390,7 +2390,8 @@ assert.match(approvalRouteSource, /成片只建一个 video 节点/);
 assert.equal(isRunningHubChatModel('google/gemini-3.7-flash'), true);
 assert.equal(isRunningHubChatModel('qwen/qwen3.8-flash-next'), true);
 assert.equal(isRunningHubChatModel('gemini-3.5-flash'), false);
-assert.match(approvalRouteSource, /Never output a card or tool call as JSON text/);
+assert.match(approvalRouteSource, /Thinking\/reasoning may be in English/);
+assert.match(approvalRouteSource, /must be written in Chinese/);
 const bareCard = parseInlineAskCards(JSON.stringify({
   card: {
     question: '本次打斗动画的主角角色来源您倾向于：',
