@@ -135,15 +135,18 @@ export function readRegisteredPlaybookText(projectRoot: string, playbookId: stri
 }
 
 // 正文先读完。词典是后接的基础设施，不写进 md，也不占正文上限。
-export function readPlaybookForAgent(projectRoot: string, playbookId: string): string {
+export function readPlaybookKnowledge(projectRoot: string, playbookId: string): string {
   const item = agentPlaybooks.find((entry) => entry.id === String(playbookId || "").trim());
+  if (!item?.knowledgePath) return "";
+  return readPromptFile(item.knowledgePath, projectRoot).trim();
+}
+
+// 骨架常驻。知识不在这里拼：只有本轮动作含 video create/update 时才由路由按元素拼。
+export function readPlaybookForAgent(projectRoot: string, playbookId: string): string {
   const body = readRegisteredPlaybookText(projectRoot, playbookId);
   if (!body) return "";
-  // 骨架 + 知识都常驻；知识只提供词汇与判断标准，流程以骨架为准。
-  const knowledge = item?.knowledgePath ? readPromptFile(item.knowledgePath, projectRoot).trim() : "";
-  const merged = knowledge ? `${body}\n\n${knowledge}` : body;
   const cameraMoves = mxShellCameraMovesInjection(projectRoot);
-  return cameraMoves ? `${merged}\n\n${cameraMoves}` : merged;
+  return cameraMoves ? `${body}\n\n${cameraMoves}` : body;
 }
 
 export function registerInfiniteCanvasRoutes(
@@ -475,7 +478,7 @@ export function registerInfiniteCanvasRoutes(
   }
 
   registerCanvasLlmRoutes(app, projectRoot, gate);
-  registerCanvasAgentRoutes(app, gate, deps?.db, (playbookId) => readPlaybookForAgent(projectRoot, playbookId), projectRoot);
+  registerCanvasAgentRoutes(app, gate, deps?.db, (playbookId) => readPlaybookForAgent(projectRoot, playbookId), (playbookId) => readPlaybookKnowledge(projectRoot, playbookId));
   registerCanvasVideoRoutes(app, {
     projectRoot,
     requireGate: gate,

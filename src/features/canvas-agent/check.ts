@@ -24,6 +24,7 @@ import { actionDisplayLabel, actionProposalNeedsApproval, derivedStepTitle, inte
 import { actionsReleasedForApproval, runScopeDigest, runScopeMatches } from './core/runApproval';
 import { turnStatePrefix } from './core/turnState';
 import { checkStoryboardAgainstDraft } from './core/planCheck';
+import { assembleKnowledgeForTurn, selectCombatKnowledge } from './core/knowledgeContext';
 import { completeTaskStep, ensureTask, readTaskState, setTaskCursor, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE } from './server/taskLedger';
 import { changelogFromActions, effectedFromApply, effectedLine, mediaRunState, mediaStatusLabel, parseRunStates, turnLabelCollapsed } from './core/effectLedger';
 import { AskCardView } from './ui/AskCardView';
@@ -110,7 +111,7 @@ import { ProposalPreviewCard } from './ui/ProposalPreviewCard';
 import { AssistantMarkdown } from './ui/assistantMarkdown';
 import { proposalDefaultOpen, PROPOSAL_OPEN_CAP, sortProposalsForDisplay } from './ui/proposalOrder';
 import { agentPlaybooks, convertSkillToAITool, canvasSkillRegistry, coreCanvasTools, CREATE_PARAM_KEYS, UPDATE_PARAM_KEYS, describeCreateCanvasNodes, describeUpdateNodeConfig, rejectUnknownCanvasParamKeys } from './tools/skillRegistry';
-import { readPlaybookForAgent, readRegisteredPlaybookText } from '../../services/infiniteCanvasRoutes';
+import { readPlaybookForAgent, readPlaybookKnowledge, readRegisteredPlaybookText } from '../../services/infiniteCanvasRoutes';
 import { downstreamImpactPaths, invalidationActions, nodeHasGeneratedOutput, upstreamDigest } from './core/invalidation';
 import {
   applyRebuildGuards,
@@ -1844,8 +1845,30 @@ const openingLoaded = readPlaybookForAgent('.', 'canvas-opening-animation');
 const combatLoaded = readPlaybookForAgent('.', 'canvas-combat-fx');
 assert.match(combatLoaded, /骨架（流程层）/);
 assert.match(combatLoaded, /以本骨架为准/);
-assert.match(combatLoaded, /知识层（说什么）/);
-assert.match(combatLoaded, /核心方法论/);
+assert.doesNotMatch(combatLoaded, /知识层（说什么）/);
+const combatKnowledge = readPlaybookKnowledge('.', 'canvas-combat-fx');
+assert.match(combatKnowledge, /知识层（说什么）/);
+assert.match(combatKnowledge, /核心方法论/);
+const anchorAssembly = assembleKnowledgeForTurn({
+  actions: [{ type: 'create_node', nodeType: 'image' } as never],
+  message: '主角三视图',
+  knowledgeText: combatKnowledge,
+});
+assert.equal(anchorAssembly.knowledge, '');
+const videoCreateAssembly = assembleKnowledgeForTurn({
+  actions: [{ type: 'create_node', nodeType: 'video' } as never],
+  message: '赤金火焰龙形特效打斗',
+  knowledgeText: combatKnowledge,
+});
+assert.ok(videoCreateAssembly.knowledge.length > 0);
+assert.match(videoCreateAssembly.selected.join(' '), /元素|提示词|冲击帧/);
+const videoUpdateAssembly = assembleKnowledgeForTurn({
+  actions: [{ type: 'update_node_params', nodeId: 'vid_1' } as never],
+  nodeTypeOf: (id) => (id === 'vid_1' ? 'video' : 'image'),
+  message: '改分镜，节奏再快一点',
+  knowledgeText: combatKnowledge,
+});
+assert.ok(videoUpdateAssembly.knowledge.length > 0);
 const openingAssembled = `${systemBody}\n${operatingPrompt('开场', openingLoaded)}\n\n${stageSegment}`;
 console.log(`system prompt with opening stage: ${openingAssembled.length}`);
 const stageDb = new Database(':memory:');

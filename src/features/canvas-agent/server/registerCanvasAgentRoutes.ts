@@ -21,6 +21,7 @@ import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
 import { canvasAgentStagePrefix } from '../core/stageLedger.js';
 import { completeTaskStep, ensureTask, readTaskArtifact, readTaskState, setTaskCursor, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
 import { checkStoryboardAgainstDraft } from '../core/planCheck.js';
+import { assembleKnowledgeForTurn } from '../core/knowledgeContext.js';
 import { turnStatePrefix } from '../core/turnState.js';
 import { VISION_IMAGE_CAP } from '../core/contextSerializer.js';
 import type {
@@ -384,6 +385,7 @@ export function registerCanvasAgentRoutes(
   gate?: RequestHandler,
   db?: InstanceType<typeof Database>,
   readPlaybookText?: (playbookId: string) => string,
+  readPlaybookKnowledgeText?: (playbookId: string) => string,
   visionRoot = '',
 ): void {
   if (db) {
@@ -1392,6 +1394,104 @@ export function registerCanvasAgentRoutes(
         .filter((call) => call.function.name !== 'confirm_character_anchor')
         .filter((call) => !['start_production_task', 'write_task_artifact', 'complete_task_step'].includes(call.function.name))
         .filter((call) => Boolean(toolContract(call.function.name, toolNames)));
+      // 阶段 5（新判据）：骨架已常驻；只有本轮真实动作含 video create/update 时，
+      // 才把对应元素的知识拼进「写 prompt」的二次调用。判据是动作，不是阶段格。
+      const knowledgeText = requestedPlaybookId && readPlaybookKnowledgeText
+        ? readPlaybookKnowledgeText(requestedPlaybookId).trim()
+        : '';
+      if (knowledgeText) {
+        const videoNodeIds = new Set<string>();
+        const assemblyActions: CanvasAction[] = [];
+        for (const call of actionCalls) {
+          const args = safeArgs(call);
+          if (call.function.name === 'create_canvas_nodes') {
+            const nodes = Array.isArray(args.nodes) ? args.nodes : [];
+            for (const raw of nodes) {
+              const node = raw as Record<string, unknown>;
+              const nodeType = String(node.nodeType || '');
+              assemblyActions.push({ type: 'create_node', nodeType } as CanvasAction);
+              if (nodeType === 'video') videoNodeIds.add(String(node.tempId || ''));
+            }
+          } else if (call.function.name === 'update_node_config') {
+            const updates = Array.isArray(args.updates) ? args.updates : [];
+            for (const raw of updates) {
+              const update = raw as Record<string, unknown>;
+              const nodeId = String(update.nodeId || '');
+              const nodeType = String(effectedNodes.find((node) => node.id === nodeId)?.nodeType || '');
+              assemblyActions.push({ type: 'update_node_params', nodeId } as CanvasAction);
+              if (nodeType === 'video') videoNodeIds.add(nodeId);
+            }
+          }
+        }
+        const nodeTypeOf = (id: string) => (
+          videoNodeIds.has(id)
+            ? 'video'
+            : String(effectedNodes.find((node) => node.id === id)?.nodeType || '')
+        );
+        const assembly = assembleKnowledgeForTurn({
+          actions: assemblyActions,
+          nodeTypeOf,
+          message: turnMessage,
+          knowledgeText,
+        });
+        if (assembly.video && assembly.knowledge && videoNodeIds.size) {
+          try {
+            const refine = await callModel(model, [
+              ...messages,
+              {
+                role: 'user',
+                content: `只重写这些 video 节点的提示词：${[...videoNodeIds].join('、')}。用 update_node_config 返回，patch.prompt 写完整提示词；不要新建节点，不要改模型、时长或参考。不要解释。\n\n以下是本轮相关的打斗知识：\n${assembly.knowledge}`,
+              },
+            ], false, controller.signal);
+            let patched = 0;
+            for (const call of parseToolCalls(refine)) {
+              if (call.function.name !== 'update_node_config') continue;
+              const args = safeArgs(call);
+              const updates = Array.isArray(args.updates) ? args.updates : [];
+              for (const raw of updates) {
+                const update = raw as Record<string, unknown>;
+                const target = String(update.nodeId || '');
+                const prompt = String((update.patch as Record<string, unknown> | undefined)?.prompt || '').trim();
+                if (!target || !prompt) continue;
+                for (const original of actionCalls) {
+                  const originalArgs = safeArgs(original);
+                  if (original.function.name === 'create_canvas_nodes') {
+                    const nodes = Array.isArray(originalArgs.nodes) ? originalArgs.nodes : [];
+                    for (const nodeRaw of nodes) {
+                      const node = nodeRaw as Record<string, unknown>;
+                      if (String(node.tempId || '') !== target) continue;
+                      node.initialParams = { ...(node.initialParams as Record<string, unknown> | undefined), prompt };
+                      original.function.arguments = JSON.stringify(originalArgs);
+                      patched += 1;
+                    }
+                  } else if (original.function.name === 'update_node_config') {
+                    const originalUpdates = Array.isArray(originalArgs.updates) ? originalArgs.updates : [];
+                    for (const updateRaw of originalUpdates) {
+                      const item = updateRaw as Record<string, unknown>;
+                      if (String(item.nodeId || '') !== target) continue;
+                      item.patch = { ...(item.patch as Record<string, unknown> | undefined), prompt };
+                      original.function.arguments = JSON.stringify(originalArgs);
+                      patched += 1;
+                    }
+                  }
+                }
+              }
+            }
+            if (patched) {
+              const log = {
+                id: `knowledge-${Date.now()}`,
+                name: 'knowledge',
+                label: `知识层：按 video 动作注入 ${assembly.selected.length} 段，重写 ${patched} 条提示词`,
+                state: 'done' as const,
+              };
+              persistedToolLogs.push(log);
+              sendEvent(res, { type: 'tool', log });
+            }
+          } catch {
+            // 知识改写失败就保留原提示词，不阻塞本轮提案。
+          }
+        }
+      }
       const firstText = extractTextLlmMessageContent(model, first).trim();
       // 模型偶尔把 ask_user 的 JSON 当正文吐出来：捞成卡片，别把 JSON 推给用户。
       // 标准 agent 做法：卡片只来自原生 tool_calls，不再从正文 JSON 生成卡片。
