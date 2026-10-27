@@ -2385,6 +2385,7 @@ assert.match(approvalRouteSource, /detectedAnchors/);
 assert.match(approvalRouteSource, /askOnly/);
 assert.match(approvalRouteSource, /multiVideoNotice/);
 assert.match(approvalRouteSource, /成片只建一个 video 节点/);
+assert.match(approvalRouteSource, /你上一轮把工具调用写成了 JSON 文本/);
 assert.match(approvalRouteSource, /Never print a tool call as JSON text/);
 const payloadCards = parseInlineAskCards(JSON.stringify({
   actions: [{

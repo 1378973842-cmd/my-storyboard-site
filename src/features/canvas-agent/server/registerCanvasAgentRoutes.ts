@@ -1184,6 +1184,25 @@ export function registerCanvasAgentRoutes(
           first = await callModel(model, messages, false, controller.signal);
         }
       }
+      // 原生工具调用偶尔会被模型写成正文 JSON：先重试一次，要求走原生 tool call。
+      const previewText = extractTextLlmMessageContent(model, first).trim();
+      if (parseToolCalls(first).length === 0
+        && /"ask_user"/.test(previewText)
+        && parseInlineAskCards(previewText).length === 0) {
+        try {
+          const retried = await callModel(model, [
+            ...messages,
+            { role: 'assistant', content: previewText },
+            { role: 'user', content: '你上一轮把工具调用写成了 JSON 文本。请重新用原生工具调用返回；不要输出 JSON 文本。' },
+          ], true, controller.signal);
+          const retriedText = extractTextLlmMessageContent(model, retried).trim();
+          if (parseToolCalls(retried).length || parseInlineAskCards(retriedText).length) {
+            first = retried;
+          }
+        } catch {
+          // 重试失败就保留原响应，后面还有 safeFirstText 兜底，不会显示 JSON。
+        }
+      }
       const calls = parseToolCalls(first);
       // 有思考过程就先推给前端，折叠展示；没有就不编。
       const reasoningText = extractReasoningText(first);
