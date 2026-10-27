@@ -322,6 +322,57 @@ export const coreCanvasTools: AIToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'start_production_task',
+      description:
+        'Create the production task ledger before building nodes. Use when the work needs multiple generations with consistent characters/scenes or production assets (draft, anchors, storyboard). Do not use for a direct one-shot edit.',
+      parameters: objectSchema(
+        {
+          title: { type: 'string' },
+          goal: { type: 'string' },
+          skill: { type: 'string' },
+        },
+        ['title'],
+      ),
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'write_task_artifact',
+      description:
+        'Write a production artifact to the task ledger file (draft/index/anchors/storyboard). This is the authoritative source, not chat. Use append for long storyboards. Optionally advance the storyboard cursor with the last 12 characters already registered.',
+      parameters: objectSchema(
+        {
+          kind: { type: 'string', enum: ['draft', 'index', 'anchors', 'storyboard'] },
+          content: { type: 'string' },
+          append: { type: 'boolean' },
+          cursor_last_line: { type: 'string' },
+          cursor_registered: { type: 'number' },
+        },
+        ['kind', 'content'],
+      ),
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'complete_task_step',
+      description:
+        'Mark one production todo as done after its artifact has been written and checked. The next unchecked todo becomes the current position.',
+      parameters: objectSchema(
+        {
+          step: {
+            type: 'string',
+            enum: ['draft', 'anchors', 'storyboard', 'review', 'anchor_runs', 'storyboard_runs', 'compose'],
+          },
+        },
+        ['step'],
+      ),
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'trigger_skill_execution',
       description:
         'Propose running existing node skills. Generation always requires explicit user approval.',

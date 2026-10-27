@@ -23,6 +23,7 @@ import { approveRunCard, defaultAskAnswer, normalizeAskCards, parseAskAnswer, pa
 import { actionDisplayLabel, actionProposalNeedsApproval, derivedStepTitle, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, openBatchProgress, partialBatchUpdate, pendingExecutionFeedback, proposalWaitsForClick, settleBatchProposal, stripCreatesOnShortYes, unknownCanvasActionMessage } from './core/proposal';
 import { actionsReleasedForApproval, runScopeDigest, runScopeMatches } from './core/runApproval';
 import { turnStatePrefix } from './core/turnState';
+import { completeTaskStep, ensureTask, readTaskState, setTaskCursor, taskStatePrompt, writeTaskArtifact } from './server/taskLedger';
 import { changelogFromActions, effectedFromApply, effectedLine, mediaRunState, mediaStatusLabel, parseRunStates, turnLabelCollapsed } from './core/effectLedger';
 import { AskCardView } from './ui/AskCardView';
 import { AskPager } from './ui/AskPager';
@@ -260,11 +261,39 @@ assert.equal(actionProposalNeedsApproval(actions), true);
 const tool = convertSkillToAITool(canvasSkillRegistry[0]);
 assert.equal(tool.type, 'function');
 assert.match(tool.function.name, /^run_/);
-assert.equal(coreCanvasTools.length, 7);
+assert.equal(coreCanvasTools.length, 10);
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'confirm_character_anchor'));
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'ask_user'));
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'remember_project_fact'));
+assert.ok(coreCanvasTools.some((item) => item.function.name === 'start_production_task'));
+assert.ok(coreCanvasTools.some((item) => item.function.name === 'write_task_artifact'));
+assert.ok(coreCanvasTools.some((item) => item.function.name === 'complete_task_step'));
 assert.ok(coreCanvasTools.every((item) => item.function.parameters.type === 'object'));
+assert.equal(toolContract('start_production_task')?.scope, 'meta');
+assert.equal(toolContract('write_task_artifact')?.requiresApproval, false);
+
+// 文件账本阶段 1：四类产物落文件，完成一步后当前位置由第一条未划掉的 todo 算出。
+process.env.CANVAS_AGENT_TASK_DIR = mkdtempSync(path.join(tmpdir(), 'canvas-agent-task-'));
+const taskConversation = 'phase1-task-test';
+const createdTask = ensureTask(taskConversation, { title: '阶段1 账本', goal: '打斗', skill: 'canvas-combat-fx' });
+assert.equal(createdTask.current, 'draft');
+assert.equal(writeTaskArtifact(taskConversation, 'draft', '创作稿正文').chars, 5);
+writeTaskArtifact(taskConversation, 'index', '总表');
+writeTaskArtifact(taskConversation, 'anchors', '锚点集');
+writeTaskArtifact(taskConversation, 'storyboard', '分镜1');
+setTaskCursor(taskConversation, { lastLine: '这是创作稿最后十二个字', registered: 1 });
+completeTaskStep(taskConversation, 'draft');
+const taskState = readTaskState(taskConversation);
+assert.equal(taskState?.current, 'anchors');
+assert.equal(taskState?.artifacts.storyboard?.chars, 3);
+assert.match(taskStatePrompt(taskState), /当前位置（第一条未划掉）：锚点登记与创建/);
+assert.match(taskStatePrompt(taskState), /文件是唯一权威源/);
+assert.match(
+  readFileSync(path.join(String(process.env.CANVAS_AGENT_TASK_DIR), taskConversation, 'task.md'), 'utf8'),
+  /\[x\] 定稿/,
+);
+rmSync(String(process.env.CANVAS_AGENT_TASK_DIR), { recursive: true, force: true });
+delete process.env.CANVAS_AGENT_TASK_DIR;
 
 assert.equal(classifyIntake('总结当前画布，不要修改'), 'direct');
 // production 分支已停用，原断言锁的是它的存在。

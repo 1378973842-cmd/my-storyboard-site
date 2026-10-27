@@ -19,6 +19,7 @@ import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRec
 import { operatingPrompt } from '../core/operatingModel.js';
 import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
 import { canvasAgentStagePrefix } from '../core/stageLedger.js';
+import { completeTaskStep, ensureTask, readTaskState, setTaskCursor, taskStatePrompt, writeTaskArtifact, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
 import { turnStatePrefix } from '../core/turnState.js';
 import { VISION_IMAGE_CAP } from '../core/contextSerializer.js';
 import type {
@@ -147,6 +148,7 @@ The opponent needs a confirmed reference too: when the user did not provide one,
 When the user asks to change the canvas, call the provided tools. Use tempId values for newly proposed nodes and reuse those tempIds when connecting, updating or executing them.
 Create, connect and update operations land on the canvas as soon as you propose them. Only execution waits for the user to approve the run card; do not claim a run has happened before that.
 Before you act, think through: (1) which skill stage you are in and what it requires next; (2) what the references actually show and whether their quality is sufficient; (3) what is specific to this user's character and project rather than a generic template; (4) the exact cards/actions for this turn, including what you recommend and why. Keep this in the thinking channel, then call the tools; never narrate the tool call in prose.
+Decide first: direct or production. If the work needs multiple generations with consistent characters/scenes or production assets (draft, anchors, storyboard), call start_production_task before creating nodes; direct one-shot edits do not need a task. Once a task exists, its first unchecked todo is the current position: write draft/index/anchors/storyboard with write_task_artifact, mark a finished step with complete_task_step. Files are the source of truth, not chat or memory; do not claim a step is done without completing it. Write long storyboards in chunks with append so the output budget does not truncate them.
 When the user must choose, write your analysis first (what the references show, the style and color call, the beat structure, what you will build), then call ask_user with one card per question in the same order. Do not repeat the option list in the chat text; the card carries the choices. mode is single or multiple. Each card's options use type text for the choices and include one type input so the user can write their own. Do not call ask_user to approve a run. A selected value of 用默认 means the user skipped that question and accepts the default. Do not ask it again.
 Never ask questions in prose. If you are about to write "请告诉我", "请选择" or "您希望哪一张", stop and call ask_user instead; a preparation stage without cards is a failed turn.
 Card questions and options must be written in Chinese; never paste an English instruction or prompt into a card. Never output a card or tool call as JSON text (including a bare {card: ...} or {question, options}); always use the native tool call.
@@ -981,6 +983,8 @@ export function registerCanvasAgentRoutes(
     const stageData = db && conversation
       ? readConversationStageData(db, req.authUser?.id || '', conversation.id)
       : { stage: '', facts: {} };
+    // 文件账本是权威源；数据库阶段只做渲染缓存。
+    const taskBefore = conversation ? readTaskState(conversation.id) : null;
     // 客户端每轮都带节点状态：已生成的锚点图直接补锚点，别等自动通知被卡住。
     const runStates = parseRunStates(body.runStates);
     // 生成完成通知里带节点 id/type：按标题把三视图/对手/场景补成锚点，
@@ -1120,6 +1124,15 @@ export function registerCanvasAgentRoutes(
       || Boolean(stageData.facts.anchor_choice)
       || Boolean(stageData.facts.character_anchor);
     const effectivePlaybookId = combatSession ? 'canvas-combat-fx' : requestedPlaybookId;
+    // 加载了技能即视为制作流程：自动建账本，下一步由文件里的第一条未划掉 todo 算出。
+    const autoTask = conversation && effectivePlaybookId && !taskBefore
+      ? ensureTask(conversation.id, {
+        title: turnMessage.replace(/^\[\[自动\]\]\s*/, '').slice(0, 40) || '制作任务',
+        goal: turnMessage.slice(0, 2000),
+        skill: effectivePlaybookId,
+      })
+      : null;
+    const taskForTurn = autoTask || taskBefore;
     // 方向阶段、还没锚点：强制第一张卡先确认主角，别默认画布里的阿波罗。
     const stageRule = combatSession
       && (stageData.stage === '' || stageData.stage === 'direction')
@@ -1150,7 +1163,7 @@ export function registerCanvasAgentRoutes(
     const memoryText = memoryPromptPrefix(recentMemory) + memoryHitsPrompt(memoryHits);
     const imageDataUrls = await compressedVisionUrls(visionRoot, body.visionImages);
     const messages: Array<Record<string, unknown>> = [
-      { role: 'system', content: `${SYSTEM_PROMPT}\n${operatingPrompt(turnMessage, playbookText)}${stageText}${turnStateText}${stageRule}${reviewRule}${anchorLock}${earlierText}${memoryText}\n\n${context}` },
+      { role: 'system', content: `${SYSTEM_PROMPT}\n${operatingPrompt(turnMessage, playbookText)}${stageText}${turnStateText}${stageRule}${reviewRule}${anchorLock}${earlierText}${memoryText}${taskStatePrompt(taskForTurn)}\n\n${context}` },
       ...history,
       { role: turnMessage.startsWith('[[自动]]') ? 'system' : 'user', content: userContentWithImages(
         askBatch.length ? `askAnswers:${JSON.stringify(askBatch)}` : askAnswer ? `askAnswer:${JSON.stringify(askAnswer)}` : turnMessage,
@@ -1291,9 +1304,71 @@ export function registerCanvasAgentRoutes(
           }
           writeConversationStageData(db, req.authUser?.id || '', conversation.id, { facts });
         });
+      // 文件账本：任务/产物/步骤落文件，数据库只做缓存。
+      let taskNotice = '';
+      calls
+        .filter((call) => ['start_production_task', 'write_task_artifact', 'complete_task_step'].includes(call.function.name))
+        .forEach((call) => {
+          if (!conversation) return;
+          const args = safeArgs(call);
+          const stepLabel = (step: TaskStep) => TASK_STEPS.find((item) => item.step === step)?.label || step;
+          try {
+            let label = '';
+            if (call.function.name === 'start_production_task') {
+              const state = ensureTask(conversation.id, {
+                title: String(args.title || ''),
+                goal: String(args.goal || ''),
+                skill: String(args.skill || effectivePlaybookId || ''),
+              });
+              label = `任务账本：${state.title}（当前 ${stepLabel(state.current)}）`;
+              taskNotice = `任务已建立：${state.title}。当前位置：${stepLabel(state.current)}。`;
+            } else if (call.function.name === 'write_task_artifact') {
+              const kind = String(args.kind || '') as TaskArtifactKind;
+              if (!['draft', 'index', 'anchors', 'storyboard'].includes(kind)) throw new Error('未知的产物类型');
+              const written = writeTaskArtifact(
+                conversation.id,
+                kind,
+                String(args.content || ''),
+                Boolean(args.append),
+              );
+              if (args.cursor_last_line !== undefined || args.cursor_registered !== undefined) {
+                setTaskCursor(conversation.id, {
+                  lastLine: String(args.cursor_last_line || ''),
+                  registered: Number(args.cursor_registered || 0),
+                });
+              }
+              label = `文件账本：已写入 ${kind}.md（${written.chars} 字）`;
+              taskNotice = `已写入 ${kind}.md（${written.chars} 字）。当前位置：${stepLabel(written.state.current)}。`;
+            } else {
+              const step = String(args.step || '') as TaskStep;
+              const state = completeTaskStep(conversation.id, step);
+              label = `文件账本：完成「${stepLabel(step)}」`;
+              taskNotice = `已完成「${stepLabel(step)}」。当前位置：${stepLabel(state.current)}。`;
+            }
+            const log = {
+              id: `task-ledger-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              name: 'task_ledger',
+              label,
+              state: 'done' as const,
+            };
+            persistedToolLogs.push(log);
+            sendEvent(res, { type: 'tool', log });
+          } catch (err) {
+            taskNotice = `账本写入失败：${err instanceof Error ? err.message : String(err)}`;
+            const log = {
+              id: `task-ledger-fail-${Date.now()}`,
+              name: 'task_ledger',
+              label: taskNotice,
+              state: 'failed' as const,
+            };
+            persistedToolLogs.push(log);
+            sendEvent(res, { type: 'tool', log });
+          }
+        });
       const actionCalls = calls
         .filter((call) => call.function.name !== 'remember_project_fact')
         .filter((call) => call.function.name !== 'confirm_character_anchor')
+        .filter((call) => !['start_production_task', 'write_task_artifact', 'complete_task_step'].includes(call.function.name))
         .filter((call) => Boolean(toolContract(call.function.name, toolNames)));
       const firstText = extractTextLlmMessageContent(model, first).trim();
       // 模型偶尔把 ask_user 的 JSON 当正文吐出来：捞成卡片，别把 JSON 推给用户。
@@ -1492,6 +1567,9 @@ export function registerCanvasAgentRoutes(
         streamText(res, persistedText);
       } else if (duplicateRunNotice) {
         persistedText = duplicateRunNotice;
+        streamText(res, persistedText);
+      } else if (taskNotice && !actions.length && !asks.length) {
+        persistedText = taskNotice;
         streamText(res, persistedText);
       } else if (shortYesBlocked) {
         persistedText = runCardPending

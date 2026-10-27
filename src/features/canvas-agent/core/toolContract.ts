@@ -74,6 +74,30 @@ const CORE_CONTRACTS: ToolContract[] = [
     idempotent: true,
     resultStatus: 'stored',
   },
+  {
+    name: 'start_production_task',
+    scope: 'meta',
+    mutatesCanvas: false,
+    requiresApproval: false,
+    idempotent: true,
+    resultStatus: 'stored',
+  },
+  {
+    name: 'write_task_artifact',
+    scope: 'meta',
+    mutatesCanvas: false,
+    requiresApproval: false,
+    idempotent: false,
+    resultStatus: 'stored',
+  },
+  {
+    name: 'complete_task_step',
+    scope: 'meta',
+    mutatesCanvas: false,
+    requiresApproval: false,
+    idempotent: true,
+    resultStatus: 'stored',
+  },
 ];
 
 const BY_NAME = new Map(CORE_CONTRACTS.map((item) => [item.name, item]));
