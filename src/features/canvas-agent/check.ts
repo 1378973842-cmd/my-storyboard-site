@@ -275,14 +275,23 @@ assert.match(planNoFragment.reason, /缺少「原文：」片段/);
 const planNoDuration = checkStoryboardAgainstDraft(planDraft, '原文：「第一段。」\n原文：「第二段。」');
 assert.equal(planNoDuration.ok, false);
 assert.match(planNoDuration.reason, /缺少时长/);
-const planTargetMismatch = checkStoryboardAgainstDraft(planDraft, planStoryboard, '要求时长：15s');
+const capacityText = '| 模型 | 上限 | 下限 |\n|---|---|---|\n| hailuo-h3 | 15 | 5 |\n| seedance-2.0 | 15 | 4 |';
+const planTargetMismatch = checkStoryboardAgainstDraft(planDraft, planStoryboard, '模型：hailuo-h3\n要求时长：15s', capacityText);
 assert.equal(planTargetMismatch.ok, false);
 assert.match(planTargetMismatch.reason, /总时长与用户要求不一致/);
-const capacityText = '| 模型 | 上限 | 下限 |\n|---|---|---|\n| hailuo-h3 | 15 | 5 |\n| seedance-2.0 | 15 | 4 |';
-const planOverCapacity = checkStoryboardAgainstDraft(planDraft, planStoryboard, '要求时长：30s', capacityText);
+const planOverCapacity = checkStoryboardAgainstDraft(planDraft, planStoryboard, '模型：hailuo-h3\n要求时长：30s', capacityText);
 assert.equal(planOverCapacity.ok, false);
 assert.match(planOverCapacity.reason, /没有制作清单/);
 assert.equal(planOverCapacity.capacityMax, 15);
+const planBadModel = checkStoryboardAgainstDraft(planDraft, planStoryboard, '模型：unknown-model\n要求时长：12s', capacityText);
+assert.equal(planBadModel.ok, false);
+assert.match(planBadModel.reason, /容量表读取失败/);
+assert.match(planBadModel.detail, /不在容量表里/);
+assert.match(planBadModel.detail, /合法值：hailuo-h3、seedance-2\.0/);
+const planMissingTable = checkStoryboardAgainstDraft(planDraft, planStoryboard, '模型：hailuo-h3\n要求时长：12s', '');
+assert.equal(planMissingTable.ok, false);
+assert.match(planMissingTable.reason, /容量表读取失败/);
+assert.match(planMissingTable.detail, /duration\.md 缺容量表/);
 const switchCapacity = '| 模型 | 上限 | 下限 |\n|---|---|---|\n| short-model | 10 | 4 |\n| long-model | 15 | 4 |';
 const planSwitch = checkStoryboardAgainstDraft(
   planDraft,
@@ -296,13 +305,14 @@ assert.match(planSwitch.detail, /long-model/);
 const planTargetOk = checkStoryboardAgainstDraft(
   '第一段。第二段。',
   '原文：「第一段。」\n时长：7秒\n原文：「第二段。」\n时长：8秒',
-  '要求时长：15s',
+  '模型：hailuo-h3\n要求时长：15s',
+  capacityText,
 );
 assert.equal(planTargetOk.ok, true);
 const planList = checkStoryboardAgainstDraft(
   '第一段。第二段。',
   '原文：「第一段。」\n时长：15秒\n原文：「第二段。」\n时长：15秒',
-  '要求时长：30s\n## 制作清单\n- SB-01 15s\n- SB-02 15s',
+  '模型：hailuo-h3\n要求时长：30s\n## 制作清单\n- SB-01 15s\n- SB-02 15s',
   capacityText,
 );
 assert.equal(planList.ok, true);

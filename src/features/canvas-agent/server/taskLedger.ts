@@ -320,6 +320,8 @@ export function taskStatePrompt(state: TaskState | null): string {
       readTaskArtifact(state.conversationId, 'draft'),
       readTaskArtifact(state.conversationId, 'storyboard'),
       readTaskArtifact(state.conversationId, 'index'),
+      '',
+      { requireCapacity: false },
     )
     : null;
   const reviewStatus = reviewCheck

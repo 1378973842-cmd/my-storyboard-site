@@ -40,16 +40,31 @@ export function parseModelCapacities(text: string): ModelCapacity[] {
   return rows;
 }
 
-function resolveCapacity(indexText: string, capacityText: string): ModelCapacity | null {
+function resolveCapacity(indexText: string, capacityText: string): { capacity: ModelCapacity | null; error: string } {
   const capacities = parseModelCapacities(capacityText);
-  if (!capacities.length) return null;
+  if (!capacities.length) {
+    return {
+      capacity: null,
+      error: 'duration.md 缺容量表。请在 duration.md 写「| 模型 | 上限 | 下限 |」并列出可用模型。',
+    };
+  }
+  const legal = capacities.map((item) => item.model).join('、');
   const modelMatch = String(indexText || '').match(/(?:选定模型|模型)\s*[:：]\s*([^\n|]+)/i);
   const model = modelMatch ? modelMatch[1].trim() : '';
-  if (model) {
-    const matched = capacities.find((item) => model.includes(item.model) || item.model.includes(model));
-    if (matched) return matched;
+  if (!model) {
+    return {
+      capacity: null,
+      error: `index.md 没有写模型，无法核对容量。请写「模型：…」。合法值：${legal}。`,
+    };
   }
-  return capacities.reduce((best, item) => (item.max > best.max ? item : best), capacities[0]);
+  const matched = capacities.find((item) => model.includes(item.model) || item.model.includes(model));
+  if (!matched) {
+    return {
+      capacity: null,
+      error: `index.md 里的模型 ${model} 不在容量表里。合法值：${legal}。请改成容量表里的模型，或在 duration.md 补上这个模型。`,
+    };
+  }
+  return { capacity: matched, error: '' };
 }
 
 function parseDurationTarget(indexText: string): number | null {
@@ -127,7 +142,9 @@ export function checkStoryboardAgainstDraft(
   storyboard: string,
   indexText = '',
   capacityText = '',
+  options: { requireCapacity?: boolean } = {},
 ): PlanCheckResult {
+  const requireCapacity = options.requireCapacity !== false;
   const draftText = normalize(draft);
   const fragments = parseStoryboardFragments(storyboard);
   const joined = normalize(fragments.map((item) => item.source).join(''));
@@ -135,7 +152,8 @@ export function checkStoryboardAgainstDraft(
   const durationLine = fragments.some((item) => item.duration !== undefined);
   const durationTarget = parseDurationTarget(indexText);
   const productionSegments = parseProductionSegments(indexText);
-  const capacity = resolveCapacity(indexText, capacityText);
+  const resolution = resolveCapacity(indexText, capacityText);
+  const capacity = resolution.capacity;
   const allCapacities = parseModelCapacities(capacityText);
   const base = {
     fragments: fragments.length,
@@ -161,6 +179,14 @@ export function checkStoryboardAgainstDraft(
     return { ...base, ok: false, reason: '分镜表缺少时长', detail: '每条分镜写「时长：N秒」，才能核对总时长与反碎化' };
   }
   if (durationTarget !== null) {
+    if (requireCapacity && resolution.error) {
+      return {
+        ...base,
+        ok: false,
+        reason: '容量表读取失败，不能按最宽上限放行',
+        detail: resolution.error,
+      };
+    }
     const capacityMax = capacity?.max ?? null;
     if (capacityMax !== null && durationTarget > capacityMax && !productionSegments.length) {
       const alternative = allCapacities.find((item) => item.max >= durationTarget && item.model !== capacity?.model);
