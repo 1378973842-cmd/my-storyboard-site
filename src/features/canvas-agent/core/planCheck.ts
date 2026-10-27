@@ -199,14 +199,10 @@ export function checkStoryboardAgainstDraft(
       };
     }
   }
-  const tooShort = fragments.filter((item) => (item.duration || 0) > 0 && (item.duration || 0) < 2);
-  const shortNote = tooShort.length
-    ? `；注意第 ${tooShort.map((item) => item.line).join('、')} 行短于 2 秒`
-    : '';
   return {
     ...base,
     ok: true,
     reason: '逐字核对通过',
-    detail: `${fragments.length} 条片段 / ${draftText.length} 字，总时长 ${totalDuration} 秒${shortNote}`,
+    detail: `${fragments.length} 条片段 / ${draftText.length} 字，总时长 ${totalDuration} 秒`,
   };
 }
