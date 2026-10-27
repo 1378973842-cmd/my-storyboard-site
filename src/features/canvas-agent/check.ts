@@ -2385,7 +2385,26 @@ assert.match(approvalRouteSource, /detectedAnchors/);
 assert.match(approvalRouteSource, /askOnly/);
 assert.match(approvalRouteSource, /multiVideoNotice/);
 assert.match(approvalRouteSource, /成片只建一个 video 节点/);
-assert.match(approvalRouteSource, /Hailuo H3 supports 5-15s/);
+assert.match(approvalRouteSource, /Never print a tool call as JSON text/);
+const payloadCards = parseInlineAskCards(JSON.stringify({
+  actions: [{
+    type: 'ask_user',
+    payload: {
+      title: '请选择打斗主角的来源',
+      mode: 'single',
+      options: [
+        { label: '使用资产库中已有的角色（推荐）', value: 'use_existing' },
+        { label: '生成全新主角', value: 'generate_new' },
+      ],
+    },
+  }],
+}));
+assert.equal(payloadCards.length, 1);
+assert.match(payloadCards[0]?.question || '', /请选择打斗主角的来源/);
+assert.equal(
+  payloadCards[0]?.options[0]?.type === 'text' ? payloadCards[0].options[0].label : '',
+  '使用资产库中已有的角色（推荐）',
+);
 assert.match(approvalRouteSource, /海螺 H3 支持 5-15s/);
 const multiVideo = collapseMultiVideoProposal([
   { type: 'create_node', tempId: 'v1', nodeType: 'video' },

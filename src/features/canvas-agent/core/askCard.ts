@@ -40,12 +40,18 @@ function optionList(value: unknown): AskOption[] {
   for (const item of value) {
     const raw = record(item);
     const type = String(raw.type || '').trim();
+    const placeholder = String(raw.placeholder || '').trim();
     if (type === 'input') {
-      const placeholder = String(raw.placeholder || '').trim();
       options.push(placeholder ? { type: 'input', placeholder } : { type: 'input' });
-    } else if (type === 'text') {
-      const label = String(raw.label || raw.text || raw.value || '').trim();
-      if (label) options.push({ type: 'text', label });
+      continue;
+    }
+    // 有的模型不写 type，只给 label/value；有 label/text 就当选项文案。
+    const label = String(raw.label || raw.text || '').trim()
+      || (type === 'text' ? String(raw.value || '').trim() : '');
+    if (label) {
+      options.push({ type: 'text', label });
+    } else if (placeholder) {
+      options.push({ type: 'input', placeholder });
     }
   }
   return options;
@@ -111,6 +117,29 @@ export function normalizeAskCards(input: unknown): AskCard[] {  const raw = reco
 }
 
 /**
+ * 模型内联工具调用的信封字段一直在变：arguments / payload / input / parameters / data。
+ * 统一扒一层，认不出就退回 action 本体。
+ */
+const ENVELOPE_KEYS = ['arguments', 'payload', 'input', 'parameters', 'data'] as const;
+
+function actionArguments(action: Record<string, unknown>): Record<string, unknown> {
+  for (const key of ENVELOPE_KEYS) {
+    let value = action[key];
+    if (typeof value === 'string') {
+      try {
+        value = JSON.parse(value);
+      } catch {
+        continue;
+      }
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+  }
+  return action;
+}
+
+/**
  * 模型有时不走原生 tool call，而是把 {"actions":[{"type":"ask_user",...}]}
  * 当正文吐出来。这里把它捞成卡片，避免用户看到一屏 JSON。
  */
@@ -134,15 +163,7 @@ export function parseInlineAskCards(text: string): AskCard[] {
     // {name:'ask_user',arguments:{cards:[...]}}（OpenAI function-call 形状）
     const name = String(action.type || action.name || '');
     if (name !== 'ask_user') return;
-    let args: unknown = action.arguments ?? action;
-    if (typeof args === 'string') {
-      try {
-        args = JSON.parse(args);
-      } catch {
-        return;
-      }
-    }
-    const argsRecord = record(args);
+    const argsRecord = actionArguments(action);
     const list = Array.isArray(argsRecord.cards)
       ? argsRecord.cards
       : Array.isArray(argsRecord.asks)
