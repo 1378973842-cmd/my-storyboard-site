@@ -19,7 +19,7 @@ import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRec
 import { operatingPrompt } from '../core/operatingModel.js';
 import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
 import { canvasAgentStagePrefix } from '../core/stageLedger.js';
-import { completeTaskStep, ensureTask, readTaskState, setTaskCursor, taskStatePrompt, writeTaskArtifact, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
+import { completeTaskStep, ensureTask, readTaskState, setTaskCursor, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
 import { turnStatePrefix } from '../core/turnState.js';
 import { VISION_IMAGE_CAP } from '../core/contextSerializer.js';
 import type {
@@ -985,6 +985,23 @@ export function registerCanvasAgentRoutes(
       : { stage: '', facts: {} };
     // 文件账本是权威源；数据库阶段只做渲染缓存。
     const taskBefore = conversation ? readTaskState(conversation.id) : null;
+    // 同一份事实：有账本时只认文件；数据库只在还没有账本的第一轮兜底。
+    const gateFacts: Record<string, unknown> = taskBefore
+      ? { ...(taskBefore.facts || {}) }
+      : { ...stageData.facts };
+    let gateStage = taskBefore ? TASK_STAGE[taskBefore.current] : stageData.stage;
+    const persistFacts = (patch: Record<string, unknown>) => {
+      if (!db || !conversation) return;
+      writeConversationStageData(db, req.authUser?.id || '', conversation.id, { facts: patch });
+      // 锚点/审阅事实也要进账本；账本还没建就先建，避免文件里缺字段。
+      ensureTask(conversation.id, {
+        title: turnMessage.replace(/^\[\[自动\]\]\s*/, '').slice(0, 40) || '制作任务',
+        goal: turnMessage.slice(0, 2000),
+        skill: requestedPlaybookId || '',
+      });
+      updateTaskFacts(conversation.id, patch);
+      Object.assign(gateFacts, patch);
+    };
     // 客户端每轮都带节点状态：已生成的锚点图直接补锚点，别等自动通知被卡住。
     const runStates = parseRunStates(body.runStates);
     // 生成完成通知里带节点 id/type：按标题把三视图/对手/场景补成锚点，
@@ -1010,23 +1027,18 @@ export function registerCanvasAgentRoutes(
       else if (/三视图|主角|角色/.test(label)) detectedAnchors.protagonist ||= `three-view:${node.id}`;
     }
     if (Object.keys(detectedAnchors).length && db && conversation) {
-      writeConversationStageData(db, req.authUser?.id || '', conversation.id, {
-        facts: {
-          ...(detectedAnchors.protagonist ? { character_anchor: detectedAnchors.protagonist, character_quality: 'good' } : {}),
-          ...(detectedAnchors.opponent ? { opponent_anchor: detectedAnchors.opponent, opponent_quality: 'good' } : {}),
-          ...(detectedAnchors.scene ? { scene_anchor: detectedAnchors.scene, scene_quality: 'good' } : {}),
-        },
+      persistFacts({
+        ...(detectedAnchors.protagonist ? { character_anchor: detectedAnchors.protagonist, character_quality: 'good' } : {}),
+        ...(detectedAnchors.opponent ? { opponent_anchor: detectedAnchors.opponent, opponent_quality: 'good' } : {}),
+        ...(detectedAnchors.scene ? { scene_anchor: detectedAnchors.scene, scene_quality: 'good' } : {}),
       });
-      if (detectedAnchors.protagonist) stageData.facts.character_anchor = detectedAnchors.protagonist;
-      if (detectedAnchors.opponent) stageData.facts.opponent_anchor = detectedAnchors.opponent;
-      if (detectedAnchors.scene) stageData.facts.scene_anchor = detectedAnchors.scene;
     }
     // 三个锚点到齐且还在参数阶段：自动推进到分镜。
     if (db && conversation
-      && stageData.stage === 'params'
-      && stageData.facts.character_anchor && stageData.facts.opponent_anchor && stageData.facts.scene_anchor) {
+      && gateStage === 'params'
+      && gateFacts.character_anchor && gateFacts.opponent_anchor && gateFacts.scene_anchor) {
       writeConversationStageData(db, req.authUser?.id || '', conversation.id, { stage: 'storyboard' });
-      stageData.stage = 'storyboard';
+      if (!taskBefore) gateStage = 'storyboard';
     }
     // 客户端上报的节点运行状态：还在生成时别重复发锚点卡。
     const pendingGeneration = effectedNodes.some((node) => {
@@ -1055,30 +1067,28 @@ export function registerCanvasAgentRoutes(
     const sceneWantsReference = wantsReference(sceneSelections);
     const sceneWantsGenerate = wantsGenerate(sceneSelections);
     if ((anchorWantsReference || anchorWantsThreeView || opponentWantsReference || opponentWantsThreeView || sceneWantsReference || sceneWantsGenerate) && db && conversation) {
-      writeConversationStageData(db, req.authUser?.id || '', conversation.id, {
-        facts: {
-          ...(anchorWantsReference ? { character_anchor: 'reference:user' } : {}),
-          ...(anchorWantsThreeView ? { anchor_choice: 'three-view' } : {}),
-          ...(opponentWantsReference ? { opponent_anchor: 'reference:user' } : {}),
-          ...(opponentWantsThreeView ? { opponent_choice: 'three-view' } : {}),
-          ...(sceneWantsReference ? { scene_anchor: 'reference:user' } : {}),
-          ...(sceneWantsGenerate ? { scene_choice: 'generate' } : {}),
-        },
+      persistFacts({
+        ...(anchorWantsReference ? { character_anchor: 'reference:user' } : {}),
+        ...(anchorWantsThreeView ? { anchor_choice: 'three-view' } : {}),
+        ...(opponentWantsReference ? { opponent_anchor: 'reference:user' } : {}),
+        ...(opponentWantsThreeView ? { opponent_choice: 'three-view' } : {}),
+        ...(sceneWantsReference ? { scene_anchor: 'reference:user' } : {}),
+        ...(sceneWantsGenerate ? { scene_choice: 'generate' } : {}),
       });
     }
     const hasAnchor = (anchorWantsReference
-      || Boolean(stageData.facts.character_anchor)
+      || Boolean(gateFacts.character_anchor)
       || Boolean(autoAnchors.protagonist)
       || citedNodes.length > 0)
-      && stageData.facts.character_quality !== 'low';
+      && gateFacts.character_quality !== 'low';
     const hasOpponentAnchor = (opponentWantsReference
-      || Boolean(stageData.facts.opponent_anchor)
+      || Boolean(gateFacts.opponent_anchor)
       || Boolean(autoAnchors.opponent))
-      && stageData.facts.opponent_quality !== 'low';
+      && gateFacts.opponent_quality !== 'low';
     const hasSceneAnchor = (sceneWantsReference
-      || Boolean(stageData.facts.scene_anchor)
+      || Boolean(gateFacts.scene_anchor)
       || Boolean(autoAnchors.scene))
-      && stageData.facts.scene_quality !== 'low';
+      && gateFacts.scene_quality !== 'low';
     const hasCanvasMedia = citedNodes.length > 0 || effectedNodes.length > 0;
     // 审阅事实：三视图锚点必须有人（模型或用户）过一遍画风/比例。
     const reviewSelections = selectionsOf('anchor-review-');
@@ -1092,37 +1102,31 @@ export function registerCanvasAgentRoutes(
     const reviewNote = reviewInput || (reviewRework ? '需要重画' : '');
     if ((reviewApproved || reviewIssue) && db && conversation) {
       const verdict = reviewApproved ? 'ok' : 'rework';
-      writeConversationStageData(db, req.authUser?.id || '', conversation.id, {
-        facts: {
-          character_reviewed: verdict,
-          opponent_reviewed: verdict,
-          scene_reviewed: verdict,
-          review_rework: reviewApproved ? '' : (reviewNote || '需要重画'),
-        },
+      persistFacts({
+        character_reviewed: verdict,
+        opponent_reviewed: verdict,
+        scene_reviewed: verdict,
+        review_rework: reviewApproved ? '' : (reviewNote || '需要重画'),
       });
-      stageData.facts.character_reviewed = verdict;
-      stageData.facts.opponent_reviewed = verdict;
-      stageData.facts.scene_reviewed = verdict;
-      stageData.facts.review_rework = reviewApproved ? '' : (reviewNote || '需要重画');
     }
     const reviewReworking = !reviewApproved
-      && (reviewIssue || Boolean(stageData.facts.review_rework));
+      && (reviewIssue || Boolean(gateFacts.review_rework));
     const reviewRule = reviewReworking
-      ? `\n\n[review_rule] 锚点审阅未通过：${reviewNote || stageData.facts.review_rework || '需要重画'}。先重画有问题的锚点（新建 v2、引用最新版本），不要重复发审阅卡；重画后让用户重新审阅。`
+      ? `\n\n[review_rule] 锚点审阅未通过：${reviewNote || gateFacts.review_rework || '需要重画'}。先重画有问题的锚点（新建 v2、引用最新版本），不要重复发审阅卡；重画后让用户重新审阅。`
       : '';
     const reviewMissing = ([
       ['character_anchor', 'character_reviewed'],
       ['opponent_anchor', 'opponent_reviewed'],
       ['scene_anchor', 'scene_reviewed'],
     ] as const).some(([anchorKey, reviewKey]) => (
-      String(stageData.facts[anchorKey] || '').startsWith('three-view:')
-      && stageData.facts[reviewKey] !== 'ok'
+      String(gateFacts[anchorKey] || '').startsWith('three-view:')
+      && gateFacts[reviewKey] !== 'ok'
     ));
     // 技能芯片被清掉也不该逃出打斗闸：会话里有阶段数据就仍按特效打斗处理。
     const combatSession = requestedPlaybookId === 'canvas-combat-fx'
-      || Boolean(stageData.stage)
-      || Boolean(stageData.facts.anchor_choice)
-      || Boolean(stageData.facts.character_anchor);
+      || Boolean(gateStage)
+      || Boolean(gateFacts.anchor_choice)
+      || Boolean(gateFacts.character_anchor);
     const effectivePlaybookId = combatSession ? 'canvas-combat-fx' : requestedPlaybookId;
     // 加载了技能即视为制作流程：自动建账本，下一步由文件里的第一条未划掉 todo 算出。
     const autoTask = conversation && effectivePlaybookId && !taskBefore
@@ -1135,10 +1139,10 @@ export function registerCanvasAgentRoutes(
     const taskForTurn = autoTask || taskBefore;
     // 方向阶段、还没锚点：强制第一张卡先确认主角，别默认画布里的阿波罗。
     const stageRule = combatSession
-      && (stageData.stage === '' || stageData.stage === 'direction')
+      && (gateStage === '' || gateStage === 'direction')
       && !hasAnchor
       ? '\n\n[stage_rule] 第一张提问卡先确认主角（用画布里的参考，还是新角色），同一轮可以继续问画风、特效、动作、叙事；不要默认画布里的角色。'
-      : combatSession && stageData.stage === 'proposal'
+      : combatSession && gateStage === 'proposal'
         ? '\n\n[stage_rule] 方向已答完：先给一套具体方案（风格/特效/动作节奏/叙事结构 + 1-2 个建议），让用户确认这个方向；确认后再收六项参数，不要跳步。方案阶段可以给 4 段叙事表（段落/占比/内容/冲击帧），但不要写镜头、时间码和逐镜拆解；这些等主角/对手/场景三张锚点图确认后再写。'
         : '';
     // 锚点版本锁：生成节点必须引用当前锚点，不能再用旧版本。
@@ -1147,12 +1151,15 @@ export function registerCanvasAgentRoutes(
       ['对手', 'opponent_anchor'],
       ['场景', 'scene_anchor'],
     ]
-      .map(([label, key]) => [label, String(stageData.facts[key] || '')] as const)
+      .map(([label, key]) => [label, String(gateFacts[key] || '')] as const)
       .filter(([, value]) => value);
     const anchorLock = anchorEntries.length
       ? `\n\n[anchor_lock] 当前锚点（生成节点必须引用这些，不要用旧版本）：${anchorEntries.map(([label, value]) => `${label}=${value}`).join('；')}`
       : '';
-    const stageText = `${canvasAgentStagePrefix(storedStage.playbookId, storedStage.stage, requestedPlaybookId, effectedNodes, parseRunStates(body.runStates))}${changelog ? `\n\n[canvas_changelog]\n${changelog}` : ''}`;
+    // 账本存在时不再用数据库阶段文案：当前位置只由 task.md 的第一条未划掉 todo 给出。
+    const stageText = taskForTurn
+      ? (changelog ? `\n\n[canvas_changelog]\n${changelog}` : '')
+      : `${canvasAgentStagePrefix(storedStage.playbookId, storedStage.stage, requestedPlaybookId, effectedNodes, parseRunStates(body.runStates))}${changelog ? `\n\n[canvas_changelog]\n${changelog}` : ''}`;
     // 项目记忆跨会话：最近 12 条常驻，命中的再补一段；够用就停，不做向量检索。
     const allMemory = db && conversation
       ? listAgentMemory(db, req.authUser?.id || '', conversation.canvas_id, 60)
@@ -1182,7 +1189,7 @@ export function registerCanvasAgentRoutes(
       // 准备阶段强制走提问卡：不让模型把问题写成一大段正文。
       const forceAsk = combatSession
         && !hasAnchor
-        && (stageData.stage === '' || stageData.stage === 'direction' || stageData.stage === 'params');
+        && (gateStage === '' || gateStage === 'direction' || gateStage === 'params');
       try {
         first = await callModel(model, messages, true, controller.signal, forceAsk);
       } catch (toolCallError) {
@@ -1253,15 +1260,15 @@ export function registerCanvasAgentRoutes(
           const qualityKey = key.replace('_anchor', '_quality');
           const quality = String(args.quality || '');
           // 锚点版本管理：记下旧版本，后续生成只认最新锚点。
-          const previous = String(stageData.facts[key] || '');
+          const previous = String(gateFacts[key] || '');
           // 参考图质量不足：不给锚点放行，转成「先生成三视图」的待办。
           const facts: Record<string, unknown> = { [key]: anchor, [`${key}_at`]: Date.now() };
           const roleLabel = role === 'opponent' ? '对手' : role === 'scene' ? '场景' : '主角';
           if (previous && previous !== anchor) {
             facts[`${key}_prev`] = previous;
             // 可见的变更记录：旧版本废弃、新版本接管。
-            const history = Array.isArray(stageData.facts.anchor_history)
-              ? [...stageData.facts.anchor_history as unknown[]]
+            const history = Array.isArray(gateFacts.anchor_history)
+              ? [...gateFacts.anchor_history as unknown[]]
               : [];
             history.push({ role, from: previous, to: anchor, at: Date.now() });
             facts.anchor_history = history.slice(-20);
@@ -1302,7 +1309,7 @@ export function registerCanvasAgentRoutes(
             // 新的审阅通过后，清掉之前的问题记录。
             facts.review_rework = review === 'ok' ? '' : '需要重画';
           }
-          writeConversationStageData(db, req.authUser?.id || '', conversation.id, { facts });
+          persistFacts(facts);
         });
       // 文件账本：任务/产物/步骤落文件，数据库只做缓存。
       let taskNotice = '';
@@ -1445,7 +1452,7 @@ export function registerCanvasAgentRoutes(
       // 特效打斗：准备阶段先拦下建/连/改/运行，逼模型把主角和对手问清楚。
       const stageGate = combatStageDecision({
         playbookId: effectivePlaybookId,
-        stage: stageData.stage,
+        stage: gateStage,
         message: turnMessage,
         answering: Boolean(askBatch.length || askAnswer),
         hasAnchor,
@@ -1513,19 +1520,17 @@ export function registerCanvasAgentRoutes(
         && /分镜/.test(String((action.initialParams || {}).text || (action.initialParams || {}).title || ''))
       ));
       if (storyboardNode && db && conversation) {
-        writeConversationStageData(db, req.authUser?.id || '', conversation.id, {
-          facts: { storyboard_written: true },
-        });
+        persistFacts({ storyboard_written: true });
       }
       const asksAboutStoryboard = asks.some((card) => /分镜|剧本|满意/.test(card.question));
-      const storyboardWritten = Boolean(stageData.facts.storyboard_written) || storyboardNode;
+      const storyboardWritten = Boolean(gateFacts.storyboard_written) || storyboardNode;
       // 只有真的到分镜阶段（或参数已齐、该进分镜）才拦；方案阶段拦会把方案确认卡也吞掉。
-      const storyboardReady = stageData.stage === 'storyboard'
-        || (stageData.stage === 'params' && hasAnchor && hasOpponentAnchor && hasSceneAnchor);
+      const storyboardReady = gateStage === 'storyboard'
+        || (gateStage === 'params' && hasAnchor && hasOpponentAnchor && hasSceneAnchor);
       const storyboardAskBlocked = storyboardReady && asksAboutStoryboard && !storyboardWritten;
       if (storyboardAskBlocked) asks = [];
       // 方案阶段模型把确认卡写成「分镜剧本满意吗」：换成方案确认卡，别让用户没卡可点。
-      if (!storyboardAskBlocked && stageData.stage === 'proposal' && asksAboutStoryboard && !storyboardWritten) {
+      if (!storyboardAskBlocked && gateStage === 'proposal' && asksAboutStoryboard && !storyboardWritten) {
         asks = [{
           id: `proposal-ok-${Date.now()}`,
           mode: 'single',
@@ -1660,7 +1665,7 @@ export function registerCanvasAgentRoutes(
         publishAsks();
       } else if (stageGate.blocked && stageGate.reason === 'blocked-anchor' && !asks.length) {
         // 锚点缺口用一张选择卡问；已经在生成三视图就不要再重复发卡。
-        const protagonistPending = stageData.facts.anchor_choice === 'three-view' || pendingGeneration;
+        const protagonistPending = gateFacts.anchor_choice === 'three-view' || pendingGeneration;
         persistedText = protagonistPending
           ? '主角三视图还在生成或等批准，生成完请点确认，我先不重复发卡。'
           : COMBAT_ANCHOR_NOTICE;
@@ -1681,7 +1686,7 @@ export function registerCanvasAgentRoutes(
         }
       } else if (stageGate.blocked && stageGate.reason === 'blocked-opponent-anchor' && !asks.length) {
         // 已经在生成对手三视图时不要再发同一张卡，等生成完确认即可。
-        const opponentPending = stageData.facts.opponent_choice === 'three-view' || pendingGeneration;
+        const opponentPending = gateFacts.opponent_choice === 'three-view' || pendingGeneration;
         persistedText = opponentPending
           ? '对手三视图还在生成或等批准，生成完请点确认，我先不重复发卡。'
           : COMBAT_OPPONENT_NOTICE;
@@ -1702,7 +1707,7 @@ export function registerCanvasAgentRoutes(
         }
       } else if (stageGate.blocked && stageGate.reason === 'blocked-scene-anchor' && !asks.length) {
         // 场景图：有就用用户的（做视觉分析），没有就让 agent 生成。
-        const scenePending = stageData.facts.scene_choice === 'generate' || pendingGeneration;
+        const scenePending = gateFacts.scene_choice === 'generate' || pendingGeneration;
         persistedText = scenePending
           ? '场景图还在生成或等批准，生成完请点确认，我先不重复发卡。'
           : COMBAT_SCENE_NOTICE;
@@ -1724,7 +1729,7 @@ export function registerCanvasAgentRoutes(
       } else if (stageGate.blocked && stageGate.reason === 'blocked-anchor-review' && !asks.length) {
         if (reviewReworking) {
           // 用户已经指出问题：别再弹同一张卡，转成重画指令。
-          persistedText = `收到问题：${reviewNote || stageData.facts.review_rework || '需要重画'}。先重画有问题的锚点（新建 v2），重画后我再重新审阅；这次不重复发卡。`;
+          persistedText = `收到问题：${reviewNote || gateFacts.review_rework || '需要重画'}。先重画有问题的锚点（新建 v2），重画后我再重新审阅；这次不重复发卡。`;
           streamText(res, persistedText);
         } else {
           // 三张锚点图必须有人过一遍画风/比例，才能进分镜。
@@ -1829,7 +1834,7 @@ export function registerCanvasAgentRoutes(
               ...messages,
               {
                 role: 'user',
-                content: stageData.stage === 'proposal'
+                content: gateStage === 'proposal'
                   ? '用中文写出完整的个性化方案：风格、特效、动作节奏、叙事结构各一句，再给 1-2 个具体建议，最后只问「以上方案可以吗」。不要重复参考图分析，不要列选项。'
                   : '用中文写 80-120 字：只说明这一步做了什么、下一步要确认什么。不要重复参考图/画布的描写，不要列选项，不要提问，不要提工具名。',
               },

@@ -23,7 +23,7 @@ import { approveRunCard, defaultAskAnswer, normalizeAskCards, parseAskAnswer, pa
 import { actionDisplayLabel, actionProposalNeedsApproval, derivedStepTitle, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, openBatchProgress, partialBatchUpdate, pendingExecutionFeedback, proposalWaitsForClick, settleBatchProposal, stripCreatesOnShortYes, unknownCanvasActionMessage } from './core/proposal';
 import { actionsReleasedForApproval, runScopeDigest, runScopeMatches } from './core/runApproval';
 import { turnStatePrefix } from './core/turnState';
-import { completeTaskStep, ensureTask, readTaskState, setTaskCursor, taskStatePrompt, writeTaskArtifact } from './server/taskLedger';
+import { completeTaskStep, ensureTask, readTaskState, setTaskCursor, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE } from './server/taskLedger';
 import { changelogFromActions, effectedFromApply, effectedLine, mediaRunState, mediaStatusLabel, parseRunStates, turnLabelCollapsed } from './core/effectLedger';
 import { AskCardView } from './ui/AskCardView';
 import { AskPager } from './ui/AskPager';
@@ -292,6 +292,13 @@ assert.match(
   readFileSync(path.join(String(process.env.CANVAS_AGENT_TASK_DIR), taskConversation, 'task.md'), 'utf8'),
   /\[x\] 定稿/,
 );
+assert.equal(TASK_STAGE.draft, 'direction');
+assert.equal(TASK_STAGE.anchors, 'params');
+assert.equal(TASK_STAGE.storyboard, 'storyboard');
+assert.equal(TASK_STAGE.review, 'storyboard');
+assert.equal(TASK_STAGE.anchor_runs, 'production');
+updateTaskFacts(taskConversation, { character_anchor: 'three-view:test', character_quality: 'good' });
+assert.equal(readTaskState(taskConversation)?.facts.character_anchor, 'three-view:test');
 rmSync(String(process.env.CANVAS_AGENT_TASK_DIR), { recursive: true, force: true });
 delete process.env.CANVAS_AGENT_TASK_DIR;
 
@@ -2518,7 +2525,8 @@ assert.match(serializerSource, /map\(\(\{ url: _url, \.\.\.rest \}\)/);
 assert.match(approvalRouteSource, /!inlineAsks\.length/);
 assert.match(approvalRouteSource, /storyboardReady/);
 assert.match(approvalRouteSource, /runApprovalIds/);
-assert.match(approvalRouteSource, /stageData\.stage = 'storyboard'/);
+assert.match(approvalRouteSource, /TASK_STAGE\[taskBefore\.current\]/);
+assert.match(approvalRouteSource, /文件账本是权威源/);
 assert.match(approvalPanelSource, /type=\$\{typeOf\(nodeId\)\}/);
 assert.match(approvalPanelSource, /event\.type === 'error'/);
 assert.match(approvalPanelSource, /setActiveJob\(null\);\n        jobIdRef\.current = '';/);

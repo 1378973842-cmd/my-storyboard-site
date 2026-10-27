@@ -34,6 +34,7 @@ export type TaskState = {
   updatedAt: number;
   todos: TaskTodo[];
   current: TaskStep;
+  facts: Record<string, unknown>;
   artifacts: Partial<Record<TaskArtifactKind, { path: string; chars: number; updatedAt: number }>>;
   cursor?: {
     lastLine: string;
@@ -118,6 +119,16 @@ function renderTaskMarkdown(state: TaskState): string {
   return `${lines.join('\n')}\n`;
 }
 
+export const TASK_STAGE: Record<TaskStep, string> = {
+  draft: 'direction',
+  anchors: 'params',
+  storyboard: 'storyboard',
+  review: 'storyboard',
+  anchor_runs: 'production',
+  storyboard_runs: 'production',
+  compose: 'production',
+};
+
 export function readTaskState(conversationId: string): TaskState | null {
   try {
     const file = statePath(conversationId);
@@ -148,6 +159,7 @@ export function ensureTask(
     updatedAt: now,
     todos: TASK_STEPS.map((item) => ({ ...item, done: false })),
     current: 'draft',
+    facts: {},
     artifacts: {},
   };
   mkdirSync(taskDir(conversationId), { recursive: true });
@@ -224,6 +236,18 @@ export function setTaskCursor(
   state.updatedAt = Date.now();
   atomicWrite(statePath(conversationId), JSON.stringify(state, null, 2));
   atomicWrite(path.join(taskDir(conversationId), 'task.md'), renderTaskMarkdown(state));
+  return state;
+}
+
+export function updateTaskFacts(
+  conversationId: string,
+  patch: Record<string, unknown>,
+): TaskState | null {
+  const state = readTaskState(conversationId);
+  if (!state) return null;
+  state.facts = { ...(state.facts || {}), ...patch };
+  state.updatedAt = Date.now();
+  atomicWrite(statePath(conversationId), JSON.stringify(state, null, 2));
   return state;
 }
 
