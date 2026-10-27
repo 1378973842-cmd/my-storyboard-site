@@ -88,7 +88,7 @@ import { EffectLabels, ThinkingFold } from './TurnLabels';
 import { TurnTimeline } from './TurnTimeline';
 import { ProposalPreviewCard } from './ProposalPreviewCard';
 import { AssistantMarkdown } from './assistantMarkdown';
-import { proposalDefaultOpen, proposalDisplayTier, sortProposalsForDisplay } from './proposalOrder';
+import { proposalDefaultOpen, proposalDisplayTier, proposalTimeLabel, sortProposalsForDisplay } from './proposalOrder';
 import type {
   ActionProposal,
   AgentChatMessage,
@@ -2189,7 +2189,26 @@ export function AgentFloatingPanel({
                   ) : null}
                 </article>
               ))}
-              {proposalRows.map(({ proposal, open }) => {
+              {(() => {
+                // 只有「还在进行/待处理」的提案展开成卡；已应用/已过期收进一条操作记录，
+                // 同一批节点的重复待批运行只保留最新一张。
+                const activeRows = proposalRows.filter(({ proposal }) => proposalDisplayTier(proposal.status) < 2);
+                const historyRows = proposalRows.filter(({ proposal }) => proposalDisplayTier(proposal.status) === 2);
+                const seenRunSignatures = new Set<string>();
+                const visibleActiveRows = activeRows.filter(({ proposal }) => {
+                  const runIds = proposal.actions
+                    .filter((action) => action.type === 'execute_node_skill')
+                    .map((action) => String(action.nodeId || ''));
+                  const onlyRun = runIds.length > 0 && runIds.length === proposal.actions.length;
+                  if (!onlyRun || (proposal.status !== 'pending' && proposal.status !== 'applying')) return true;
+                  const signature = [...runIds].sort().join(',');
+                  if (seenRunSignatures.has(signature)) return false;
+                  seenRunSignatures.add(signature);
+                  return true;
+                });
+                return (
+                  <>
+                    {visibleActiveRows.map(({ proposal, open }) => {
                 let clampLines: string[] = [];
                 try {
                   const snapshot = getCanvasSnapshot();
@@ -2236,6 +2255,32 @@ export function AgentFloatingPanel({
                   </Fragment>
                 );
               })}
+                    {historyRows.length ? (
+                      <details className="canvas-agent-proposal-history">
+                        <summary>操作记录 · {historyRows.length} 项</summary>
+                        <ul>
+                          {historyRows.map(({ proposal }) => (
+                            <li key={proposal.id}>
+                              <span className="canvas-agent-proposal-history-status">
+                                {proposal.status === 'applied' ? '已应用'
+                                  : proposal.status === 'expired' ? '已过期'
+                                    : proposal.status === 'discarded' ? '已丢弃' : '失败'}
+                              </span>
+                              <span className="canvas-agent-proposal-history-summary">
+                                {proposal.summary || proposal.title}
+                              </span>
+                              {proposal.status === 'applied' || proposal.status === 'partial' ? (
+                                <button type="button" onClick={() => void requestRollback(proposal)}>撤销</button>
+                              ) : null}
+                              <time>{proposalTimeLabel(proposal.createdAt)}</time>
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    ) : null}
+                  </>
+                );
+              })()}
               {toolLogs.length ? (
                 <div className="canvas-agent-processed">
                   <button type="button" onClick={() => setLogsOpen((value) => !value)}>

@@ -1976,3 +1976,74 @@ details.canvas-agent-turn-label > summary::after {
 details.canvas-agent-turn-label[open] > summary::after {
   transform: rotate(180deg);
 }
+/* —— 历史提案收成一条记录，不再一屏「画布操作建议」—— */
+.canvas-agent-proposal-history {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(229, 226, 225, 0.04);
+}
+
+.canvas-agent-proposal-history summary {
+  cursor: pointer;
+  color: #a8a3a1;
+  font-size: 11.5px;
+  list-style: none;
+}
+
+.canvas-agent-proposal-history summary::-webkit-details-marker {
+  display: none;
+}
+
+.canvas-agent-proposal-history ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.canvas-agent-proposal-history li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: #c8c4c2;
+}
+
+.canvas-agent-proposal-history-status {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #2a2928;
+  color: #a8a3a1;
+  font-size: 10.5px;
+}
+
+.canvas-agent-proposal-history-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-agent-proposal-history li button {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: #6f6a68;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.canvas-agent-proposal-history li button:hover {
+  color: #ffb866;
+}
+
+.canvas-agent-proposal-history li time {
+  flex: none;
+  margin-left: auto;
+  color: #6f6a68;
+  font-size: 10.5px;
+}
