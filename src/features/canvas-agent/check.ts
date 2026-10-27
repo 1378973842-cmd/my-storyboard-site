@@ -2365,6 +2365,7 @@ assert.match(approvalRouteSource, /pendingGeneration/);
 assert.match(approvalRouteSource, /detectedAnchors/);
 assert.match(approvalRouteSource, /askOnly/);
 assert.match(approvalRouteSource, /proposal-ok-/);
+assert.match(approvalRouteSource, /!inlineAsks\.length/);
 assert.match(approvalRouteSource, /storyboardReady/);
 assert.match(approvalRouteSource, /runApprovalIds/);
 assert.match(approvalRouteSource, /stageData\.stage = 'storyboard'/);

@@ -1508,7 +1508,9 @@ export function registerCanvasAgentRoutes(
         streamText(res, persistedText);
       } else if (asks.length) {
         // 只出提问卡的轮次，正文就是模型写的方案/分析，别再补一段。
-        let lead = askOnly ? firstText : '';
+        // 但内联 ask_user JSON 不能当正文推给用户。
+        let lead = askOnly && !inlineAsks.length ? firstText : '';
+        if (lead.trim().startsWith('{')) lead = '';
         if (!lead && !persistedThinking) {
           try {
             const written = await callModel(model, [
