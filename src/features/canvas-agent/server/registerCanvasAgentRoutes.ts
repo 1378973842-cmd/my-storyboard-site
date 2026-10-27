@@ -1281,11 +1281,11 @@ export function registerCanvasAgentRoutes(
       if (!shortYesBlocked) {
         actions = appendRunProposalForNewGenerativeNodes(effectivePlaybookId, actions);
       }
-      // auto 模式下「建节点 + 运行」会立即落板并开跑，别再发一张过期的运行卡。
-      const clientMode = String(body.mode || 'auto') === 'confirm' ? 'confirm' : 'auto';
-      const executeIds = actions.flatMap((action) => action.type === 'execute_node_skill' ? [action.nodeId] : []);
-      const mixedProposal = actions.some((action) => action.type !== 'execute_node_skill');
-      const runApprovalIds = clientMode === 'auto' && mixedProposal ? [] : executeIds;
+      // 结构动作会立即落板，但运行必须由用户在审批卡上放行，所以只要有 execute
+      // 就一定要出运行卡；不要因为是混合提案就把卡吞掉。
+      const runApprovalIds = actions.flatMap((action) => (
+        action.type === 'execute_node_skill' ? [action.nodeId] : []
+      ));
       let asks = inlineAsks.length ? inlineAsks : collectAskCards(
         actionCalls.filter((call) => call.function.name === 'ask_user').map((call) => safeArgs(call)),
         actionCalls.length ? '' : (proposalText || firstText),
