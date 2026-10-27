@@ -2392,6 +2392,27 @@ assert.match(approvalRouteSource, /splitPromptSections/);
 assert.match(approvalPanelSource, /canvas-agent-changelog/);
 assert.match(approvalPanelSource, /promptIndexes/);
 assert.match(approvalPanelSource, /canvas-agent-prompt-index/);
+const inlineAskCards3 = parseInlineAskCards(JSON.stringify({
+  actions: [{
+    type: 'ask_user',
+    id: 'confirm_protagonist',
+    title: '确认动画主角',
+    mode: 'single',
+    options: [
+      { type: 'text', value: 'asset_character', text: '使用素材库现有角色（推荐）' },
+      { type: 'text', value: 'new_character', text: '重新设计' },
+      { type: 'input', value: 'custom_character', text: '自定义主角描述' },
+    ],
+  }],
+}));
+assert.equal(inlineAskCards3.length, 1);
+assert.match(inlineAskCards3[0]?.question || '', /确认动画主角/);
+assert.equal(
+  inlineAskCards3[0]?.options[0]?.type === 'text' ? inlineAskCards3[0].options[0].label : '',
+  '使用素材库现有角色（推荐）',
+);
+assert.match(approvalRouteSource, /safeFirstText/);
+assert.match(approvalRouteSource, /looksLikeToolJson/);
 assert.match(approvalRouteSource, /想先改哪一层/);
 assert.match(approvalRouteSource, /anchor_history/);
 assert.match(approvalRouteSource, /锚点版本：/);
@@ -2454,7 +2475,7 @@ const cameraBridgeSource = readFileSync(new URL('../../services/canvasMxShellPro
 assert.match(cameraBridgeSource, /运镜词典（写法参考）/);
 assert.match(cameraBridgeSource, /技能正文的分镜结构、节奏与特效层优先/);
 assert.match(approvalRouteSource, /proposal\.jobId = jobId/);
-assert.match(approvalRouteSource, /sendEvent\(res, \{ type: 'thinking', text: firstText \}\)/);
+assert.match(approvalRouteSource, /sendEvent\(res, \{ type: 'thinking', text: safeFirstText \}\)/);
 assert.match(approvalPanelSource, /TurnTimeline steps=\{steps\}/);
 assert.match(approvalRouteSource, /if \(!regenerate\) \{/);
 assert.match(approvalPanelSource, /sendText\(previous\.content, messages\.slice\(0, index - 1\), undefined, true\)/);

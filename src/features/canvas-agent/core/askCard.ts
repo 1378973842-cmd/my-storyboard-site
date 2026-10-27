@@ -44,7 +44,7 @@ function optionList(value: unknown): AskOption[] {
       const placeholder = String(raw.placeholder || '').trim();
       options.push(placeholder ? { type: 'input', placeholder } : { type: 'input' });
     } else if (type === 'text') {
-      const label = String(raw.label || raw.value || '').trim();
+      const label = String(raw.label || raw.text || raw.value || '').trim();
       if (label) options.push({ type: 'text', label });
     }
   }
@@ -55,7 +55,8 @@ function oneCard(value: unknown, index: number): AskCard | null {
   const raw = record(value);
   const mode = String(raw.mode || '').trim();
   if (mode !== 'single' && mode !== 'multiple' && mode !== 'approve_run_node') return null;
-  const question = String(raw.question || '').trim()
+  // 有的模型把问题写在 title 而不是 question。
+  const question = String(raw.question || raw.title || '').trim()
     // 方案/方向/分镜在卡片上方，模型常误写成「以下方案」。
     .replace(/以下(?=[^。！？]*(?:方案|方向|分镜))/, '以上');
   if (!question) return null;

@@ -1261,14 +1261,19 @@ export function registerCanvasAgentRoutes(
       const firstText = extractTextLlmMessageContent(model, first).trim();
       // 模型偶尔把 ask_user 的 JSON 当正文吐出来：捞成卡片，别把 JSON 推给用户。
       const inlineAsks = parseInlineAskCards(firstText);
+      // JSON 坏掉/形状不认识时也别把原始 JSON 推给用户：只保留 JSON 之前的正文。
+      const looksLikeToolJson = !inlineAsks.length && /"ask_user"/.test(firstText) && /^\s*[{\[]/.test(firstText);
+      const safeFirstText = looksLikeToolJson
+        ? firstText.slice(0, Math.max(0, firstText.indexOf('{'))).trim()
+        : firstText;
       // 只出提问卡、没有画布动作时，前面那段是方案/分析，应该当正文，不要塞进思考过程。
       const askOnly = calls.length > 0 && actionCalls.length === 0;
       // 调工具之前的那段是模型的推演，归到「思考过程」折叠里；正文只放后续说明。
-      if (calls.length && firstText && !inlineAsks.length && !askOnly) {
-        persistedThinking = [persistedThinking, firstText].filter(Boolean).join('\n\n').slice(0, 6000);
-        sendEvent(res, { type: 'thinking', text: firstText });
+      if (calls.length && safeFirstText && !inlineAsks.length && !askOnly) {
+        persistedThinking = [persistedThinking, safeFirstText].filter(Boolean).join('\n\n').slice(0, 6000);
+        sendEvent(res, { type: 'thinking', text: safeFirstText });
       }
-      let proposalText = inlineAsks.length ? '' : firstText;
+      let proposalText = inlineAsks.length ? '' : safeFirstText;
       let interpreted = actionCalls.length || inlineAsks.length ? null : interpretCanvasProposalText(proposalText);
       if (!actionCalls.length && interpreted?.unknownTypes.length) {
         const retry = await callModel(model, [
@@ -1361,7 +1366,7 @@ export function registerCanvasAgentRoutes(
       ));
       let asks = inlineAsks.length ? inlineAsks : collectAskCards(
         actionCalls.filter((call) => call.function.name === 'ask_user').map((call) => safeArgs(call)),
-        actionCalls.length ? '' : (proposalText || firstText),
+        actionCalls.length ? '' : (proposalText || safeFirstText),
         runApprovalIds,
       );
       // 分镜还没写进节点就来问「是否满意」：拦下这个提问，先让模型把分镜落板。
@@ -1460,11 +1465,11 @@ export function registerCanvasAgentRoutes(
         }
         persistedProposal = proposal;
 
-        let explanation = interpreted ? interpreted.prose : firstText;
+        let explanation = interpreted ? interpreted.prose : safeFirstText;
         if (calls.length) {
           const assistantMessage = {
             role: 'assistant',
-            content: firstText || null,
+            content: safeFirstText || null,
             tool_calls: calls,
           };
           const toolResults = calls.map((call) => ({
@@ -1661,7 +1666,7 @@ export function registerCanvasAgentRoutes(
       } else if (asks.length) {
         // 只出提问卡的轮次，正文就是模型写的方案/分析，别再补一段。
         // 但内联 ask_user JSON 不能当正文推给用户。
-        let lead = askOnly && !inlineAsks.length ? firstText : '';
+        let lead = askOnly && !inlineAsks.length ? safeFirstText : '';
         if (lead.trim().startsWith('{')) lead = '';
         if (!lead && editFirst) lead = '先不生成。给你一份改法菜单，勾选要改的层，我按勾选改同一版提示词。';
         if (!lead && !persistedThinking) {
@@ -1687,10 +1692,10 @@ export function registerCanvasAgentRoutes(
         persistedText = `动作类型无法识别：${interpreted.unknownTypes.join('、')}。这轮没有生成提案。`;
         streamText(res, persistedText);
       } else if (remembered.length) {
-        persistedText = firstText || `记下了：${remembered.map((item) => item.key).join('、')}。`;
+        persistedText = safeFirstText || `记下了：${remembered.map((item) => item.key).join('、')}。`;
         if (!calls.length) streamText(res, persistedText);
       } else {
-        persistedText = firstText || '我暂时没有生成可执行的画布建议，请换一种方式描述目标。';
+        persistedText = safeFirstText || '我暂时没有生成可执行的画布建议，请换一种方式描述目标。';
         if (!calls.length) streamText(res, persistedText);
       }
       if (db && conversation) {
