@@ -116,11 +116,20 @@ export function augmentChatCompletionsBody(
   if (!isRunningHubChatModel(model)) return out;
   const effort =
     String(process.env.RUNNINGHUB_LLM_REASONING_EFFORT || "none").trim() || "none";
+  const requested = body.reasoning_effort !== undefined
+    ? String(body.reasoning_effort).trim()
+    : effort;
+  // Google 系把 reasoning_effort=none 映射成 MINIMAL，而 gemini-3.7 不支持这个档位；
+  // 不传就按模型默认思考，medium/high 可用。
+  if (String(model).trim().toLowerCase().startsWith("google/")) {
+    if (requested && requested.toLowerCase() !== "none") out.reasoning_effort = requested;
+  } else {
+    out.reasoning_effort = requested;
+  }
   Object.assign(out, {
     top_p: body.top_p !== undefined ? body.top_p : 1,
     presence_penalty: body.presence_penalty !== undefined ? body.presence_penalty : 0,
     frequency_penalty: body.frequency_penalty !== undefined ? body.frequency_penalty : 0,
-    reasoning_effort: body.reasoning_effort !== undefined ? body.reasoning_effort : effort,
   });
   if (body.temperature === undefined) out.temperature = 1;
   return out;
