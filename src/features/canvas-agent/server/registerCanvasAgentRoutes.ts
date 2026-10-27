@@ -1188,8 +1188,10 @@ export function registerCanvasAgentRoutes(
       const firstText = extractTextLlmMessageContent(model, first).trim();
       // 模型偶尔把 ask_user 的 JSON 当正文吐出来：捞成卡片，别把 JSON 推给用户。
       const inlineAsks = parseInlineAskCards(firstText);
+      // 只出提问卡、没有画布动作时，前面那段是方案/分析，应该当正文，不要塞进思考过程。
+      const askOnly = calls.length > 0 && actionCalls.length === 0;
       // 调工具之前的那段是模型的推演，归到「思考过程」折叠里；正文只放后续说明。
-      if (calls.length && firstText && !inlineAsks.length) {
+      if (calls.length && firstText && !inlineAsks.length && !askOnly) {
         persistedThinking = [persistedThinking, firstText].filter(Boolean).join('\n\n').slice(0, 6000);
         sendEvent(res, { type: 'thinking', text: firstText });
       }
@@ -1280,10 +1282,25 @@ export function registerCanvasAgentRoutes(
         });
       }
       const asksAboutStoryboard = asks.some((card) => /分镜|剧本|满意/.test(card.question));
-      const storyboardAskBlocked = asksAboutStoryboard
-        && !storyboardNode
-        && !Boolean(stageData.facts.storyboard_written);
+      const storyboardWritten = Boolean(stageData.facts.storyboard_written) || storyboardNode;
+      // 只有真的到分镜阶段（或参数已齐、该进分镜）才拦；方案阶段拦会把方案确认卡也吞掉。
+      const storyboardReady = stageData.stage === 'storyboard'
+        || (stageData.stage === 'params' && hasAnchor && hasOpponentAnchor && hasSceneAnchor);
+      const storyboardAskBlocked = storyboardReady && asksAboutStoryboard && !storyboardWritten;
       if (storyboardAskBlocked) asks = [];
+      // 方案阶段模型把确认卡写成「分镜剧本满意吗」：换成方案确认卡，别让用户没卡可点。
+      if (!storyboardAskBlocked && stageData.stage === 'proposal' && asksAboutStoryboard && !storyboardWritten) {
+        asks = [{
+          id: `proposal-ok-${Date.now()}`,
+          mode: 'single',
+          question: '以上方案可以吗？',
+          options: [
+            { type: 'text', label: '可以，按此方案推进' },
+            { type: 'text', label: '需要调整（在下方写）' },
+            { type: 'input', placeholder: '自己写（可留空）' },
+          ],
+        }];
+      }
       const publishAsks = () => {
         if (!asks.length) return;
         persistedAsks = asks;
@@ -1490,9 +1507,9 @@ export function registerCanvasAgentRoutes(
         persistedText = '分镜剧本还没落进节点，先让我把分镜表写出来，你再确认满不满意。';
         streamText(res, persistedText);
       } else if (asks.length) {
-        // 强制 ask_user 时模型常常只给卡片、不写正文；补一段分析，别让用户只看到问题。
-        let lead = '';
-        if (!persistedThinking) {
+        // 只出提问卡的轮次，正文就是模型写的方案/分析，别再补一段。
+        let lead = askOnly ? firstText : '';
+        if (!lead && !persistedThinking) {
           try {
             const written = await callModel(model, [
               ...messages,
