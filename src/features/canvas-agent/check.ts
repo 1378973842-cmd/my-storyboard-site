@@ -278,9 +278,11 @@ assert.match(planNoDuration.reason, /缺少时长/);
 const planTargetMismatch = checkStoryboardAgainstDraft(planDraft, planStoryboard, '要求时长：15s');
 assert.equal(planTargetMismatch.ok, false);
 assert.match(planTargetMismatch.reason, /总时长与用户要求不一致/);
-const planOverCapacity = checkStoryboardAgainstDraft(planDraft, planStoryboard, '要求时长：30s');
+const capacityText = '| 模型 | 单次下限 | 单次上限 |\n|---|---|---|\n| 海螺 H3 | 5s | 15s |\n| Seedance 2.0 | 4s | 15s |';
+const planOverCapacity = checkStoryboardAgainstDraft(planDraft, planStoryboard, '要求时长：30s', capacityText);
 assert.equal(planOverCapacity.ok, false);
 assert.match(planOverCapacity.reason, /没有制作清单/);
+assert.equal(planOverCapacity.capacityMax, 15);
 const planTargetOk = checkStoryboardAgainstDraft(
   '第一段。第二段。',
   '原文：「第一段。」\n时长：7秒\n原文：「第二段。」\n时长：8秒',
@@ -291,6 +293,7 @@ const planList = checkStoryboardAgainstDraft(
   '第一段。第二段。',
   '原文：「第一段。」\n时长：15秒\n原文：「第二段。」\n时长：15秒',
   '要求时长：30s\n## 制作清单\n- SB-01 15s\n- SB-02 15s',
+  capacityText,
 );
 assert.equal(planList.ok, true);
 
@@ -2642,6 +2645,19 @@ assert.match(approvalRouteSource, /storyboardReady/);
 assert.match(approvalRouteSource, /runApprovalIds/);
 assert.match(approvalRouteSource, /TASK_STAGE\[taskBefore\.current\]/);
 assert.match(approvalRouteSource, /arguments 不是合法 JSON/);
+assert.match(approvalRouteSource, /production_plan_knowledge/);
+assert.match(approvalRouteSource, /没有拼接、转场、BGM 能力/);
+assert.doesNotMatch(readFileSync(new URL('./core/planCheck.ts', import.meta.url), 'utf8'), /durationTarget > 15/);
+const capacityPlan = selectKnowledgeForUse(
+  readPlaybookKnowledge('.', 'canvas-combat-fx'),
+  '要求 30 秒，给制作清单',
+  ['collect-params', 'estimate'],
+);
+assert.ok(capacityPlan.knowledge.length > 0);
+assert.match(capacityPlan.knowledge, /六项参数可选值/);
+assert.match(capacityPlan.knowledge, /模型容量/);
+assert.match(approvalRouteSource, /交付的是这一个节点/);
+assert.match(approvalRouteSource, /合成校验通过（未拼接）/);
 assert.match(approvalRouteSource, /正好一个成片视频节点|恰好一个成片视频节点/);
 assert.match(approvalRouteSource, /nodeId 不存在/);
 assert.match(readFileSync(new URL('./core/canvasFacade.ts', import.meta.url), 'utf8'), /合法类型：/);

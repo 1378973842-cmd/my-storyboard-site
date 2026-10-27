@@ -17,9 +17,39 @@ export type PlanCheckResult = {
   totalDuration: number;
   durationTarget: number | null;
   productionSegments: number[];
+  capacityModel: string | null;
+  capacityMax: number | null;
   reason: string;
   detail: string;
 };
+
+export type ModelCapacity = { model: string; min: number; max: number };
+
+export function parseModelCapacities(text: string): ModelCapacity[] {
+  const rows: ModelCapacity[] = [];
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const table = line.match(/^\|\s*([^|]+?)\s*\|\s*(\d+(?:\.\d+)?)\s*(?:s|秒)?\s*\|\s*(\d+(?:\.\d+)?)\s*(?:s|秒)?\s*\|/i);
+    if (table && !/模型|model/i.test(table[1])) {
+      rows.push({ model: table[1].trim(), min: Number(table[2]), max: Number(table[3]) });
+      continue;
+    }
+    const bullet = line.match(/(?:^|\s)([^：:]{2,30})[：:]\s*单次\s*(\d+(?:\.\d+)?)\s*[-–~]\s*(\d+(?:\.\d+)?)\s*(?:s|秒)/i);
+    if (bullet) rows.push({ model: bullet[1].trim(), min: Number(bullet[2]), max: Number(bullet[3]) });
+  }
+  return rows;
+}
+
+function resolveCapacity(indexText: string, capacityText: string): ModelCapacity | null {
+  const capacities = parseModelCapacities(capacityText);
+  if (!capacities.length) return null;
+  const modelMatch = String(indexText || '').match(/(?:选定模型|模型)\s*[:：]\s*([^\n|]+)/i);
+  const model = modelMatch ? modelMatch[1].trim() : '';
+  if (model) {
+    const matched = capacities.find((item) => model.includes(item.model) || item.model.includes(model));
+    if (matched) return matched;
+  }
+  return capacities.reduce((best, item) => (item.max > best.max ? item : best), capacities[0]);
+}
 
 function parseDurationTarget(indexText: string): number | null {
   const match = String(indexText || '').match(/(?:用户要求时长|要求时长|目标时长)\s*[:：]\s*(\d+(?:\.\d+)?)\s*(?:秒|s)?/i);
@@ -95,6 +125,7 @@ export function checkStoryboardAgainstDraft(
   draft: string,
   storyboard: string,
   indexText = '',
+  capacityText = '',
 ): PlanCheckResult {
   const draftText = normalize(draft);
   const fragments = parseStoryboardFragments(storyboard);
@@ -103,6 +134,7 @@ export function checkStoryboardAgainstDraft(
   const durationLine = fragments.some((item) => item.duration !== undefined);
   const durationTarget = parseDurationTarget(indexText);
   const productionSegments = parseProductionSegments(indexText);
+  const capacity = resolveCapacity(indexText, capacityText);
   const base = {
     fragments: fragments.length,
     entries: fragments.length,
@@ -111,6 +143,8 @@ export function checkStoryboardAgainstDraft(
     totalDuration,
     durationTarget,
     productionSegments,
+    capacityModel: capacity?.model || null,
+    capacityMax: capacity?.max ?? null,
   };
   if (!draftText) {
     return { ...base, ok: false, reason: '创作稿为空', detail: '先写 draft.md，再核对' };
@@ -125,12 +159,13 @@ export function checkStoryboardAgainstDraft(
     return { ...base, ok: false, reason: '分镜表缺少时长', detail: '每条分镜写「时长：N秒」，才能核对总时长与反碎化' };
   }
   if (durationTarget !== null) {
-    if (durationTarget > 15 && !productionSegments.length) {
+    const capacityMax = capacity?.max ?? null;
+    if (capacityMax !== null && durationTarget > capacityMax && !productionSegments.length) {
       return {
         ...base,
         ok: false,
         reason: '目标时长超过单次容量，但 total 表没有制作清单',
-        detail: `用户要求 ${durationTarget} 秒，单次容量最多 15 秒；先在 index.md 写「制作清单」（每段时长），再重新核对。`,
+        detail: `用户要求 ${durationTarget} 秒，${capacity?.model || '所选模型'} 单次上限 ${capacityMax} 秒；先在 index.md 写「制作清单」（每段时长），再重新核对。`,
       };
     }
     const planned = productionSegments.length

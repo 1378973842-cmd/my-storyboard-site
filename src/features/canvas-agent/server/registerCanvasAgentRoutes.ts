@@ -21,7 +21,7 @@ import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
 import { canvasAgentStagePrefix } from '../core/stageLedger.js';
 import { completeTaskStep, ensureTask, readTaskArtifact, readTaskArtifactSlice, readTaskState, setTaskCursor, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
 import { checkStoryboardAgainstDraft } from '../core/planCheck.js';
-import { assembleKnowledgeForTurn } from '../core/knowledgeContext.js';
+import { assembleKnowledgeForTurn, selectKnowledgeForUse } from '../core/knowledgeContext.js';
 import { turnStatePrefix } from '../core/turnState.js';
 import { VISION_IMAGE_CAP } from '../core/contextSerializer.js';
 import type {
@@ -1024,6 +1024,9 @@ export function registerCanvasAgentRoutes(
     const earlierText = compacted.digest ? `\n\n[earlier_turns]\n${compacted.digest}` : '';
     const context = String(body.context || '');
     const playbookText = requestedPlaybookId && readPlaybookText ? readPlaybookText(requestedPlaybookId) : '';
+    const knowledgeTextForPrompt = requestedPlaybookId && readPlaybookKnowledgeText
+      ? readPlaybookKnowledgeText(requestedPlaybookId).trim()
+      : '';
     const storedStage = db && conversation
       ? readConversationStage(db, req.authUser?.id || '', conversation.id)
       : { playbookId: '', stage: null };
@@ -1198,6 +1201,19 @@ export function registerCanvasAgentRoutes(
       })
       : null;
     const taskForTurn = autoTask || taskBefore;
+    // 清单确认轮：目标时长超出所选模型容量且没有制作清单时，
+    // 自动拼 collect-params + estimate 两段知识，模型才能给出可确认的分段方案。
+    const productionPlanKnowledge = (() => {
+      if (!conversation || !taskForTurn || taskForTurn.current !== 'review' || !knowledgeTextForPrompt) return '';
+      const check = checkStoryboardAgainstDraft(
+        readTaskArtifact(conversation.id, 'draft'),
+        readTaskArtifact(conversation.id, 'storyboard'),
+        readTaskArtifact(conversation.id, 'index'),
+        knowledgeTextForPrompt,
+      );
+      if (check.ok || !/没有制作清单/.test(check.reason)) return '';
+      return selectKnowledgeForUse(knowledgeTextForPrompt, turnMessage, ['collect-params', 'estimate']).knowledge;
+    })();
     // 方向阶段、还没锚点：强制第一张卡先确认主角，别默认画布里的阿波罗。
     const stageRule = combatSession
       && (gateStage === '' || gateStage === 'direction')
@@ -1231,7 +1247,7 @@ export function registerCanvasAgentRoutes(
     const memoryText = memoryPromptPrefix(recentMemory) + memoryHitsPrompt(memoryHits);
     const imageDataUrls = await compressedVisionUrls(visionRoot, body.visionImages);
     const messages: Array<Record<string, unknown>> = [
-      { role: 'system', content: `${SYSTEM_PROMPT}\n${operatingPrompt(turnMessage, playbookText)}${stageText}${turnStateText}${stageRule}${reviewRule}${anchorLock}${earlierText}${memoryText}${taskStatePrompt(taskForTurn)}\n\n${context}` },
+      { role: 'system', content: `${SYSTEM_PROMPT}\n${operatingPrompt(turnMessage, playbookText)}${stageText}${turnStateText}${stageRule}${reviewRule}${anchorLock}${earlierText}${memoryText}${taskStatePrompt(taskForTurn)}${productionPlanKnowledge ? `\n\n[production_plan_knowledge]\n${productionPlanKnowledge}` : ''}\n\n${context}` },
       ...history,
       { role: turnMessage.startsWith('[[自动]]') ? 'system' : 'user', content: userContentWithImages(
         askBatch.length ? `askAnswers:${JSON.stringify(askBatch)}` : askAnswer ? `askAnswer:${JSON.stringify(askAnswer)}` : turnMessage,
@@ -1522,6 +1538,9 @@ export function registerCanvasAgentRoutes(
                   readTaskArtifact(conversation.id, 'draft'),
                   readTaskArtifact(conversation.id, 'storyboard'),
                   readTaskArtifact(conversation.id, 'index'),
+                  requestedPlaybookId && readPlaybookKnowledgeText
+                    ? readPlaybookKnowledgeText(requestedPlaybookId)
+                    : '',
                 );
                 if (!check.ok) throw new Error(`${check.reason}：${check.detail}`);
                 const state = completeTaskStep(conversation.id, step);
@@ -1538,8 +1557,11 @@ export function registerCanvasAgentRoutes(
                   throw new Error(`成片节点「${video.label || video.id}」还没生成完成（当前 ${runStates[video.id] || '未运行'}）。先跑分镜批，生成后再合成。`);
                 }
                 const state = completeTaskStep(conversation.id, step);
-                label = '文件账本：合成校验通过（1 个成片）';
-                taskNotice = `合成校验通过：1 个成片节点「${video.label || video.id}」。已完成「${stepLabel(step)}」。当前位置：${stepLabel(state.current)}。`;
+                label = '文件账本：合成校验通过（未拼接）';
+                taskNotice = `合成校验通过：恰好 1 个成片节点「${video.label || video.id}」且已生成。`
+                  + '当前执行层没有拼接、转场、BGM 能力，所以交付的是这一个节点，不是拼接后的成片；'
+                  + '需要真正的多段合成要另行处理。'
+                  + `已完成「${stepLabel(step)}」。当前位置：${stepLabel(state.current)}。`;
               } else {
                 const state = completeTaskStep(conversation.id, step);
                 label = `文件账本：完成「${stepLabel(step)}」`;
@@ -1573,9 +1595,7 @@ export function registerCanvasAgentRoutes(
         .filter((call) => Boolean(toolContract(call.function.name, toolNames)));
       // 阶段 5（新判据）：骨架已常驻；只有本轮真实动作含 video create/update 时，
       // 才把对应元素的知识拼进「写 prompt」的二次调用。判据是动作，不是阶段格。
-      const knowledgeText = requestedPlaybookId && readPlaybookKnowledgeText
-        ? readPlaybookKnowledgeText(requestedPlaybookId).trim()
-        : '';
+      const knowledgeText = knowledgeTextForPrompt;
       if (knowledgeText) {
         const videoNodeIds = new Set<string>();
         const assemblyActions: CanvasAction[] = [];

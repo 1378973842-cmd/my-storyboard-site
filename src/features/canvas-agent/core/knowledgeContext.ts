@@ -74,6 +74,12 @@ export function selectKnowledgeForUse(
     // 兼容没有段标签的旧知识文本：按全文处理。
     return { knowledge: uses.includes('prompt') ? String(text || '').slice(0, 5_000) : '', selected: [] };
   }
+  // 参数/估时是整表知识，不做段落筛选，整段拼。
+  if (uses.some((use) => use === 'collect-params' || use === 'estimate')) {
+    const full = blocks.map((block) => block.body).join('\n\n');
+    const cap = uses.includes('estimate') ? 2_000 : 2_000;
+    return { knowledge: full.slice(0, cap), selected: blocks.map((block) => block.path) };
+  }
   const elements = ELEMENT_ALIASES
     .filter((item) => item.patterns.test(message))
     .map((item) => item.element);
