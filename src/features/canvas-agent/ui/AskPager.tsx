@@ -39,7 +39,7 @@ export function AskPager({
     );
   }
   const card = cards[Math.min(index, cards.length - 1)];
-  const texts = card.options.filter((item) => item.type === 'text').slice(0, 3);
+  const texts = card.options.filter((item) => item.type === 'text');
   const write = card.options.find((item) => item.type === 'input');
   const placeholder = write && write.type === 'input' ? (write.placeholder || '自己写') : '自己写';
   const show = (answer: AskAnswer | undefined) => {

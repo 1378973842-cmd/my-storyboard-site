@@ -1193,8 +1193,9 @@ const crowded = renderToStaticMarkup(createElement(AskPager, {
 assert.match(crowded, /自己写/);
 assert.match(crowded, />一</);
 assert.match(crowded, />三</);
-assert.doesNotMatch(crowded, />四</);
-assert.doesNotMatch(crowded, />五</);
+// 参考平台的卡常有 4–6 个选项，不能再截到前三个。
+assert.match(crowded, />四</);
+assert.match(crowded, />五</);
 assert.equal(mediaStatusLabel('generator', 'created'), '图片节点已创建');
 assert.equal(mediaStatusLabel('generator', 'generated'), '图片已生成');
 assert.equal(mediaStatusLabel('generator', 'failed'), '执行失败');
@@ -2370,7 +2371,11 @@ assert.match(inlineAskCards2[0]?.question || '', /以上方案可以吗/);
 assert.match(approvalRouteSource, /pendingGeneration/);
 assert.match(approvalRouteSource, /detectedAnchors/);
 assert.match(approvalRouteSource, /askOnly/);
-assert.match(approvalRouteSource, /（推荐）/);
+assert.match(approvalRouteSource, /edit-menu-/);
+assert.match(approvalRouteSource, /想先改哪一层/);
+assert.match(approvalRouteSource, /anchor_history/);
+assert.match(approvalRouteSource, /锚点版本：/);
+assert.match(approvalRouteSource, /hasCanvasMedia/);
 assert.match(approvalRouteSource, /先改提示词/);
 assert.match(approvalRouteSource, /4 段叙事表/);
 assert.match(combatPlaybookSource, /每张卡都要有推荐/);

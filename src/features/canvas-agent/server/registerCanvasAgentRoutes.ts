@@ -1066,6 +1066,7 @@ export function registerCanvasAgentRoutes(
       || Boolean(stageData.facts.scene_anchor)
       || Boolean(autoAnchors.scene))
       && stageData.facts.scene_quality !== 'low';
+    const hasCanvasMedia = citedNodes.length > 0 || effectedNodes.length > 0;
     // 技能芯片被清掉也不该逃出打斗闸：会话里有阶段数据就仍按特效打斗处理。
     const combatSession = requestedPlaybookId === 'canvas-combat-fx'
       || Boolean(stageData.stage)
@@ -1176,7 +1177,33 @@ export function registerCanvasAgentRoutes(
           const previous = String(stageData.facts[key] || '');
           // 参考图质量不足：不给锚点放行，转成「先生成三视图」的待办。
           const facts: Record<string, unknown> = { [key]: anchor, [`${key}_at`]: Date.now() };
-          if (previous && previous !== anchor) facts[`${key}_prev`] = previous;
+          const roleLabel = role === 'opponent' ? '对手' : role === 'scene' ? '场景' : '主角';
+          if (previous && previous !== anchor) {
+            facts[`${key}_prev`] = previous;
+            // 可见的变更记录：旧版本废弃、新版本接管。
+            const history = Array.isArray(stageData.facts.anchor_history)
+              ? [...stageData.facts.anchor_history as unknown[]]
+              : [];
+            history.push({ role, from: previous, to: anchor, at: Date.now() });
+            facts.anchor_history = history.slice(-20);
+            const log = {
+              id: `anchor-version-${Date.now()}-${role}`,
+              name: 'anchor_version',
+              label: `锚点版本：${roleLabel} 切到新版本（旧版废弃）`,
+              state: 'done' as const,
+            };
+            persistedToolLogs.push(log);
+            sendEvent(res, { type: 'tool', log });
+          } else if (!previous) {
+            const log = {
+              id: `anchor-lock-${Date.now()}-${role}`,
+              name: 'anchor_lock',
+              label: `锚点锁定：${roleLabel}`,
+              state: 'done' as const,
+            };
+            persistedToolLogs.push(log);
+            sendEvent(res, { type: 'tool', log });
+          }
           if (quality === 'low') {
             facts[qualityKey] = 'low';
             if (role !== 'opponent' && role !== 'scene') facts.anchor_choice = 'three-view';
@@ -1327,6 +1354,25 @@ export function registerCanvasAgentRoutes(
           ],
         }];
       }
+      // 用户选了「先改提示词」：不运行，给一张可直接勾选的改法菜单。
+      const editFirst = askAnswer?.mode === 'approve_run_node' && askAnswer.selected[0] === '先改提示词';
+      if (editFirst) {
+        asks = [{
+          id: `edit-menu-${Date.now()}`,
+          mode: 'multiple',
+          question: '想先改哪一层？',
+          options: [
+            { type: 'text', label: '节奏（段长/时间分配）' },
+            { type: 'text', label: '特效密度' },
+            { type: 'text', label: '动作设计' },
+            { type: 'text', label: '环境破坏' },
+            { type: 'text', label: '冲击帧位置' },
+            { type: 'text', label: '收尾构图' },
+            { type: 'text', label: '画风/色调' },
+            { type: 'input', placeholder: '自己写（可留空）' },
+          ],
+        }];
+      }
       const publishAsks = () => {
         if (!asks.length) return;
         persistedAsks = asks;
@@ -1416,8 +1462,8 @@ export function registerCanvasAgentRoutes(
             mode: 'single',
             question: '角色参考怎么定？',
             options: [
-              { type: 'text', label: '用画布里的参考图' },
-              { type: 'text', label: '先让我生成三视图' },
+              { type: 'text', label: hasCanvasMedia ? '用画布里的参考图（推荐）' : '用画布里的参考图' },
+              { type: 'text', label: hasCanvasMedia ? '先让我生成三视图' : '先让我生成三视图（推荐）' },
               { type: 'input', placeholder: '自己写（可留空）' },
             ],
           };
@@ -1437,8 +1483,8 @@ export function registerCanvasAgentRoutes(
             mode: 'single',
             question: '对手参考怎么定？',
             options: [
-              { type: 'text', label: '用画布里的对手图' },
-              { type: 'text', label: '先让我生成对手三视图' },
+              { type: 'text', label: hasCanvasMedia ? '用画布里的对手图（推荐）' : '用画布里的对手图' },
+              { type: 'text', label: hasCanvasMedia ? '先让我生成对手三视图' : '先让我生成对手三视图（推荐）' },
               { type: 'input', placeholder: '自己写（可留空）' },
             ],
           };
@@ -1458,8 +1504,8 @@ export function registerCanvasAgentRoutes(
             mode: 'single',
             question: '场景参考怎么定？',
             options: [
-              { type: 'text', label: '用画布里的场景图（在消息里 @ 它）' },
-              { type: 'text', label: '先让我生成场景图' },
+              { type: 'text', label: hasCanvasMedia ? '用画布里的场景图（在消息里 @ 它）（推荐）' : '用画布里的场景图（在消息里 @ 它）' },
+              { type: 'text', label: hasCanvasMedia ? '先让我生成场景图' : '先让我生成场景图（推荐）' },
               { type: 'input', placeholder: '自己写（可留空）' },
             ],
           };
@@ -1475,8 +1521,8 @@ export function registerCanvasAgentRoutes(
               mode: 'single',
               question: '主角用谁？',
               options: [
-                { type: 'text', label: '用画布里的参考（在消息里 @）' },
-                { type: 'text', label: '新角色' },
+                { type: 'text', label: hasCanvasMedia ? '用画布里的参考（在消息里 @）（推荐）' : '用画布里的参考（在消息里 @）' },
+                { type: 'text', label: hasCanvasMedia ? '新角色' : '新角色（推荐）' },
                 { type: 'input', placeholder: '自己写（可留空）' },
               ],
             },
@@ -1486,7 +1532,7 @@ export function registerCanvasAgentRoutes(
               question: '画风偏哪种？',
               options: [
                 { type: 'text', label: '偏写实（真人质感）' },
-                { type: 'text', label: '偏二次元（国漫/日漫/3D卡通）' },
+                { type: 'text', label: '偏二次元（国漫/日漫/3D卡通）（推荐）' },
                 { type: 'input', placeholder: '自己写（可留空）' },
               ],
             },
@@ -1496,7 +1542,7 @@ export function registerCanvasAgentRoutes(
               question: '特效风格偏哪种？',
               options: [
                 { type: 'text', label: '写意飘逸（仙侠剑气）' },
-                { type: 'text', label: '硬核爆炸（冲击波震地）' },
+                { type: 'text', label: '硬核爆炸（冲击波震地）（推荐）' },
                 { type: 'input', placeholder: '有具体作品参考就写这里' },
               ],
             },
@@ -1505,7 +1551,7 @@ export function registerCanvasAgentRoutes(
               mode: 'single',
               question: '动作节奏偏哪种？',
               options: [
-                { type: 'text', label: '快速连击' },
+                { type: 'text', label: '快速连击（推荐）' },
                 { type: 'text', label: '蓄力一击' },
                 { type: 'text', label: '舞步式' },
                 { type: 'text', label: '野蛮压制' },
@@ -1516,7 +1562,7 @@ export function registerCanvasAgentRoutes(
               mode: 'single',
               question: '叙事节奏要哪种？',
               options: [
-                { type: 'text', label: '完整故事弧（建立→蓄力→爆发→收束）' },
+                { type: 'text', label: '完整故事弧（建立→蓄力→爆发→收束）（推荐）' },
                 { type: 'text', label: '直接上高潮' },
                 { type: 'input', placeholder: '自己写（可留空）' },
               ],
@@ -1540,6 +1586,7 @@ export function registerCanvasAgentRoutes(
         // 但内联 ask_user JSON 不能当正文推给用户。
         let lead = askOnly && !inlineAsks.length ? firstText : '';
         if (lead.trim().startsWith('{')) lead = '';
+        if (!lead && editFirst) lead = '先不生成。给你一份改法菜单，勾选要改的层，我按勾选改同一版提示词。';
         if (!lead && !persistedThinking) {
           try {
             const written = await callModel(model, [
