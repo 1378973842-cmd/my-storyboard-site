@@ -81,8 +81,9 @@ import {
 } from './agentMemoryStore.js';
 import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from '../core/memory.js';
 import { compactHistory } from '../core/history.js';
-import { COMBAT_ANCHOR_NOTICE, COMBAT_OPPONENT_NOTICE, COMBAT_SCENE_NOTICE, combatStageDecision } from '../core/combatStage.js';
+import { COMBAT_ANCHOR_NOTICE, COMBAT_OPPONENT_NOTICE, COMBAT_REVIEW_NOTICE, COMBAT_SCENE_NOTICE, combatStageDecision } from '../core/combatStage.js';
 import { appendRunProposalForNewGenerativeNodes } from '../core/runProposal.js';
+import { splitPromptSections, type PromptIndex } from '../core/promptIndex.js';
 import { extractReasoningText } from '../core/reasoning.js';
 import { rollbackCanvasPlan } from '../core/rollbackPlan.js';
 import {
@@ -566,6 +567,10 @@ export function registerCanvasAgentRoutes(
         messages: listCanvasAgentMessages(db, userId, conversation.id),
         citedNodes: readConversationCitedNodes(db, userId, conversation.id),
         effectedNodes: readConversationEffected(db, userId, conversation.id),
+        anchorHistory: (() => {
+          const stage = readConversationStageData(db, userId, conversation.id);
+          return Array.isArray(stage.facts.anchor_history) ? stage.facts.anchor_history : [];
+        })(),
       });
     });
     app.patch('/api/canvas-agent/conversations/:id', ...protectedRoute, (req, res) => {
@@ -1067,6 +1072,31 @@ export function registerCanvasAgentRoutes(
       || Boolean(autoAnchors.scene))
       && stageData.facts.scene_quality !== 'low';
     const hasCanvasMedia = citedNodes.length > 0 || effectedNodes.length > 0;
+    // 审阅事实：三视图锚点必须有人（模型或用户）过一遍画风/比例。
+    const reviewSelections = selectionsOf('anchor-review-');
+    const reviewApproved = reviewSelections.some((value) => value.includes('一致'));
+    const reviewRework = reviewSelections.some((value) => value.includes('重画'));
+    if ((reviewApproved || reviewRework) && db && conversation) {
+      const verdict = reviewApproved ? 'ok' : 'rework';
+      writeConversationStageData(db, req.authUser?.id || '', conversation.id, {
+        facts: {
+          character_reviewed: verdict,
+          opponent_reviewed: verdict,
+          scene_reviewed: verdict,
+        },
+      });
+      stageData.facts.character_reviewed = verdict;
+      stageData.facts.opponent_reviewed = verdict;
+      stageData.facts.scene_reviewed = verdict;
+    }
+    const reviewMissing = ([
+      ['character_anchor', 'character_reviewed'],
+      ['opponent_anchor', 'opponent_reviewed'],
+      ['scene_anchor', 'scene_reviewed'],
+    ] as const).some(([anchorKey, reviewKey]) => (
+      String(stageData.facts[anchorKey] || '').startsWith('three-view:')
+      && stageData.facts[reviewKey] !== 'ok'
+    ));
     // 技能芯片被清掉也不该逃出打斗闸：会话里有阶段数据就仍按特效打斗处理。
     const combatSession = requestedPlaybookId === 'canvas-combat-fx'
       || Boolean(stageData.stage)
@@ -1117,6 +1147,7 @@ export function registerCanvasAgentRoutes(
       let persistedAsks: AskCard[] = [];
       let persistedText = '';
       let persistedThinking = '';
+      let persistedPromptIndex: PromptIndex | null = null;
       let first: Record<string, unknown>;
       // 准备阶段强制走提问卡：不让模型把问题写成一大段正文。
       const forceAsk = combatSession
@@ -1186,6 +1217,10 @@ export function registerCanvasAgentRoutes(
               : [];
             history.push({ role, from: previous, to: anchor, at: Date.now() });
             facts.anchor_history = history.slice(-20);
+            sendEvent(res, {
+              type: 'anchors',
+              history: history.slice(-20) as Array<{ role: string; from: string; to: string; at: number }>,
+            });
             const log = {
               id: `anchor-version-${Date.now()}-${role}`,
               name: 'anchor_version',
@@ -1211,6 +1246,11 @@ export function registerCanvasAgentRoutes(
             if (role === 'scene') facts.scene_choice = 'generate';
           } else if (quality === 'good' || args.kind === 'three-view') {
             facts[qualityKey] = 'good';
+          }
+          // 审阅事实：三视图确认时由模型带 review=ok / rework。
+          const review = String(args.review || '');
+          if (args.kind === 'three-view' && (review === 'ok' || review === 'rework')) {
+            facts[`${key}_reviewed`] = review;
           }
           writeConversationStageData(db, req.authUser?.id || '', conversation.id, { facts });
         });
@@ -1279,6 +1319,7 @@ export function registerCanvasAgentRoutes(
         hasAnchor,
         hasOpponentAnchor,
         hasSceneAnchor,
+        reviewMissing,
       });
       if (stageGate.advanceTo && db && conversation) {
         writeConversationStageData(db, req.authUser?.id || '', conversation.id, { stage: stageGate.advanceTo });
@@ -1286,7 +1327,7 @@ export function registerCanvasAgentRoutes(
       if (stageGate.blocked) {
         // 锚点缺口：允许先建「图片生成节点」（三视图用 generator 或 image），
         // 其它动作照旧丢掉。generator 是只有提示词、点生成才出图的节点。
-        actions = (stageGate.reason === 'blocked-anchor' || stageGate.reason === 'blocked-opponent-anchor' || stageGate.reason === 'blocked-scene-anchor')
+        actions = (stageGate.reason === 'blocked-anchor' || stageGate.reason === 'blocked-opponent-anchor' || stageGate.reason === 'blocked-scene-anchor' || stageGate.reason === 'blocked-anchor-review')
           ? actions
             .filter((action) => (
               action.type === 'create_node'
@@ -1448,6 +1489,26 @@ export function registerCanvasAgentRoutes(
         }
         // 正文先到、卡片后到：避免卡片抢在解释前面弹出来。
         sendEvent(res, { type: 'proposal', proposal });
+        // 成片节点：把提示词拆成结构索引，前端单独显示，不用用户翻正文。
+        const videoCreate = actions.find((action) => (
+          action.type === 'create_node' && action.nodeType === 'video'
+        ));
+        if (videoCreate && videoCreate.type === 'create_node') {
+          const params = (videoCreate.initialParams || {}) as Record<string, unknown>;
+          const prompt = String(params.prompt || '');
+          const index: PromptIndex = {
+            title: String(params.title || '成片节点'),
+            ...(params.ratio ? { ratio: String(params.ratio) } : {}),
+            ...(params.aspectRatio ? { ratio: String(params.aspectRatio) } : {}),
+            ...(params.resolution ? { resolution: String(params.resolution) } : {}),
+            ...(params.duration ? { duration: String(params.duration) } : {}),
+            ...(params.model ? { model: String(params.model) } : {}),
+            promptChars: prompt.length,
+            sections: splitPromptSections(prompt),
+          };
+          persistedPromptIndex = index;
+          sendEvent(res, { type: 'promptIndex', index });
+        }
         publishAsks();
       } else if (stageGate.blocked && stageGate.reason === 'blocked-anchor' && !asks.length) {
         // 锚点缺口用一张选择卡问；已经在生成三视图就不要再重复发卡。
@@ -1512,6 +1573,22 @@ export function registerCanvasAgentRoutes(
           persistedAsks = [sceneCard];
           sendEvent(res, { type: 'ask', asks: [sceneCard] });
         }
+      } else if (stageGate.blocked && stageGate.reason === 'blocked-anchor-review' && !asks.length) {
+        // 三张锚点图必须有人过一遍画风/比例，才能进分镜。
+        const reviewCard: AskCard = {
+          id: `anchor-review-${Date.now()}`,
+          mode: 'single',
+          question: '三张锚点图检查',
+          options: [
+            { type: 'text', label: '风格/比例一致，进分镜（推荐）' },
+            { type: 'text', label: '有问题，需要重画（在下方写）' },
+            { type: 'input', placeholder: '哪里不对（可留空）' },
+          ],
+        };
+        persistedAsks = [reviewCard];
+        persistedText = COMBAT_REVIEW_NOTICE;
+        streamText(res, persistedText);
+        sendEvent(res, { type: 'ask', asks: [reviewCard] });
       } else if (stageGate.blocked && !asks.length) {
         // 模型没给提问卡时，方向阶段由服务端补一套（按 skill 的维度）。
         if (stageGate.reason === 'blocked-direction') {
@@ -1627,6 +1704,7 @@ export function registerCanvasAgentRoutes(
             ...(persistedProposal ? { proposal: persistedProposal } : {}),
             ...(persistedThinking ? { thinking: persistedThinking } : {}),
             ...(persistedAsks.length ? { asks: persistedAsks } : {}),
+            ...(persistedPromptIndex ? { promptIndex: persistedPromptIndex } : {}),
             ...(persistedToolLogs.length ? { toolLogs: persistedToolLogs } : {}),
           },
         );

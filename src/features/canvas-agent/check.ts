@@ -76,6 +76,7 @@ import { rollbackCanvasPlan } from './core/rollbackPlan';
 import { extractReasoningText } from './core/reasoning';
 import { replaceNodeTokens } from './core/displayText';
 import { COMBAT_ANCHOR_NOTICE, combatStageDecision } from './core/combatStage';
+import { splitPromptSections } from './core/promptIndex';
 import { appendRunProposalForNewGenerativeNodes } from './core/runProposal';
 import { pruneCanvasSnapshots } from '../../services/infiniteCanvasStore';
 import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from './core/memory';
@@ -1612,6 +1613,17 @@ assert.equal(
   'blocked-scene-anchor',
 );
 assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '', answering: true, hasAnchor: true, hasOpponentAnchor: true, hasSceneAnchor: true, reviewMissing: true }).reason,
+  'blocked-anchor-review',
+);
+assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'storyboard', message: '', answering: false, hasAnchor: true, hasOpponentAnchor: true, hasSceneAnchor: true, reviewMissing: true }).reason,
+  'blocked-anchor-review',
+);
+const promptSections = splitPromptSections('【风格】3D国漫玄幻\n【运镜】广角推近\n【核心画面】蓄力爆发\n【细节】碎石悬浮');
+assert.equal(promptSections.length, 4);
+assert.equal(promptSections.reduce((sum, section) => sum + section.percent, 0) >= 99, true);
+assert.equal(
   combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '', answering: true, hasAnchor: true, hasOpponentAnchor: true, hasSceneAnchor: true }).advanceTo,
   'storyboard',
 );
@@ -2371,7 +2383,15 @@ assert.match(inlineAskCards2[0]?.question || '', /以上方案可以吗/);
 assert.match(approvalRouteSource, /pendingGeneration/);
 assert.match(approvalRouteSource, /detectedAnchors/);
 assert.match(approvalRouteSource, /askOnly/);
-assert.match(approvalRouteSource, /edit-menu-/);
+assert.match(approvalRouteSource, /anchor-review-/);
+assert.match(approvalRouteSource, /blocked-anchor-review/);
+assert.match(approvalRouteSource, /reviewMissing/);
+assert.match(approvalRouteSource, /\$\{key\}_reviewed/);
+assert.match(approvalRouteSource, /promptIndex/);
+assert.match(approvalRouteSource, /splitPromptSections/);
+assert.match(approvalPanelSource, /canvas-agent-changelog/);
+assert.match(approvalPanelSource, /promptIndexes/);
+assert.match(approvalPanelSource, /canvas-agent-prompt-index/);
 assert.match(approvalRouteSource, /想先改哪一层/);
 assert.match(approvalRouteSource, /anchor_history/);
 assert.match(approvalRouteSource, /锚点版本：/);

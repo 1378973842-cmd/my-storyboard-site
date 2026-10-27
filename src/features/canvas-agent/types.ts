@@ -218,8 +218,21 @@ export type AgentStoredMessage = {
   created_at: number;
 };
 
+import type { PromptIndex } from './core/promptIndex';
+
+export type AnchorHistoryEntry = {
+  role: string;
+  from: string;
+  to: string;
+  at: number;
+};
+
+export type { PromptIndex, PromptSection } from './core/promptIndex';
+
 export type CanvasAgentStreamEvent =
   | { type: 'meta'; model: string; conversationId?: string; jobId?: string; citedNodes?: string[]; effectedNodes?: Array<{ id: string; nodeType: string; label?: string }> }
+  | { type: 'anchors'; history: AnchorHistoryEntry[] }
+  | { type: 'promptIndex'; index: PromptIndex }
   | { type: 'delta'; text: string }
   | { type: 'thinking'; text: string }
   | { type: 'tool'; log: AgentToolLog }

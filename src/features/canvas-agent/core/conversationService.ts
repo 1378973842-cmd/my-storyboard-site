@@ -1,5 +1,5 @@
 import type { EffectedNode } from './effectLedger';
-import type { AgentConversation, AgentStoredMessage } from '../types';
+import type { AgentConversation, AgentStoredMessage, AnchorHistoryEntry } from '../types';
 import type { ProposalDiskOutcome } from './proposalPersistence';
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -39,7 +39,7 @@ export async function createAgentConversation(
 
 export async function loadAgentConversation(
   conversationId: string,
-): Promise<{ conversation: AgentConversation; messages: AgentStoredMessage[]; citedNodes?: string[]; effectedNodes?: EffectedNode[] }> {
+): Promise<{ conversation: AgentConversation; messages: AgentStoredMessage[]; citedNodes?: string[]; effectedNodes?: EffectedNode[]; anchorHistory?: AnchorHistoryEntry[] }> {
   return requestJson(`/api/canvas-agent/conversations/${encodeURIComponent(conversationId)}/messages`);
 }
 

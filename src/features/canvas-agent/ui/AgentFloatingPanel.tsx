@@ -95,6 +95,7 @@ import type {
   AgentConversation,
   AgentToolLog,
   CanvasAgentStreamEvent,
+  PromptIndex,
 } from '../types';
 import type { AskAnswer, AskCard } from '../core/askCard';
 import { runScopeDigest, runScopeMatches, actionsReleasedForApproval, type RunScope } from '../core/runApproval';
@@ -588,6 +589,8 @@ export function AgentFloatingPanel({
   // 批准后正在生成的节点：全部出结果后自动发一条系统通知，让模型接着往下走。
   const autoWatchRef = useRef(new Set<string>());
   const [askAnswers, setAskAnswers] = useState<Record<string, AskAnswer>>({});
+  const [anchorHistory, setAnchorHistory] = useState<Array<{ role: string; from: string; to: string; at: number }>>([]);
+  const [promptIndexes, setPromptIndexes] = useState<Record<string, PromptIndex>>({});
   const [conversations, setConversations] = useState<AgentConversation[]>([]);
   const [renaming, setRenaming] = useState(false);
   const [input, setInput] = useState('');
@@ -817,6 +820,13 @@ export function AgentFloatingPanel({
     conversationIdRef.current = data.conversation.id;
     citedNodesRef.current = Array.isArray(data.citedNodes) ? data.citedNodes : [];
     effectedRef.current = Array.isArray(data.effectedNodes) ? data.effectedNodes : [];
+    setAnchorHistory(Array.isArray(data.anchorHistory) ? data.anchorHistory : []);
+    const restoredIndexes: Record<string, PromptIndex> = {};
+    data.messages.forEach((message) => {
+      const index = (message.metadata as { promptIndex?: PromptIndex } | undefined)?.promptIndex;
+      if (index && Array.isArray(index.sections)) restoredIndexes[message.id] = index;
+    });
+    setPromptIndexes(restoredIndexes);
     setConversationId(data.conversation.id);
     setTitle(data.conversation.title);
     const restoredAnswers: Record<string, AskAnswer> = {};
@@ -1127,6 +1137,10 @@ export function AgentFloatingPanel({
         if (Array.isArray(event.citedNodes)) citedNodesRef.current = event.citedNodes;
         if (Array.isArray(event.effectedNodes)) effectedRef.current = event.effectedNodes;
         if (event.jobId) jobIdRef.current = event.jobId;
+      } else if (event.type === 'anchors') {
+        setAnchorHistory(Array.isArray(event.history) ? event.history : []);
+      } else if (event.type === 'promptIndex') {
+        setPromptIndexes((current) => ({ ...current, [assistantId]: event.index }));
       } else if (event.type === 'delta') {
         setMessages((items) =>
           items.map((item) =>
@@ -1980,6 +1994,24 @@ export function AgentFloatingPanel({
                   <p>描述镜头、节奏或工作流。建/连/改按「执行模式」落板；运行一律等审批卡。</p>
                 </motion.div>
               ) : null}
+              {anchorHistory.length ? (
+                <details className="canvas-agent-changelog">
+                  <summary>锚点变更记录 · {anchorHistory.length}</summary>
+                  <ol>
+                    {[...anchorHistory].reverse().map((entry, index) => (
+                      <li key={`${entry.at}-${index}`}>
+                        <span>{entry.role === 'opponent' ? '对手' : entry.role === 'scene' ? '场景' : '主角'}</span>
+                        <span>
+                          {entry.from.split(':').pop()?.slice(0, 8)}
+                          {' → '}
+                          {entry.to.split(':').pop()?.slice(0, 8)}
+                        </span>
+                        <time>{formatTurnTime(entry.at)}</time>
+                      </li>
+                    ))}
+                  </ol>
+                </details>
+              ) : null}
               {messages.filter((message) => !(message.role === 'user' && message.content.startsWith('[[自动]]'))).map((message) => (
                 <article key={message.id} className={`canvas-agent-message is-${message.role}`}>
                   <div className="canvas-agent-message-head">
@@ -2014,6 +2046,33 @@ export function AgentFloatingPanel({
                     ];
                     return <TurnTimeline steps={steps} />;
                   })() : null}
+                  {message.role === 'assistant' && promptIndexes[message.id] ? (
+                    <details className="canvas-agent-prompt-index">
+                      <summary>提示词结构 · {promptIndexes[message.id].promptChars} 字</summary>
+                      <div className="canvas-agent-prompt-index-meta">
+                        {[
+                          promptIndexes[message.id].ratio,
+                          promptIndexes[message.id].resolution,
+                          promptIndexes[message.id].duration,
+                          promptIndexes[message.id].model,
+                        ].filter(Boolean).join(' · ')}
+                      </div>
+                      <table>
+                        <thead>
+                          <tr><th>层</th><th>占比</th><th>字数</th></tr>
+                        </thead>
+                        <tbody>
+                          {promptIndexes[message.id].sections.map((section) => (
+                            <tr key={section.label}>
+                              <td>{section.label}</td>
+                              <td>{section.percent}%</td>
+                              <td>{section.chars}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </details>
+                  ) : null}
                   {message.role === 'assistant' && message.thinking ? (
                     <ThinkingFold text={message.thinking}>
                       <AssistantMarkdown text={replaceNodeTokens(message.thinking, getCanvasSnapshot().nodes)} />

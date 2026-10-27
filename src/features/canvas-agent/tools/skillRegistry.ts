@@ -305,13 +305,15 @@ export const coreCanvasTools: AIToolDefinition[] = [
         + 'role=opponent marks the opponent anchor instead of the protagonist; '
         + 'role=scene marks the scene reference. '
         + 'When the user provides a reference, assess it first: pass quality="good" if it is clear and shows enough detail/angles, '
-        + 'quality="low" if it is blurry, cropped or missing views; low quality forces a three-view regeneration.',
+        + 'quality="low" if it is blurry, cropped or missing views; low quality forces a three-view regeneration. '
+        + 'After checking a generated three-view for style/proportion consistency, pass review="ok"; if it must be redrawn, pass review="rework".',
       parameters: objectSchema(
         {
           kind: { type: 'string', enum: ['reference', 'three-view'] },
           nodeId: { type: 'string' },
           role: { type: 'string', enum: ['protagonist', 'opponent', 'scene'] },
           quality: { type: 'string', enum: ['good', 'low'] },
+          review: { type: 'string', enum: ['ok', 'rework'] },
         },
         ['kind'],
       ),

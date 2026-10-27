@@ -27,7 +27,8 @@ export type CombatStageReason =
   | 'blocked-params'
   | 'blocked-anchor'
   | 'blocked-opponent-anchor'
-  | 'blocked-scene-anchor';
+  | 'blocked-scene-anchor'
+  | 'blocked-anchor-review';
 
 export type CombatStageDecision = {
   blocked: boolean;
@@ -108,6 +109,14 @@ export const COMBAT_SCENE_NOTICE = [
   '2. 让我生成一张场景图，你确认后再写分镜',
 ].join('\n');
 
+export const COMBAT_REVIEW_NOTICE = [
+  '锚点图还没审阅，先别写分镜。',
+  '',
+  '三张图（主角/对手/场景）要先过一遍：比例、画风、服装武器是否一致。',
+  '1. 一致，可以进分镜',
+  '2. 有问题，需要重画（说明哪里不对）',
+].join('\n');
+
 export function combatStageDecision(input: {
   playbookId: string;
   stage: string;
@@ -119,6 +128,8 @@ export function combatStageDecision(input: {
   hasOpponentAnchor?: boolean;
   /** 场景锚点是否已确认；不传视为已确认（兼容旧调用） */
   hasSceneAnchor?: boolean;
+  /** 三视图锚点是否还有未审阅的；true 表示缺审阅 */
+  reviewMissing?: boolean;
 }): CombatStageDecision {
   const stage = (COMBAT_STAGES as readonly string[]).includes(input.stage)
     ? input.stage as CombatStage
@@ -139,6 +150,9 @@ export function combatStageDecision(input: {
   if (stage === 'storyboard' && input.hasSceneAnchor === false) {
     return { blocked: true, advanceTo: null, reason: 'blocked-scene-anchor', notice: COMBAT_SCENE_NOTICE };
   }
+  if (stage === 'storyboard' && input.reviewMissing) {
+    return { blocked: true, advanceTo: null, reason: 'blocked-anchor-review', notice: COMBAT_REVIEW_NOTICE };
+  }
   if (stage === 'storyboard') {
     return { blocked: false, advanceTo: null, reason: 'storyboard', notice };
   }
@@ -156,6 +170,9 @@ export function combatStageDecision(input: {
       }
       if (input.hasSceneAnchor === false) {
         return { blocked: true, advanceTo: null, reason: 'blocked-scene-anchor', notice: COMBAT_SCENE_NOTICE };
+      }
+      if (input.reviewMissing) {
+        return { blocked: true, advanceTo: null, reason: 'blocked-anchor-review', notice: COMBAT_REVIEW_NOTICE };
       }
     }
     // 每答完一轮提问，往前推一段：方向 → 方案 → 参数 → 分镜
