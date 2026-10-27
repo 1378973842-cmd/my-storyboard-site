@@ -151,7 +151,7 @@ When the user must choose, write your analysis first (what the references show, 
 Never ask questions in prose. If you are about to write "请告诉我", "请选择" or "您希望哪一张", stop and call ask_user instead; a preparation stage without cards is a failed turn.
 Card questions and options must be written in Chinese; never paste an English instruction or prompt into a card. Never output a card or tool call as JSON text (including a bare {card: ...} or {question, options}); always use the native tool call.
 Make every card opinionated: mark the option you recommend with （推荐） and a short reason, for example "16:9（宽幅张力最强，推荐）". A neutral list with no recommendation is a failed card.
-The run approval card has three options: 批准 / 拒绝 / 先改提示词. When the user picks 先改提示词, do not run; show the prompt structure index and a short menu of common edits instead.
+The run approval card has three options: 批准 / 拒绝 / 先改提示词. When the user picks 先改提示词, do not run; show the prompt structure index and a short menu of common edits instead. When a run approval card is already waiting, do not propose the same run again; tell the user the card is waiting and they can approve it or choose 先改提示词.
 After anchor images are generated, inspect them before the storyboard: compare proportions and rendering style with the user's existing character images. If the styles clash, say so plainly and propose the fix with a recommendation; do not silently proceed.
 When a new three-view replaces an old one, mark the old node deprecated, create a v2, record a change log, and ask for authorization again.
 After the video node is built, give the user a prompt structure index (style / camera / core / details with rough percentages) and a menu of common edits, then ask for authorization.
@@ -1403,12 +1403,21 @@ export function registerCanvasAgentRoutes(
           : [];
       }
       const runCardPending = Boolean(db && conversation && hasPendingRunApproval(db, req.authUser?.id || '', conversation.id));
+      // 已经有一张运行卡在等用户：不要再发新的运行请求，避免同一条视频反复弹卡。
+      let duplicateRunNotice = '';
+      if (runCardPending) {
+        const hadRun = actions.some((action) => action.type === 'execute_node_skill');
+        actions = actions.filter((action) => action.type !== 'execute_node_skill');
+        if (hadRun && !actions.length) {
+          duplicateRunNotice = '审批卡还在等您：先在卡上点「批准」或「先改提示词」；这一轮没有重复发运行卡。';
+        }
+      }
       const beforeShortYes = actions.length;
       actions = stripCreatesOnShortYes(actions, message);
       const shortYesBlocked = beforeShortYes > 0 && actions.length === 0;
       // 特效打斗：新建了可生成节点就把运行请求一起提出来，用户在卡片上批准；
       // 不要再让用户去画布上点「生成」。
-      if (!shortYesBlocked) {
+      if (!shortYesBlocked && !runCardPending) {
         actions = appendRunProposalForNewGenerativeNodes(effectivePlaybookId, actions);
       }
       // 结构动作会立即落板，但运行必须由用户在审批卡上放行，所以只要有 execute
@@ -1480,6 +1489,9 @@ export function registerCanvasAgentRoutes(
 
       if (guardNotice) {
         persistedText = guardNotice;
+        streamText(res, persistedText);
+      } else if (duplicateRunNotice) {
+        persistedText = duplicateRunNotice;
         streamText(res, persistedText);
       } else if (shortYesBlocked) {
         persistedText = runCardPending

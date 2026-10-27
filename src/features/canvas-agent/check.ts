@@ -2390,7 +2390,8 @@ assert.match(approvalRouteSource, /成片只建一个 video 节点/);
 assert.equal(isRunningHubChatModel('google/gemini-3.7-flash'), true);
 assert.equal(isRunningHubChatModel('qwen/qwen3.8-flash-next'), true);
 assert.equal(isRunningHubChatModel('gemini-3.5-flash'), false);
-assert.match(approvalRouteSource, /Thinking\/reasoning may be in English/);
+assert.match(approvalRouteSource, /没有重复发运行卡/);
+assert.match(approvalRouteSource, /When a run approval card is already waiting/);
 assert.match(approvalRouteSource, /must be written in Chinese/);
 const bareCard = parseInlineAskCards(JSON.stringify({
   card: {
