@@ -2389,7 +2389,8 @@ assert.match(approvalRouteSource, /reviewMissing/);
 assert.match(approvalRouteSource, /\$\{key\}_reviewed/);
 assert.match(approvalRouteSource, /promptIndex/);
 assert.match(approvalRouteSource, /splitPromptSections/);
-assert.match(approvalPanelSource, /canvas-agent-changelog/);
+assert.match(approvalPanelSource, /anchorWatchRef/);
+assert.match(approvalPanelSource, /anchorWatchStartedAt/);
 assert.match(approvalPanelSource, /promptIndexes/);
 assert.match(approvalPanelSource, /canvas-agent-prompt-index/);
 const inlineAskCards3 = parseInlineAskCards(JSON.stringify({

@@ -588,6 +588,10 @@ export function AgentFloatingPanel({
   const askedRef = useRef(new Set<string>());
   // 批准后正在生成的节点：全部出结果后自动发一条系统通知，让模型接着往下走。
   const autoWatchRef = useRef(new Set<string>());
+  // 从提案层兜底：只要这轮建了可生成节点，就盯到它们出结果为止
+  // （不依赖审批卡上的 id，避免临时 id/换版本时漏通知）。
+  const anchorWatchRef = useRef(false);
+  const anchorWatchStartedAt = useRef(0);
   const [askAnswers, setAskAnswers] = useState<Record<string, AskAnswer>>({});
   const [anchorHistory, setAnchorHistory] = useState<Array<{ role: string; from: string; to: string; at: number }>>([]);
   const [promptIndexes, setPromptIndexes] = useState<Record<string, PromptIndex>>({});
@@ -1161,6 +1165,10 @@ export function AgentFloatingPanel({
       } else if (event.type === 'proposal') {
         if (jobIdRef.current) proposalJobRef.current.set(event.proposal.id, jobIdRef.current);
         replaceProposals((items) => [...items, { ...event.proposal, messageId: assistantId }]);
+        if (event.proposal.actions.some((action) => action.type === 'execute_node_skill')) {
+          anchorWatchRef.current = true;
+          anchorWatchStartedAt.current = Date.now();
+        }
         if (!proposalWaitsForClick(modeRef.current, event.proposal)) {
           void applyRef.current(event.proposal);
         }
@@ -1301,7 +1309,7 @@ export function AgentFloatingPanel({
   // 避免模型在图片还没出来时就问「是否满意」。
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (!autoWatchRef.current.size || streaming) return;
+      if ((!autoWatchRef.current.size && !anchorWatchRef.current) || streaming) return;
       // 还有没答完的提问卡时别插一条自动通知，否则会把新一轮回复怼到用户答题中间。
       const waitingForAnswer = messages.some((message) => (
         message.role === 'assistant'
@@ -1312,10 +1320,23 @@ export function AgentFloatingPanel({
       ));
       if (waitingForAnswer) return;
       const nodes = getCanvasSnapshot().nodes;
+      const watched = [...autoWatchRef.current].filter((nodeId) => (
+        nodes.some((node) => node.id === nodeId)
+      ));
+      // 审批卡上的 id 可能对不上（临时 id/换版本）：退化为按标题盯锚点节点。
+      const anchorNodes = nodes.filter((node) => {
+        const type = String(node.type || '');
+        if (type !== 'generator' && type !== 'image') return false;
+        return /三视图|主角|角色|对手|反派|邪修|场景|背景|神殿|废墟/.test(String(node.title || ''));
+      }).map((node) => node.id);
+      const targets = watched.length
+        ? watched
+        : (anchorWatchRef.current && Date.now() - anchorWatchStartedAt.current > 6000 ? anchorNodes : []);
+      if (!targets.length) return;
       const done: string[] = [];
       const failed: string[] = [];
       let waiting = 0;
-      for (const nodeId of autoWatchRef.current) {
+      for (const nodeId of targets) {
         const state = mediaRunState(nodes.find((node) => node.id === nodeId));
         if (state === 'generated') done.push(nodeId);
         else if (state === 'failed') failed.push(nodeId);
@@ -1323,6 +1344,7 @@ export function AgentFloatingPanel({
       }
       if (waiting) return;
       autoWatchRef.current.clear();
+      anchorWatchRef.current = false;
       const labelOf = (nodeId: string) => nodes.find((node) => node.id === nodeId)?.title || nodeId;
       const typeOf = (nodeId: string) => String(nodes.find((node) => node.id === nodeId)?.type || '');
       const parts = [
