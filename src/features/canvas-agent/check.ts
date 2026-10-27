@@ -2362,6 +2362,8 @@ const inlineAskCards2 = parseInlineAskCards(JSON.stringify({
 assert.equal(inlineAskCards2.length, 1);
 assert.match(inlineAskCards2[0]?.question || '', /以上方案可以吗/);
 assert.match(approvalRouteSource, /pendingGeneration/);
+assert.match(approvalRouteSource, /detectedAnchors/);
+assert.match(approvalRouteSource, /runApprovalIds/);
 assert.match(approvalRouteSource, /stageData\.stage = 'storyboard'/);
 assert.match(approvalPanelSource, /type=\$\{typeOf\(nodeId\)\}/);
 assert.match(approvalPanelSource, /event\.type === 'error'/);

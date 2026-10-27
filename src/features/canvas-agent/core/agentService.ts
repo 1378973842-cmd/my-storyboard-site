@@ -13,6 +13,7 @@ export type AgentStreamRequest = {
   model?: string;
   conversationId?: string;
   playbookId?: string;
+  mode?: 'auto' | 'confirm';
   citedNodeIds?: readonly string[];
   askAnswer?: AgentChatMessage['askAnswer'];
   askAnswers?: AgentChatMessage['askAnswers'];
@@ -41,6 +42,7 @@ export async function streamCanvasAgent(request: AgentStreamRequest): Promise<vo
       canvasId: request.snapshot.canvasId,
       conversationId: request.conversationId,
       playbookId: request.playbookId,
+      mode: request.mode,
       context: serializeCanvasContext(request.snapshot),
       visionImages: visionImageUrlsForTurn(request.snapshot, request.message, request.citedNodeIds),
       runStates: Object.fromEntries(request.snapshot.nodes.map((node) => [node.id, mediaRunState(node)])),

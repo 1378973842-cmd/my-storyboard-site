@@ -110,6 +110,8 @@ type ChatBody = {
   canvasId?: string;
   conversationId?: string;
   playbookId?: string;
+  /** 客户端的提案模式：auto 立即落板，confirm 等点击。 */
+  mode?: string;
   visionImages?: unknown;
   runStates?: unknown;
   askAnswer?: unknown;
@@ -964,6 +966,8 @@ export function registerCanvasAgentRoutes(
     const stageData = db && conversation
       ? readConversationStageData(db, req.authUser?.id || '', conversation.id)
       : { stage: '', facts: {} };
+    // 客户端每轮都带节点状态：已生成的锚点图直接补锚点，别等自动通知被卡住。
+    const runStates = parseRunStates(body.runStates);
     // 生成完成通知里带节点 id/type：按标题把三视图/对手/场景补成锚点，
     // 别因为模型没调 confirm_character_anchor 又把同一张卡问一遍。
     const autoAnchors: { protagonist?: string; opponent?: string; scene?: string } = {};
@@ -975,31 +979,37 @@ export function registerCanvasAgentRoutes(
         else if (/场景|背景|废墟|神殿|庭院|环境/.test(title)) autoAnchors.scene ||= `three-view:${nodeId}`;
         else if (/三视图|主角|角色/.test(title)) autoAnchors.protagonist ||= `three-view:${nodeId}`;
       }
-      if (Object.keys(autoAnchors).length && db && conversation) {
-        writeConversationStageData(db, req.authUser?.id || '', conversation.id, {
-          facts: {
-            ...(autoAnchors.protagonist ? { character_anchor: autoAnchors.protagonist, character_quality: 'good' } : {}),
-            ...(autoAnchors.opponent ? { opponent_anchor: autoAnchors.opponent, opponent_quality: 'good' } : {}),
-            ...(autoAnchors.scene ? { scene_anchor: autoAnchors.scene, scene_quality: 'good' } : {}),
-          },
-        });
-      }
     }
-    // 三个锚点到齐且还在参数阶段：自动推进到分镜，别等一条不是「答题」的消息。
-    const mergedFacts = {
-      ...stageData.facts,
-      ...(autoAnchors.protagonist ? { character_anchor: autoAnchors.protagonist } : {}),
-      ...(autoAnchors.opponent ? { opponent_anchor: autoAnchors.opponent } : {}),
-      ...(autoAnchors.scene ? { scene_anchor: autoAnchors.scene } : {}),
-    };
+    const detectedAnchors: { protagonist?: string; opponent?: string; scene?: string } = { ...autoAnchors };
+    for (const node of effectedNodes) {
+      if (runStates[node.id] !== 'generated') continue;
+      const type = String(node.nodeType || '');
+      if (type !== 'generator' && type !== 'image') continue;
+      const label = String(node.label || '');
+      if (/对手|反派|敌方|魔尊|邪修|boss/i.test(label)) detectedAnchors.opponent ||= `three-view:${node.id}`;
+      else if (/场景|背景|废墟|神殿|庭院|环境/.test(label)) detectedAnchors.scene ||= `three-view:${node.id}`;
+      else if (/三视图|主角|角色/.test(label)) detectedAnchors.protagonist ||= `three-view:${node.id}`;
+    }
+    if (Object.keys(detectedAnchors).length && db && conversation) {
+      writeConversationStageData(db, req.authUser?.id || '', conversation.id, {
+        facts: {
+          ...(detectedAnchors.protagonist ? { character_anchor: detectedAnchors.protagonist, character_quality: 'good' } : {}),
+          ...(detectedAnchors.opponent ? { opponent_anchor: detectedAnchors.opponent, opponent_quality: 'good' } : {}),
+          ...(detectedAnchors.scene ? { scene_anchor: detectedAnchors.scene, scene_quality: 'good' } : {}),
+        },
+      });
+      if (detectedAnchors.protagonist) stageData.facts.character_anchor = detectedAnchors.protagonist;
+      if (detectedAnchors.opponent) stageData.facts.opponent_anchor = detectedAnchors.opponent;
+      if (detectedAnchors.scene) stageData.facts.scene_anchor = detectedAnchors.scene;
+    }
+    // 三个锚点到齐且还在参数阶段：自动推进到分镜。
     if (db && conversation
       && stageData.stage === 'params'
-      && mergedFacts.character_anchor && mergedFacts.opponent_anchor && mergedFacts.scene_anchor) {
+      && stageData.facts.character_anchor && stageData.facts.opponent_anchor && stageData.facts.scene_anchor) {
       writeConversationStageData(db, req.authUser?.id || '', conversation.id, { stage: 'storyboard' });
       stageData.stage = 'storyboard';
     }
     // 客户端上报的节点运行状态：还在生成时别重复发锚点卡。
-    const runStates = parseRunStates(body.runStates);
     const pendingGeneration = effectedNodes.some((node) => {
       const type = String(node.nodeType || '');
       if (type !== 'generator' && type !== 'image') return false;
@@ -1248,10 +1258,15 @@ export function registerCanvasAgentRoutes(
       if (!shortYesBlocked) {
         actions = appendRunProposalForNewGenerativeNodes(effectivePlaybookId, actions);
       }
+      // auto 模式下「建节点 + 运行」会立即落板并开跑，别再发一张过期的运行卡。
+      const clientMode = String(body.mode || 'auto') === 'confirm' ? 'confirm' : 'auto';
+      const executeIds = actions.flatMap((action) => action.type === 'execute_node_skill' ? [action.nodeId] : []);
+      const mixedProposal = actions.some((action) => action.type !== 'execute_node_skill');
+      const runApprovalIds = clientMode === 'auto' && mixedProposal ? [] : executeIds;
       let asks = inlineAsks.length ? inlineAsks : collectAskCards(
         actionCalls.filter((call) => call.function.name === 'ask_user').map((call) => safeArgs(call)),
         actionCalls.length ? '' : (proposalText || firstText),
-        actions.flatMap((action) => action.type === 'execute_node_skill' ? [action.nodeId] : []),
+        runApprovalIds,
       );
       // 分镜还没写进节点就来问「是否满意」：拦下这个提问，先让模型把分镜落板。
       const storyboardNode = actions.some((action) => (
