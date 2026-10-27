@@ -148,7 +148,7 @@ When the user asks to change the canvas, call the provided tools. Use tempId val
 Create, connect and update operations land on the canvas as soon as you propose them. Only execution waits for the user to approve the run card; do not claim a run has happened before that.
 When the user must choose, write your analysis first (what the references show, the style and color call, the beat structure, what you will build), then call ask_user with one card per question in the same order. Do not repeat the option list in the chat text; the card carries the choices. mode is single or multiple. Each card's options use type text for the choices and include one type input so the user can write their own. Do not call ask_user to approve a run. A selected value of 用默认 means the user skipped that question and accepts the default. Do not ask it again.
 Never ask questions in prose. If you are about to write "请告诉我", "请选择" or "您希望哪一张", stop and call ask_user instead; a preparation stage without cards is a failed turn.
-Card questions and options must be written in Chinese; never paste an English instruction or prompt into a card. Never print a tool call as JSON text; always return it through the native tool call.
+Card questions and options must be written in Chinese; never paste an English instruction or prompt into a card. Never output a card or tool call as JSON text (including a bare {card: ...} or {question, options}); always use the native tool call.
 Make every card opinionated: mark the option you recommend with （推荐） and a short reason, for example "16:9（宽幅张力最强，推荐）". A neutral list with no recommendation is a failed card.
 The run approval card has three options: 批准 / 拒绝 / 先改提示词. When the user picks 先改提示词, do not run; show the prompt structure index and a short menu of common edits instead.
 After anchor images are generated, inspect them before the storyboard: compare proportions and rendering style with the user's existing character images. If the styles clash, say so plainly and propose the fix with a recommendation; do not silently proceed.
@@ -1296,10 +1296,13 @@ export function registerCanvasAgentRoutes(
       const firstText = extractTextLlmMessageContent(model, first).trim();
       // 模型偶尔把 ask_user 的 JSON 当正文吐出来：捞成卡片，别把 JSON 推给用户。
       const inlineAsks = parseInlineAskCards(firstText);
-      // JSON 坏掉/形状不认识时也别把原始 JSON 推给用户：只保留 JSON 之前的正文。
-      const looksLikeToolJson = !inlineAsks.length && /"ask_user"/.test(firstText) && /^\s*[{\[]/.test(firstText);
+      // 硬保证：整条正文如果是 JSON（卡片/工具调用/未知信封），一律不展示。
+      // 只保留 JSON 之前可能存在的正常文字。
+      const trimmedText = firstText.trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
+      const jsonOnly = /^[{\[]/.test(trimmedText) && /"(ask_user|actions|card|cards|question|options)"\s*:/.test(trimmedText);
+      const looksLikeToolJson = !inlineAsks.length && jsonOnly;
       const safeFirstText = looksLikeToolJson
-        ? firstText.slice(0, Math.max(0, firstText.indexOf('{'))).trim()
+        ? firstText.slice(0, Math.max(0, firstText.search(/[{\[]/))).trim()
         : firstText;
       // 只出提问卡、没有画布动作时，前面那段是方案/分析，应该当正文，不要塞进思考过程。
       const askOnly = calls.length > 0 && actionCalls.length === 0;

@@ -2389,7 +2389,19 @@ assert.match(approvalRouteSource, /成片只建一个 video 节点/);
 assert.equal(isRunningHubChatModel('google/gemini-3.7-flash'), true);
 assert.equal(isRunningHubChatModel('qwen/qwen3.8-flash-next'), true);
 assert.equal(isRunningHubChatModel('gemini-3.5-flash'), false);
-assert.match(approvalRouteSource, /Never print a tool call as JSON text/);
+assert.match(approvalRouteSource, /Never output a card or tool call as JSON text/);
+const bareCard = parseInlineAskCards(JSON.stringify({
+  card: {
+    question: '本次打斗动画的主角角色来源您倾向于：',
+    options: [
+      { type: 'text', label: '由AI全新生设计（推荐）' },
+      { type: 'text', label: '使用我素材库/已有的角色资产' },
+      { type: 'input', placeholder: '输入您指定的主角人设或描述…' },
+    ],
+  },
+}));
+assert.equal(bareCard.length, 1);
+assert.match(bareCard[0]?.question || '', /主角角色来源/);
 const payloadCards = parseInlineAskCards(JSON.stringify({
   actions: [{
     type: 'ask_user',

@@ -145,7 +145,8 @@ function actionArguments(action: Record<string, unknown>): Record<string, unknow
  */
 export function parseInlineAskCards(text: string): AskCard[] {
   const source = String(text || '').trim();
-  if (!source.includes('"ask_user"')) return [];
+  // 除了 ask_user，也接受裸卡片：{card:{...}} / {cards:[...]} / {question,options}
+  if (!/"ask_user"|"card"|"cards"|"question"/.test(source)) return [];
   const start = source.indexOf('{');
   const end = source.lastIndexOf('}');
   if (start < 0 || end <= start) return [];
@@ -155,8 +156,20 @@ export function parseInlineAskCards(text: string): AskCard[] {
   } catch {
     return [];
   }
-  const actions = Array.isArray(record(parsed).actions) ? record(parsed).actions as unknown[] : [];
+  const root = record(parsed);
   const cards: AskCard[] = [];
+  const pushCard = (entry: unknown, index: number) => {
+    const raw = record(entry);
+    const card = oneCard({ ...raw, mode: raw.mode || 'single' }, index);
+    if (card) cards.push(card);
+  };
+  const actions = Array.isArray(root.actions) ? root.actions as unknown[] : [];
+  if (!actions.length) {
+    const direct = root.cards ?? root.card ?? (root.question ? root : null);
+    const list = Array.isArray(direct) ? direct : direct ? [direct] : [];
+    list.forEach((entry, index) => pushCard(entry, index));
+    return cards;
+  }
   actions.forEach((item, index) => {
     const action = record(item);
     // 两种形态都认：{type:'ask_user',question,...} 和
@@ -169,11 +182,7 @@ export function parseInlineAskCards(text: string): AskCard[] {
       : Array.isArray(argsRecord.asks)
         ? argsRecord.asks
         : [argsRecord];
-    list.forEach((entry, offset) => {
-      const raw = record(entry);
-      const card = oneCard({ ...raw, mode: raw.mode || 'single' }, index + offset);
-      if (card) cards.push(card);
-    });
+    list.forEach((entry, offset) => pushCard(entry, index + offset));
   });
   return cards;
 }
