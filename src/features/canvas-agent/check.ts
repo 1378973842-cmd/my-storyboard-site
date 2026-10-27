@@ -77,7 +77,7 @@ import { extractReasoningText } from './core/reasoning';
 import { replaceNodeTokens } from './core/displayText';
 import { COMBAT_ANCHOR_NOTICE, combatStageDecision } from './core/combatStage';
 import { splitPromptSections } from './core/promptIndex';
-import { appendRunProposalForNewGenerativeNodes } from './core/runProposal';
+import { appendRunProposalForNewGenerativeNodes, collapseMultiVideoProposal } from './core/runProposal';
 import { pruneCanvasSnapshots } from '../../services/infiniteCanvasStore';
 import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from './core/memory';
 import { compactHistory } from './core/history';
@@ -2383,7 +2383,24 @@ assert.match(inlineAskCards2[0]?.question || '', /以上方案可以吗/);
 assert.match(approvalRouteSource, /pendingGeneration/);
 assert.match(approvalRouteSource, /detectedAnchors/);
 assert.match(approvalRouteSource, /askOnly/);
-assert.match(approvalRouteSource, /anchor-review-/);
+assert.match(approvalRouteSource, /multiVideoNotice/);
+assert.match(approvalRouteSource, /成片只建一个 video 节点/);
+assert.match(approvalRouteSource, /Create exactly one video node/);
+const multiVideo = collapseMultiVideoProposal([
+  { type: 'create_node', tempId: 'v1', nodeType: 'video' },
+  { type: 'create_node', tempId: 'v2', nodeType: 'video' },
+  { type: 'create_node', tempId: 'v3', nodeType: 'video' },
+  { type: 'execute_node_skill', nodeId: 'v1' },
+], '做一条 15s 的打斗');
+assert.equal(multiVideo.dropped, 3);
+assert.equal(multiVideo.actions.length, 0);
+assert.equal(
+  collapseMultiVideoProposal([
+    { type: 'create_node', tempId: 'v1', nodeType: 'video' },
+    { type: 'create_node', tempId: 'v2', nodeType: 'video' },
+  ], '分段生成三条').dropped,
+  0,
+);
 assert.match(approvalRouteSource, /blocked-anchor-review/);
 assert.match(approvalRouteSource, /reviewInput/);
 assert.match(approvalRouteSource, /reviewReworking/);
