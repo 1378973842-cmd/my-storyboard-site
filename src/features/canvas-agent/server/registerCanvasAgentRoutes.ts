@@ -1074,21 +1074,34 @@ export function registerCanvasAgentRoutes(
     const hasCanvasMedia = citedNodes.length > 0 || effectedNodes.length > 0;
     // 审阅事实：三视图锚点必须有人（模型或用户）过一遍画风/比例。
     const reviewSelections = selectionsOf('anchor-review-');
+    const reviewInput = askAnswer && String(askAnswer.cardId || '').startsWith('anchor-review-')
+      ? String(askAnswer.input || '').trim()
+      : '';
     const reviewApproved = reviewSelections.some((value) => value.includes('一致'));
     const reviewRework = reviewSelections.some((value) => value.includes('重画'));
-    if ((reviewApproved || reviewRework) && db && conversation) {
+    // 用户直接写「对手画风不对」也算问题反馈，不能因为没点选项又弹一次卡。
+    const reviewIssue = !reviewApproved && (reviewRework || Boolean(reviewInput));
+    const reviewNote = reviewInput || (reviewRework ? '需要重画' : '');
+    if ((reviewApproved || reviewIssue) && db && conversation) {
       const verdict = reviewApproved ? 'ok' : 'rework';
       writeConversationStageData(db, req.authUser?.id || '', conversation.id, {
         facts: {
           character_reviewed: verdict,
           opponent_reviewed: verdict,
           scene_reviewed: verdict,
+          review_rework: reviewApproved ? '' : (reviewNote || '需要重画'),
         },
       });
       stageData.facts.character_reviewed = verdict;
       stageData.facts.opponent_reviewed = verdict;
       stageData.facts.scene_reviewed = verdict;
+      stageData.facts.review_rework = reviewApproved ? '' : (reviewNote || '需要重画');
     }
+    const reviewReworking = !reviewApproved
+      && (reviewIssue || Boolean(stageData.facts.review_rework));
+    const reviewRule = reviewReworking
+      ? `\n\n[review_rule] 锚点审阅未通过：${reviewNote || stageData.facts.review_rework || '需要重画'}。先重画有问题的锚点（新建 v2、引用最新版本），不要重复发审阅卡；重画后让用户重新审阅。`
+      : '';
     const reviewMissing = ([
       ['character_anchor', 'character_reviewed'],
       ['opponent_anchor', 'opponent_reviewed'],
@@ -1133,7 +1146,7 @@ export function registerCanvasAgentRoutes(
     const memoryText = memoryPromptPrefix(recentMemory) + memoryHitsPrompt(memoryHits);
     const imageDataUrls = await compressedVisionUrls(visionRoot, body.visionImages);
     const messages: Array<Record<string, unknown>> = [
-      { role: 'system', content: `${SYSTEM_PROMPT}\n${operatingPrompt(turnMessage, playbookText)}${stageText}${turnStateText}${stageRule}${anchorLock}${earlierText}${memoryText}\n\n${context}` },
+      { role: 'system', content: `${SYSTEM_PROMPT}\n${operatingPrompt(turnMessage, playbookText)}${stageText}${turnStateText}${stageRule}${reviewRule}${anchorLock}${earlierText}${memoryText}\n\n${context}` },
       ...history,
       { role: turnMessage.startsWith('[[自动]]') ? 'system' : 'user', content: userContentWithImages(
         askBatch.length ? `askAnswers:${JSON.stringify(askBatch)}` : askAnswer ? `askAnswer:${JSON.stringify(askAnswer)}` : turnMessage,
@@ -1251,6 +1264,8 @@ export function registerCanvasAgentRoutes(
           const review = String(args.review || '');
           if (args.kind === 'three-view' && (review === 'ok' || review === 'rework')) {
             facts[`${key}_reviewed`] = review;
+            // 新的审阅通过后，清掉之前的问题记录。
+            facts.review_rework = review === 'ok' ? '' : '需要重画';
           }
           writeConversationStageData(db, req.authUser?.id || '', conversation.id, { facts });
         });
@@ -1579,21 +1594,27 @@ export function registerCanvasAgentRoutes(
           sendEvent(res, { type: 'ask', asks: [sceneCard] });
         }
       } else if (stageGate.blocked && stageGate.reason === 'blocked-anchor-review' && !asks.length) {
-        // 三张锚点图必须有人过一遍画风/比例，才能进分镜。
-        const reviewCard: AskCard = {
-          id: `anchor-review-${Date.now()}`,
-          mode: 'single',
-          question: '三张锚点图检查',
-          options: [
-            { type: 'text', label: '风格/比例一致，进分镜（推荐）' },
-            { type: 'text', label: '有问题，需要重画（在下方写）' },
-            { type: 'input', placeholder: '哪里不对（可留空）' },
-          ],
-        };
-        persistedAsks = [reviewCard];
-        persistedText = COMBAT_REVIEW_NOTICE;
-        streamText(res, persistedText);
-        sendEvent(res, { type: 'ask', asks: [reviewCard] });
+        if (reviewReworking) {
+          // 用户已经指出问题：别再弹同一张卡，转成重画指令。
+          persistedText = `收到问题：${reviewNote || stageData.facts.review_rework || '需要重画'}。先重画有问题的锚点（新建 v2），重画后我再重新审阅；这次不重复发卡。`;
+          streamText(res, persistedText);
+        } else {
+          // 三张锚点图必须有人过一遍画风/比例，才能进分镜。
+          const reviewCard: AskCard = {
+            id: `anchor-review-${Date.now()}`,
+            mode: 'single',
+            question: '三张锚点图检查',
+            options: [
+              { type: 'text', label: '风格/比例一致，进分镜（推荐）' },
+              { type: 'text', label: '有问题，需要重画（在下方写）' },
+              { type: 'input', placeholder: '哪里不对（可留空）' },
+            ],
+          };
+          persistedAsks = [reviewCard];
+          persistedText = COMBAT_REVIEW_NOTICE;
+          streamText(res, persistedText);
+          sendEvent(res, { type: 'ask', asks: [reviewCard] });
+        }
       } else if (stageGate.blocked && !asks.length) {
         // 模型没给提问卡时，方向阶段由服务端补一套（按 skill 的维度）。
         if (stageGate.reason === 'blocked-direction') {
