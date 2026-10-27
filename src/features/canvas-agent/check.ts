@@ -297,6 +297,14 @@ assert.equal(TASK_STAGE.anchors, 'params');
 assert.equal(TASK_STAGE.storyboard, 'storyboard');
 assert.equal(TASK_STAGE.review, 'storyboard');
 assert.equal(TASK_STAGE.anchor_runs, 'production');
+// 规划核对：必须回读文件，提示里附上创作稿与分镜原文。
+completeTaskStep(taskConversation, 'anchors');
+completeTaskStep(taskConversation, 'storyboard');
+const reviewState = readTaskState(taskConversation);
+assert.equal(reviewState?.current, 'review');
+assert.match(taskStatePrompt(reviewState), /\[review_files\]/);
+assert.match(taskStatePrompt(reviewState), /创作稿正文/);
+assert.match(taskStatePrompt(reviewState), /分镜1/);
 updateTaskFacts(taskConversation, { character_anchor: 'three-view:test', character_quality: 'good' });
 assert.equal(readTaskState(taskConversation)?.facts.character_anchor, 'three-view:test');
 rmSync(String(process.env.CANVAS_AGENT_TASK_DIR), { recursive: true, force: true });
