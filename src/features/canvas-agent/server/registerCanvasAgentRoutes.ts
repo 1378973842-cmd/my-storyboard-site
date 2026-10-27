@@ -296,7 +296,9 @@ async function callModel(
     ...(tools
       ? {
         tools: allCanvasAITools,
-        tool_choice: forceAsk
+        // Google 系（RunningHub）对 tool_choice=对象/required 支持不好：
+        // 会变成 length 截断 + 用正文描述调用。这里只给它 auto，靠提示词约束。
+        tool_choice: forceAsk && !/^google\//i.test(model)
           ? { type: 'function', function: { name: 'ask_user' } }
           : 'auto',
       }
@@ -1186,8 +1188,8 @@ export function registerCanvasAgentRoutes(
       }
       // 原生工具调用偶尔会被模型写成正文 JSON：先重试一次，要求走原生 tool call。
       const previewText = extractTextLlmMessageContent(model, first).trim();
-      const previewJson = /^\s*[{\[]/.test(previewText)
-        && /"(ask_user|actions|card|cards|question|options)"\s*:/.test(previewText);
+      const previewJson = /"(ask_user|card|cards)"\s*:/.test(previewText)
+        || (/"question"\s*:/.test(previewText) && /"options"\s*:/.test(previewText));
       if (parseToolCalls(first).length === 0 && previewJson) {
         try {
           const retried = await callModel(model, [
@@ -1301,6 +1303,9 @@ export function registerCanvasAgentRoutes(
       // 只保留 JSON 之前可能存在的正常文字。
       const trimmedText = firstText.trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
       const jsonOnly = /^[{\[]/.test(trimmedText) && /"(ask_user|actions|card|cards|question|options)"\s*:/.test(trimmedText);
+      // 正文里夹着卡片 JSON（哪怕前面有 "I need to call..." 这种旁白）也算。
+      const cardJsonInText = /"(ask_user|card|cards)"\s*:/.test(firstText)
+        || (/"question"\s*:/.test(firstText) && /"options"\s*:/.test(firstText));
       const looksLikeToolJson = !inlineAsks.length && jsonOnly;
       const safeFirstText = looksLikeToolJson
         ? firstText.slice(0, Math.max(0, firstText.search(/[{\[]/))).trim()
@@ -1716,8 +1721,9 @@ export function registerCanvasAgentRoutes(
         // 分镜还没落板就先别问「是否满意」，先把剧本写进节点。
         persistedText = '分镜剧本还没落进节点，先让我把分镜表写出来，你再确认满不满意。';
         streamText(res, persistedText);
-      } else if (jsonOnly && !calls.length && !asks.length) {
-        // 模型把卡片写成了正文 JSON：重试过仍没走工具，给明确提示，不展示 JSON。
+      } else if ((jsonOnly || cardJsonInText) && !calls.length && !asks.length) {
+        // 模型把卡片写成了正文 JSON（甚至先来一句 "I need to call..."）：
+        // 重试过仍没走工具，给明确提示，不展示 JSON 或旁白。
         persistedText = '这一轮没有通过工具生成卡片，请再发一次。';
         streamText(res, persistedText);
       } else if (asks.length) {
