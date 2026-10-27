@@ -2685,6 +2685,7 @@ assert.match(approvalRouteSource, /TASK_STAGE\[taskBefore\.current\]/);
 assert.match(approvalRouteSource, /arguments 不是合法 JSON/);
 assert.match(approvalRouteSource, /production_plan_knowledge/);
 assert.match(approvalRouteSource, /没有拼接、转场、BGM 能力/);
+assert.match(readFileSync(new URL('./core/planCheck.ts', import.meta.url), 'utf8'), /requireCapacity 默认 true/);
 assert.doesNotMatch(readFileSync(new URL('./core/planCheck.ts', import.meta.url), 'utf8'), /durationTarget > 15/);
 const capacityPlan = selectKnowledgeForUse(
   readPlaybookKnowledge('.', 'canvas-combat-fx'),

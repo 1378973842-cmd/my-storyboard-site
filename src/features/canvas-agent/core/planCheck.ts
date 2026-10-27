@@ -137,6 +137,10 @@ function mismatchDetail(draft: string, joined: string): string {
   return `第 ${index + 1} 字开始不一致：创作稿「${draft.slice(from, index + 24)}」/ 分镜「${joined.slice(from, index + 24)}」`;
 }
 
+/**
+ * requireCapacity 默认 true：读不到容量表就显式失败，不按最宽上限放行。
+ * 新增调用点必须显式传 false 才跳过；禁止把默认值改成 false。
+ */
 export function checkStoryboardAgainstDraft(
   draft: string,
   storyboard: string,
