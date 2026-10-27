@@ -1316,6 +1316,9 @@ export function AgentFloatingPanel({
         ...failed.map((nodeId) => `生成失败：${labelOf(nodeId)}`),
       ];
       if (!parts.length) return;
+      // 让下一轮真的能看到生成结果：把这些节点加进本次会话引用，
+      // visionImages 会带上它们，模型才能做画风/比例自查。
+      citedNodesRef.current = [...new Set([...citedNodesRef.current, ...done])];
       void sendText(
         `[[自动]] ${parts.join('；')}。请检查结果并让用户确认，或继续下一步；不要重复之前的分析。`,
         messages,

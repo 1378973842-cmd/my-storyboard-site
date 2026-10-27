@@ -148,6 +148,11 @@ Create, connect and update operations land on the canvas as soon as you propose 
 When the user must choose, write your analysis first (what the references show, the style and color call, the beat structure, what you will build), then call ask_user with one card per question in the same order. Do not repeat the option list in the chat text; the card carries the choices. mode is single or multiple. Each card's options use type text for the choices and include one type input so the user can write their own. Do not call ask_user to approve a run. A selected value of 用默认 means the user skipped that question and accepts the default. Do not ask it again.
 Never ask questions in prose. If you are about to write "请告诉我", "请选择" or "您希望哪一张", stop and call ask_user instead; a preparation stage without cards is a failed turn.
 Card questions and options must be written in Chinese; never paste an English instruction or prompt into a card.
+Make every card opinionated: mark the option you recommend with （推荐） and a short reason, for example "16:9（宽幅张力最强，推荐）". A neutral list with no recommendation is a failed card.
+The run approval card has three options: 批准 / 拒绝 / 先改提示词. When the user picks 先改提示词, do not run; show the prompt structure index and a short menu of common edits instead.
+After anchor images are generated, inspect them before the storyboard: compare proportions and rendering style with the user's existing character images. If the styles clash, say so plainly and propose the fix with a recommendation; do not silently proceed.
+When a new three-view replaces an old one, mark the old node deprecated, create a v2, record a change log, and ask for authorization again.
+After the video node is built, give the user a prompt structure index (style / camera / core / details with rough percentages) and a menu of common edits, then ask for authorization.
 When asking the user to confirm a plan or proposal, write the full plan in your message first and refer to it as 以上方案 (never 以下方案, because the card has no plan below it). Do not number a single card question like "1.". 
 Never ask the user to confirm an image before it is actually generated; if the node is still running, say it is still generating. Do not repeat analysis you already gave in an earlier turn; if nothing changed, answer in one line.
 Messages whose text starts with [[自动]] are automatic system notes about generation finishing, not user speech. Treat them as status updates: inspect the result, then let the user confirm or continue. Never claim the user asked to redesign, replace or modify anything unless their own message says so.
@@ -1073,7 +1078,7 @@ export function registerCanvasAgentRoutes(
       && !hasAnchor
       ? '\n\n[stage_rule] 第一张提问卡先确认主角：用画布里的参考，还是新角色。确认前不要问画风、特效或对手。'
       : combatSession && stageData.stage === 'proposal'
-        ? '\n\n[stage_rule] 方向已答完：先给一套具体方案（风格/特效/动作节奏/叙事结构 + 1-2 个建议），让用户确认这个方向；确认后再收六项参数，不要跳步。方案阶段只写叙事弧（建立→对抗→爆发→收束），不要写 SB-01 这类分镜编号和镜头表；分镜表等主角/对手/场景三张锚点图确认后再写。'
+        ? '\n\n[stage_rule] 方向已答完：先给一套具体方案（风格/特效/动作节奏/叙事结构 + 1-2 个建议），让用户确认这个方向；确认后再收六项参数，不要跳步。方案阶段可以给 4 段叙事表（段落/占比/内容/冲击帧），但不要写镜头、时间码和逐镜拆解；这些等主角/对手/场景三张锚点图确认后再写。'
         : '';
     // 锚点版本锁：生成节点必须引用当前锚点，不能再用旧版本。
     const anchorEntries = [

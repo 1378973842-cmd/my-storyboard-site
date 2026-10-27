@@ -1137,7 +1137,11 @@ const asked = normalizeAskCards({ mode: 'single', question: '多少秒？', opti
 assert.equal(asked[0]?.options.some((item) => item.type === 'input'), true);
 const runCard = withRunApproval([{ ...asked[0], id: 'q' }], ['vid_a', 'vid_b']);
 assert.equal(runCard.at(-1)?.mode, 'approve_run_node');
-assert.deepEqual(runCard.at(-1)?.options, [{ type: 'text', label: '批准' }, { type: 'text', label: '拒绝' }]);
+assert.deepEqual(runCard.at(-1)?.options, [
+  { type: 'text', label: '批准' },
+  { type: 'text', label: '拒绝' },
+  { type: 'text', label: '先改提示词' },
+]);
 assert.deepEqual(runCard.at(-1)?.node_keys, ['vid_a', 'vid_b']);
 assert.equal(parseAskAnswer({ cardId: 'ask-run', mode: 'approve_run_node', selected: ['批准'], input: '改一下' }), null);
 assert.equal(approveRunCard([]) , null);
@@ -1146,6 +1150,8 @@ assert.match(askHtml, /自己写/);
 const runHtml = renderToStaticMarkup(createElement(AskCardView, { card: runCard.at(-1)!, onSubmit() {} }));
 assert.match(runHtml, /批准/);
 assert.match(runHtml, /拒绝/);
+assert.match(runHtml, /先改提示词/);
+assert.ok(parseAskAnswer({ cardId: 'ask-run', mode: 'approve_run_node', selected: ['先改提示词'] }));
 assert.doesNotMatch(runHtml, /自己写/);
 assert.doesNotMatch(runHtml, /忽略/);
 // 卡上给用户看节点名，不放 id；id 只留在 title 里兜底。
@@ -2364,7 +2370,11 @@ assert.match(inlineAskCards2[0]?.question || '', /以上方案可以吗/);
 assert.match(approvalRouteSource, /pendingGeneration/);
 assert.match(approvalRouteSource, /detectedAnchors/);
 assert.match(approvalRouteSource, /askOnly/);
-assert.match(approvalRouteSource, /assetGuardNotice/);
+assert.match(approvalRouteSource, /（推荐）/);
+assert.match(approvalRouteSource, /先改提示词/);
+assert.match(approvalRouteSource, /4 段叙事表/);
+assert.match(combatPlaybookSource, /每张卡都要有推荐/);
+assert.match(approvalPanelSource, /visionImages 会带上它们|visionImages 会/);
 assert.match(approvalRouteSource, /blockedAssetTitles/);
 assert.match(approvalRouteSource, /Never create an image node from an asset-library/);
 const serializerSource = readFileSync(new URL('./core/contextSerializer.ts', import.meta.url), 'utf8');

@@ -27,6 +27,7 @@ export type AskAnswer = {
 
 const APPROVE = '批准';
 const REJECT = '拒绝';
+export const RUN_EDIT_FIRST = '先改提示词';
 export const ASK_DEFAULT = '用默认';
 
 function record(value: unknown): Record<string, unknown> {
@@ -71,6 +72,8 @@ function oneCard(value: unknown, index: number): AskCard | null {
       options: [
         { type: 'text', label: APPROVE },
         { type: 'text', label: REJECT },
+        // 参考平台的第三选项：先别生成，给我看提示词结构/先改一版。
+        { type: 'text', label: RUN_EDIT_FIRST },
       ],
       node_keys: nodeKeys,
       ...(nodeKey ? { node_key: nodeKey } : {}),
@@ -163,12 +166,13 @@ export function approveRunCard(nodeKeys: string[]): AskCard | null {
     options: [
       { type: 'text', label: APPROVE },
       { type: 'text', label: REJECT },
+      { type: 'text', label: RUN_EDIT_FIRST },
     ],
     node_keys: keys,
   };
 }
 
-/** 模型自己写的审批卡丢掉。即将运行的节点由这一侧列全，选项固定两个。 */
+/** 模型自己写的审批卡丢掉。即将运行的节点由这一侧列全，选项固定三个。 */
 export function withRunApproval(cards: AskCard[], executeNodeIds: string[]): AskCard[] {
   const rest = cards.filter((card) => card.mode !== 'approve_run_node');
   const run = approveRunCard(executeNodeIds);
@@ -220,7 +224,9 @@ export function parseAskAnswer(value: unknown): AskAnswer | null {
   const input = String(raw.input || '').trim();
   const question = String(raw.question || '').trim();
   if (mode === 'approve_run_node') {
-    if (selected.length !== 1 || (selected[0] !== APPROVE && selected[0] !== REJECT) || input) return null;
+    if (selected.length !== 1
+      || (selected[0] !== APPROVE && selected[0] !== REJECT && selected[0] !== RUN_EDIT_FIRST)
+      || input) return null;
     return { cardId, mode, selected, ...(question ? { question } : {}) };
   }
   if (mode === 'single' && selected.length > 1) return null;
