@@ -19,7 +19,7 @@ import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRec
 import { operatingPrompt } from '../core/operatingModel.js';
 import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
 import { canvasAgentStagePrefix } from '../core/stageLedger.js';
-import { completeTaskStep, ensureTask, readTaskArtifact, readTaskState, setTaskCursor, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
+import { completeTaskStep, ensureTask, readTaskArtifact, readTaskArtifactSlice, readTaskState, setTaskCursor, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
 import { checkStoryboardAgainstDraft } from '../core/planCheck.js';
 import { assembleKnowledgeForTurn } from '../core/knowledgeContext.js';
 import { turnStatePrefix } from '../core/turnState.js';
@@ -1212,7 +1212,68 @@ export function registerCanvasAgentRoutes(
           first = await callModel(model, messages, false, controller.signal);
         }
       }
-      // 原生工具调用偶尔会被模型写成正文 JSON：先重试一次，要求走原生 tool call。
+      // 通用读回：模型可单独调 read_task_artifact 读账本；把文件内容作为 tool result
+      // 回给它，再让它继续本轮的动作。最多 3 轮，避免读循环。
+      for (let readRound = 0; readRound < 3; readRound += 1) {
+        const probeCalls = parseToolCalls(first);
+        const onlyReads = probeCalls.length > 0
+          && probeCalls.every((call) => call.function.name === 'read_task_artifact');
+        if (!onlyReads) break;
+        const toolResults = probeCalls.map((call) => {
+          const args = safeArgs(call);
+          try {
+            const slice = readTaskArtifactSlice(
+              conversation?.id || '',
+              String(args.kind || ''),
+              args.offset,
+              args.length,
+            );
+            const log = {
+              id: `read-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              name: 'read_task_artifact',
+              label: `读回 ${slice.kind}（${slice.offset}-${slice.nextOffset}/${slice.total} 字）`,
+              state: 'done' as const,
+            };
+            persistedToolLogs.push(log);
+            sendEvent(res, { type: 'tool', log });
+            return {
+              role: 'tool',
+              tool_call_id: call.id,
+              content: JSON.stringify({ status: 'ok', ...slice }),
+            };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            const log = {
+              id: `read-fail-${Date.now()}`,
+              name: 'read_task_artifact',
+              label: `读回失败：${message}`,
+              state: 'failed' as const,
+            };
+            persistedToolLogs.push(log);
+            sendEvent(res, { type: 'tool', log });
+            return {
+              role: 'tool',
+              tool_call_id: call.id,
+              content: JSON.stringify({ status: 'error', error: message }),
+            };
+          }
+        });
+        const assistantToolMessage = {
+          role: 'assistant',
+          content: extractTextLlmMessageContent(model, first),
+          tool_calls: probeCalls.map((call) => ({
+            id: call.id,
+            type: 'function',
+            function: { name: call.function.name, arguments: call.function.arguments },
+          })),
+        };
+        first = await callModel(
+          model,
+          [...messages, assistantToolMessage, ...toolResults],
+          false,
+          controller.signal,
+        );
+      }
       const previewText = extractTextLlmMessageContent(model, first).trim();
       const previewJson = /"(ask_user|card|cards)"\s*:/.test(previewText)
         || (/"question"\s*:/.test(previewText) && /"options"\s*:/.test(previewText));
@@ -1319,7 +1380,7 @@ export function registerCanvasAgentRoutes(
       // 文件账本：任务/产物/步骤落文件，数据库只做缓存。
       let taskNotice = '';
       calls
-        .filter((call) => ['start_production_task', 'write_task_artifact', 'complete_task_step'].includes(call.function.name))
+        .filter((call) => ['start_production_task', 'write_task_artifact', 'complete_task_step', 'read_task_artifact'].includes(call.function.name))
         .forEach((call) => {
           if (!conversation) return;
           const args = safeArgs(call);
@@ -1351,6 +1412,9 @@ export function registerCanvasAgentRoutes(
               }
               label = `文件账本：已写入 ${kind}.md（${written.chars} 字）`;
               taskNotice = `已写入 ${kind}.md（${written.chars} 字）。当前位置：${stepLabel(written.state.current)}。`;
+            } else if (call.function.name === 'read_task_artifact') {
+              // 读回要和写/推进分开调用：混在同一批时，文件内容没法安全地回给模型。
+              throw new Error('read_task_artifact 要单独调用，不要和 write/complete 放在同一批工具里。');
             } else {
               const step = String(args.step || '') as TaskStep;
               if (step === 'review') {
@@ -1392,7 +1456,7 @@ export function registerCanvasAgentRoutes(
       const actionCalls = calls
         .filter((call) => call.function.name !== 'remember_project_fact')
         .filter((call) => call.function.name !== 'confirm_character_anchor')
-        .filter((call) => !['start_production_task', 'write_task_artifact', 'complete_task_step'].includes(call.function.name))
+        .filter((call) => !['start_production_task', 'write_task_artifact', 'complete_task_step', 'read_task_artifact'].includes(call.function.name))
         .filter((call) => Boolean(toolContract(call.function.name, toolNames)));
       // 阶段 5（新判据）：骨架已常驻；只有本轮真实动作含 video create/update 时，
       // 才把对应元素的知识拼进「写 prompt」的二次调用。判据是动作，不是阶段格。

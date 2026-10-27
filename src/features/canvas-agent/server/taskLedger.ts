@@ -207,6 +207,59 @@ export function readTaskArtifact(
   }
 }
 
+export type TaskArtifactSlice = {
+  kind: TaskArtifactKind;
+  offset: number;
+  length: number;
+  total: number;
+  content: string;
+  truncated: boolean;
+  nextOffset: number;
+};
+
+/** 通用读回：模型主动读账本产物，支持偏移+长度分段。失败时报字段、合法值、怎么改。 */
+export function readTaskArtifactSlice(
+  conversationId: string,
+  kindInput: string,
+  offsetInput: unknown = 0,
+  lengthInput: unknown = 8000,
+): TaskArtifactSlice {
+  const kind = String(kindInput || '').trim() as TaskArtifactKind;
+  if (!ARTIFACT_FILES[kind]) {
+    throw new Error(
+      `read_task_artifact 的 kind 不合法：${kind || '（空）'}。合法值：draft、index、anchors、storyboard。请改成其中之一。`,
+    );
+  }
+  const state = readTaskState(conversationId);
+  if (!state) {
+    throw new Error('当前会话还没有账本。先调用 start_production_task 建账本，再读产物。');
+  }
+  const file = path.join(taskDir(conversationId), ARTIFACT_FILES[kind]);
+  if (!existsSync(file)) {
+    throw new Error(`还没有 ${ARTIFACT_FILES[kind]}。先用 write_task_artifact 写 ${kind}，再读。`);
+  }
+  const raw = readFileSync(file, 'utf8');
+  const offset = Number(offsetInput ?? 0);
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error(`read_task_artifact 的 offset 必须是 >=0 的整数（收到 ${String(offsetInput)}）。从 0 开始按字符计。`);
+  }
+  const length = Number(lengthInput ?? 8000);
+  if (!Number.isInteger(length) || length < 1 || length > 20_000) {
+    throw new Error(`read_task_artifact 的 length 必须是 1..20000 的整数（收到 ${String(lengthInput)}）。不传时默认 8000。`);
+  }
+  const content = raw.slice(offset, offset + length);
+  const nextOffset = offset + content.length;
+  return {
+    kind,
+    offset,
+    length,
+    total: raw.length,
+    content,
+    truncated: nextOffset < raw.length,
+    nextOffset,
+  };
+}
+
 export function completeTaskStep(
   conversationId: string,
   step: TaskStep,
@@ -274,5 +327,5 @@ export function taskStatePrompt(state: TaskState | null): string {
   const reviewFiles = state.current === 'review'
     ? `\n\n[review_files]\n<draft>\n${readTaskArtifact(state.conversationId, 'draft').slice(0, 20_000)}\n</draft>\n<storyboard>\n${readTaskArtifact(state.conversationId, 'storyboard').slice(0, 20_000)}\n</storyboard>\n逐字核对：分镜的原文片段拼起来是否等于创作稿全文；再核对总时长与反碎化。结论写进 index.md 的「规划核对」分节，再 complete_task_step('review')。`
     : '';
-  return `\n\n[task_state]\n- 任务：${state.title}（${state.id}）\n- 当前位置（第一条未划掉）：${TASK_STEPS.find((item) => item.step === state.current)?.label || state.current}\n- todo：${todo}${cursor}\n- 产物：${artifacts || '（尚未写入）'}${reviewStatus}\n- 文件是唯一权威源：写产物用 write_task_artifact，完成一步用 complete_task_step；核对所需的创作稿/分镜会自动附上，不要凭记忆推进。${reviewFiles}`;
+  return `\n\n[task_state]\n- 任务：${state.title}（${state.id}）\n- 当前位置（第一条未划掉）：${TASK_STEPS.find((item) => item.step === state.current)?.label || state.current}\n- todo：${todo}${cursor}\n- 产物：${artifacts || '（尚未写入）'}${reviewStatus}\n- 文件是唯一权威源：写产物用 write_task_artifact，完成一步用 complete_task_step，主动读回用 read_task_artifact（kind + offset/length，单独一批调用）；核对所需的创作稿/分镜会自动附上，不要凭记忆推进。${reviewFiles}`;
 }

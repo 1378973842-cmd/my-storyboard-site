@@ -373,6 +373,22 @@ export const coreCanvasTools: AIToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'read_task_artifact',
+      description:
+        'Read a production artifact from the task ledger file (draft/index/anchors/storyboard). Supports offset+length for long files; returns total/truncated/nextOffset. Call this alone (not together with write/complete). Read the file instead of relying on memory.',
+      parameters: objectSchema(
+        {
+          kind: { type: 'string', enum: ['draft', 'index', 'anchors', 'storyboard'] },
+          offset: { type: 'number' },
+          length: { type: 'number' },
+        },
+        ['kind'],
+      ),
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'trigger_skill_execution',
       description:
         'Propose running existing node skills. Generation always requires explicit user approval.',

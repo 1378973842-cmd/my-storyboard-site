@@ -98,6 +98,14 @@ const CORE_CONTRACTS: ToolContract[] = [
     idempotent: true,
     resultStatus: 'stored',
   },
+  {
+    name: 'read_task_artifact',
+    scope: 'meta',
+    mutatesCanvas: false,
+    requiresApproval: false,
+    idempotent: true,
+    resultStatus: 'read',
+  },
 ];
 
 const BY_NAME = new Map(CORE_CONTRACTS.map((item) => [item.name, item]));
