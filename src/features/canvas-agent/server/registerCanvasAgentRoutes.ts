@@ -150,6 +150,7 @@ Create, connect and update operations land on the canvas as soon as you propose 
 Before you act, think through: (1) which skill stage you are in and what it requires next; (2) what the references actually show and whether their quality is sufficient; (3) what is specific to this user's character and project rather than a generic template; (4) the exact cards/actions for this turn, including what you recommend and why. Keep this in the thinking channel, then call the tools; never narrate the tool call in prose.
 Decide first: direct or production. If the work needs multiple generations with consistent characters/scenes or production assets (draft, anchors, storyboard), call start_production_task before creating nodes; direct one-shot edits do not need a task. Once a task exists, its first unchecked todo is the current position: write draft/index/anchors/storyboard with write_task_artifact, mark a finished step with complete_task_step. Files are the source of truth, not chat or memory; do not claim a step is done without completing it. Write long storyboards in chunks with append so the output budget does not truncate them.
 Planning files: draft.md is the only content baseline (user text verbatim, or an approved rewrite); index.md holds the total table (final-cut account, model/continuation choice, ratio, one global style sentence reused by every shot, user time requirement); anchors.md holds the full anchor registry; storyboard.md holds source fragments, anchor refs, estimated durations, stage/shot and continuation marks. At the review step, read draft.md and storyboard.md from files (not memory), check the source fragments concatenate to the draft word-for-word, check total duration and anti-fragmentation, write the conclusions into index.md, then complete_task_step('review').
+Batch derivation follows references, not guessing: run anchor images before any storyboard video whose prompt references them; never propose a storyboard video run while its anchor has no generated image. Parallelize only independent storyboards. One task produces exactly one final cut; do not create multiple final video nodes unless the user explicitly asks for separate segments.
 When the user must choose, write your analysis first (what the references show, the style and color call, the beat structure, what you will build), then call ask_user with one card per question in the same order. Do not repeat the option list in the chat text; the card carries the choices. mode is single or multiple. Each card's options use type text for the choices and include one type input so the user can write their own. Do not call ask_user to approve a run. A selected value of 用默认 means the user skipped that question and accepts the default. Do not ask it again.
 Never ask questions in prose. If you are about to write "请告诉我", "请选择" or "您希望哪一张", stop and call ask_user instead; a preparation stage without cards is a failed turn.
 Card questions and options must be written in Chinese; never paste an English instruction or prompt into a card. Never output a card or tool call as JSON text (including a bare {card: ...} or {question, options}); always use the native tool call.
@@ -1498,6 +1499,27 @@ export function registerCanvasAgentRoutes(
       const beforeShortYes = actions.length;
       actions = stripCreatesOnShortYes(actions, message);
       const shortYesBlocked = beforeShortYes > 0 && actions.length === 0;
+      // 阶段 4：批次推导按引用关系算。锚点图没生成完，分镜视频不许先跑。
+      let batchNotice = '';
+      const anchorNodeIds = ['character_anchor', 'opponent_anchor', 'scene_anchor']
+        .map((key) => String(gateFacts[key] || ''))
+        .filter((value) => value.startsWith('three-view:'))
+        .map((value) => value.slice('three-view:'.length));
+      const anchorReady = anchorNodeIds.length > 0 && anchorNodeIds.every((id) => runStates[id] === 'generated');
+      if (anchorNodeIds.length && !anchorReady) {
+        const deferred = actions.filter((action) => {
+          if (action.type !== 'execute_node_skill') return false;
+          const nodeId = String((action as { nodeId?: string }).nodeId || '');
+          const node = effectedNodes.find((item) => item.id === nodeId);
+          const label = String(node?.label || '');
+          return node?.nodeType === 'video' || /视频|成片|分镜/.test(label);
+        });
+        if (deferred.length) {
+          const deferredIds = new Set(deferred.map((action) => String((action as { nodeId?: string }).nodeId || '')));
+          actions = actions.filter((action) => !(action.type === 'execute_node_skill' && deferredIds.has(String((action as { nodeId?: string }).nodeId || ''))));
+          batchNotice = '锚点图还没生成完：先跑锚点批，等三视图/对手/场景都出图，再跑分镜视频。';
+        }
+      }
       // 特效打斗：新建了可生成节点就把运行请求一起提出来，用户在卡片上批准；
       // 不要再让用户去画布上点「生成」。
       if (!shortYesBlocked && !runCardPending) {
@@ -1573,6 +1595,9 @@ export function registerCanvasAgentRoutes(
         streamText(res, persistedText);
       } else if (duplicateRunNotice) {
         persistedText = duplicateRunNotice;
+        streamText(res, persistedText);
+      } else if (batchNotice && !actions.length && !asks.length) {
+        persistedText = batchNotice;
         streamText(res, persistedText);
       } else if (taskNotice && !actions.length && !asks.length) {
         persistedText = taskNotice;
