@@ -2,8 +2,8 @@ import { Resolver } from "node:dns/promises";
 import { Agent, fetch as undiciFetch } from "undici";
 import { createFakeTextLlmResponse } from "./fakeTextLlmProvider.js";
 
-/** RunningHub OpenAI-compatible text LLM (e.g. glm-5.1); supports multimodal via image_url content parts */
-export const RUNNINGHUB_LLM_DEFAULT_BASE = "https://llm.runninghub.cn";
+/** RunningHub OpenAI-compatible text LLM (glm-*, google/*, qwen/*, ...); supports multimodal via image_url content parts */
+export const RUNNINGHUB_LLM_DEFAULT_BASE = "https://llm.runninghub.ai";
 
 /** APIMart OpenAI Chat Completions（gemini-3.5-flash 等多模态 Gemini） */
 export const APIMART_DEFAULT_BASE = "https://api.apimart.ai";
@@ -17,7 +17,14 @@ export function stripBearerKey(key: string): string {
 export function isRunningHubChatModel(model: string): boolean {
   const m = String(model || "").trim().toLowerCase();
   if (!m) return false;
-  return m === "glm-5.1" || m.startsWith("glm-");
+  // RunningHub 聚合了 glm / google / qwen / deepseek / openai 等带命名空间的模型。
+  return m === "glm-5.1"
+    || m.startsWith("glm-")
+    || m.startsWith("google/")
+    || m.startsWith("qwen/")
+    || m.startsWith("deepseek/")
+    || m.startsWith("openai/")
+    || m.startsWith("anthropic/");
 }
 
 /** 仅 gemini-3.5-flash 走 APIMart Chat Completions；/v1/responses 仅支持 GPT 系列多模态 */
@@ -72,6 +79,7 @@ export function resolveTextLlmEnv(model?: string): { apiBase: string; apiKey: st
     );
     const apiKey = stripBearerKey(
       (process.env.RUNNINGHUB_LLM_API_KEY || "").trim() ||
+        (process.env.RUNNINGHUB_API_KEY || "").trim() ||
         (process.env.STORYBOARD_IMAGE_API_KEY || "").trim() ||
         (process.env.NINE_GRID_TEXT_API_KEY || "").trim() ||
         (process.env.THIRD_PARTY_API_KEY || "").trim()

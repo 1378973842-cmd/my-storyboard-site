@@ -76,6 +76,7 @@ import { rollbackCanvasPlan } from './core/rollbackPlan';
 import { extractReasoningText } from './core/reasoning';
 import { replaceNodeTokens } from './core/displayText';
 import { COMBAT_ANCHOR_NOTICE, combatStageDecision } from './core/combatStage';
+import { isRunningHubChatModel } from '../../services/canvasTextLlmBridge';
 import { splitPromptSections } from './core/promptIndex';
 import { appendRunProposalForNewGenerativeNodes, collapseMultiVideoProposal } from './core/runProposal';
 import { pruneCanvasSnapshots } from '../../services/infiniteCanvasStore';
@@ -2385,7 +2386,9 @@ assert.match(approvalRouteSource, /detectedAnchors/);
 assert.match(approvalRouteSource, /askOnly/);
 assert.match(approvalRouteSource, /multiVideoNotice/);
 assert.match(approvalRouteSource, /成片只建一个 video 节点/);
-assert.match(approvalRouteSource, /你上一轮把工具调用写成了 JSON 文本/);
+assert.equal(isRunningHubChatModel('google/gemini-3.7-flash'), true);
+assert.equal(isRunningHubChatModel('qwen/qwen3.8-flash-next'), true);
+assert.equal(isRunningHubChatModel('gemini-3.5-flash'), false);
 assert.match(approvalRouteSource, /Never print a tool call as JSON text/);
 const payloadCards = parseInlineAskCards(JSON.stringify({
   actions: [{
