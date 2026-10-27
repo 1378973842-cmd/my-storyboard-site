@@ -408,7 +408,7 @@ export const allCanvasAITools: AIToolDefinition[] = [
 ];
 
 /** 后续技能从这里登记。空着表示还没接入，不要在别处再造一套 Skill 加载器。 */
-export type AgentKnowledgeFile = { path: string; when: string; needsRead: boolean };
+export type AgentKnowledgeFile = { path: string; when: string; needsRead: boolean; use: string };
 export type AgentPlaybook = { id: string; title: string; when: string; path: string; knowledgePath?: string; knowledgeFiles?: AgentKnowledgeFile[] };
 export const agentPlaybooks: AgentPlaybook[] = [
   {
@@ -430,13 +430,13 @@ export const agentPlaybooks: AgentPlaybook[] = [
     path: 'prompts/playbook_combat_fx.skeleton.md',
     knowledgePath: 'prompts/playbook_combat_fx.knowledge.md',
     knowledgeFiles: [
-      { path: 'prompts/playbook_combat_fx.inputs.md', when: 'ask_user 覆盖六项参数', needsRead: false },
-      { path: 'prompts/playbook_combat_fx.duration.md', when: 'video create/update', needsRead: false },
-      { path: 'prompts/playbook_combat_fx.storyboard-spec.md', when: 'video create/update 或写分镜', needsRead: false },
-      { path: 'prompts/playbook_combat_fx.knowledge.md', when: 'video create/update', needsRead: false },
-      { path: 'prompts/playbook_combat_fx.techniques.md', when: 'video create/update', needsRead: false },
-      { path: 'prompts/playbook_combat_fx.troubleshooting.md', when: 'runStates 失败或 review 未通过', needsRead: true },
-      { path: 'prompts/mx-shell-prompt/references/camera-moves.md', when: 'video create/update', needsRead: false },
+      { path: 'prompts/playbook_combat_fx.inputs.md', when: 'ask_user 覆盖六项参数', needsRead: false, use: 'collect-params' },
+      { path: 'prompts/playbook_combat_fx.duration.md', when: 'video create/update', needsRead: false, use: 'estimate' },
+      { path: 'prompts/playbook_combat_fx.storyboard-spec.md', when: 'video create/update 或写分镜', needsRead: false, use: 'storyboard' },
+      { path: 'prompts/playbook_combat_fx.knowledge.md', when: 'video create/update', needsRead: false, use: 'prompt' },
+      { path: 'prompts/playbook_combat_fx.techniques.md', when: 'video create/update', needsRead: false, use: 'prompt-example' },
+      { path: 'prompts/playbook_combat_fx.troubleshooting.md', when: 'runStates 失败或 review 未通过', needsRead: true, use: 'troubleshoot' },
+      { path: 'prompts/mx-shell-prompt/references/camera-moves.md', when: 'video create/update', needsRead: false, use: 'prompt' },
     ],
   },
 ];

@@ -1,8 +1,8 @@
 import type { CanvasAction } from '../types';
 
 /**
- * 阶段 5（新判据）：骨架常驻；知识只在「本轮动作含 video create/update」时拼。
- * 打斗知识再按素材元素选段，且仍然只在写 prompt 那一轮。
+ * 阶段 5（新判据）：骨架常驻；知识按「哪一步用」的段标签拼，不按「是不是 video 轮」猜。
+ * 段标签来自注册表 use：collect-params / estimate / storyboard / prompt / prompt-example / troubleshoot。
  */
 export type KnowledgeAssembly = {
   video: boolean;
@@ -22,10 +22,32 @@ const ELEMENT_ALIASES: Array<{ element: string; patterns: RegExp }> = [
   { element: '兽形', patterns: /龙|虎|兽形|巨影/ },
 ];
 
-const GENERIC_TITLES = [/叙事/, /四层提示词/, /冲击帧/, /核心方法论/, /输入/, /时长/, /容量/, /分镜/, /诊断/, /示例/, /技法/, /运镜/];
+const GENERIC_TITLES = [
+  /叙事/, /四层提示词/, /冲击帧/, /核心方法论/,
+  /分镜结构/, /多角色镜头/, /每条分镜/,
+  /运镜四件套/, /分类 A/, /运镜/, /词典/,
+];
 
-function splitKnowledgeSections(text: string): Array<{ title: string; body: string }> {
-  const lines = String(text || '').split(/\r?\n/);
+type KnowledgeBlock = { path: string; use: string; body: string };
+
+function splitKnowledgeFiles(text: string): KnowledgeBlock[] {
+  const blocks: KnowledgeBlock[] = [];
+  const regex = /<!--\s*knowledge-file:\s*([^;]+);\s*use=([^\s]+)\s*-->/g;
+  const matches = [...String(text || '').matchAll(regex)];
+  matches.forEach((match, index) => {
+    const start = (match.index ?? 0) + match[0].length;
+    const end = index + 1 < matches.length ? (matches[index + 1].index ?? text.length) : text.length;
+    blocks.push({
+      path: match[1].trim(),
+      use: match[2].trim(),
+      body: text.slice(start, end).trim(),
+    });
+  });
+  return blocks;
+}
+
+function splitSections(body: string): Array<{ title: string; body: string }> {
+  const lines = String(body || '').split(/\r?\n/);
   const sections: Array<{ title: string; body: string }> = [];
   let current: { title: string; body: string } | null = null;
   for (const line of lines) {
@@ -41,23 +63,39 @@ function splitKnowledgeSections(text: string): Array<{ title: string; body: stri
   return sections;
 }
 
-export function selectCombatKnowledge(text: string, message: string): { knowledge: string; selected: string[] } {
-  const sections = splitKnowledgeSections(text);
-  if (!sections.length) return { knowledge: String(text || '').slice(0, 12_000), selected: ['全文'] };
+export function selectKnowledgeForUse(
+  text: string,
+  message: string,
+  uses: readonly string[],
+): { knowledge: string; selected: string[] } {
+  const useSet = new Set(uses);
+  const blocks = splitKnowledgeFiles(text).filter((block) => useSet.has(block.use));
+  if (!blocks.length) {
+    // 兼容没有段标签的旧知识文本：按全文处理。
+    return { knowledge: uses.includes('prompt') ? String(text || '').slice(0, 5_000) : '', selected: [] };
+  }
   const elements = ELEMENT_ALIASES
     .filter((item) => item.patterns.test(message))
     .map((item) => item.element);
   const selected: string[] = [];
   const chunks: string[] = [];
-  for (const section of sections) {
-    const generic = GENERIC_TITLES.some((pattern) => pattern.test(section.title));
-    const elementMatch = elements.some((element) => section.title.includes(element) || section.body.includes(element));
-    if (!generic && !elementMatch) continue;
-    selected.push(section.title);
-    chunks.push(`## ${section.title}\n${section.body}`.trim());
+  for (const block of blocks) {
+    const sections = splitSections(block.body);
+    if (!sections.length) {
+      selected.push(block.path);
+      chunks.push(block.body);
+      continue;
+    }
+    for (const section of sections) {
+      const generic = GENERIC_TITLES.some((pattern) => pattern.test(section.title));
+      const elementMatch = elements.some((element) => section.title.includes(element) || section.body.includes(element));
+      if (!generic && !elementMatch) continue;
+      selected.push(section.title);
+      chunks.push(`## ${section.title}\n${section.body}`.trim());
+    }
   }
-  const knowledge = chunks.join('\n\n').slice(0, 12_000);
-  return { knowledge, selected };
+  const cap = uses.includes('prompt') ? 5_000 : uses.includes('storyboard') ? 2_000 : 2_000;
+  return { knowledge: chunks.join('\n\n').slice(0, cap), selected };
 }
 
 export function assembleKnowledgeForTurn(input: {
@@ -65,22 +103,25 @@ export function assembleKnowledgeForTurn(input: {
   nodeTypeOf?: (nodeId: string) => string;
   message: string;
   knowledgeText: string;
+  step?: string;
 }): KnowledgeAssembly {
   const nodeTypeOf = input.nodeTypeOf || (() => '');
-  const video = input.actions.some((action) => {
-    if (action.type === 'create_node') return action.nodeType === 'video';
-    if (action.type === 'update_node_params') return nodeTypeOf(action.nodeId) === 'video';
-    return false;
-  });
+  const createVideo = input.actions.some((action) => action.type === 'create_node' && action.nodeType === 'video');
+  const updateVideo = input.actions.some((action) => action.type === 'update_node_params' && nodeTypeOf(action.nodeId) === 'video');
+  const video = createVideo || updateVideo;
   if (!video) {
     return { video: false, bones: true, knowledge: '', selected: [], reason: '本轮动作无 video create/update：只拼骨架' };
   }
-  const picked = selectCombatKnowledge(input.knowledgeText, input.message);
+  // 改分镜走 storyboard；新建 video 走 prompt。
+  const step = input.step || (updateVideo && !createVideo ? 'storyboard' : 'prompt');
+  const uses = [step];
+  if (step === 'prompt' && /示例|参考|像|参考图|例子/.test(input.message)) uses.push('prompt-example');
+  const picked = selectKnowledgeForUse(input.knowledgeText, input.message, uses);
   return {
     video: true,
     bones: true,
     knowledge: picked.knowledge,
     selected: picked.selected,
-    reason: `本轮动作含 video：拼骨架 + 知识（${picked.selected.length} 段）`,
+    reason: `本轮动作含 video，按步骤 ${uses.join('+')} 拼知识（${picked.selected.length} 段）`,
   };
 }

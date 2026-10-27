@@ -15,9 +15,30 @@ export type PlanCheckResult = {
   draftChars: number;
   storyboardChars: number;
   totalDuration: number;
+  durationTarget: number | null;
+  productionSegments: number[];
   reason: string;
   detail: string;
 };
+
+function parseDurationTarget(indexText: string): number | null {
+  const match = String(indexText || '').match(/(?:用户要求时长|要求时长|目标时长)\s*[:：]\s*(\d+(?:\.\d+)?)\s*(?:秒|s)?/i);
+  return match ? Number(match[1]) : null;
+}
+
+function parseProductionSegments(indexText: string): number[] {
+  const text = String(indexText || '');
+  const start = text.search(/制作清单/);
+  if (start < 0) return [];
+  const block = text.slice(start).split(/\r?\n/).slice(1);
+  const durations: number[] = [];
+  for (const line of block) {
+    if (/^#{1,3}\s/.test(line)) break;
+    const match = line.match(/(\d+(?:\.\d+)?)\s*(?:秒|s)/i);
+    if (match) durations.push(Number(match[1]));
+  }
+  return durations;
+}
 
 function normalize(text: string): string {
   return String(text || '').replace(/\s+/g, '');
@@ -70,18 +91,26 @@ function mismatchDetail(draft: string, joined: string): string {
   return `第 ${index + 1} 字开始不一致：创作稿「${draft.slice(from, index + 24)}」/ 分镜「${joined.slice(from, index + 24)}」`;
 }
 
-export function checkStoryboardAgainstDraft(draft: string, storyboard: string): PlanCheckResult {
+export function checkStoryboardAgainstDraft(
+  draft: string,
+  storyboard: string,
+  indexText = '',
+): PlanCheckResult {
   const draftText = normalize(draft);
   const fragments = parseStoryboardFragments(storyboard);
   const joined = normalize(fragments.map((item) => item.source).join(''));
   const totalDuration = fragments.reduce((sum, item) => sum + (item.duration || 0), 0);
   const durationLine = fragments.some((item) => item.duration !== undefined);
+  const durationTarget = parseDurationTarget(indexText);
+  const productionSegments = parseProductionSegments(indexText);
   const base = {
     fragments: fragments.length,
     entries: fragments.length,
     draftChars: draftText.length,
     storyboardChars: joined.length,
     totalDuration,
+    durationTarget,
+    productionSegments,
   };
   if (!draftText) {
     return { ...base, ok: false, reason: '创作稿为空', detail: '先写 draft.md，再核对' };
@@ -94,6 +123,35 @@ export function checkStoryboardAgainstDraft(draft: string, storyboard: string): 
   }
   if (!durationLine) {
     return { ...base, ok: false, reason: '分镜表缺少时长', detail: '每条分镜写「时长：N秒」，才能核对总时长与反碎化' };
+  }
+  if (durationTarget !== null) {
+    if (durationTarget > 15 && !productionSegments.length) {
+      return {
+        ...base,
+        ok: false,
+        reason: '目标时长超过单次容量，但 total 表没有制作清单',
+        detail: `用户要求 ${durationTarget} 秒，单次容量最多 15 秒；先在 index.md 写「制作清单」（每段时长），再重新核对。`,
+      };
+    }
+    const planned = productionSegments.length
+      ? productionSegments.reduce((sum, value) => sum + value, 0)
+      : totalDuration;
+    if (Math.abs(planned - durationTarget) > 0.01) {
+      return {
+        ...base,
+        ok: false,
+        reason: productionSegments.length ? '制作清单总时长与用户要求不一致' : '分镜总时长与用户要求不一致',
+        detail: `用户要求 ${durationTarget} 秒，${productionSegments.length ? `制作清单合计 ${planned} 秒` : `分镜合计 ${totalDuration} 秒`}。改时长或改制作清单后重新核对。`,
+      };
+    }
+    if (productionSegments.length && Math.abs(totalDuration - durationTarget) > 0.01) {
+      return {
+        ...base,
+        ok: false,
+        reason: '制作清单与分镜总时长不一致',
+        detail: `制作清单 ${durationTarget} 秒，分镜 ${totalDuration} 秒；两边对齐后再核对。`,
+      };
+    }
   }
   const tooShort = fragments.filter((item) => (item.duration || 0) > 0 && (item.duration || 0) < 2);
   const shortNote = tooShort.length

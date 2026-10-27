@@ -39,7 +39,9 @@ import {
 const creatableTypes = new Set<string>(AGENT_CREATABLE_NODE_TYPES);
 
 function assertCreatableType(type: string): void {
-  if (!creatableTypes.has(type)) throw new Error(`不支持创建节点类型：${type}`);
+  if (!creatableTypes.has(type)) {
+    throw new Error(`不支持创建节点类型：${type}。合法类型：${[...creatableTypes].join('、')}。请改成其中之一。`);
+  }
 }
 
 function overlaps(snapshot: CanvasSnapshot, x: number, y: number): boolean {
@@ -126,7 +128,7 @@ export function createNode(
   assertAgentActionContent(action, snapshot);
   const result = applyCanvasAgentActions([action]);
   const id = result.createdNodeIds[0];
-  if (!id) throw new Error('节点创建失败');
+  if (!id) throw new Error(`节点创建失败：type=${type}，initialParams 键=${Object.keys(initialParams || {}).join('、') || '（空）'}。检查必填参数和节点类型后重试。`);
   return id;
 }
 

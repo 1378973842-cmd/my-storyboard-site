@@ -209,6 +209,62 @@ function safeArgs(call: ToolCall): Record<string, any> {
   }
 }
 
+const TOOL_ARG_SHAPES: Record<string, string> = {
+  create_canvas_nodes: '{"nodes":[{"tempId":"...","nodeType":"generator|image|video|prompt","initialParams":{...}}]}',
+  connect_workflow_edges: '{"edges":[{"sourceNodeId":"...","targetNodeId":"..."}]}',
+  update_node_config: '{"updates":[{"nodeId":"...","patch":{...}}]}',
+  ask_user: '{"cards":[{"mode":"single|multiple","question":"...","options":[...]}]}',
+  confirm_character_anchor: '{"kind":"reference|three-view","nodeId":"...","role":"protagonist|opponent|scene"}',
+  write_task_artifact: '{"kind":"draft|index|anchors|storyboard","content":"..."}',
+  complete_task_step: '{"step":"draft|anchors|storyboard|review|anchor_runs|storyboard_runs|compose"}',
+  read_task_artifact: '{"kind":"draft|index|anchors|storyboard","offset":0,"length":8000}',
+  start_production_task: '{"title":"...","goal":"..."}',
+};
+
+function toolArgsIssue(call: ToolCall): string {
+  try {
+    const parsed = JSON.parse(call.function.arguments || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('顶层必须是对象');
+    }
+    return '';
+  } catch (err) {
+    const allowed = TOOL_ARG_SHAPES[call.function.name] || '一个 JSON 对象';
+    return `工具 ${call.function.name} 的 arguments 不是合法 JSON：${err instanceof Error ? err.message : String(err)}。`
+      + `收到：${String(call.function.arguments || '').slice(0, 160)}。允许形状：${allowed}。请重新调用这个工具。`;
+  }
+}
+
+function toolEnumsIssue(call: ToolCall): string {
+  const args = safeArgs(call);
+  const allow = (field: string, value: unknown, values: string[]): string => {
+    if (value === undefined || value === null || value === '') return '';
+    return values.includes(String(value))
+      ? ''
+      : `${call.function.name} 的 ${field} 不合法：${String(value)}。合法值：${values.join('、')}。请改成其中之一。`;
+  };
+  if (call.function.name === 'ask_user') {
+    const cards = Array.isArray(args.cards) ? args.cards : [];
+    for (const [index, raw] of cards.entries()) {
+      const issue = allow(`cards[${index}].mode`, (raw as Record<string, unknown>)?.mode, ['single', 'multiple']);
+      if (issue) return issue;
+    }
+  }
+  if (call.function.name === 'confirm_character_anchor') {
+    return allow('kind', args.kind, ['reference', 'three-view'])
+      || allow('role', args.role, ['protagonist', 'opponent', 'scene'])
+      || allow('quality', args.quality, ['good', 'low'])
+      || allow('review', args.review, ['ok', 'rework']);
+  }
+  if (call.function.name === 'write_task_artifact' || call.function.name === 'read_task_artifact') {
+    return allow('kind', args.kind, ['draft', 'index', 'anchors', 'storyboard']);
+  }
+  if (call.function.name === 'complete_task_step') {
+    return allow('step', args.step, ['draft', 'anchors', 'storyboard', 'review', 'anchor_runs', 'storyboard_runs', 'compose']);
+  }
+  return '';
+}
+
 function actionsForTool(call: ToolCall): CanvasAction[] {
   const args = safeArgs(call);
   if (call.function.name === 'create_canvas_nodes') {
@@ -1292,7 +1348,49 @@ export function registerCanvasAgentRoutes(
           // 重试失败就保留原响应，后面还有 safeFirstText 兜底，不会显示 JSON。
         }
       }
-      const calls = parseToolCalls(first);
+      let toolArgNotice = '';
+      const parsedCalls = parseToolCalls(first);
+      const knownNodeIds = new Set(effectedNodes.map((node) => node.id));
+      const tempNodeIds = new Set<string>();
+      for (const call of parsedCalls) {
+        if (call.function.name !== 'create_canvas_nodes') continue;
+        const nodes = Array.isArray(safeArgs(call).nodes) ? safeArgs(call).nodes as unknown[] : [];
+        for (const raw of nodes) {
+          const id = String((raw as Record<string, unknown>)?.tempId || '');
+          if (id) tempNodeIds.add(id);
+        }
+      }
+      const nodeRefIssue = (call: ToolCall): string => {
+        const args = safeArgs(call);
+        const ids: string[] = [];
+        if (call.function.name === 'update_node_config') {
+          const updates = Array.isArray(args.updates) ? args.updates : [];
+          for (const raw of updates) ids.push(String((raw as Record<string, unknown>)?.nodeId || ''));
+        } else if (call.function.name === 'trigger_skill_execution') {
+          const list = Array.isArray(args.nodeIds) ? args.nodeIds : [];
+          for (const id of list) ids.push(String(id || ''));
+        }
+        for (const id of ids) {
+          if (!id || knownNodeIds.has(id) || tempNodeIds.has(id)) continue;
+          const known = [...knownNodeIds].slice(0, 8).join('、') || '（空）';
+          return `工具 ${call.function.name} 的 nodeId 不存在：${id}。现有节点：${known}。如果是新节点，请先在同一批 create_canvas_nodes 里用 tempId 创建。`;
+        }
+        return '';
+      };
+      const calls = parsedCalls.filter((call) => {
+        const issue = toolArgsIssue(call) || toolEnumsIssue(call) || nodeRefIssue(call);
+        if (!issue) return true;
+        toolArgNotice = toolArgNotice ? `${toolArgNotice}\n${issue}` : issue;
+        const log = {
+          id: `arg-check-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name: 'validation',
+          label: issue,
+          state: 'failed' as const,
+        };
+        persistedToolLogs.push(log);
+        sendEvent(res, { type: 'tool', log });
+        return false;
+      });
       // 有思考过程就先推给前端，折叠展示；没有就不编。
       const reasoningText = extractReasoningText(first);
       if (reasoningText) {
@@ -1423,11 +1521,25 @@ export function registerCanvasAgentRoutes(
                 const check = checkStoryboardAgainstDraft(
                   readTaskArtifact(conversation.id, 'draft'),
                   readTaskArtifact(conversation.id, 'storyboard'),
+                  readTaskArtifact(conversation.id, 'index'),
                 );
                 if (!check.ok) throw new Error(`${check.reason}：${check.detail}`);
                 const state = completeTaskStep(conversation.id, step);
                 label = `文件账本：规划核对通过（${check.fragments} 条 / ${check.draftChars} 字）`;
                 taskNotice = `规划核对通过：${check.detail}。已完成「${stepLabel(step)}」。当前位置：${stepLabel(state.current)}。`;
+              } else if (step === 'compose') {
+                // 合成前：一个任务只允许一个成片 video 节点，且必须已生成。
+                const videos = effectedNodes.filter((node) => node.nodeType === 'video');
+                if (videos.length !== 1) {
+                  throw new Error(`合成前必须恰好一个成片视频节点，当前 ${videos.length} 个。请停用多余成片，只保留一个，再完成合成。`);
+                }
+                const video = videos[0];
+                if (runStates[video.id] !== 'generated') {
+                  throw new Error(`成片节点「${video.label || video.id}」还没生成完成（当前 ${runStates[video.id] || '未运行'}）。先跑分镜批，生成后再合成。`);
+                }
+                const state = completeTaskStep(conversation.id, step);
+                label = '文件账本：合成校验通过（1 个成片）';
+                taskNotice = `合成校验通过：1 个成片节点「${video.label || video.id}」。已完成「${stepLabel(step)}」。当前位置：${stepLabel(state.current)}。`;
               } else {
                 const state = completeTaskStep(conversation.id, step);
                 label = `文件账本：完成「${stepLabel(step)}」`;
@@ -1768,7 +1880,10 @@ export function registerCanvasAgentRoutes(
         sendEvent(res, { type: 'ask', asks });
       };
 
-      if (guardNotice) {
+      if (toolArgNotice && !calls.length) {
+        persistedText = toolArgNotice;
+        streamText(res, persistedText);
+      } else if (guardNotice) {
         persistedText = guardNotice;
         streamText(res, persistedText);
       } else if (duplicateRunNotice) {

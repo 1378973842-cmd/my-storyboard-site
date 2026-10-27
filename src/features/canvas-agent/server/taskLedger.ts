@@ -319,6 +319,7 @@ export function taskStatePrompt(state: TaskState | null): string {
     ? checkStoryboardAgainstDraft(
       readTaskArtifact(state.conversationId, 'draft'),
       readTaskArtifact(state.conversationId, 'storyboard'),
+      readTaskArtifact(state.conversationId, 'index'),
     )
     : null;
   const reviewStatus = reviewCheck

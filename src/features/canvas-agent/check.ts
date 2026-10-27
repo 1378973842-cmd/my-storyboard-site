@@ -24,7 +24,7 @@ import { actionDisplayLabel, actionProposalNeedsApproval, derivedStepTitle, inte
 import { actionsReleasedForApproval, runScopeDigest, runScopeMatches } from './core/runApproval';
 import { turnStatePrefix } from './core/turnState';
 import { checkStoryboardAgainstDraft } from './core/planCheck';
-import { assembleKnowledgeForTurn, selectCombatKnowledge } from './core/knowledgeContext';
+import { assembleKnowledgeForTurn, selectKnowledgeForUse } from './core/knowledgeContext';
 import { completeTaskStep, ensureTask, readTaskArtifactSlice, readTaskState, setTaskCursor, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE } from './server/taskLedger';
 import { changelogFromActions, effectedFromApply, effectedLine, mediaRunState, mediaStatusLabel, parseRunStates, turnLabelCollapsed } from './core/effectLedger';
 import { AskCardView } from './ui/AskCardView';
@@ -275,6 +275,24 @@ assert.match(planNoFragment.reason, /缺少「原文：」片段/);
 const planNoDuration = checkStoryboardAgainstDraft(planDraft, '原文：「第一段。」\n原文：「第二段。」');
 assert.equal(planNoDuration.ok, false);
 assert.match(planNoDuration.reason, /缺少时长/);
+const planTargetMismatch = checkStoryboardAgainstDraft(planDraft, planStoryboard, '要求时长：15s');
+assert.equal(planTargetMismatch.ok, false);
+assert.match(planTargetMismatch.reason, /总时长与用户要求不一致/);
+const planOverCapacity = checkStoryboardAgainstDraft(planDraft, planStoryboard, '要求时长：30s');
+assert.equal(planOverCapacity.ok, false);
+assert.match(planOverCapacity.reason, /没有制作清单/);
+const planTargetOk = checkStoryboardAgainstDraft(
+  '第一段。第二段。',
+  '原文：「第一段。」\n时长：7秒\n原文：「第二段。」\n时长：8秒',
+  '要求时长：15s',
+);
+assert.equal(planTargetOk.ok, true);
+const planList = checkStoryboardAgainstDraft(
+  '第一段。第二段。',
+  '原文：「第一段。」\n时长：15秒\n原文：「第二段。」\n时长：15秒',
+  '要求时长：30s\n## 制作清单\n- SB-01 15s\n- SB-02 15s',
+);
+assert.equal(planList.ok, true);
 
 const tool = convertSkillToAITool(canvasSkillRegistry[0]);
 assert.equal(tool.type, 'function');
@@ -1884,7 +1902,9 @@ for (const pointer of ['inputs.md', 'duration.md', 'storyboard-spec.md', 'knowle
 const combatKnowledge = readPlaybookKnowledge('.', 'canvas-combat-fx');
 assert.match(combatKnowledge, /知识层（说什么）/);
 assert.match(combatKnowledge, /核心方法论/);
-assert.match(combatKnowledge, /六项参数/);
+assert.match(combatKnowledge, /knowledge-file: .*use=prompt/);
+assert.match(combatKnowledge, /knowledge-file: .*use=storyboard/);
+assert.match(combatKnowledge, /knowledge-file: .*use=collect-params/);
 const anchorAssembly = assembleKnowledgeForTurn({
   actions: [{ type: 'create_node', nodeType: 'image' } as never],
   message: '主角三视图',
@@ -1897,6 +1917,8 @@ const videoCreateAssembly = assembleKnowledgeForTurn({
   knowledgeText: combatKnowledge,
 });
 assert.ok(videoCreateAssembly.knowledge.length > 0);
+assert.ok(videoCreateAssembly.knowledge.length < 5_000);
+assert.doesNotMatch(videoCreateAssembly.selected.join(' '), /输入参数表|六项参数/);
 assert.match(videoCreateAssembly.selected.join(' '), /元素|提示词|冲击帧/);
 const videoUpdateAssembly = assembleKnowledgeForTurn({
   actions: [{ type: 'update_node_params', nodeId: 'vid_1' } as never],
@@ -1905,6 +1927,9 @@ const videoUpdateAssembly = assembleKnowledgeForTurn({
   knowledgeText: combatKnowledge,
 });
 assert.ok(videoUpdateAssembly.knowledge.length > 0);
+assert.ok(videoUpdateAssembly.knowledge.length < 2_000);
+assert.doesNotMatch(videoUpdateAssembly.selected.join(' '), /输入参数表|六项参数/);
+assert.match(videoUpdateAssembly.selected.join(' '), /分镜|配比/);
 const openingAssembled = `${systemBody}\n${operatingPrompt('开场', openingLoaded)}\n\n${stageSegment}`;
 console.log(`system prompt with opening stage: ${openingAssembled.length}`);
 const stageDb = new Database(':memory:');
@@ -2616,7 +2641,10 @@ assert.match(approvalRouteSource, /!inlineAsks\.length/);
 assert.match(approvalRouteSource, /storyboardReady/);
 assert.match(approvalRouteSource, /runApprovalIds/);
 assert.match(approvalRouteSource, /TASK_STAGE\[taskBefore\.current\]/);
-assert.match(approvalRouteSource, /每批可并行多个 read/);
+assert.match(approvalRouteSource, /arguments 不是合法 JSON/);
+assert.match(approvalRouteSource, /正好一个成片视频节点|恰好一个成片视频节点/);
+assert.match(approvalRouteSource, /nodeId 不存在/);
+assert.match(readFileSync(new URL('./core/canvasFacade.ts', import.meta.url), 'utf8'), /合法类型：/);
 assert.match(approvalRouteSource, /MAX_READ_ROUNDS/);
 assert.match(approvalRouteSource, /readTaskArtifactSlice/);
 assert.match(approvalRouteSource, /Every storyboard entry must contain 原文/);

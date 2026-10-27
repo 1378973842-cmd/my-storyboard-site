@@ -139,12 +139,17 @@ export function readPlaybookKnowledge(projectRoot: string, playbookId: string): 
   const item = agentPlaybooks.find((entry) => entry.id === String(playbookId || "").trim());
   if (!item) return "";
   const files = item.knowledgeFiles?.length
-    ? item.knowledgeFiles.map((entry) => entry.path)
+    ? item.knowledgeFiles.map((entry) => ({ path: entry.path, use: entry.use }))
     : item.knowledgePath
-      ? [item.knowledgePath]
+      ? [{ path: item.knowledgePath, use: 'prompt' }]
       : [];
   return files
-    .map((file) => readPromptFile(file, projectRoot).trim())
+    .map((entry) => {
+      const text = readPromptFile(entry.path, projectRoot).trim();
+      if (!text) return "";
+      // 段标签：选择器按 use 选，不按「是不是 video 轮」猜。
+      return `<!-- knowledge-file: ${entry.path}; use=${entry.use} -->\n${text}`;
+    })
     .filter(Boolean)
     .join("\n\n");
 }
