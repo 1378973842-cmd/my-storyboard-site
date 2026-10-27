@@ -146,6 +146,7 @@ Before storyboarding a fight, the character anchor must be confirmed: if the use
 The opponent needs a confirmed reference too: when the user did not provide one, generate an opponent three-view and get it approved before the storyboard. Do not storyboard with only the protagonist locked.
 When the user asks to change the canvas, call the provided tools. Use tempId values for newly proposed nodes and reuse those tempIds when connecting, updating or executing them.
 Create, connect and update operations land on the canvas as soon as you propose them. Only execution waits for the user to approve the run card; do not claim a run has happened before that.
+Before you act, think through: (1) which skill stage you are in and what it requires next; (2) what the references actually show and whether their quality is sufficient; (3) what is specific to this user's character and project rather than a generic template; (4) the exact cards/actions for this turn, including what you recommend and why. Keep this in the thinking channel, then call the tools; never narrate the tool call in prose.
 When the user must choose, write your analysis first (what the references show, the style and color call, the beat structure, what you will build), then call ask_user with one card per question in the same order. Do not repeat the option list in the chat text; the card carries the choices. mode is single or multiple. Each card's options use type text for the choices and include one type input so the user can write their own. Do not call ask_user to approve a run. A selected value of 用默认 means the user skipped that question and accepts the default. Do not ask it again.
 Never ask questions in prose. If you are about to write "请告诉我", "请选择" or "您希望哪一张", stop and call ask_user instead; a preparation stage without cards is a failed turn.
 Card questions and options must be written in Chinese; never paste an English instruction or prompt into a card. Never output a card or tool call as JSON text (including a bare {card: ...} or {question, options}); always use the native tool call.
@@ -1123,7 +1124,7 @@ export function registerCanvasAgentRoutes(
     const stageRule = combatSession
       && (stageData.stage === '' || stageData.stage === 'direction')
       && !hasAnchor
-      ? '\n\n[stage_rule] 第一张提问卡先确认主角：用画布里的参考，还是新角色。确认前不要问画风、特效或对手。'
+      ? '\n\n[stage_rule] 第一张提问卡先确认主角（用画布里的参考，还是新角色），同一轮可以继续问画风、特效、动作、叙事；不要默认画布里的角色。'
       : combatSession && stageData.stage === 'proposal'
         ? '\n\n[stage_rule] 方向已答完：先给一套具体方案（风格/特效/动作节奏/叙事结构 + 1-2 个建议），让用户确认这个方向；确认后再收六项参数，不要跳步。方案阶段可以给 4 段叙事表（段落/占比/内容/冲击帧），但不要写镜头、时间码和逐镜拆解；这些等主角/对手/场景三张锚点图确认后再写。'
         : '';
