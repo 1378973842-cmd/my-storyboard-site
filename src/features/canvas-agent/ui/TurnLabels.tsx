@@ -12,7 +12,7 @@ import {
 export function ThinkingFold({ text, children }: { text: string; children: ReactNode }) {
   if (!text.trim()) return null;
   return (
-    <details className="canvas-agent-turn-label" open>
+    <details className="canvas-agent-turn-label">
       <summary>思考过程</summary>
       {children}
     </details>

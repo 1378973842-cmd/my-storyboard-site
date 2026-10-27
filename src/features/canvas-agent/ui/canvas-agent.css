@@ -1965,3 +1965,14 @@ details.canvas-agent-turn-label > .canvas-agent-md {
 .canvas-agent-prompt-index tbody tr:nth-child(odd) {
   background: rgba(229, 226, 225, 0.03);
 }
+/* 思考过程默认折叠，只露出真正的回复 */
+details.canvas-agent-turn-label > summary::after {
+  content: '⌄';
+  margin-left: auto;
+  color: #6f6a68;
+  transition: transform 0.18s ease;
+}
+
+details.canvas-agent-turn-label[open] > summary::after {
+  transform: rotate(180deg);
+}
