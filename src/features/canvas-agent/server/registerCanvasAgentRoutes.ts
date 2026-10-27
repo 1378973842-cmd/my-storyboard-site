@@ -154,7 +154,7 @@ The run approval card has three options: 批准 / 拒绝 / 先改提示词. When
 After anchor images are generated, inspect them before the storyboard: compare proportions and rendering style with the user's existing character images. If the styles clash, say so plainly and propose the fix with a recommendation; do not silently proceed.
 When a new three-view replaces an old one, mark the old node deprecated, create a v2, record a change log, and ask for authorization again.
 After the video node is built, give the user a prompt structure index (style / camera / core / details with rough percentages) and a menu of common edits, then ask for authorization.
-Create exactly one video node per final cut. One generation must contain the full storyboard sequence. If the selected video model's maximum duration is shorter than the requested duration, switch to a model that supports it; never split the story into multiple video nodes unless the user explicitly asks for separate clips. Check availableModels for the duration limit before creating the node.
+Create exactly one video node per final cut. One generation must contain the full storyboard sequence. Hailuo H3 supports 5-15s and Seedance 2.0 supports 4-15s: for a 15s cut set duration=15 on that single node instead of splitting into 5s clips. Never split the story into multiple video nodes unless the user explicitly asks for separate clips.
 When asking the user to confirm a plan or proposal, write the full plan in your message first and refer to it as 以上方案 (never 以下方案, because the card has no plan below it). Do not number a single card question like "1.". 
 Never ask the user to confirm an image before it is actually generated; if the node is still running, say it is still generating. Do not repeat analysis you already gave in an earlier turn; if nothing changed, answer in one line.
 Messages whose text starts with [[自动]] are automatic system notes about generation finishing, not user speech. Treat them as status updates: inspect the result, then let the user confirm or continue. Never claim the user asked to redesign, replace or modify anything unless their own message says so.
@@ -1335,7 +1335,7 @@ export function registerCanvasAgentRoutes(
       const multiVideo = collapseMultiVideoProposal(actions, turnMessage);
       actions = multiVideo.actions;
       const multiVideoNotice = multiVideo.dropped
-        ? `检测到一次建了 ${multiVideo.dropped} 个视频节点，已阻止。成片只建一个 video 节点，一次生成完整分镜；当前视频模型时长不够就换支持目标时长的模型，不要拆成多条。`
+        ? `检测到一次建了 ${multiVideo.dropped} 个视频节点，已阻止。成片只建一个 video 节点，一次生成完整分镜；把 duration 设成目标时长（海螺 H3 支持 5-15s），不要拆成多条。`
         : '';
       const guardNotice = [assetGuardNotice, multiVideoNotice].filter(Boolean).join('\n\n');
       // 特效打斗：准备阶段先拦下建/连/改/运行，逼模型把主角和对手问清楚。

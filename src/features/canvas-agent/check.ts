@@ -2385,7 +2385,8 @@ assert.match(approvalRouteSource, /detectedAnchors/);
 assert.match(approvalRouteSource, /askOnly/);
 assert.match(approvalRouteSource, /multiVideoNotice/);
 assert.match(approvalRouteSource, /成片只建一个 video 节点/);
-assert.match(approvalRouteSource, /Create exactly one video node/);
+assert.match(approvalRouteSource, /Hailuo H3 supports 5-15s/);
+assert.match(approvalRouteSource, /海螺 H3 支持 5-15s/);
 const multiVideo = collapseMultiVideoProposal([
   { type: 'create_node', tempId: 'v1', nodeType: 'video' },
   { type: 'create_node', tempId: 'v2', nodeType: 'video' },
