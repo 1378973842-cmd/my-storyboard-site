@@ -136,10 +136,14 @@ export function readRegisteredPlaybookText(projectRoot: string, playbookId: stri
 
 // 正文先读完。词典是后接的基础设施，不写进 md，也不占正文上限。
 export function readPlaybookForAgent(projectRoot: string, playbookId: string): string {
+  const item = agentPlaybooks.find((entry) => entry.id === String(playbookId || "").trim());
   const body = readRegisteredPlaybookText(projectRoot, playbookId);
   if (!body) return "";
+  // 骨架 + 知识都常驻；知识只提供词汇与判断标准，流程以骨架为准。
+  const knowledge = item?.knowledgePath ? readPromptFile(item.knowledgePath, projectRoot).trim() : "";
+  const merged = knowledge ? `${body}\n\n${knowledge}` : body;
   const cameraMoves = mxShellCameraMovesInjection(projectRoot);
-  return cameraMoves ? `${body}\n\n${cameraMoves}` : body;
+  return cameraMoves ? `${merged}\n\n${cameraMoves}` : merged;
 }
 
 export function registerInfiniteCanvasRoutes(

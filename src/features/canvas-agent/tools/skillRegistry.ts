@@ -392,7 +392,7 @@ export const allCanvasAITools: AIToolDefinition[] = [
 ];
 
 /** 后续技能从这里登记。空着表示还没接入，不要在别处再造一套 Skill 加载器。 */
-export type AgentPlaybook = { id: string; title: string; when: string; path: string };
+export type AgentPlaybook = { id: string; title: string; when: string; path: string; knowledgePath?: string };
 export const agentPlaybooks: AgentPlaybook[] = [
   {
     id: 'canvas-video-piece',
@@ -410,6 +410,7 @@ export const agentPlaybooks: AgentPlaybook[] = [
     id: 'canvas-combat-fx',
     title: '特效打斗',
     when: '用户要角色战斗、技能特效或打斗视频时（单段 10–15 秒，分镜 + 冲击帧 + 四层提示词）',
-    path: 'prompts/playbook_combat_fx.md',
+    path: 'prompts/playbook_combat_fx.skeleton.md',
+    knowledgePath: 'prompts/playbook_combat_fx.knowledge.md',
   },
 ];

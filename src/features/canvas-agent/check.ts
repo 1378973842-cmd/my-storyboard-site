@@ -1615,7 +1615,8 @@ assert.equal(agentPlaybooks[1]?.title, '开场动画');
 assert.equal(agentPlaybooks[1]?.path, 'prompts/playbook_opening_animation.md');
 assert.equal(agentPlaybooks[2]?.id, 'canvas-combat-fx');
 assert.equal(agentPlaybooks[2]?.title, '特效打斗');
-assert.equal(agentPlaybooks[2]?.path, 'prompts/playbook_combat_fx.md');
+assert.equal(agentPlaybooks[2]?.path, 'prompts/playbook_combat_fx.skeleton.md');
+assert.equal(agentPlaybooks[2]?.knowledgePath, 'prompts/playbook_combat_fx.knowledge.md');
 // 打斗阶段闸：方向 → 参数 → 分镜，之前不许建节点；角色锚点没确认也不放行
 assert.equal(
   combatStageDecision({ playbookId: 'canvas-combat-fx', stage: '', message: '给我设计一个打斗动画', answering: false, hasAnchor: false }).blocked,
@@ -1823,6 +1824,11 @@ const systemStart = systemPrompt.indexOf('const SYSTEM_PROMPT = `');
 const systemEnd = systemPrompt.indexOf('`;', systemStart);
 const systemBody = systemPrompt.slice(systemStart + 'const SYSTEM_PROMPT = `'.length, systemEnd);
 const openingLoaded = readPlaybookForAgent('.', 'canvas-opening-animation');
+const combatLoaded = readPlaybookForAgent('.', 'canvas-combat-fx');
+assert.match(combatLoaded, /骨架（流程层）/);
+assert.match(combatLoaded, /以本骨架为准/);
+assert.match(combatLoaded, /知识层（说什么）/);
+assert.match(combatLoaded, /核心方法论/);
 const openingAssembled = `${systemBody}\n${operatingPrompt('开场', openingLoaded)}\n\n${stageSegment}`;
 console.log(`system prompt with opening stage: ${openingAssembled.length}`);
 const stageDb = new Database(':memory:');
