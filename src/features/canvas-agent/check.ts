@@ -2351,7 +2351,8 @@ const inlineAskJson = JSON.stringify({
 const inlineAskCards = parseInlineAskCards(inlineAskJson);
 assert.equal(inlineAskCards.length, 1);
 assert.equal(inlineAskCards[0]?.options[0]?.type === 'text' ? inlineAskCards[0].options[0].label : '', '3D写实国漫风');
-assert.match(approvalRouteSource, /parseInlineAskCards/);
+assert.match(approvalRouteSource, /卡片只来自原生 tool_calls/);
+assert.match(approvalRouteSource, /没有通过工具生成卡片/);
 assert.match(approvalRouteSource, /character_quality !== 'low'/);
 assert.match(combatPlaybookSource, /锚点版本/);
 assert.match(approvalRouteSource, /quality === 'low'/);

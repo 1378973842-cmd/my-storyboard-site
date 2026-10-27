@@ -14,7 +14,7 @@ import {
   readImageBufferForGemini,
 } from '../../../services/canvasReplicaAgentBridge.js';
 import { agentPlaybooks, allCanvasAITools, canvasSkillRegistry } from '../tools/skillRegistry.js';
-import { collectAskCards, parseAskAnswer, parseAskAnswers, parseInlineAskCards, type AskCard } from '../core/askCard.js';
+import { collectAskCards, parseAskAnswer, parseAskAnswers, type AskCard } from '../core/askCard.js';
 import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, stripCreatesOnShortYes, unknownCanvasActionMessage } from '../core/proposal.js';
 import { operatingPrompt } from '../core/operatingModel.js';
 import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
@@ -1186,17 +1186,16 @@ export function registerCanvasAgentRoutes(
       }
       // 原生工具调用偶尔会被模型写成正文 JSON：先重试一次，要求走原生 tool call。
       const previewText = extractTextLlmMessageContent(model, first).trim();
-      if (parseToolCalls(first).length === 0
-        && /"ask_user"/.test(previewText)
-        && parseInlineAskCards(previewText).length === 0) {
+      const previewJson = /^\s*[{\[]/.test(previewText)
+        && /"(ask_user|actions|card|cards|question|options)"\s*:/.test(previewText);
+      if (parseToolCalls(first).length === 0 && previewJson) {
         try {
           const retried = await callModel(model, [
             ...messages,
             { role: 'assistant', content: previewText },
             { role: 'user', content: '你上一轮把工具调用写成了 JSON 文本。请重新用原生工具调用返回；不要输出 JSON 文本。' },
           ], true, controller.signal);
-          const retriedText = extractTextLlmMessageContent(model, retried).trim();
-          if (parseToolCalls(retried).length || parseInlineAskCards(retriedText).length) {
+          if (parseToolCalls(retried).length) {
             first = retried;
           }
         } catch {
@@ -1295,7 +1294,9 @@ export function registerCanvasAgentRoutes(
         .filter((call) => Boolean(toolContract(call.function.name, toolNames)));
       const firstText = extractTextLlmMessageContent(model, first).trim();
       // 模型偶尔把 ask_user 的 JSON 当正文吐出来：捞成卡片，别把 JSON 推给用户。
-      const inlineAsks = parseInlineAskCards(firstText);
+      // 标准 agent 做法：卡片只来自原生 tool_calls，不再从正文 JSON 生成卡片。
+      // 正文 JSON 只用于识别并隐藏（safeFirstText），以及触发一次重试。
+      const inlineAsks: AskCard[] = [];
       // 硬保证：整条正文如果是 JSON（卡片/工具调用/未知信封），一律不展示。
       // 只保留 JSON 之前可能存在的正常文字。
       const trimmedText = firstText.trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
@@ -1409,9 +1410,10 @@ export function registerCanvasAgentRoutes(
       const runApprovalIds = actions.flatMap((action) => (
         action.type === 'execute_node_skill' ? [action.nodeId] : []
       ));
-      let asks = inlineAsks.length ? inlineAsks : collectAskCards(
+      let asks = collectAskCards(
         actionCalls.filter((call) => call.function.name === 'ask_user').map((call) => safeArgs(call)),
-        actionCalls.length ? '' : (proposalText || safeFirstText),
+        // 不再从正文 JSON 生成卡片；正文只由 tool_calls 或服务端兜底卡产生。
+        '',
         runApprovalIds,
       );
       // 分镜还没写进节点就来问「是否满意」：拦下这个提问，先让模型把分镜落板。
@@ -1713,6 +1715,10 @@ export function registerCanvasAgentRoutes(
       } else if (storyboardAskBlocked) {
         // 分镜还没落板就先别问「是否满意」，先把剧本写进节点。
         persistedText = '分镜剧本还没落进节点，先让我把分镜表写出来，你再确认满不满意。';
+        streamText(res, persistedText);
+      } else if (jsonOnly && !calls.length && !asks.length) {
+        // 模型把卡片写成了正文 JSON：重试过仍没走工具，给明确提示，不展示 JSON。
+        persistedText = '这一轮没有通过工具生成卡片，请再发一次。';
         streamText(res, persistedText);
       } else if (asks.length) {
         // 只出提问卡的轮次，正文就是模型写的方案/分析，别再补一段。
