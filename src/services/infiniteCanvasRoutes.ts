@@ -137,16 +137,21 @@ export function readRegisteredPlaybookText(projectRoot: string, playbookId: stri
 // 正文先读完。词典是后接的基础设施，不写进 md，也不占正文上限。
 export function readPlaybookKnowledge(projectRoot: string, playbookId: string): string {
   const item = agentPlaybooks.find((entry) => entry.id === String(playbookId || "").trim());
-  if (!item?.knowledgePath) return "";
-  return readPromptFile(item.knowledgePath, projectRoot).trim();
+  if (!item) return "";
+  const files = item.knowledgeFiles?.length
+    ? item.knowledgeFiles.map((entry) => entry.path)
+    : item.knowledgePath
+      ? [item.knowledgePath]
+      : [];
+  return files
+    .map((file) => readPromptFile(file, projectRoot).trim())
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 // 骨架常驻。知识不在这里拼：只有本轮动作含 video create/update 时才由路由按元素拼。
 export function readPlaybookForAgent(projectRoot: string, playbookId: string): string {
-  const body = readRegisteredPlaybookText(projectRoot, playbookId);
-  if (!body) return "";
-  const cameraMoves = mxShellCameraMovesInjection(projectRoot);
-  return cameraMoves ? `${body}\n\n${cameraMoves}` : body;
+  return readRegisteredPlaybookText(projectRoot, playbookId);
 }
 
 export function registerInfiniteCanvasRoutes(

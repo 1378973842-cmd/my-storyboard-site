@@ -408,7 +408,8 @@ export const allCanvasAITools: AIToolDefinition[] = [
 ];
 
 /** 后续技能从这里登记。空着表示还没接入，不要在别处再造一套 Skill 加载器。 */
-export type AgentPlaybook = { id: string; title: string; when: string; path: string; knowledgePath?: string };
+export type AgentKnowledgeFile = { path: string; when: string; needsRead: boolean };
+export type AgentPlaybook = { id: string; title: string; when: string; path: string; knowledgePath?: string; knowledgeFiles?: AgentKnowledgeFile[] };
 export const agentPlaybooks: AgentPlaybook[] = [
   {
     id: 'canvas-video-piece',
@@ -428,5 +429,14 @@ export const agentPlaybooks: AgentPlaybook[] = [
     when: '用户要角色战斗、技能特效或打斗视频时（单段 10–15 秒，分镜 + 冲击帧 + 四层提示词）',
     path: 'prompts/playbook_combat_fx.skeleton.md',
     knowledgePath: 'prompts/playbook_combat_fx.knowledge.md',
+    knowledgeFiles: [
+      { path: 'prompts/playbook_combat_fx.inputs.md', when: 'ask_user 覆盖六项参数', needsRead: false },
+      { path: 'prompts/playbook_combat_fx.duration.md', when: 'video create/update', needsRead: false },
+      { path: 'prompts/playbook_combat_fx.storyboard-spec.md', when: 'video create/update 或写分镜', needsRead: false },
+      { path: 'prompts/playbook_combat_fx.knowledge.md', when: 'video create/update', needsRead: false },
+      { path: 'prompts/playbook_combat_fx.techniques.md', when: 'video create/update', needsRead: false },
+      { path: 'prompts/playbook_combat_fx.troubleshooting.md', when: 'runStates 失败或 review 未通过', needsRead: true },
+      { path: 'prompts/mx-shell-prompt/references/camera-moves.md', when: 'video create/update', needsRead: false },
+    ],
   },
 ];

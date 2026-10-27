@@ -22,14 +22,14 @@ const ELEMENT_ALIASES: Array<{ element: string; patterns: RegExp }> = [
   { element: '兽形', patterns: /龙|虎|兽形|巨影/ },
 ];
 
-const GENERIC_TITLES = [/叙事/, /四层提示词/, /冲击帧/, /核心方法论/];
+const GENERIC_TITLES = [/叙事/, /四层提示词/, /冲击帧/, /核心方法论/, /输入/, /时长/, /容量/, /分镜/, /诊断/, /示例/, /技法/, /运镜/];
 
 function splitKnowledgeSections(text: string): Array<{ title: string; body: string }> {
   const lines = String(text || '').split(/\r?\n/);
   const sections: Array<{ title: string; body: string }> = [];
   let current: { title: string; body: string } | null = null;
   for (const line of lines) {
-    const heading = line.match(/^#{2,3}\s+(.+)$/);
+    const heading = line.match(/^#{1,3}\s+(.+)$/);
     if (heading) {
       if (current) sections.push(current);
       current = { title: heading[1].trim(), body: '' };

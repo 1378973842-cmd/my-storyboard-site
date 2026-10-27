@@ -1213,8 +1213,9 @@ export function registerCanvasAgentRoutes(
         }
       }
       // 通用读回：模型可单独调 read_task_artifact 读账本；把文件内容作为 tool result
-      // 回给它，再让它继续本轮的动作。最多 3 轮，避免读循环。
-      for (let readRound = 0; readRound < 3; readRound += 1) {
+      // 回给它，再让它继续本轮的动作。最多 3 轮；每批可并行多个 read，只限串行往返。
+      const MAX_READ_ROUNDS = 3;
+      for (let readRound = 0; readRound < MAX_READ_ROUNDS; readRound += 1) {
         const probeCalls = parseToolCalls(first);
         const onlyReads = probeCalls.length > 0
           && probeCalls.every((call) => call.function.name === 'read_task_artifact');

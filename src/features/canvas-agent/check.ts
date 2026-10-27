@@ -1649,6 +1649,8 @@ assert.equal(agentPlaybooks[2]?.id, 'canvas-combat-fx');
 assert.equal(agentPlaybooks[2]?.title, '特效打斗');
 assert.equal(agentPlaybooks[2]?.path, 'prompts/playbook_combat_fx.skeleton.md');
 assert.equal(agentPlaybooks[2]?.knowledgePath, 'prompts/playbook_combat_fx.knowledge.md');
+assert.ok((agentPlaybooks[2]?.knowledgeFiles?.length || 0) >= 6);
+assert.ok(agentPlaybooks[2]?.knowledgeFiles?.some((item) => item.path.endsWith('camera-moves.md')));
 // 打斗阶段闸：方向 → 参数 → 分镜，之前不许建节点；角色锚点没确认也不放行
 assert.equal(
   combatStageDecision({ playbookId: 'canvas-combat-fx', stage: '', message: '给我设计一个打斗动画', answering: false, hasAnchor: false }).blocked,
@@ -1823,11 +1825,8 @@ const playbookBodies = ['canvas-video-piece', 'canvas-opening-animation'].map((i
 });
 assert.deepEqual(playbookGaps, []);
 const playbookLoaded = ['canvas-video-piece', 'canvas-opening-animation'].map((id) => readPlaybookForAgent('.', id));
-const cameraInjection = playbookLoaded[0].slice(playbookBodies[0].length);
-assert.match(cameraInjection, /^\n\n---\n\n## 运镜词典（写法参考）\n\n/);
-assert.match(cameraInjection, /技能正文的分镜结构、节奏与特效层优先/);
-assert.equal(playbookLoaded[1].slice(playbookBodies[1].length), cameraInjection);
-assert.match(cameraInjection, /甩镜/);
+assert.equal(playbookLoaded[0], playbookBodies[0]);
+assert.equal(playbookLoaded[1], playbookBodies[1]);
 assert.equal(inferAppliedPlaybookStage('canvas-video-piece', [
   { type: 'create_node', tempId: 'gen', nodeType: 'generator' },
   { type: 'create_node', tempId: 'vid', nodeType: 'video' },
@@ -1860,9 +1859,32 @@ const combatLoaded = readPlaybookForAgent('.', 'canvas-combat-fx');
 assert.match(combatLoaded, /骨架（流程层）/);
 assert.match(combatLoaded, /以本骨架为准/);
 assert.doesNotMatch(combatLoaded, /知识层（说什么）/);
+// 指针化：骨架里不能再写模型名、时长范围、画幅、百分比配比。
+assert.doesNotMatch(combatLoaded, /Hailuo|Seedance|5-15s|4-15s|16:9|9:16/);
+assert.doesNotMatch(combatLoaded, /\d+\s*%/);
+// 加载表每一行都要有真实文件。
+const combatKnowledgeFiles = agentPlaybooks[2]?.knowledgeFiles || [];
+for (const item of combatKnowledgeFiles) {
+  assert.ok(readFileSync(item.path, 'utf8').length > 0, `知识文件为空：${item.path}`);
+}
+// 骨架里所有反引号 .md 指针都能唯一匹配加载表里的一行。
+const loadTablePaths = combatLoaded
+  .split(/\r?\n/)
+  .filter((line) => line.startsWith('| `'))
+  .map((line) => (line.match(/^\| `([^`]+)`/) || [])[1])
+  .filter(Boolean);
+const declaredPaths = new Set(loadTablePaths);
+for (const pointer of ['inputs.md', 'duration.md', 'storyboard-spec.md', 'knowledge.md', 'techniques.md', 'troubleshooting.md', 'camera-moves.md', 'draft.md', 'storyboard.md', 'anchors.md', 'index.md']) {
+  const hits = [...declaredPaths].filter((value) => value.endsWith(pointer));
+  assert.equal(hits.length, 1, `指针不唯一或悬空：${pointer}`);
+  if (hits[0].includes('/')) {
+    assert.ok(readFileSync(hits[0], 'utf8').length > 0, `指针文件不存在：${hits[0]}`);
+  }
+}
 const combatKnowledge = readPlaybookKnowledge('.', 'canvas-combat-fx');
 assert.match(combatKnowledge, /知识层（说什么）/);
 assert.match(combatKnowledge, /核心方法论/);
+assert.match(combatKnowledge, /六项参数/);
 const anchorAssembly = assembleKnowledgeForTurn({
   actions: [{ type: 'create_node', nodeType: 'image' } as never],
   message: '主角三视图',
@@ -2594,7 +2616,8 @@ assert.match(approvalRouteSource, /!inlineAsks\.length/);
 assert.match(approvalRouteSource, /storyboardReady/);
 assert.match(approvalRouteSource, /runApprovalIds/);
 assert.match(approvalRouteSource, /TASK_STAGE\[taskBefore\.current\]/);
-assert.match(approvalRouteSource, /onlyReads/);
+assert.match(approvalRouteSource, /每批可并行多个 read/);
+assert.match(approvalRouteSource, /MAX_READ_ROUNDS/);
 assert.match(approvalRouteSource, /readTaskArtifactSlice/);
 assert.match(approvalRouteSource, /Every storyboard entry must contain 原文/);
 assert.match(approvalRouteSource, /One task produces exactly one final cut/);
