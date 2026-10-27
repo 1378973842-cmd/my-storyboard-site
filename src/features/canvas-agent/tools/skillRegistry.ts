@@ -340,7 +340,7 @@ export const coreCanvasTools: AIToolDefinition[] = [
     function: {
       name: 'write_task_artifact',
       description:
-        'Write a production artifact to the task ledger file (draft/index/anchors/storyboard). This is the authoritative source, not chat. Use append for long storyboards. Optionally advance the storyboard cursor with the last 12 characters already registered.',
+        'Write a production artifact to the task ledger file (draft/index/anchors/storyboard). This is the authoritative source, not chat. Use append to stay within the 8192-token output budget; the 200,000-character file cap is unrelated. Optionally advance the storyboard cursor with the last 12 characters already registered.',
       parameters: objectSchema(
         {
           kind: { type: 'string', enum: ['draft', 'index', 'anchors', 'storyboard'] },
