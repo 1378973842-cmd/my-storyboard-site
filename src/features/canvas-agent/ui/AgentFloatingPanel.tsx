@@ -2350,7 +2350,11 @@ export function AgentFloatingPanel({
               {activeJob && !jobNoticeHidden && !streaming ? (() => {
                 const beat = activeJob.heartbeat_at || activeJob.updated_at || 0;
                 const alive = Date.now() - beat < 90_000;
-                const waiting = activeJob.status === 'waiting_approval';
+                // job 只是执行壳，提案才是「有没有卡在等」的真源。
+                const pendingProposal = proposals.some((item) => item.status === 'pending');
+                const jobWaiting = activeJob.status === 'waiting_approval';
+                if (jobWaiting && !pendingProposal) return null;
+                const waiting = jobWaiting && pendingProposal;
                 const interrupted = !waiting && !alive;
                 const runIds = Array.isArray(activeJob.result?.runNodeIds)
                   ? (activeJob.result?.runNodeIds as unknown[]).map(String).filter(Boolean)
