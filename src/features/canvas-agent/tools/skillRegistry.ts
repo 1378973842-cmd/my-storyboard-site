@@ -356,6 +356,32 @@ export const coreCanvasTools: AIToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'set_next_action',
+      description:
+        'Persist the next planned canvas action to the task ledger before ending a turn: action type, key params, and dependent node ids. The next turn reads this from task-state instead of relying on thinking/history.',
+      parameters: objectSchema(
+        {
+          action_type: { type: 'string', enum: ['create_node', 'connect_nodes', 'update_node_params', 'execute_node_skill', 'none'] },
+          params: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              prompt: { type: 'string' },
+              duration: { type: 'number' },
+              ratio: { type: 'string' },
+              model: { type: 'string' },
+            },
+            additionalProperties: true,
+          },
+          node_ids: { type: 'array', items: { type: 'string' } },
+        },
+        ['action_type'],
+      ),
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'complete_task_step',
       description:
         'Mark one production todo as done after its artifact has been written and checked. The next unchecked todo becomes the current position.',

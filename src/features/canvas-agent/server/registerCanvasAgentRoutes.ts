@@ -19,7 +19,7 @@ import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRec
 import { operatingPrompt, assertCanvasVideoShotTimelines } from '../core/operatingModel.js';
 import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
 import { canvasAgentStagePrefix } from '../core/stageLedger.js';
-import { completeTaskStep, ensureTask, readTaskArtifact, readTaskArtifactSlice, readTaskState, setTaskCursor, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
+import { completeTaskStep, ensureTask, readTaskArtifact, readTaskArtifactSlice, readTaskState, setTaskCursor, setTaskNextAction, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
 import { checkStoryboardAgainstDraft, parseStoryboardFragments } from '../core/planCheck.js';
 import { assembleKnowledgeForTurn, selectKnowledgeForUse } from '../core/knowledgeContext.js';
 import { turnStatePrefix } from '../core/turnState.js';
@@ -386,6 +386,8 @@ function streamText(
   res: Response,
   text: string,
 ): void {
+  if (!text.trim()) return;
+  (res.locals as Record<string, unknown>).__agentTextStreamed = true;
   const chunks = text.match(/.{1,18}/gs) || [];
   chunks.forEach((chunk) => sendEvent(res, { type: 'delta', text: chunk }));
 }
@@ -1620,7 +1622,7 @@ export function registerCanvasAgentRoutes(
       // 文件账本：任务/产物/步骤落文件，数据库只做缓存。
       let taskNotice = '';
       calls
-        .filter((call) => ['start_production_task', 'write_task_artifact', 'complete_task_step', 'read_task_artifact', 'read_skill_file'].includes(call.function.name))
+        .filter((call) => ['start_production_task', 'set_next_action', 'write_task_artifact', 'complete_task_step', 'read_task_artifact', 'read_skill_file'].includes(call.function.name))
         .forEach((call) => {
           if (!conversation) return;
           const args = safeArgs(call);
@@ -1635,6 +1637,15 @@ export function registerCanvasAgentRoutes(
               });
               label = `任务账本：${state.title}（当前 ${state.preparing ? '准备阶段' : stepLabel(state.current)}）`;
               taskNotice = `任务已建立：${state.title}。当前位置：${state.preparing ? '准备阶段（先确认参数）' : stepLabel(state.current)}。`;
+            } else if (call.function.name === 'set_next_action') {
+              const actionType = String(args.action_type || '').trim();
+              if (!actionType) throw new Error('set_next_action 缺少 action_type');
+              const params = args.params && typeof args.params === 'object'
+                ? args.params as Record<string, unknown>
+                : {};
+              const nodeIds = Array.isArray(args.node_ids) ? args.node_ids.map(String) : [];
+              setTaskNextAction(conversation.id, actionType, params, nodeIds);
+              label = `下一步计划：${actionType}`;
             } else if (call.function.name === 'write_task_artifact') {
               const kind = String(args.kind || '') as TaskArtifactKind;
               if (!['draft', 'index', 'anchors', 'storyboard'].includes(kind)) throw new Error('未知的产物类型');
@@ -2533,6 +2544,13 @@ export function registerCanvasAgentRoutes(
         streamText(res, `${hadText ? '\n\n' : ''}${note}`);
         persistedAsks = [anchorCard];
         sendEvent(res, { type: 'ask', asks: [anchorCard] });
+      }
+      // 所有退出路径的兜底：只要有正文而这一轮还没推送过，就推一次。
+      if (!(res.locals as Record<string, unknown>).__agentTextStreamed) {
+        if (!persistedText.trim()) {
+          persistedText = '这一轮没有生成正文；请查看工具明细，或继续下一步。';
+        }
+        streamText(res, persistedText);
       }
       if (db && conversation) {
         appendCanvasAgentMessage(

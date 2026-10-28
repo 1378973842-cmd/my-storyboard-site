@@ -36,6 +36,13 @@ export type TaskState = {
   todos: TaskTodo[];
   /** 自动建账本时的准备态：只给状态依据，不暗示下一步写 draft。 */
   preparing?: boolean;
+  /** 上一轮落账的下一步计划；跨轮存活，不依赖 thinking。 */
+  nextAction?: {
+    actionType: string;
+    params: Record<string, unknown>;
+    nodeIds: string[];
+    at: number;
+  };
   current: TaskStep;
   facts: Record<string, unknown>;
   artifacts: Partial<Record<TaskArtifactKind, { path: string; chars: number; updatedAt: number }>>;
@@ -273,6 +280,25 @@ export function setTaskPreparing(conversationId: string, preparing: boolean): Ta
   return state;
 }
 
+export function setTaskNextAction(
+  conversationId: string,
+  actionType: string,
+  params: Record<string, unknown>,
+  nodeIds: string[],
+): TaskState {
+  const state = ensureTask(conversationId, {});
+  state.nextAction = {
+    actionType: String(actionType || '').trim().slice(0, 80),
+    params: params && typeof params === 'object' ? params : {},
+    nodeIds: nodeIds.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 40),
+    at: Date.now(),
+  };
+  state.updatedAt = Date.now();
+  atomicWrite(statePath(conversationId), JSON.stringify(state, null, 2));
+  atomicWrite(path.join(taskDir(conversationId), 'task.md'), renderTaskMarkdown(state));
+  return state;
+}
+
 export function completeTaskStep(
   conversationId: string,
   step: TaskStep,
@@ -366,5 +392,8 @@ export function taskStatePrompt(state: TaskState | null): string {
   const position = state.preparing
     ? '准备阶段（尚未进入定稿；先确认参数，不要预设下一步）'
     : (TASK_STEPS.find((item) => item.step === state.current)?.label || state.current);
-  return `\n\n[task_state]\n- 任务：${state.title}（${state.id}）\n- 当前位置：${position}\n- todo：${todo}${cursor}\n- 产物：${artifacts || '（尚未写入）'}${reviewStatus}\n- 文件是唯一权威源：写产物用 write_task_artifact，完成一步用 complete_task_step，主动读回用 read_task_artifact（kind + offset/length，单独一批调用）；核对所需的创作稿/分镜会自动附上，不要凭记忆推进。${reviewFiles}`;
+  const nextAction = state.nextAction
+    ? `\n- 下一步计划（上一轮落账）：${state.nextAction.actionType} ${JSON.stringify(state.nextAction.params)} 依赖:${state.nextAction.nodeIds.join('、') || '无'}`
+    : '\n- 下一步计划（上一轮落账）：（未写）';
+  return `\n\n[task_state]\n- 任务：${state.title}（${state.id}）\n- 当前位置：${position}\n- todo：${todo}${cursor}${nextAction}\n- 产物：${artifacts || '（尚未写入）'}${reviewStatus}\n- 文件是唯一权威源：写产物用 write_task_artifact，完成一步用 complete_task_step，主动读回用 read_task_artifact（kind + offset/length，单独一批调用）；核对所需的创作稿/分镜会自动附上，不要凭记忆推进。${reviewFiles}`;
 }

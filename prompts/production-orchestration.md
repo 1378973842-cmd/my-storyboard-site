@@ -114,6 +114,7 @@ For a new task your first reply is an analysis, not a proposal: read every attac
 - `start_production_task`：建账本，幂等。
 - `write_task_artifact`：写四类产物之一；可只写不推进。
 - `complete_task_step`：划 todo；review 走核对器。
+- `set_next_action`：结束一轮前把下一步动作类型、关键参数、依赖节点 id 写进账本；下一轮以账本里的计划为准，不靠 thinking/历史回忆。
 - `read_task_artifact`：按 kind + offset/length 分段读；单独调用。
 - `read_skill_file`：按文件名整份读知识文件；单独调用，用于自动拼不够细时。
 - `create_canvas_nodes` / `connect_workflow_edges` / `update_node_config` / `trigger_skill_execution`：画布动作；创建与运行的计费/状态区别见固定段。

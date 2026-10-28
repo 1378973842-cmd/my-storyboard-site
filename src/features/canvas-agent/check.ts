@@ -26,7 +26,7 @@ import { applyRunCardSettlement, settleRunCardAnswer } from './core/runCardSettl
 import { turnStatePrefix } from './core/turnState';
 import { checkStoryboardAgainstDraft } from './core/planCheck';
 import { assembleKnowledgeForTurn, selectKnowledgeForUse } from './core/knowledgeContext';
-import { completeTaskStep, ensureTask, readTaskArtifactSlice, readTaskState, setTaskCursor, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE } from './server/taskLedger';
+import { completeTaskStep, ensureTask, readTaskArtifactSlice, readTaskState, setTaskCursor, setTaskNextAction, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE } from './server/taskLedger';
 import { changelogFromActions, effectedFromApply, effectedLine, mediaRunState, mediaStatusLabel, parseRunStates, turnLabelCollapsed } from './core/effectLedger';
 import { AskCardView } from './ui/AskCardView';
 import { AskPager } from './ui/AskPager';
@@ -326,13 +326,14 @@ assert.equal(planList.ok, true);
 const tool = convertSkillToAITool(canvasSkillRegistry[0]);
 assert.equal(tool.type, 'function');
 assert.match(tool.function.name, /^run_/);
-assert.equal(coreCanvasTools.length, 12);
+assert.equal(coreCanvasTools.length, 13);
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'confirm_character_anchor'));
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'ask_user'));
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'remember_project_fact'));
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'start_production_task'));
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'write_task_artifact'));
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'complete_task_step'));
+assert.ok(coreCanvasTools.some((item) => item.function.name === 'set_next_action'));
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'read_task_artifact'));
 assert.ok(coreCanvasTools.some((item) => item.function.name === 'read_skill_file'));
 assert.equal(toolContract('read_skill_file')?.scope, 'meta');
@@ -363,6 +364,10 @@ const prepTask = ensureTask('prep-task-test', { title: '准备态', preparing: t
 assert.match(taskStatePrompt(prepTask), /当前位置：准备阶段（尚未进入定稿/);
 setTaskPreparing('prep-task-test', false);
 assert.match(taskStatePrompt(readTaskState('prep-task-test')), /当前位置：定稿/);
+ensureTask('next-action-test', { title: '下一步计划' });
+setTaskNextAction('next-action-test', 'create_node', { title: '成片', duration: 15 }, ['gen_a', 'gen_b']);
+assert.match(taskStatePrompt(readTaskState('next-action-test')), /下一步计划（上一轮落账）：create_node/);
+assert.match(taskStatePrompt(readTaskState('next-action-test')), /gen_a、gen_b/);
 assert.throws(() => readTaskArtifactSlice('empty-task-test', 'draft'), /还没有 draft\.md/);
 assert.throws(
   () => completeTaskStep('empty-task-test', 'draft'),

@@ -2465,6 +2465,15 @@ export function AgentFloatingPanel({
                 </div>
               ) : null}
               <div className="canvas-agent-composer">
+                {playbookId ? (() => {
+                  const currentTitle = conversations.find((item) => item.id === conversationId)?.title || '';
+                  const skillName = agentPlaybooks.find((item) => item.id === playbookId)?.title || playbookId;
+                  const mismatch = (currentTitle.includes('开场') && playbookId === 'canvas-combat-fx')
+                    || ((currentTitle.includes('打斗') || currentTitle.includes('战斗')) && playbookId === 'canvas-opening-animation');
+                  return mismatch
+                    ? <small className="canvas-agent-skill-mismatch">当前技能：{skillName}（标题写的是{currentTitle}）</small>
+                    : null;
+                })() : null}
                 <div className="canvas-agent-field">
                   <div
                     ref={composerRef}

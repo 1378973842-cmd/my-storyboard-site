@@ -91,6 +91,14 @@ const CORE_CONTRACTS: ToolContract[] = [
     resultStatus: 'stored',
   },
   {
+    name: 'set_next_action',
+    scope: 'meta',
+    mutatesCanvas: false,
+    requiresApproval: false,
+    idempotent: true,
+    resultStatus: 'stored',
+  },
+  {
     name: 'complete_task_step',
     scope: 'meta',
     mutatesCanvas: false,
