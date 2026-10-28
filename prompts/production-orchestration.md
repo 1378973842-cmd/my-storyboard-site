@@ -140,7 +140,7 @@ For a new task your first reply is an analysis, not a proposal: read every attac
 
 
 
-以下五条所有制作 skill 共用；单段/多段只差在「整条」还是「整段」，不改变原则。
+以下五条所有制作 skill 共用；单段/多段只差在「整条」还是「整段」：单段说「整条」，多段说「整段」，原则内容不变。
 
 ### 停点是结构，不是礼貌
 
