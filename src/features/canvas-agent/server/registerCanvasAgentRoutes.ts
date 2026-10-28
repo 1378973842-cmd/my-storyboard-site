@@ -1367,7 +1367,7 @@ export function registerCanvasAgentRoutes(
       }
       // 通用读回：模型可单独调 read_task_artifact 读账本；把文件内容作为 tool result
       // 回给它，再让它继续本轮的动作。最多 3 轮；每批可并行多个 read，只限串行往返。
-      const MAX_READ_ROUNDS = 3;
+      const MAX_READ_ROUNDS = 5;
       for (let readRound = 0; readRound < MAX_READ_ROUNDS; readRound += 1) {
         const probeCalls = parseToolCalls(first);
         const onlyReads = probeCalls.length > 0
@@ -1629,8 +1629,22 @@ export function registerCanvasAgentRoutes(
               label = `文件账本：已写入 ${kind}.md（${written.chars} 字）`;
               taskNotice = `已写入 ${kind}.md（${written.chars} 字）。当前位置：${stepLabel(written.state.current)}。`;
             } else if (call.function.name === 'read_task_artifact' || call.function.name === 'read_skill_file') {
-              // 读回要和写/推进分开调用：混在同一批时，文件内容没法安全地回给模型。
-              throw new Error(`${call.function.name} 要单独调用，不要和 write/complete 放在同一批工具里。`);
+              // 读回和写/推进同批时，不把整轮打死：先执行写/推进，读回留到下一批。
+              // 读回循环已经把纯读批次读完；这里跳过的只是同批里多出来的读。
+              const mixedWithMutation = calls.some((item) => (
+                ['start_production_task', 'write_task_artifact', 'complete_task_step'].includes(item.function.name)
+              ));
+              const log = {
+                id: `read-deferred-${Date.now()}`,
+                name: call.function.name,
+                label: mixedWithMutation
+                  ? `读回延后：${call.function.name} 与写/推进同批，先执行写/推进`
+                  : `读回延后：读回轮次已用完，${call.function.name} 留到下一批`,
+                state: 'done' as const,
+              };
+              persistedToolLogs.push(log);
+              sendEvent(res, { type: 'tool', log });
+              return;
             } else {
               const step = String(args.step || '') as TaskStep;
               if (['review', 'storyboard_runs', 'compose'].includes(step)
