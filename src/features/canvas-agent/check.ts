@@ -1804,6 +1804,8 @@ for (const file of ['prompts/playbook_video_content.prompt.md', 'prompts/playboo
   assert.match(text, /原文片段是核对基准，不整段贴进 prompt/, file);
   assert.match(text, /不采用<图片背景／图中人物>/, file);
   assert.match(text, /不互相交换/, file);
+  assert.match(text, /画面左侧<代称>/, file);
+  assert.match(text, /不支持「运镜参考」「质感参考」/, file);
   assert.match(text, /共同定义同一个<主体>/, file);
 }
 const playbookLoaded = ['canvas-video-piece', 'canvas-opening-animation'].map((id) => readPlaybookForAgent('.', id));
@@ -1917,6 +1919,9 @@ assert.equal(anchorAssembly.knowledge, '');
 const specKnowledge = selectKnowledgeForUse(combatKnowledge, '分镜', ['storyboard']);
 assert.match(specKnowledge.knowledge, /按标点或分行一行一镜，是典型错误/);
 assert.match(specKnowledge.knowledge, /分镜做太碎是大忌/);
+assert.match(specKnowledge.knowledge, /切点优先落在叙事节拍转换处/);
+assert.match(specKnowledge.knowledge, /氛围与环境描写.*不单独成镜/);
+assert.match(specKnowledge.knowledge, /分镜时长低于模型最短时长/);
 for (const id of ['canvas-video-piece', 'canvas-opening-animation']) {
   const picked = selectKnowledgeForUse(readPlaybookKnowledge('.', id), '分镜', ['storyboard']);
   assert.match(picked.knowledge, /按标点或分行一行一镜，是典型错误/, id);
