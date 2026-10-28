@@ -260,6 +260,11 @@ assert.equal(actions.length, 3);
 assert.equal(actions[0]?.type, 'create_node');
 assert.equal(actionProposalNeedsApproval(actions), true);
 
+const planTitleDraft = '# 战斗剧本定稿：金光破晓\n\n---\n\n雷霆之下，黑煞刺客化作黑烟。';
+const planTitleStoryboard = '原文：「雷霆之下，黑煞刺客化作黑烟。」\n时长：5秒';
+const planTitleCheck = checkStoryboardAgainstDraft(planTitleDraft, planTitleStoryboard);
+assert.equal(planTitleCheck.ok, true);
+assert.equal(planTitleCheck.draftChars, 14);
 const planDraft = '第一段。第二段。';
 const planStoryboard = '原文：「第一段。」\n时长：5秒\n原文：「第二段。」\n时长：6秒';
 const planPass = checkStoryboardAgainstDraft(planDraft, planStoryboard);
@@ -354,6 +359,10 @@ assert.throws(() => readTaskArtifactSlice(taskConversation, 'draft', 0, 0), /len
 assert.throws(() => readTaskArtifactSlice('no-such-task', 'draft'), /还没有账本/);
 ensureTask('empty-task-test', { title: '空账本' });
 assert.throws(() => readTaskArtifactSlice('empty-task-test', 'draft'), /还没有 draft\.md/);
+assert.throws(
+  () => completeTaskStep('empty-task-test', 'draft'),
+  /不能完成「定稿」：draft\.md 还没写入或为空/,
+);
 writeTaskArtifact(taskConversation, 'index', '总表');
 writeTaskArtifact(taskConversation, 'anchors', '锚点集');
 writeTaskArtifact(taskConversation, 'storyboard', '分镜1');

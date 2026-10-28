@@ -267,6 +267,25 @@ export function completeTaskStep(
   const state = ensureTask(conversationId, {});
   const target = state.todos.find((item) => item.step === step);
   if (!target) throw new Error('未知的步骤');
+  // 推进的前置条件是「该步的产物文件已写入」。
+  // 不用「上次写入失败」标记：标记会被后续成功写、重启、换写者绕过；
+  // 文件是否存在/非空才是实际状态，也是四步循环「先回填文件」的判据。
+  const required: Partial<Record<TaskStep, TaskArtifactKind>> = {
+    draft: 'draft',
+    anchors: 'anchors',
+    storyboard: 'storyboard',
+    review: 'storyboard',
+    anchor_runs: 'anchors',
+    storyboard_runs: 'storyboard',
+  };
+  const artifactKind = required[step];
+  if (artifactKind) {
+    const text = readTaskArtifact(conversationId, artifactKind);
+    if (!text.trim()) {
+      const file = ARTIFACT_FILES[artifactKind];
+      throw new Error(`不能完成「${target.label}」：${file} 还没写入或为空。先 write_task_artifact 写 ${artifactKind}，再 complete_task_step('${step}')。`);
+    }
+  }
   target.done = true;
   target.at = target.at || Date.now();
   state.current = currentOf(state.todos);

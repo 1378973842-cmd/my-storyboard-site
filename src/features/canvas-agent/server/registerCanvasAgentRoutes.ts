@@ -1599,7 +1599,7 @@ export function registerCanvasAgentRoutes(
             persistedToolLogs.push(log);
             sendEvent(res, { type: 'tool', log });
           } catch (err) {
-            taskNotice = `账本写入失败：${err instanceof Error ? err.message : String(err)}`;
+            taskNotice = `账本操作失败：${err instanceof Error ? err.message : String(err)}`;
             const log = {
               id: `task-ledger-fail-${Date.now()}`,
               name: 'task_ledger',

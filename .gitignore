@@ -29,3 +29,5 @@ data/canvas-snapshots/
 data/hf-cache/
 data/runninghub-workflows.json
 data/runninghub-apps.json
+
+data/agent-tasks/

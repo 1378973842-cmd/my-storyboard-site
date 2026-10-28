@@ -90,6 +90,20 @@ function normalize(text: string): string {
   return String(text || '').replace(/\s+/g, '');
 }
 
+/** 核对只找「漏情节」，不找「标题没抄」：去掉 markdown 标题与分节线。 */
+function stripNonNarrative(text: string): string {
+  return String(text || '')
+    .split(/\r?\n/)
+    .filter((line) => {
+      const value = line.trim();
+      if (!value) return true;
+      if (/^#{1,6}\s/.test(value)) return false;
+      if (/^([-*_])\1{2,}$/.test(value)) return false;
+      return true;
+    })
+    .join('\n');
+}
+
 function stripQuotes(value: string): string {
   const text = String(value || '').trim();
   const pairs: Array<[string, string]> = [
@@ -149,7 +163,7 @@ export function checkStoryboardAgainstDraft(
   options: { requireCapacity?: boolean } = {},
 ): PlanCheckResult {
   const requireCapacity = options.requireCapacity !== false;
-  const draftText = normalize(draft);
+  const draftText = normalize(stripNonNarrative(draft));
   const fragments = parseStoryboardFragments(storyboard);
   const joined = normalize(fragments.map((item) => item.source).join(''));
   const totalDuration = fragments.reduce((sum, item) => sum + (item.duration || 0), 0);
