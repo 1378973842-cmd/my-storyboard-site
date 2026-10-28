@@ -39,6 +39,7 @@ import {
   listCanvasAgentMessages,
   hasPendingRunApproval,
   pendingAskQuestions,
+  hasConversationAskHistory,
   setConversationCancelMarker,
   takeConversationCancelMarker,
   readConversationCitedNodes,
@@ -2576,7 +2577,10 @@ export function registerCanvasAgentRoutes(
         || taskNow?.artifacts.anchors?.chars
         || taskForTurn?.artifacts.anchors?.chars,
       );
-      if (forceAsk && !stagePassed && !anchorsRegistered && !persistedAsks.length && !persistedProposal) {
+      const askHistoryExists = Boolean(
+        db && conversation && hasConversationAskHistory(db, req.authUser?.id || '', conversation.id),
+      );
+      if (forceAsk && !stagePassed && !anchorsRegistered && !askHistoryExists && !persistedAsks.length && !persistedProposal) {
         const anchorCard: AskCard = {
           id: `anchor-${Date.now()}`,
           mode: 'single',

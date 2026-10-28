@@ -53,6 +53,7 @@ import {
   recordConversationCitations,
   recordConversationEffected,
   recordConversationStage,
+  hasConversationAskHistory,
   setConversationCancelMarker,
   takeConversationCancelMarker,
   takeConversationChangelog,
@@ -2059,9 +2060,11 @@ const approvalDb = new Database(':memory:');
 initCanvasAgentConversationSchema(approvalDb);
 const approvalConversation = createCanvasAgentConversation(approvalDb, 'user', 'canvas', '审批');
 assert.equal(hasPendingRunApproval(approvalDb, 'user', approvalConversation.id), false);
+assert.equal(hasConversationAskHistory(approvalDb, 'user', approvalConversation.id), false);
 appendCanvasAgentMessage(approvalDb, 'user', approvalConversation.id, 'assistant', '', {
   asks: [{ id: 'q', mode: 'single', question: '几秒？', options: [] }],
 });
+assert.equal(hasConversationAskHistory(approvalDb, 'user', approvalConversation.id), true);
 assert.equal(hasPendingRunApproval(approvalDb, 'user', approvalConversation.id), false);
 appendCanvasAgentMessage(approvalDb, 'user', approvalConversation.id, 'assistant', '', {
   asks: [{ id: 'ask-run', mode: 'approve_run_node', question: '批准运行这些节点？', options: [], node_keys: ['vid_a'] }],

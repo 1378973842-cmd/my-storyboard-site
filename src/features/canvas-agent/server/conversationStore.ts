@@ -294,6 +294,20 @@ export function hasPendingRunApproval(
  * 审批卡不算：它走 hasPendingRunApproval，那套是「没点批准就不跑」。
  * 这里只回答一件事：用户有没有理那张卡。没理不是同意，不能替他按默认值走。
  */
+export function hasConversationAskHistory(
+  db: InstanceType<typeof Database>,
+  userId: string,
+  conversationId: string,
+): boolean {
+  const row = db.prepare(
+    `SELECT 1 AS ok FROM canvas_agent_messages
+     WHERE conversation_id = ? AND user_id = ? AND role = 'assistant'
+       AND EXISTS (SELECT 1 FROM json_each(metadata_json, '$.asks'))
+     LIMIT 1`
+  ).get(conversationId, userId) as { ok?: number } | undefined;
+  return Boolean(row?.ok);
+}
+
 export function pendingAskQuestions(
   db: InstanceType<typeof Database>,
   userId: string,
