@@ -1657,12 +1657,17 @@ export function registerCanvasAgentRoutes(
         }
         if (assembly.video && assembly.knowledge && videoNodeIds.size) {
           try {
-            // tools=false：第二次调用关工具，不能读 draft.md；语言锚点只能用上下文里已有的 storyboard 原文。
+            // tools=false：第二次调用关工具，也看不到第一次调用的 tool result。
+            // 所以 storyboard 原文必须由服务端读出来随消息带上，不能假设节点已在上下文里。
+            const storyboardForRefine = conversation ? readTaskArtifact(conversation.id, 'storyboard').trim() : '';
+            const storyboardBlock = storyboardForRefine
+              ? `\n\n[storyboard]\n${storyboardForRefine.slice(0, 8_000)}`
+              : '';
             const refine = await callModel(model, [
               ...messages,
               {
                 role: 'user',
-                content: `只重写这些 video 节点的提示词：${[...videoNodeIds].join('、')}。用 update_node_config 返回，patch.prompt 写完整提示词；不要新建节点，不要改模型、时长或参考。不要解释。\n\n以下是本轮相关的打斗知识：\n${assembly.knowledge}`,
+                content: `只重写这些 video 节点的提示词：${[...videoNodeIds].join('、')}。用 update_node_config 返回，patch.prompt 写完整提示词；不要新建节点，不要改模型、时长或参考。不要解释。\n\n以下是本轮相关的打斗知识：\n${assembly.knowledge}${storyboardBlock}`,
               },
             ], false, controller.signal);
             let patched = 0;
