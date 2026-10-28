@@ -13,6 +13,7 @@
 |---|---|---|
 | `prompts/playbook_combat_fx.inputs.md` | 本轮工具调用含 `ask_user`，且卡片覆盖六项参数 | 否，命中自动拼 |
 | `prompts/playbook_combat_fx.duration.md` | 本轮动作含 `create_node.nodeType=video`，或 `update_node_params` 的视频节点 | 否，命中自动拼 |
+| `prompts/production-storyboard-spec.md` | 本轮写分镜 | 否，命中自动拼 |
 | `prompts/playbook_combat_fx.storyboard-spec.md` | 本轮动作含 video create/update，或本轮写分镜 | 否，命中自动拼 |
 | `prompts/playbook_combat_fx.knowledge.md` | 本轮动作含 video create/update | 否，命中自动拼 |
 | `prompts/playbook_combat_fx.techniques.md` | 本轮动作含 video create/update | 否，命中自动拼 |

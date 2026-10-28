@@ -433,6 +433,7 @@ export const agentPlaybooks: AgentPlaybook[] = [
     knowledgePath: 'prompts/playbook_video_content.prompt.md',
     knowledgeFiles: [
       { path: 'prompts/playbook_video_content.inputs.md', when: '收集参数/估时', needsRead: false, use: 'estimate' },
+      { path: 'prompts/production-storyboard-spec.md', when: '本轮写分镜', needsRead: false, use: 'storyboard' },
       { path: 'prompts/playbook_video_content.prompt.md', when: 'video create/update', needsRead: false, use: 'prompt' },
     ],
   },
@@ -444,6 +445,7 @@ export const agentPlaybooks: AgentPlaybook[] = [
     knowledgePath: 'prompts/playbook_opening_animation.prompt.md',
     knowledgeFiles: [
       { path: 'prompts/playbook_opening_animation.inputs.md', when: '收集参数/估时', needsRead: false, use: 'estimate' },
+      { path: 'prompts/production-storyboard-spec.md', when: '本轮写分镜', needsRead: false, use: 'storyboard' },
       { path: 'prompts/playbook_opening_animation.prompt.md', when: 'video create/update', needsRead: false, use: 'prompt' },
     ],
   },
@@ -456,6 +458,7 @@ export const agentPlaybooks: AgentPlaybook[] = [
     knowledgeFiles: [
       { path: 'prompts/playbook_combat_fx.inputs.md', when: 'ask_user 覆盖六项参数', needsRead: false, use: 'collect-params' },
       { path: 'prompts/playbook_combat_fx.duration.md', when: 'video create/update', needsRead: false, use: 'estimate' },
+      { path: 'prompts/production-storyboard-spec.md', when: '本轮写分镜', needsRead: false, use: 'storyboard' },
       { path: 'prompts/playbook_combat_fx.storyboard-spec.md', when: 'video create/update 或写分镜', needsRead: false, use: 'storyboard' },
       { path: 'prompts/playbook_combat_fx.knowledge.md', when: 'video create/update', needsRead: false, use: 'prompt' },
       { path: 'prompts/playbook_combat_fx.techniques.md', when: 'video create/update', needsRead: false, use: 'prompt-example' },

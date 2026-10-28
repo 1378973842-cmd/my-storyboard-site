@@ -40,4 +40,5 @@
 | 文件 | 何时使用 | 需要 read |
 |---|---|---|
 | `prompts/playbook_video_content.inputs.md` | 收集参数/估时 | 否，按 use 自动拼 |
+| `prompts/production-storyboard-spec.md` | 本轮写分镜 | 否，按 use 自动拼 |
 | `prompts/playbook_video_content.prompt.md` | 分镜/提示词/输出模板/示例 | 否，按 use 自动拼 |

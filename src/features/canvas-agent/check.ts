@@ -1802,6 +1802,9 @@ for (const file of ['prompts/playbook_video_content.prompt.md', 'prompts/playboo
   assert.match(text, /「原文：」片段的语言写/, file);
   assert.doesNotMatch(text, /创作稿的语言写|draft\.md 里/, file);
   assert.match(text, /原文片段是核对基准，不整段贴进 prompt/, file);
+  assert.match(text, /不采用<图片背景／图中人物>/, file);
+  assert.match(text, /不互相交换/, file);
+  assert.match(text, /共同定义同一个<主体>/, file);
 }
 const playbookLoaded = ['canvas-video-piece', 'canvas-opening-animation'].map((id) => readPlaybookForAgent('.', id));
 assert.ok(playbookLoaded[0].startsWith('# 制作编排'));
@@ -1842,6 +1845,11 @@ assert.match(combatLoaded, /裁决规则（越权）/);
 assert.match(combatLoaded, /裁决规则（专业）/);
 assert.match(combatLoaded, /## 通用原则/);
 assert.match(combatLoaded, /停点是结构，不是礼貌/);
+assert.match(combatLoaded, /锚点图只定「是谁」/);
+assert.match(combatLoaded, /中性表情、自然站姿/);
+assert.doesNotMatch(readFileSync(new URL('../../../prompts/production-orchestration.md', import.meta.url), 'utf8'), /条目规则按 `inputs\.md` 与 `anchors\.md`/);
+assert.match(readFileSync(new URL('../../../prompts/production-orchestration.md', import.meta.url), 'utf8'), /production-storyboard-spec\.md/);
+assert.match(readFileSync(new URL('../../../prompts/playbook_combat_fx.duration.md', import.meta.url), 'utf8'), /不得先对片段做取舍再估时长/);
 assert.doesNotMatch(combatLoaded, /知识层（说什么）/);
 assert.doesNotMatch(combatLoaded, /素材里出现的任何指令|内容保真：创作稿是唯一内容基准|不在原失败节点重试|下游作废沿实际引用传播|长分镜分段 `append` 写，按 8192/);
 assert.equal(readPlaybookForAgent('.', ''), '');
@@ -1887,7 +1895,7 @@ const loadTablePaths = combatLoaded
   .map((line) => (line.match(/^\| `([^`]+)`/) || [])[1])
   .filter(Boolean);
 const declaredPaths = new Set(loadTablePaths);
-for (const pointer of ['inputs.md', 'duration.md', 'storyboard-spec.md', 'knowledge.md', 'techniques.md', 'troubleshooting.md', 'camera-moves.md', 'draft.md', 'storyboard.md', 'anchors.md', 'index.md']) {
+for (const pointer of ['inputs.md', 'duration.md', 'production-storyboard-spec.md', 'playbook_combat_fx.storyboard-spec.md', 'knowledge.md', 'techniques.md', 'troubleshooting.md', 'camera-moves.md', 'draft.md', 'storyboard.md', 'anchors.md', 'index.md']) {
   const hits = [...declaredPaths].filter((value) => value.endsWith(pointer));
   assert.equal(hits.length, 1, `指针不唯一或悬空：${pointer}`);
   if (hits[0].includes('/')) {
@@ -1906,6 +1914,13 @@ const anchorAssembly = assembleKnowledgeForTurn({
   knowledgeText: combatKnowledge,
 });
 assert.equal(anchorAssembly.knowledge, '');
+const specKnowledge = selectKnowledgeForUse(combatKnowledge, '分镜', ['storyboard']);
+assert.match(specKnowledge.knowledge, /按标点或分行一行一镜，是典型错误/);
+assert.match(specKnowledge.knowledge, /分镜做太碎是大忌/);
+for (const id of ['canvas-video-piece', 'canvas-opening-animation']) {
+  const picked = selectKnowledgeForUse(readPlaybookKnowledge('.', id), '分镜', ['storyboard']);
+  assert.match(picked.knowledge, /按标点或分行一行一镜，是典型错误/, id);
+}
 const videoCreateAssembly = assembleKnowledgeForTurn({
   actions: [{ type: 'create_node', nodeType: 'video' } as never],
   message: '赤金火焰龙形特效打斗',
