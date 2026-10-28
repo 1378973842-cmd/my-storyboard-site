@@ -1727,9 +1727,11 @@ export function registerCanvasAgentRoutes(
               }
             }
             const validationErrors: string[] = [];
+            const checkStatus = { timeline: '通过', count: '通过', semantic: '通过' };
             for (const [target, prompt] of candidates) {
               const duration = videoDurations.get(target);
               if (duration === undefined) {
+                checkStatus.timeline = '受阻';
                 validationErrors.push(`节点 ${target}：没有节点时长，无法核对分镜时间线`);
                 continue;
               }
@@ -1739,6 +1741,7 @@ export function registerCanvasAgentRoutes(
               try {
                 assertCanvasVideoShotTimelines([candidateAction], effectedNodes as never);
               } catch (err) {
+                checkStatus.timeline = '受阻';
                 const total = [...prompt.matchAll(/(?:分镜|Shot)\s*(\d+)\s*丨\s*([\d.]+)\s*-\s*([\d.]+)\s*s/gi)]
                   .reduce((sum, match) => sum + Math.max(0, Number(match[3]) - Number(match[2])), 0);
                 if (total > 0) {
@@ -1749,16 +1752,66 @@ export function registerCanvasAgentRoutes(
                 }
               }
             }
-            const storyboardCount = parseStoryboardFragments(storyboardForRefine).length;
-            if (storyboardCount && candidates.size) {
-              const finalPrompts = new Map(originalPrompts);
-              for (const [target, prompt] of candidates) finalPrompts.set(target, prompt);
+            const storyboardFragments = parseStoryboardFragments(storyboardForRefine);
+            const finalPrompts = new Map(originalPrompts);
+            for (const [target, prompt] of candidates) finalPrompts.set(target, prompt);
+            if (storyboardFragments.length && candidates.size) {
               const shotCount = [...finalPrompts.values()]
                 .reduce((sum, prompt) => sum + ([...prompt.matchAll(/(?:分镜|Shot)\s*\d+\s*丨/gi)].length), 0);
-              if (shotCount !== storyboardCount) {
-                validationErrors.push(`storyboard 有 ${storyboardCount} 条，prompt 只写了 ${shotCount} 镜`);
+              if (shotCount !== storyboardFragments.length) {
+                checkStatus.count = '受阻';
+                validationErrors.push(`storyboard 有 ${storyboardFragments.length} 条，prompt 只写了 ${shotCount} 镜`);
               }
             }
+            // 语义覆盖：只核情节/台词能不能从 prompt 还原，不做逐字匹配。
+            if (candidates.size && storyboardFragments.length) {
+              if (checkStatus.timeline === '受阻' || checkStatus.count === '受阻') {
+                checkStatus.semantic = '受阻';
+                validationErrors.push('语义覆盖未执行：时间线或条目数前置核对未通过');
+              } else {
+                const normalizedPrompt = [...finalPrompts.values()].join('\n').replace(/\s+/g, '');
+                const pasted = storyboardFragments.find((fragment) => (
+                  fragment.source.replace(/\s+/g, '').length >= 3
+                  && normalizedPrompt.includes(fragment.source.replace(/\s+/g, ''))
+                ));
+                if (pasted) {
+                  checkStatus.semantic = '受阻';
+                  validationErrors.push(`语义覆盖未通过：原文片段「${pasted.source.slice(0, 40)}」整段贴进了 prompt，不能算转写`);
+                } else {
+                  try {
+                    const semanticResponse = await callModel(model, [
+                      ...messages,
+                      {
+                        role: 'user',
+                        content: `只做语义覆盖核对，不要解释。遮住视觉风格与镜头描述，仅凭其余内容能完整还原该条原文片段的全部情节和台词；跨多镜逐条核。整段照抄原文、只复述原文不算还原（原文片段是核对基准，不整段贴进 prompt）。\n\n[storyboard]\n${storyboardFragments.map((fragment, index) => `${index + 1}. 原文：「${fragment.source}」 时长：${fragment.duration ?? '?'}秒`).join('\n')}\n\n[prompt]\n${[...finalPrompts.entries()].map(([id, prompt]) => `节点 ${id}：\n${prompt}`).join('\n\n')}\n\n只输出 JSON：{"items":[{"index":1,"covered":true,"reason":""}]}`,
+                      },
+                    ], false, controller.signal);
+                    const semanticText = extractTextLlmMessageContent(model, semanticResponse).trim();
+                    const jsonText = semanticText.match(/\{[\s\S]*\}/)?.[0] || '';
+                    const parsed = jsonText ? JSON.parse(jsonText) as { items?: Array<{ index?: number; covered?: boolean; reason?: string }> } : {};
+                    const items = Array.isArray(parsed.items) ? parsed.items : [];
+                    if (items.length !== storyboardFragments.length) {
+                      checkStatus.semantic = '受阻';
+                      validationErrors.push(`语义覆盖自检结果条数不符：storyboard ${storyboardFragments.length} 条，自检 ${items.length} 条`);
+                    } else {
+                      const missing = items.filter((item) => !item.covered);
+                      if (missing.length) {
+                        checkStatus.semantic = '受阻';
+                        for (const item of missing) {
+                          const index = Number(item.index) || 0;
+                          const source = storyboardFragments[index - 1]?.source || '';
+                          validationErrors.push(`语义覆盖未通过：第 ${index || '?'} 条原文片段未还原${source ? `「${source.slice(0, 40)}」` : ''}${item.reason ? `：${item.reason}` : ''}`);
+                        }
+                      }
+                    }
+                  } catch (err) {
+                    checkStatus.semantic = '受阻';
+                    validationErrors.push(`语义覆盖自检调用失败：${err instanceof Error ? err.message : String(err)}`);
+                  }
+                }
+              }
+            }
+            const checkLabel = `时间线=${checkStatus.timeline}；条目数=${checkStatus.count}；语义覆盖=${checkStatus.semantic}`;
             if (validationErrors.length) {
               if (conversation) {
                 const message = validationErrors.join('；');
@@ -1768,7 +1821,7 @@ export function registerCanvasAgentRoutes(
               const log = {
                 id: `knowledge-validation-${Date.now()}`,
                 name: 'knowledge-validation',
-                label: `知识层校验未通过：${validationErrors.join('；')}`.slice(0, 1200),
+                label: `知识层校验未通过（${checkLabel}）：${validationErrors.join('；')}`.slice(0, 1200),
                 state: 'failed' as const,
               };
               persistedToolLogs.push(log);
@@ -1807,7 +1860,7 @@ export function registerCanvasAgentRoutes(
               const log = {
                 id: `knowledge-${Date.now()}`,
                 name: 'knowledge',
-                label: `知识层：按 video 动作注入 ${assembly.selected.length} 段，重写 ${patched} 条提示词${assembly.truncated ? `；未拼入 ${assembly.dropped.length} 段` : ''}`,
+                label: `知识层：按 video 动作注入 ${assembly.selected.length} 段，重写 ${patched} 条提示词（${checkLabel}）${assembly.truncated ? `；未拼入 ${assembly.dropped.length} 段` : ''}`,
                 state: 'done' as const,
               };
               persistedToolLogs.push(log);

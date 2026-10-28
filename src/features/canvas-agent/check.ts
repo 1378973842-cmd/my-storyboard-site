@@ -1801,6 +1801,7 @@ for (const file of ['prompts/playbook_video_content.prompt.md', 'prompts/playboo
   assert.match(text, /分镜行怎么写/, file);
   assert.match(text, /「原文：」片段的语言写/, file);
   assert.doesNotMatch(text, /创作稿的语言写|draft\.md 里/, file);
+  assert.match(text, /原文片段是核对基准，不整段贴进 prompt/, file);
 }
 const playbookLoaded = ['canvas-video-piece', 'canvas-opening-animation'].map((id) => readPlaybookForAgent('.', id));
 assert.ok(playbookLoaded[0].startsWith('# 制作编排'));
@@ -3779,10 +3780,12 @@ assert.ok(orderAt('flattenModelParamKeys(normalized)') < orderAt('rejectUnknownC
 assert.ok(orderAt('rejectUnknownCanvasParamKeys(') < orderAt('applyRebuildGuards('));
 assert.ok(orderAt('applyRebuildGuards(') < orderAt('invalidationActions('));
 assert.match(promptSource, /assertCanvasVideoShotTimelines\(\[candidateAction\]/);
-assert.match(promptSource, /storyboard 有 \$\{storyboardCount\} 条，prompt 只写了 \$\{shotCount\} 镜/);
+assert.match(promptSource, /storyboard 有 \$\{storyboardFragments\.length\} 条，prompt 只写了 \$\{shotCount\} 镜/);
 assert.match(promptSource, /prompt_structure_error/);
 assert.match(promptSource, /分镜时间线与节点时长不符/);
-assert.match(promptSource, /storyboard 有 \$\{storyboardCount\} 条，prompt 只写了/);
+assert.match(promptSource, /语义覆盖/);
+assert.match(promptSource, /遮住视觉风格与镜头描述/);
+assert.match(promptSource, /整段贴进了 prompt/);
 assert.match(promptSource, /stripCreatesOnShortYes\(actions, message\)/);
 assert.match(promptSource, /runCardPending\s*\?\s*'审批卡还在等您/);
 assert.match(promptSource, /上一批已完成。您是要继续做下一步，还是要改刚才的分析？/);
