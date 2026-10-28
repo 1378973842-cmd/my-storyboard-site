@@ -153,7 +153,8 @@ When the user must choose, write your analysis first (what the references show, 
 Never ask questions in prose. If you are about to write "请告诉我", "请选择" or "您希望哪一张", stop and call ask_user instead; a preparation stage without cards is a failed turn.
 Card questions and options must be written in Chinese; never paste an English instruction or prompt into a card. Never output a card or tool call as JSON text (including a bare {card: ...} or {question, options}); always use the native tool call.
 Make every card opinionated: mark the option you recommend with （推荐） and a short reason, for example "16:9（宽幅张力最强，推荐）". A neutral list with no recommendation is a failed card.
-When asking the user to confirm a plan or proposal, write the full plan in your message first and refer to it as 以上方案 (never 以下方案, because the card has no plan below it). Do not number a single card question like "1.". 
+When asking the user to confirm a plan or proposal, write the full plan in your message first and refer to it as 以上方案 (never 以下方案, because the card has no plan below it). Do not number a single card question like "1.".
+要求用户确认方案时，必须先把完整方案写进正文，再用「以上方案」指代；卡片下方没有方案，禁止只发卡让用户盲确认。 
 Never ask the user to confirm an image before it is actually generated; if the node is still running, say it is still generating. Do not repeat analysis you already gave in an earlier turn; if nothing changed, answer in one line.
 Messages whose text starts with [[自动]] are automatic system notes about generation finishing, not user speech. Treat them as status updates: inspect the result, then let the user confirm or continue. Never claim the user asked to redesign, replace or modify anything unless their own message says so.
 Thinking/reasoning may be in English, but every user-facing word — chat prose, questions, card labels, options, summaries, status text — must be written in Chinese, even if the reasoning was English or the user writes English. Never open with English meta-commentary such as "Wait, let's..." and never switch the reply language mid-turn.
@@ -2535,7 +2536,8 @@ export function registerCanvasAgentRoutes(
         let lead = askOnly && !inlineAsks.length ? safeFirstText : '';
         if (lead.trim().startsWith('{')) lead = '';
         if (!lead && editFirst) lead = '先不生成。给你一份改法菜单，勾选要改的层，我按勾选改同一版提示词。';
-        if (!lead && !persistedThinking) {
+        // thinking 不是用户可见正文。没有正文就必须补写，不能因为有 thinking 就跳过。
+        if (!lead) {
           try {
             const written = await callModel(model, [
               ...messages,
@@ -2551,9 +2553,15 @@ export function registerCanvasAgentRoutes(
             /* 补写失败就只发卡片 */
           }
         }
-        persistedText = lead || '已发卡，请在卡片上选择；选完我继续。';
-        streamText(res, persistedText);
-        publishAsks();
+        if (!lead) {
+          // 补写也失败：不发盲卡，明确告诉用户正文没给全。
+          persistedText = '方案正文我还没给全，先不让你确认；我补写后再发卡。';
+          streamText(res, persistedText);
+        } else {
+          persistedText = lead;
+          streamText(res, persistedText);
+          publishAsks();
+        }
       } else if (interpreted?.unknownTypes.length) {
         persistedText = `动作类型无法识别：${interpreted.unknownTypes.join('、')}。这轮没有生成提案。`;
         streamText(res, persistedText);
