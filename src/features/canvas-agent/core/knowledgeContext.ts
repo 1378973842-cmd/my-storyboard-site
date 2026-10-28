@@ -24,7 +24,7 @@ const ELEMENT_ALIASES: Array<{ element: string; patterns: RegExp }> = [
 
 const GENERIC_TITLES = [
   /叙事/, /四层提示词/, /冲击帧/, /核心方法论/,
-  /分镜结构/, /多角色镜头/, /每条分镜/,
+  /分镜结构/, /多角色镜头/, /每条分镜/, /分镜/, /输入/, /时长/, /示例/, /输出模板/, /内容不满意/,
   /运镜四件套/, /分类 A/, /运镜/, /词典/,
 ];
 

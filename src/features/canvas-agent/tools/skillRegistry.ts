@@ -430,9 +430,10 @@ export const agentPlaybooks: AgentPlaybook[] = [
     title: '剧情动画',
     when: '用户要多段剧情片时（每段 25–40 秒，分 2–3 段，主角跨段存活）',
     path: 'prompts/playbook_video_content.md',
-    knowledgePath: 'prompts/playbook_video_content.knowledge.md',
+    knowledgePath: 'prompts/playbook_video_content.prompt.md',
     knowledgeFiles: [
-      { path: 'prompts/playbook_video_content.knowledge.md', when: 'video create/update', needsRead: false, use: 'prompt' },
+      { path: 'prompts/playbook_video_content.inputs.md', when: '收集参数/估时', needsRead: false, use: 'estimate' },
+      { path: 'prompts/playbook_video_content.prompt.md', when: 'video create/update', needsRead: false, use: 'prompt' },
     ],
   },
   {
@@ -440,9 +441,10 @@ export const agentPlaybooks: AgentPlaybook[] = [
     title: '开场动画',
     when: '用户要一条游戏开场动画时（单段，15 秒内，可选配乐）',
     path: 'prompts/playbook_opening_animation.md',
-    knowledgePath: 'prompts/playbook_opening_animation.knowledge.md',
+    knowledgePath: 'prompts/playbook_opening_animation.prompt.md',
     knowledgeFiles: [
-      { path: 'prompts/playbook_opening_animation.knowledge.md', when: 'video create/update', needsRead: false, use: 'prompt' },
+      { path: 'prompts/playbook_opening_animation.inputs.md', when: '收集参数/估时', needsRead: false, use: 'estimate' },
+      { path: 'prompts/playbook_opening_animation.prompt.md', when: 'video create/update', needsRead: false, use: 'prompt' },
     ],
   },
   {

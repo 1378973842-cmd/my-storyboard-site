@@ -104,5 +104,6 @@ video 的 prompt 里不要写参考图的文件名、节点名或任何 id。参
 
 | 文件 | 何时使用 | 需要 read |
 |---|---|---|
-| `prompts/playbook_opening_animation.knowledge.md` | 分镜/提示词/输出模板/示例/时长 | 否，按 use 自动拼 |
+| `prompts/playbook_opening_animation.inputs.md` | 收集参数/估时 | 否，按 use 自动拼 |
+| `prompts/playbook_opening_animation.prompt.md` | 分镜/提示词/输出模板/示例 | 否，按 use 自动拼 |
 

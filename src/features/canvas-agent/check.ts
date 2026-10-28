@@ -1794,7 +1794,7 @@ const playbookBodies = ['canvas-video-piece', 'canvas-opening-animation'].map((i
   assert.match(loaded, /When you create image, video or generator nodes, propose running them/);
   return body;
 });
-for (const file of ['prompts/playbook_video_content.knowledge.md', 'prompts/playbook_opening_animation.knowledge.md']) {
+for (const file of ['prompts/playbook_video_content.prompt.md', 'prompts/playbook_opening_animation.prompt.md']) {
   const text = readFileSync(file, 'utf8');
   assert.ok(text.length > 0, file);
   assert.match(text, /分镜行怎么写/, file);
