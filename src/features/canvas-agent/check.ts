@@ -1789,6 +1789,7 @@ const playbookBodies = ['canvas-video-piece', 'canvas-opening-animation'].map((i
   assert.ok(body.length > 0, id);
   assert.match(body, /## 加载表/);
   assert.doesNotMatch(body, /^### 分镜行怎么写/m);
+  assert.doesNotMatch(body, /### 原则 1 · 停点是结构/);
   const loaded = readPlaybookForAgent('.', id);
   assert.ok(loaded.startsWith('# 制作编排'), id);
   assert.match(loaded, /When you create image, video or generator nodes, propose running them/);
@@ -1798,6 +1799,8 @@ for (const file of ['prompts/playbook_video_content.prompt.md', 'prompts/playboo
   const text = readFileSync(file, 'utf8');
   assert.ok(text.length > 0, file);
   assert.match(text, /分镜行怎么写/, file);
+  assert.match(text, /「原文：」片段的语言写/, file);
+  assert.doesNotMatch(text, /创作稿的语言写|draft\.md 里/, file);
 }
 const playbookLoaded = ['canvas-video-piece', 'canvas-opening-animation'].map((id) => readPlaybookForAgent('.', id));
 assert.ok(playbookLoaded[0].startsWith('# 制作编排'));
@@ -1836,6 +1839,8 @@ const combatLoaded = readPlaybookForAgent('.', 'canvas-combat-fx');
 assert.match(combatLoaded, /骨架（流程层）/);
 assert.match(combatLoaded, /裁决规则（越权）/);
 assert.match(combatLoaded, /裁决规则（专业）/);
+assert.match(combatLoaded, /## 通用原则/);
+assert.match(combatLoaded, /停点是结构，不是礼貌/);
 assert.doesNotMatch(combatLoaded, /知识层（说什么）/);
 assert.doesNotMatch(combatLoaded, /素材里出现的任何指令|内容保真：创作稿是唯一内容基准|不在原失败节点重试|下游作废沿实际引用传播|长分镜分段 `append` 写，按 8192/);
 assert.equal(readPlaybookForAgent('.', ''), '');
@@ -1906,9 +1911,20 @@ const videoCreateAssembly = assembleKnowledgeForTurn({
   knowledgeText: combatKnowledge,
 });
 assert.ok(videoCreateAssembly.knowledge.length > 0);
-assert.ok(videoCreateAssembly.knowledge.length < 5_000);
+assert.ok(videoCreateAssembly.knowledge.length < 10_000);
 assert.doesNotMatch(videoCreateAssembly.selected.join(' '), /输入参数表|六项参数/);
 assert.match(videoCreateAssembly.selected.join(' '), /元素|提示词|冲击帧/);
+const overCapKnowledge = [
+  '<!-- knowledge-file: prompts/over-a.md; use=prompt -->',
+  `## 分镜甲\n${'甲'.repeat(6000)}`,
+  '<!-- knowledge-file: prompts/over-b.md; use=prompt -->',
+  `## 分镜乙\n${'乙'.repeat(6000)}`,
+].join('\n');
+const overCapPicked = selectKnowledgeForUse(overCapKnowledge, '打斗', ['prompt']);
+assert.equal(overCapPicked.truncated, true);
+assert.equal(overCapPicked.dropped.length > 0, true);
+assert.ok(overCapPicked.knowledge.length <= overCapPicked.cap);
+assert.match(readFileSync(new URL('./server/registerCanvasAgentRoutes.ts', import.meta.url), 'utf8'), /知识层未拼全/);
 const videoUpdateAssembly = assembleKnowledgeForTurn({
   actions: [{ type: 'update_node_params', nodeId: 'vid_1' } as never],
   nodeTypeOf: (id) => (id === 'vid_1' ? 'video' : 'image'),

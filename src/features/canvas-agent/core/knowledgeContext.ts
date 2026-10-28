@@ -9,6 +9,9 @@ export type KnowledgeAssembly = {
   bones: boolean;
   knowledge: string;
   selected: string[];
+  dropped: string[];
+  cap: number;
+  truncated: boolean;
   reason: string;
 };
 
@@ -67,41 +70,60 @@ export function selectKnowledgeForUse(
   text: string,
   message: string,
   uses: readonly string[],
-): { knowledge: string; selected: string[] } {
+): { knowledge: string; selected: string[]; dropped: string[]; cap: number; truncated: boolean } {
   const useSet = new Set(uses);
   const blocks = splitKnowledgeFiles(text).filter((block) => useSet.has(block.use));
+  const pack = (items: Array<{ label: string; text: string }>, cap: number) => {
+    const selected: string[] = [];
+    const dropped: string[] = [];
+    const chunks: string[] = [];
+    let used = 0;
+    for (const item of items) {
+      const separator = chunks.length ? 2 : 0;
+      if (used + separator + item.text.length > cap) {
+        dropped.push(item.label);
+        continue;
+      }
+      chunks.push(item.text);
+      selected.push(item.label);
+      used += separator + item.text.length;
+    }
+    return {
+      knowledge: chunks.join('\n\n'),
+      selected,
+      dropped,
+      cap,
+      truncated: dropped.length > 0,
+    };
+  };
   if (!blocks.length) {
     // 兼容没有段标签的旧知识文本：按全文处理。
-    return { knowledge: uses.includes('prompt') ? String(text || '').slice(0, 5_000) : '', selected: [] };
+    if (!uses.includes('prompt')) return { knowledge: '', selected: [], dropped: [], cap: 0, truncated: false };
+    return pack([{ label: '(unmarked knowledge)', text: String(text || '') }], 10_000);
   }
   // 参数/估时是整表知识，不做段落筛选，整段拼。
   if (uses.some((use) => use === 'collect-params' || use === 'estimate')) {
-    const full = blocks.map((block) => block.body).join('\n\n');
-    const cap = uses.includes('estimate') ? 2_000 : 2_000;
-    return { knowledge: full.slice(0, cap), selected: blocks.map((block) => block.path) };
+    return pack(blocks.map((block) => ({ label: block.path, text: block.body })), 2_000);
   }
   const elements = ELEMENT_ALIASES
     .filter((item) => item.patterns.test(message))
     .map((item) => item.element);
-  const selected: string[] = [];
-  const chunks: string[] = [];
+  const items: Array<{ label: string; text: string }> = [];
   for (const block of blocks) {
     const sections = splitSections(block.body);
     if (!sections.length) {
-      selected.push(block.path);
-      chunks.push(block.body);
+      items.push({ label: block.path, text: block.body });
       continue;
     }
     for (const section of sections) {
       const generic = GENERIC_TITLES.some((pattern) => pattern.test(section.title));
       const elementMatch = elements.some((element) => section.title.includes(element) || section.body.includes(element));
       if (!generic && !elementMatch) continue;
-      selected.push(section.title);
-      chunks.push(`## ${section.title}\n${section.body}`.trim());
+      items.push({ label: section.title, text: `## ${section.title}\n${section.body}`.trim() });
     }
   }
-  const cap = uses.includes('prompt') ? 5_000 : uses.includes('storyboard') ? 2_000 : 2_000;
-  return { knowledge: chunks.join('\n\n').slice(0, cap), selected };
+  const cap = uses.includes('prompt') ? 10_000 : uses.includes('storyboard') ? 2_000 : 2_000;
+  return pack(items, cap);
 }
 
 export function assembleKnowledgeForTurn(input: {
@@ -116,7 +138,7 @@ export function assembleKnowledgeForTurn(input: {
   const updateVideo = input.actions.some((action) => action.type === 'update_node_params' && nodeTypeOf(action.nodeId) === 'video');
   const video = createVideo || updateVideo;
   if (!video) {
-    return { video: false, bones: true, knowledge: '', selected: [], reason: '本轮动作无 video create/update：只拼骨架' };
+    return { video: false, bones: true, knowledge: '', selected: [], dropped: [], cap: 0, truncated: false, reason: '本轮动作无 video create/update：只拼骨架' };
   }
   // 改分镜走 storyboard；新建 video 走 prompt。
   const step = input.step || (updateVideo && !createVideo ? 'storyboard' : 'prompt');
@@ -128,6 +150,9 @@ export function assembleKnowledgeForTurn(input: {
     bones: true,
     knowledge: picked.knowledge,
     selected: picked.selected,
-    reason: `本轮动作含 video，按步骤 ${uses.join('+')} 拼知识（${picked.selected.length} 段）`,
+    dropped: picked.dropped,
+    cap: picked.cap,
+    truncated: picked.truncated,
+    reason: `本轮动作含 video，按步骤 ${uses.join('+')} 拼知识（${picked.selected.length} 段${picked.truncated ? `，未拼入 ${picked.dropped.length} 段` : ''}）`,
   };
 }

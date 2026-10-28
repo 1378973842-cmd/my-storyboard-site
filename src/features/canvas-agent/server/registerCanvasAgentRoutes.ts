@@ -1203,7 +1203,10 @@ export function registerCanvasAgentRoutes(
         knowledgeTextForPrompt,
       );
       if (check.ok || !/没有制作清单/.test(check.reason)) return '';
-      return selectKnowledgeForUse(knowledgeTextForPrompt, turnMessage, ['collect-params', 'estimate']).knowledge;
+      const picked = selectKnowledgeForUse(knowledgeTextForPrompt, turnMessage, ['collect-params', 'estimate']);
+      return picked.truncated
+        ? `${picked.knowledge}\n\n[knowledge_truncated] 超出 ${picked.cap} 字，未拼入 ${picked.dropped.length} 段：${picked.dropped.join('、')}`
+        : picked.knowledge;
     })();
     // 方向阶段、还没锚点：强制第一张卡先确认主角，别默认画布里的阿波罗。
     const stageRule = combatSession
@@ -1642,8 +1645,19 @@ export function registerCanvasAgentRoutes(
           message: turnMessage,
           knowledgeText,
         });
+        if (assembly.video && assembly.truncated && videoNodeIds.size) {
+          const log = {
+            id: `knowledge-truncated-${Date.now()}`,
+            name: 'knowledge',
+            label: `知识层未拼全：上限 ${assembly.cap} 字，未拼入 ${assembly.dropped.length} 段（${assembly.dropped.join('、')}）`,
+            state: 'done' as const,
+          };
+          persistedToolLogs.push(log);
+          sendEvent(res, { type: 'tool', log });
+        }
         if (assembly.video && assembly.knowledge && videoNodeIds.size) {
           try {
+            // tools=false：第二次调用关工具，不能读 draft.md；语言锚点只能用上下文里已有的 storyboard 原文。
             const refine = await callModel(model, [
               ...messages,
               {
@@ -1689,7 +1703,7 @@ export function registerCanvasAgentRoutes(
               const log = {
                 id: `knowledge-${Date.now()}`,
                 name: 'knowledge',
-                label: `知识层：按 video 动作注入 ${assembly.selected.length} 段，重写 ${patched} 条提示词`,
+                label: `知识层：按 video 动作注入 ${assembly.selected.length} 段，重写 ${patched} 条提示词${assembly.truncated ? `；未拼入 ${assembly.dropped.length} 段` : ''}`,
                 state: 'done' as const,
               };
               persistedToolLogs.push(log);
