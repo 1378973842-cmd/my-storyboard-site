@@ -1284,6 +1284,7 @@ export function registerCanvasAgentRoutes(
       const safeCompleteSteps = new Set<TaskStep>(['draft', 'anchors', 'storyboard']);
       const taskStepLabel = (step: TaskStep) => TASK_STEPS.find((item) => item.step === step)?.label || step;
       let lastNonEmptyContent = extractTextLlmMessageContent(model, first).trim();
+      let continuationRounds = 0;
       for (let writeRound = 0; writeRound < MAX_WRITE_ROUNDS; writeRound += 1) {
         const writeCalls = parseToolCalls(first);
         if (!writeCalls.length) break;
@@ -1293,6 +1294,7 @@ export function registerCanvasAgentRoutes(
             && safeCompleteSteps.has(String(safeArgs(call).step || '') as TaskStep))
         ));
         if (!allContinuable || !conversation) break;
+        continuationRounds += 1;
         const toolResults = writeCalls.map((call) => {
           const args = safeArgs(call);
           try {
@@ -1343,7 +1345,7 @@ export function registerCanvasAgentRoutes(
         const roundContent = extractTextLlmMessageContent(model, first).trim();
         if (roundContent) lastNonEmptyContent = roundContent;
       }
-      if (parseToolCalls(first).some((call) => (
+      if (continuationRounds >= MAX_WRITE_ROUNDS && parseToolCalls(first).some((call) => (
         call.function.name === 'write_task_artifact'
         || (call.function.name === 'complete_task_step' && safeCompleteSteps.has(String(safeArgs(call).step || '') as TaskStep))
       ))) {
