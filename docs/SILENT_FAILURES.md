@@ -9,6 +9,7 @@
 | duration.md 缺容量表 | 曾跳过容量拦截 | 已修：显式「duration.md 缺容量表」（`41bf451`） |
 | write_task_artifact 超 200,000 字符 | `slice` 静默截断 | **待办**：应改为显式报错，报当前字符数/上限/怎么分段；模型输出 8192 tokens 够不到，不阻塞跑片 |
 | 知识选择超上限 | 曾 `slice` 静默丢尾部，`selected` 仍报全 | 已修：按段丢并返回 `dropped`，tool log「知识层未拼全」/ review `[knowledge_truncated]`；prompt cap 5,000→10,000 |
+| 分镜时间线核对器 | `assertCanvasVideoShotTimelines` 只有定义/import，无调用点；review 只核 draft→storyboard | 已修：refine 后逐节点调用；失败写 `prompt_structure_error`，review/storyboard_runs/compose 硬拦 |
 
 ## 相关但已处理
 

@@ -3778,7 +3778,11 @@ assert.ok(orderAt('const normalized = normalizeCanvasActions') < orderAt('flatte
 assert.ok(orderAt('flattenModelParamKeys(normalized)') < orderAt('rejectUnknownCanvasParamKeys('));
 assert.ok(orderAt('rejectUnknownCanvasParamKeys(') < orderAt('applyRebuildGuards('));
 assert.ok(orderAt('applyRebuildGuards(') < orderAt('invalidationActions('));
-assert.ok(orderAt('assertCanvasVideoShotTimelines(') < orderAt('applyCanvasAgentActions('));
+assert.match(promptSource, /assertCanvasVideoShotTimelines\(\[candidateAction\]/);
+assert.match(promptSource, /storyboard 有 \$\{storyboardCount\} 条，prompt 只写了 \$\{shotCount\} 镜/);
+assert.match(promptSource, /prompt_structure_error/);
+assert.match(promptSource, /分镜时间线与节点时长不符/);
+assert.match(promptSource, /storyboard 有 \$\{storyboardCount\} 条，prompt 只写了/);
 assert.match(promptSource, /stripCreatesOnShortYes\(actions, message\)/);
 assert.match(promptSource, /runCardPending\s*\?\s*'审批卡还在等您/);
 assert.match(promptSource, /上一批已完成。您是要继续做下一步，还是要改刚才的分析？/);
@@ -3806,6 +3810,20 @@ const shortShots = [
 const gappedShots = landedShots.replace('4-9s', '6-9s');
 assert.doesNotThrow(() => assertVideoShotTimeline(openingTen, 10));
 assert.doesNotThrow(() => assertVideoShotTimeline(openingTen.replace(/\n/g, ' '), 10));
+assert.doesNotThrow(() => assertVideoShotTimeline('Shot 1丨0-2s丨甲\nShot 2丨2-5s丨乙', 5));
+assert.throws(
+  () => assertVideoShotTimeline('分镜1丨0-2s丨甲\n分镜2丨2-4s丨乙', 5),
+  /分镜时长合计 4 秒，节点时长是 5 秒/,
+);
+assert.throws(
+  () => assertCanvasVideoShotTimelines([{
+    type: 'create_node', tempId: 'vid_bad', nodeType: 'video',
+    initialParams: { prompt: '分镜1丨0-2s丨甲\n分镜2丨2-4s丨乙', duration: 5 },
+  }], []),
+  /分镜时长合计 4 秒，节点时长是 5 秒/,
+);
+// 转写正确但字面不同：没有分镜行时不做文本匹配，不应误拦。
+assert.doesNotThrow(() => assertVideoShotTimeline('弓臂从胸前往两侧撑开', 5));
 // 防回归：引用记号换成名字时换行被收成空格。按换行切开只会读到 0-3，合计被报成 3。
 assert.doesNotThrow(() => assertVideoShotTimeline(
   '参考角色外观 参考图1。 分镜1丨起势丨0-3s丨甲 分镜2丨承接丨3-6s丨乙 分镜3丨高潮丨6-10s丨丙',

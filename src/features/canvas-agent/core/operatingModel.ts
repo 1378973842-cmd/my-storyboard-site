@@ -230,7 +230,7 @@ function shotTime(line: string): { start: number; end: number } | null {
 // 引用记号换成名字时会把换行收成空格，所以不能按换行切开。
 // 一段都读不出时只提示格式，不拿重叠去判。没有分镜标记就跳过。
 export function assertVideoShotTimeline(prompt: string, duration: number | null): void {
-  const marks = [...prompt.matchAll(/分镜\s*(\d+)\s*丨/g)];
+  const marks = [...prompt.matchAll(/(?:分镜|Shot)\s*(\d+)\s*丨/gi)];
   const lines = marks.map((mark, index) => {
     const start = mark.index ?? 0;
     const end = marks[index + 1]?.index ?? prompt.length;

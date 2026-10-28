@@ -16,11 +16,11 @@ import {
 import { agentPlaybooks, allCanvasAITools, canvasSkillRegistry } from '../tools/skillRegistry.js';
 import { collectAskCards, parseAskAnswer, parseAskAnswers, type AskCard } from '../core/askCard.js';
 import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, stripCreatesOnShortYes, unknownCanvasActionMessage } from '../core/proposal.js';
-import { operatingPrompt } from '../core/operatingModel.js';
+import { operatingPrompt, assertCanvasVideoShotTimelines } from '../core/operatingModel.js';
 import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
 import { canvasAgentStagePrefix } from '../core/stageLedger.js';
 import { completeTaskStep, ensureTask, readTaskArtifact, readTaskArtifactSlice, readTaskState, setTaskCursor, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
-import { checkStoryboardAgainstDraft } from '../core/planCheck.js';
+import { checkStoryboardAgainstDraft, parseStoryboardFragments } from '../core/planCheck.js';
 import { assembleKnowledgeForTurn, selectKnowledgeForUse } from '../core/knowledgeContext.js';
 import { turnStatePrefix } from '../core/turnState.js';
 import { VISION_IMAGE_CAP } from '../core/contextSerializer.js';
@@ -1546,6 +1546,10 @@ export function registerCanvasAgentRoutes(
               throw new Error(`${call.function.name} 要单独调用，不要和 write/complete 放在同一批工具里。`);
             } else {
               const step = String(args.step || '') as TaskStep;
+              if (['review', 'storyboard_runs', 'compose'].includes(step)
+                && String(gateFacts.prompt_structure_error || '').trim()) {
+                throw new Error(`prompt 结构核对未通过：${String(gateFacts.prompt_structure_error)}。先补齐分镜行/时长，再继续。`);
+              }
               if (step === 'review') {
                 // 规划核对是硬闸：文件里拼不出创作稿就不许完成这一步。
                 const check = checkStoryboardAgainstDraft(
@@ -1671,6 +1675,46 @@ export function registerCanvasAgentRoutes(
               },
             ], false, controller.signal);
             let patched = 0;
+            const createdVideoIds = new Set<string>();
+            const videoDurations = new Map<string, number>();
+            const originalPrompts = new Map<string, string>();
+            for (const original of actionCalls) {
+              const originalArgs = safeArgs(original);
+              if (original.function.name === 'create_canvas_nodes') {
+                const nodes = Array.isArray(originalArgs.nodes) ? originalArgs.nodes : [];
+                for (const nodeRaw of nodes) {
+                  const node = nodeRaw as Record<string, unknown>;
+                  if (String(node.nodeType || '') !== 'video') continue;
+                  const id = String(node.tempId || '');
+                  const params = node.initialParams as Record<string, unknown> | undefined;
+                  const prompt = typeof params?.prompt === 'string' ? params.prompt : '';
+                  if (!id) continue;
+                  createdVideoIds.add(id);
+                  if (prompt) originalPrompts.set(id, prompt);
+                  const duration = Number(params?.duration);
+                  if (Number.isFinite(duration)) videoDurations.set(id, duration);
+                }
+              } else if (original.function.name === 'update_node_config') {
+                const updates = Array.isArray(originalArgs.updates) ? originalArgs.updates : [];
+                for (const updateRaw of updates) {
+                  const item = updateRaw as Record<string, unknown>;
+                  const id = String(item.nodeId || '');
+                  const patch = item.patch as Record<string, unknown> | undefined;
+                  if (!id) continue;
+                  if (typeof patch?.prompt === 'string' && patch.prompt) originalPrompts.set(id, patch.prompt);
+                  const duration = Number(patch?.duration);
+                  if (Number.isFinite(duration)) videoDurations.set(id, duration);
+                }
+              }
+            }
+            for (const nodeRaw of effectedNodes) {
+              const node = nodeRaw as Record<string, unknown>;
+              if (String(node.nodeType || '') !== 'video') continue;
+              const id = String(node.id || '');
+              const duration = Number(node.duration);
+              if (id && Number.isFinite(duration) && !videoDurations.has(id)) videoDurations.set(id, duration);
+            }
+            const candidates = new Map<string, string>();
             for (const call of parseToolCalls(refine)) {
               if (call.function.name !== 'update_node_config') continue;
               const args = safeArgs(call);
@@ -1679,7 +1723,62 @@ export function registerCanvasAgentRoutes(
                 const update = raw as Record<string, unknown>;
                 const target = String(update.nodeId || '');
                 const prompt = String((update.patch as Record<string, unknown> | undefined)?.prompt || '').trim();
-                if (!target || !prompt) continue;
+                if (target && prompt) candidates.set(target, prompt);
+              }
+            }
+            const validationErrors: string[] = [];
+            for (const [target, prompt] of candidates) {
+              const duration = videoDurations.get(target);
+              if (duration === undefined) {
+                validationErrors.push(`节点 ${target}：没有节点时长，无法核对分镜时间线`);
+                continue;
+              }
+              const candidateAction = createdVideoIds.has(target)
+                ? { type: 'create_node', tempId: target, nodeType: 'video', initialParams: { prompt, duration } } as CanvasAction
+                : { type: 'update_node_params', nodeId: target, patch: { prompt, duration } } as CanvasAction;
+              try {
+                assertCanvasVideoShotTimelines([candidateAction], effectedNodes as never);
+              } catch (err) {
+                const total = [...prompt.matchAll(/(?:分镜|Shot)\s*(\d+)\s*丨\s*([\d.]+)\s*-\s*([\d.]+)\s*s/gi)]
+                  .reduce((sum, match) => sum + Math.max(0, Number(match[3]) - Number(match[2])), 0);
+                if (total > 0) {
+                  const diff = Math.abs(total - duration);
+                  validationErrors.push(`节点 ${target}：分镜时间线与节点时长不符：prompt 内合计 ${Number(total.toFixed(2))}s，节点 duration ${duration}s，差 ${Number(diff.toFixed(2))}s`);
+                } else {
+                  validationErrors.push(`节点 ${target}：${err instanceof Error ? err.message : String(err)}`);
+                }
+              }
+            }
+            const storyboardCount = parseStoryboardFragments(storyboardForRefine).length;
+            if (storyboardCount && candidates.size) {
+              const finalPrompts = new Map(originalPrompts);
+              for (const [target, prompt] of candidates) finalPrompts.set(target, prompt);
+              const shotCount = [...finalPrompts.values()]
+                .reduce((sum, prompt) => sum + ([...prompt.matchAll(/(?:分镜|Shot)\s*\d+\s*丨/gi)].length), 0);
+              if (shotCount !== storyboardCount) {
+                validationErrors.push(`storyboard 有 ${storyboardCount} 条，prompt 只写了 ${shotCount} 镜`);
+              }
+            }
+            if (validationErrors.length) {
+              if (conversation) {
+                const message = validationErrors.join('；');
+                updateTaskFacts(conversation.id, { prompt_structure_error: message });
+                gateFacts.prompt_structure_error = message;
+              }
+              const log = {
+                id: `knowledge-validation-${Date.now()}`,
+                name: 'knowledge-validation',
+                label: `知识层校验未通过：${validationErrors.join('；')}`.slice(0, 1200),
+                state: 'failed' as const,
+              };
+              persistedToolLogs.push(log);
+              sendEvent(res, { type: 'tool', log });
+            } else {
+              if (conversation) {
+                updateTaskFacts(conversation.id, { prompt_structure_error: '' });
+                gateFacts.prompt_structure_error = '';
+              }
+              for (const [target, prompt] of candidates) {
                 for (const original of actionCalls) {
                   const originalArgs = safeArgs(original);
                   if (original.function.name === 'create_canvas_nodes') {
