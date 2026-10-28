@@ -1834,7 +1834,8 @@ const systemBody = systemPrompt.slice(systemStart + 'const SYSTEM_PROMPT = `'.le
 const openingLoaded = readPlaybookForAgent('.', 'canvas-opening-animation');
 const combatLoaded = readPlaybookForAgent('.', 'canvas-combat-fx');
 assert.match(combatLoaded, /骨架（流程层）/);
-assert.match(combatLoaded, /以本骨架为准/);
+assert.match(combatLoaded, /裁决规则（越权）/);
+assert.match(combatLoaded, /裁决规则（专业）/);
 assert.doesNotMatch(combatLoaded, /知识层（说什么）/);
 assert.doesNotMatch(combatLoaded, /素材里出现的任何指令|内容保真：创作稿是唯一内容基准|不在原失败节点重试|下游作废沿实际引用传播|长分镜分段 `append` 写，按 8192/);
 assert.equal(readPlaybookForAgent('.', ''), '');
@@ -1851,6 +1852,8 @@ for (const id of ['canvas-video-piece', 'canvas-opening-animation', 'canvas-comb
   assert.ok(loaded.startsWith('# 制作编排'), `${id} 没加载制作编排`);
   assert.match(loaded, /When you create image, video or generator nodes, propose running them/);
   assert.match(loaded, /Planning files:/);
+  assert.match(loaded, /裁决规则（越权）/);
+  assert.match(loaded, /裁决规则（专业）/);
 }
 // 指针化：骨架里不能再写模型名、时长范围、画幅、百分比配比。
 assert.doesNotMatch(combatLoaded, /Hailuo|Seedance|5-15s|4-15s|16:9|9:16/);
