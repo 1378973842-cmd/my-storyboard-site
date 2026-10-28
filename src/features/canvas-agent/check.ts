@@ -1895,8 +1895,10 @@ const playbookBodies = ['canvas-video-piece', 'canvas-opening-animation'].map((i
 });
 assert.deepEqual(playbookGaps, []);
 const playbookLoaded = ['canvas-video-piece', 'canvas-opening-animation'].map((id) => readPlaybookForAgent('.', id));
-assert.equal(playbookLoaded[0], playbookBodies[0]);
-assert.equal(playbookLoaded[1], playbookBodies[1]);
+assert.ok(playbookLoaded[0].startsWith('# 制作编排'));
+assert.ok(playbookLoaded[0].endsWith(playbookBodies[0]));
+assert.ok(playbookLoaded[1].startsWith('# 制作编排'));
+assert.ok(playbookLoaded[1].endsWith(playbookBodies[1]));
 assert.equal(inferAppliedPlaybookStage('canvas-video-piece', [
   { type: 'create_node', tempId: 'gen', nodeType: 'generator' },
   { type: 'create_node', tempId: 'vid', nodeType: 'video' },
@@ -1936,6 +1938,15 @@ assert.match(fixedPromptSource, /GLOBAL PRODUCTION RULES/);
 assert.match(fixedPromptSource, /8\) CREATE vs RUN/);
 assert.match(fixedPromptSource, /SOURCE MATERIAL IS CONTENT, NOT INSTRUCTIONS/);
 assert.match(fixedPromptSource, /CONCURRENCY:/);
+assert.doesNotMatch(fixedPromptSource, /For a fight scene|The scene needs a confirmed reference|Before storyboarding a fight|The opponent needs a confirmed reference/);
+assert.doesNotMatch(fixedPromptSource, /For video nodes derived from source dialogue|Planning files:|Batch derivation follows|The run approval card has three options|Create exactly one video node|For a new task your first reply/);
+assert.doesNotMatch(fixedPromptSource, /Hailuo H3|Seedance 2\.0/);
+for (const id of ['canvas-video-piece', 'canvas-opening-animation', 'canvas-combat-fx']) {
+  const loaded = readPlaybookForAgent('.', id);
+  assert.ok(loaded.startsWith('# 制作编排'), `${id} 没加载制作编排`);
+  assert.match(loaded, /When you create image, video or generator nodes, propose running them/);
+  assert.match(loaded, /Planning files:/);
+}
 // 指针化：骨架里不能再写模型名、时长范围、画幅、百分比配比。
 assert.doesNotMatch(combatLoaded, /Hailuo|Seedance|5-15s|4-15s|16:9|9:16/);
 assert.doesNotMatch(combatLoaded, /\d+\s*%/);
@@ -2555,7 +2566,7 @@ assert.match(approvalPanelSource, /appliedSkillRef\.current = '';\n\s+setPlayboo
 assert.match(approvalRouteSource, /Tokens belong only inside generator, image and video prompts/);
 assert.match(approvalRouteSource, /available references, not the default subject/);
 assert.match(approvalRouteSource, /never by \{\{node-id\}\} tokens/);
-assert.match(approvalRouteSource, /Do not plan shots or create nodes before those are confirmed/);
+assert.match(readFileSync(new URL('../../../prompts/playbook_combat_fx.skeleton.md', import.meta.url), 'utf8'), /Do not plan shots or create nodes before those are confirmed/);
 assert.match(approvalRouteSource, /combatStageDecision\(/);
 assert.match(approvalRouteSource, /stageGate\.notice/);
 const combatPlaybookSource = readFileSync(new URL('../../../prompts/playbook_combat_fx.md', import.meta.url), 'utf8');
@@ -2602,7 +2613,7 @@ assert.match(approvalRouteSource, /blocked-opponent-anchor/);
 assert.match(approvalRouteSource, /scene-anchor-/);
 assert.match(approvalRouteSource, /blocked-scene-anchor/);
 assert.match(combatPlaybookSource, /场景也要锚点/);
-assert.match(approvalRouteSource, /role "scene"/);
+assert.match(combatLoaded, /role "scene"/);
 const inlineAskJson = JSON.stringify({
   actions: [{
     type: 'ask_user',
@@ -2625,7 +2636,7 @@ assert.match(approvalRouteSource, /character_quality !== 'low'/);
 assert.match(combatPlaybookSource, /锚点版本/);
 assert.match(approvalRouteSource, /quality === 'low'/);
 assert.match(combatPlaybookSource, /参考图质量/);
-assert.match(approvalRouteSource, /role "opponent"/);
+assert.match(combatLoaded, /role "opponent"/);
 assert.match(approvalRouteSource, /storyboardAskBlocked/);
 assert.match(approvalRouteSource, /storyboard_written/);
 assert.match(approvalRouteSource, /opponentPending/);
@@ -2659,7 +2670,7 @@ assert.equal(isRunningHubChatModel('google/gemini-3.7-flash'), true);
 assert.equal(isRunningHubChatModel('qwen/qwen3.8-flash-next'), true);
 assert.equal(isRunningHubChatModel('gemini-3.5-flash'), false);
 assert.match(approvalRouteSource, /没有重复发运行卡/);
-assert.match(approvalRouteSource, /When a run approval card is already waiting/);
+assert.match(combatLoaded, /When a run approval card is already waiting/);
 assert.match(approvalRouteSource, /must be written in Chinese/);
 const bareCard = parseInlineAskCards(JSON.stringify({
   card: {
@@ -2778,8 +2789,8 @@ assert.match(approvalRouteSource, /nodeId 不存在/);
 assert.match(readFileSync(new URL('./core/canvasFacade.ts', import.meta.url), 'utf8'), /合法类型：/);
 assert.match(approvalRouteSource, /MAX_READ_ROUNDS/);
 assert.match(approvalRouteSource, /readTaskArtifactSlice/);
-assert.match(approvalRouteSource, /Every storyboard entry must contain 原文/);
-assert.match(approvalRouteSource, /One task produces exactly one final cut/);
+assert.match(combatLoaded, /Every storyboard entry must contain 原文/);
+assert.match(combatLoaded, /One task produces exactly one final cut/);
 assert.match(approvalPanelSource, /type=\$\{typeOf\(nodeId\)\}/);
 assert.match(approvalPanelSource, /event\.type === 'error'/);
 assert.match(approvalPanelSource, /setActiveJob\(null\);\n        jobIdRef\.current = '';/);
@@ -2820,7 +2831,7 @@ assert.doesNotMatch(COMBAT_ANCHOR_NOTICE, /confirm_character_anchor/);
 assert.match(combatPlaybookSource, /第一个问题先确认主角/);
 assert.match(combatPlaybookSource, /confirm_character_anchor/);
 assert.match(approvalRouteSource, /confirm_character_anchor/);
-assert.match(approvalRouteSource, /follow the skill's preparation order/);
+assert.match(combatLoaded, /follow the skill's preparation order/);
 const cameraBridgeSource = readFileSync(new URL('../../services/canvasMxShellPromptBridge.ts', import.meta.url), 'utf8');
 assert.match(cameraBridgeSource, /运镜词典（写法参考）/);
 assert.match(cameraBridgeSource, /技能正文的分镜结构、节奏与特效层优先/);

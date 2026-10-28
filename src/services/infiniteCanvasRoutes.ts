@@ -176,9 +176,12 @@ export function readPlaybookSkillFile(projectRoot: string, playbookId: string, f
   return body;
 }
 
-// 骨架常驻。知识不在这里拼：只有本轮动作含 video create/update 时才由路由按元素拼。
+// 骨架按需：有 playbookId 才拼。制作编排是三条 skill 共用的中间层，同一条件加载。
 export function readPlaybookForAgent(projectRoot: string, playbookId: string): string {
-  return readRegisteredPlaybookText(projectRoot, playbookId);
+  const skeleton = readRegisteredPlaybookText(projectRoot, playbookId);
+  if (!skeleton) return "";
+  const orchestration = readPromptFile("prompts/production-orchestration.md", projectRoot).trim();
+  return orchestration ? `${orchestration}\n\n${skeleton}` : skeleton;
 }
 
 export function registerInfiniteCanvasRoutes(

@@ -58,7 +58,6 @@
 
 - 批次按引用关系推导，不靠模型判断：锚点先成批，分镜在锚点图生成后成批。并发与批内引用见固定段。
 - 承接链不实现：不做尾帧抽取、不做剪尾；跨镜一致性只靠锚点引用。
-- 一个任务只产出一个成片；除非用户明确要求分段，不建多条最终视频。
 
 ## 动作的前置条件
 
@@ -94,3 +93,14 @@
 - `create_canvas_nodes` / `connect_workflow_edges` / `update_node_config` / `trigger_skill_execution`：画布动作；创建与运行的计费/状态区别见固定段。
 - `ask_user`：卡片提问；一次一批。
 - 需要知识时按上方加载表；不要猜文件名。
+
+## 打斗专属规则（固定段下沉）
+
+- For a fight scene, follow the skill's preparation order: direction questions (style, effect grammar, action rhythm, narrative) → a personalized direction the user confirms → six parameters (character asset, opponent, ratio, resolution, scene, duration, intensity). Do not plan shots or create nodes before those are confirmed. Never invent the opponent or treat a canvas reference image as a confirmed combatant.
+- The scene needs a confirmed reference too. If the user provides a scene image, actually look at it first (light, weather, materials, interactable elements) and call confirm_character_anchor with role "scene" and kind "reference"; if they do not have one, generate a scene image and confirm it before the storyboard.
+- Before using a user-supplied reference as an anchor, assess its quality (clarity, detail, front/side/back angles). If it is blurry, cropped or missing views, call confirm_character_anchor with kind "reference" and quality "low", then generate a three-view and confirm that instead; if it is good, pass quality "good".
+- Before the style questions, if the user did not name the protagonist, confirm it first (use the canvas reference, or a new character). Never open with "阿波罗的…" as if the protagonist were already confirmed.
+- Before storyboarding a fight, the character anchor must be confirmed: if the user cited a reference image, call confirm_character_anchor with kind "reference"; if you generated a three-view and the user approved it, call it with kind "three-view" and the node id. For the opponent pass role "opponent". Do not start the storyboard while either anchor is missing.
+- The opponent needs a confirmed reference too: when the user did not provide one, generate an opponent three-view and get it approved before the storyboard. Do not storyboard with only the protagonist locked.
+- After anchor images are generated, inspect them before the storyboard: compare proportions and rendering style with the user's existing character images. If the styles clash, say so plainly and propose the fix with a recommendation; do not silently proceed.
+- When a new three-view replaces an old one, mark the old node deprecated, create a v2, record a change log, and ask for authorization again.
