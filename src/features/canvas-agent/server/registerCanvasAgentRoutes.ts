@@ -615,6 +615,35 @@ export function registerCanvasAgentRoutes(
           parseEffectedNodes(req.body?.effectedNodes).slice(0, 40),
           String(req.body?.changelog || '').slice(0, 2000),
         );
+        // 提案落板时，actions 就是计划；顺手写进账本，下一轮不用靠 thinking 回忆。
+        const row = db.prepare(
+          `SELECT m.conversation_id AS conversation_id, m.metadata_json AS metadata_json
+           FROM canvas_agent_messages m
+           WHERE m.user_id = ? AND json_extract(m.metadata_json, '$.proposal.id') = ?
+           LIMIT 1`,
+        ).get(req.authUser?.id || '', proposalId) as { conversation_id?: string; metadata_json?: string } | undefined;
+        const cid = String(row?.conversation_id || '');
+        if (cid && readTaskState(cid)) {
+          let actions: CanvasAction[] = [];
+          try {
+            actions = (JSON.parse(String(row?.metadata_json || '{}')) as { proposal?: { actions?: CanvasAction[] } }).proposal?.actions || [];
+          } catch {
+            actions = [];
+          }
+          if (actions.length) {
+            const summary = actions.slice(0, 20).map((action) => ({
+              type: action.type,
+              ...(action.type === 'create_node' ? { nodeType: action.nodeType, tempId: action.tempId } : {}),
+              ...(action.type === 'execute_node_skill' ? { nodeId: action.nodeId } : {}),
+            }));
+            const nodeIds = actions.flatMap((action) => {
+              if (action.type === 'create_node' && action.tempId) return [action.tempId];
+              if (action.type === 'execute_node_skill' && action.nodeId) return [action.nodeId];
+              return [];
+            });
+            setTaskNextAction(cid, 'proposal_actions', { actions: summary }, nodeIds);
+          }
+        }
       }
       return res.json({ updated });
     });
@@ -1291,6 +1320,23 @@ export function registerCanvasAgentRoutes(
       const MAX_WRITE_ROUNDS = 4;
       const safeCompleteSteps = new Set<TaskStep>(['draft', 'anchors', 'storyboard']);
       const taskStepLabel = (step: TaskStep) => TASK_STEPS.find((item) => item.step === step)?.label || step;
+      const nextActionForStep = (step: TaskStep) => {
+        const actions: Record<TaskStep, { actionType: string; params: Record<string, unknown> }> = {
+          draft: { actionType: 'write_task_artifact', params: { kind: 'draft' } },
+          anchors: { actionType: 'write_task_artifact', params: { kind: 'anchors' } },
+          storyboard: { actionType: 'write_task_artifact', params: { kind: 'storyboard' } },
+          review: { actionType: 'none', params: { todo: 'review' } },
+          anchor_runs: { actionType: 'execute_node_skill', params: { todo: 'anchor_runs' } },
+          storyboard_runs: { actionType: 'create_node', params: { todo: 'storyboard_runs', nodeType: 'video' } },
+          compose: { actionType: 'none', params: { todo: 'compose' } },
+        };
+        return actions[step];
+      };
+      const nextActionNodeIds = [
+        gateFacts.character_anchor,
+        gateFacts.opponent_anchor,
+        gateFacts.scene_anchor,
+      ].map((value) => String(value || '').split(':').pop() || '').filter(Boolean);
       let lastNonEmptyContent = extractTextLlmMessageContent(model, first).trim();
       let continuationRounds = 0;
       let lastSafeAction = '';
@@ -1345,6 +1391,8 @@ export function registerCanvasAgentRoutes(
               const step = String(args.step || '') as TaskStep;
               const state = completeTaskStep(conversation.id, step);
               lastSafeAction = step;
+              const next = nextActionForStep(state.current);
+              setTaskNextAction(conversation.id, next.actionType, next.params, nextActionNodeIds);
               content = `已完成「${taskStepLabel(step)}」。当前位置：${taskStepLabel(state.current)}。下一步：继续下一个未完成 todo；需要用户确认或审批时再停。`;
               const log = { id: `task-ledger-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: 'task_ledger', label: `文件账本：${content}`, state: 'done' as const };
               persistedToolLogs.push(log);
@@ -2072,8 +2120,9 @@ export function registerCanvasAgentRoutes(
       const assetGuardNotice = blockedAssetTitles.length
         ? `我没有把素材库文件直接搬进画布（${blockedAssetTitles.join('、')}）。要使用请先在消息里 @ 对应素材；要新图请让我用生成节点。`
         : '';
-      // 成片只允许一个视频节点：拒绝一次建多条视频（除非用户明确要分段）。
-      const multiVideo = collapseMultiVideoProposal(actions, turnMessage);
+      // 成片只允许一个视频节点；剧情动画是多段形态，按 skill 的结构声明放行。
+      const allowMultiVideo = agentPlaybooks.find((item) => item.id === effectivePlaybookId)?.videoShape === 'multi';
+      const multiVideo = collapseMultiVideoProposal(actions, turnMessage, allowMultiVideo);
       actions = multiVideo.actions;
       const multiVideoNotice = multiVideo.dropped
         ? `检测到一次建了 ${multiVideo.dropped} 个视频节点，已阻止。成片只建一个 video 节点，一次生成完整分镜；把 duration 设成目标时长（海螺 H3 支持 5-15s），不要拆成多条。`

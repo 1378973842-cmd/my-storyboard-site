@@ -10,7 +10,9 @@ const GENERATIVE_NODE_TYPES = new Set(['image', 'video', 'generator']);
 export function collapseMultiVideoProposal(
   actions: CanvasAction[],
   message: string,
+  allowMulti = false,
 ): { actions: CanvasAction[]; dropped: number } {
+  if (allowMulti) return { actions, dropped: 0 };
   const videos = actions.filter((action) => (
     action.type === 'create_node' && action.nodeType === 'video'
   ));

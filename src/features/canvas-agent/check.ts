@@ -2683,6 +2683,13 @@ assert.equal(
   ], '分段生成三条').dropped,
   0,
 );
+assert.equal(
+  collapseMultiVideoProposal([
+    { type: 'create_node', tempId: 'v1', nodeType: 'video' },
+    { type: 'create_node', tempId: 'v2', nodeType: 'video' },
+  ], '一条 30 秒剧情', true).dropped,
+  0,
+);
 assert.match(approvalRouteSource, /blocked-anchor-review/);
 assert.match(approvalRouteSource, /reviewInput/);
 assert.match(approvalRouteSource, /reviewReworking/);
@@ -3827,6 +3834,8 @@ assert.match(promptSource, /MAX_READ_ROUNDS = 5/);
 assert.match(promptSource, /读回延后/);
 assert.match(promptSource, /lastSafeAction !== 'storyboard'/);
 assert.match(promptSource, /继续下一步：按 task_state 的 current 执行/);
+assert.match(promptSource, /setTaskNextAction\(conversation\.id, next\.actionType/);
+assert.match(promptSource, /__agentTextStreamed/);
 assert.match(promptSource, /stagePassed/);
 assert.match(promptSource, /anchorsRegistered/);
 assert.equal(textFromChatResponse({

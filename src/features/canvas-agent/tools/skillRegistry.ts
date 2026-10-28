@@ -449,12 +449,13 @@ export const allCanvasAITools: AIToolDefinition[] = [
 
 /** 后续技能从这里登记。空着表示还没接入，不要在别处再造一套 Skill 加载器。 */
 export type AgentKnowledgeFile = { path: string; when: string; needsRead: boolean; use: string };
-export type AgentPlaybook = { id: string; title: string; when: string; path: string; knowledgePath?: string; knowledgeFiles?: AgentKnowledgeFile[] };
+export type AgentPlaybook = { id: string; title: string; when: string; path: string; videoShape?: 'single' | 'multi'; knowledgePath?: string; knowledgeFiles?: AgentKnowledgeFile[] };
 export const agentPlaybooks: AgentPlaybook[] = [
   {
     id: 'canvas-video-piece',
     title: '剧情动画',
     when: '用户要多段剧情片时（每段 25–40 秒，分 2–3 段，主角跨段存活）',
+    videoShape: 'multi',
     path: 'prompts/playbook_video_content.md',
     knowledgePath: 'prompts/playbook_video_content.prompt.md',
     knowledgeFiles: [
@@ -467,6 +468,7 @@ export const agentPlaybooks: AgentPlaybook[] = [
     id: 'canvas-opening-animation',
     title: '开场动画',
     when: '用户要一条游戏开场动画时（单段，15 秒内，可选配乐）',
+    videoShape: 'single',
     path: 'prompts/playbook_opening_animation.md',
     knowledgePath: 'prompts/playbook_opening_animation.prompt.md',
     knowledgeFiles: [
@@ -479,6 +481,7 @@ export const agentPlaybooks: AgentPlaybook[] = [
     id: 'canvas-combat-fx',
     title: '特效打斗',
     when: '用户要角色战斗、技能特效或打斗视频时（单段 10–15 秒，分镜 + 冲击帧 + 四层提示词）',
+    videoShape: 'single',
     path: 'prompts/playbook_combat_fx.skeleton.md',
     knowledgePath: 'prompts/playbook_combat_fx.knowledge.md',
     knowledgeFiles: [
