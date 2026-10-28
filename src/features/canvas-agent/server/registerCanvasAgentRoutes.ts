@@ -1283,6 +1283,7 @@ export function registerCanvasAgentRoutes(
       const MAX_WRITE_ROUNDS = 4;
       const safeCompleteSteps = new Set<TaskStep>(['draft', 'anchors', 'storyboard']);
       const taskStepLabel = (step: TaskStep) => TASK_STEPS.find((item) => item.step === step)?.label || step;
+      let lastNonEmptyContent = extractTextLlmMessageContent(model, first).trim();
       for (let writeRound = 0; writeRound < MAX_WRITE_ROUNDS; writeRound += 1) {
         const writeCalls = parseToolCalls(first);
         if (!writeCalls.length) break;
@@ -1339,6 +1340,8 @@ export function registerCanvasAgentRoutes(
           true,
           controller.signal,
         );
+        const roundContent = extractTextLlmMessageContent(model, first).trim();
+        if (roundContent) lastNonEmptyContent = roundContent;
       }
       if (parseToolCalls(first).some((call) => (
         call.function.name === 'write_task_artifact'
@@ -1346,6 +1349,13 @@ export function registerCanvasAgentRoutes(
       ))) {
         // 达到上限仍在写：已经执行的写入保留，停止自动续跑，不重复执行最后一批。
         first = { choices: [{ message: { role: 'assistant', content: `已连续写入 ${MAX_WRITE_ROUNDS} 轮，停在当前步骤；请查看账本后继续。` } }] };
+      }
+      // 续跑最后一轮可能只有 thinking、没有 content；正文回退到最后一个非空轮，
+      // 不把空正文直接交给用户。
+      if (!extractTextLlmMessageContent(model, first).trim()
+        && lastNonEmptyContent
+        && !parseToolCalls(first).length) {
+        first = { choices: [{ message: { role: 'assistant', content: lastNonEmptyContent } }] };
       }
       // 通用读回：模型可单独调 read_task_artifact 读账本；把文件内容作为 tool result
       // 回给它，再让它继续本轮的动作。最多 3 轮；每批可并行多个 read，只限串行往返。
@@ -2434,8 +2444,8 @@ export function registerCanvasAgentRoutes(
             /* 补写失败就只发卡片 */
           }
         }
-        persistedText = lead;
-        if (lead) streamText(res, lead);
+        persistedText = lead || '已发卡，请在卡片上选择；选完我继续。';
+        streamText(res, persistedText);
         publishAsks();
       } else if (interpreted?.unknownTypes.length) {
         persistedText = `动作类型无法识别：${interpreted.unknownTypes.join('、')}。这轮没有生成提案。`;

@@ -207,6 +207,15 @@ export function unwrapTextLlmResponseData(raw: Record<string, unknown>): Record<
   return raw;
 }
 
+function textContentPart(part: unknown): string {
+  if (typeof part === "string") return part;
+  if (!part || typeof part !== "object") return "";
+  const row = part as { type?: unknown; text?: unknown; thought?: unknown };
+  const type = String(row.type || "").toLowerCase();
+  if (type === "thinking" || type === "thought" || type === "reasoning" || row.thought === true) return "";
+  return typeof row.text === "string" ? row.text : "";
+}
+
 export function textFromChatResponse(raw: Record<string, unknown>): string {
   const choices = raw.choices;
   if (!Array.isArray(choices) || !choices.length) return "";
@@ -215,13 +224,7 @@ export function textFromChatResponse(raw: Record<string, unknown>): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
-      .map((part) => {
-        if (typeof part === "string") return part;
-        if (part && typeof part === "object" && "text" in part) {
-          return String((part as { text?: unknown }).text || "");
-        }
-        return "";
-      })
+      .map((part) => textContentPart(part))
       .filter(Boolean)
       .join("\n");
   }
@@ -245,10 +248,8 @@ export function extractTextLlmMessageContent(model: string, raw: Record<string, 
         }
         if (Array.isArray(content)) {
           for (const part of content) {
-            if (part && typeof part === "object" && "text" in part) {
-              const t = String((part as { text?: unknown }).text || "").trim();
-              if (t) chunks.push(t);
-            }
+            const t = textContentPart(part).trim();
+            if (t) chunks.push(t);
           }
         }
       }

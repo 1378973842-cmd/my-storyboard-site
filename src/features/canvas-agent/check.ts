@@ -80,7 +80,7 @@ import { rollbackCanvasPlan } from './core/rollbackPlan';
 import { extractReasoningText } from './core/reasoning';
 import { replaceNodeTokens } from './core/displayText';
 import { COMBAT_ANCHOR_NOTICE, combatStageDecision } from './core/combatStage';
-import { isRunningHubChatModel } from '../../services/canvasTextLlmBridge';
+import { isRunningHubChatModel, textFromChatResponse } from '../../services/canvasTextLlmBridge';
 import { splitPromptSections } from './core/promptIndex';
 import { appendRunProposalForNewGenerativeNodes, collapseMultiVideoProposal } from './core/runProposal';
 import { pruneCanvasSnapshots } from '../../services/infiniteCanvasStore';
@@ -3805,6 +3805,18 @@ assert.match(promptSource, /prompt_structure_error/);
 assert.match(promptSource, /MAX_WRITE_ROUNDS = 4/);
 assert.match(promptSource, /不要用纯文本停在这里/);
 assert.match(promptSource, /allContinuable/);
+assert.match(promptSource, /lastNonEmptyContent/);
+assert.match(promptSource, /已发卡，请在卡片上选择/);
+assert.equal(textFromChatResponse({
+  choices: [{
+    message: {
+      content: [
+        { type: 'thinking', text: '这是思考，不应进正文' },
+        { type: 'text', text: '这是正文' },
+      ],
+    },
+  }],
+} as never), '这是正文');
 assert.match(promptSource, /分镜时间线与节点时长不符/);
 assert.match(promptSource, /语义覆盖/);
 assert.match(promptSource, /遮住视觉风格与镜头描述/);
