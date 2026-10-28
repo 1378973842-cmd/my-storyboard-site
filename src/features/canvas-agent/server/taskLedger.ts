@@ -34,6 +34,8 @@ export type TaskState = {
   createdAt: number;
   updatedAt: number;
   todos: TaskTodo[];
+  /** 自动建账本时的准备态：只给状态依据，不暗示下一步写 draft。 */
+  preparing?: boolean;
   current: TaskStep;
   facts: Record<string, unknown>;
   artifacts: Partial<Record<TaskArtifactKind, { path: string; chars: number; updatedAt: number }>>;
@@ -144,7 +146,7 @@ export function readTaskState(conversationId: string): TaskState | null {
 
 export function ensureTask(
   conversationId: string,
-  input: { title?: string; goal?: string; skill?: string },
+  input: { title?: string; goal?: string; skill?: string; preparing?: boolean },
 ): TaskState {
   const existing = readTaskState(conversationId);
   if (existing) return existing;
@@ -159,6 +161,7 @@ export function ensureTask(
     createdAt: now,
     updatedAt: now,
     todos: TASK_STEPS.map((item) => ({ ...item, done: false })),
+    preparing: Boolean(input.preparing),
     current: 'draft',
     facts: {},
     artifacts: {},
@@ -260,6 +263,16 @@ export function readTaskArtifactSlice(
   };
 }
 
+export function setTaskPreparing(conversationId: string, preparing: boolean): TaskState {
+  const state = ensureTask(conversationId, {});
+  if (state.preparing === preparing) return state;
+  state.preparing = preparing;
+  state.updatedAt = Date.now();
+  atomicWrite(statePath(conversationId), JSON.stringify(state, null, 2));
+  atomicWrite(path.join(taskDir(conversationId), 'task.md'), renderTaskMarkdown(state));
+  return state;
+}
+
 export function completeTaskStep(
   conversationId: string,
   step: TaskStep,
@@ -288,6 +301,7 @@ export function completeTaskStep(
   }
   target.done = true;
   target.at = target.at || Date.now();
+  state.preparing = false;
   state.current = currentOf(state.todos);
   state.updatedAt = Date.now();
   atomicWrite(statePath(conversationId), JSON.stringify(state, null, 2));
@@ -349,5 +363,8 @@ export function taskStatePrompt(state: TaskState | null): string {
   const reviewFiles = state.current === 'review'
     ? `\n\n[review_files]\n<draft>\n${readTaskArtifact(state.conversationId, 'draft').slice(0, 20_000)}\n</draft>\n<storyboard>\n${readTaskArtifact(state.conversationId, 'storyboard').slice(0, 20_000)}\n</storyboard>\n逐字核对：分镜的原文片段拼起来是否等于创作稿全文；再核对总时长与反碎化。结论写进 index.md 的「规划核对」分节，再 complete_task_step('review')。`
     : '';
-  return `\n\n[task_state]\n- 任务：${state.title}（${state.id}）\n- 当前位置（第一条未划掉）：${TASK_STEPS.find((item) => item.step === state.current)?.label || state.current}\n- todo：${todo}${cursor}\n- 产物：${artifacts || '（尚未写入）'}${reviewStatus}\n- 文件是唯一权威源：写产物用 write_task_artifact，完成一步用 complete_task_step，主动读回用 read_task_artifact（kind + offset/length，单独一批调用）；核对所需的创作稿/分镜会自动附上，不要凭记忆推进。${reviewFiles}`;
+  const position = state.preparing
+    ? '准备阶段（尚未进入定稿；先确认参数，不要预设下一步）'
+    : (TASK_STEPS.find((item) => item.step === state.current)?.label || state.current);
+  return `\n\n[task_state]\n- 任务：${state.title}（${state.id}）\n- 当前位置：${position}\n- todo：${todo}${cursor}\n- 产物：${artifacts || '（尚未写入）'}${reviewStatus}\n- 文件是唯一权威源：写产物用 write_task_artifact，完成一步用 complete_task_step，主动读回用 read_task_artifact（kind + offset/length，单独一批调用）；核对所需的创作稿/分镜会自动附上，不要凭记忆推进。${reviewFiles}`;
 }

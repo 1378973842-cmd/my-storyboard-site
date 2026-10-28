@@ -19,7 +19,7 @@ import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRec
 import { operatingPrompt, assertCanvasVideoShotTimelines } from '../core/operatingModel.js';
 import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
 import { canvasAgentStagePrefix } from '../core/stageLedger.js';
-import { completeTaskStep, ensureTask, readTaskArtifact, readTaskArtifactSlice, readTaskState, setTaskCursor, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
+import { completeTaskStep, ensureTask, readTaskArtifact, readTaskArtifactSlice, readTaskState, setTaskCursor, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
 import { checkStoryboardAgainstDraft, parseStoryboardFragments } from '../core/planCheck.js';
 import { assembleKnowledgeForTurn, selectKnowledgeForUse } from '../core/knowledgeContext.js';
 import { turnStatePrefix } from '../core/turnState.js';
@@ -1189,9 +1189,15 @@ export function registerCanvasAgentRoutes(
         title: turnMessage.replace(/^\[\[自动\]\]\s*/, '').slice(0, 40) || '制作任务',
         goal: turnMessage.slice(0, 2000),
         skill: effectivePlaybookId,
+        preparing: true,
       })
       : null;
     const taskForTurn = autoTask || taskBefore;
+    // 第一次提问答完，准备态结束；此前不要把 current 当行动指令。
+    if (conversation && taskBefore?.preparing && (askAnswer || askBatch.length)) {
+      setTaskPreparing(conversation.id, false);
+      taskForTurn!.preparing = false;
+    }
     // 清单确认轮：目标时长超出所选模型容量且没有制作清单时，
     // 自动拼 collect-params + estimate 两段知识，模型才能给出可确认的分段方案。
     const productionPlanKnowledge = (() => {
@@ -1603,8 +1609,8 @@ export function registerCanvasAgentRoutes(
                 goal: String(args.goal || ''),
                 skill: String(args.skill || effectivePlaybookId || ''),
               });
-              label = `任务账本：${state.title}（当前 ${stepLabel(state.current)}）`;
-              taskNotice = `任务已建立：${state.title}。当前位置：${stepLabel(state.current)}。`;
+              label = `任务账本：${state.title}（当前 ${state.preparing ? '准备阶段' : stepLabel(state.current)}）`;
+              taskNotice = `任务已建立：${state.title}。当前位置：${state.preparing ? '准备阶段（先确认参数）' : stepLabel(state.current)}。`;
             } else if (call.function.name === 'write_task_artifact') {
               const kind = String(args.kind || '') as TaskArtifactKind;
               if (!['draft', 'index', 'anchors', 'storyboard'].includes(kind)) throw new Error('未知的产物类型');
@@ -2458,6 +2464,26 @@ export function registerCanvasAgentRoutes(
       } else {
         persistedText = safeFirstText || '我暂时没有生成可执行的画布建议，请换一种方式描述目标。';
         if (!calls.length) streamText(res, persistedText);
+      }
+      // 准备阶段的服务端兜底：模型只建任务、没发 ask_user 时，必须补一张卡。
+      // 这是唯一不依赖模型自觉的闸；卡形状与模型自己发的单卡一致。
+      if (forceAsk && !persistedAsks.length && !persistedProposal) {
+        const anchorCard: AskCard = {
+          id: `anchor-${Date.now()}`,
+          mode: 'single',
+          question: '角色参考怎么定？',
+          options: [
+            { type: 'text', label: hasCanvasMedia ? '用画布里的参考图（推荐）' : '用画布里的参考图' },
+            { type: 'text', label: hasCanvasMedia ? '先让我生成三视图' : '先让我生成三视图（推荐）' },
+            { type: 'input', placeholder: '自己写（可留空）' },
+          ],
+        };
+        const note = '准备阶段先确认角色参考；请在卡上选择，选完再继续。';
+        const hadText = Boolean(persistedText);
+        persistedText = [persistedText, note].filter(Boolean).join('\n\n');
+        streamText(res, `${hadText ? '\n\n' : ''}${note}`);
+        persistedAsks = [anchorCard];
+        sendEvent(res, { type: 'ask', asks: [anchorCard] });
       }
       if (db && conversation) {
         appendCanvasAgentMessage(

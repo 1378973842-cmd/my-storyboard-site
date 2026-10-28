@@ -26,7 +26,7 @@ import { applyRunCardSettlement, settleRunCardAnswer } from './core/runCardSettl
 import { turnStatePrefix } from './core/turnState';
 import { checkStoryboardAgainstDraft } from './core/planCheck';
 import { assembleKnowledgeForTurn, selectKnowledgeForUse } from './core/knowledgeContext';
-import { completeTaskStep, ensureTask, readTaskArtifactSlice, readTaskState, setTaskCursor, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE } from './server/taskLedger';
+import { completeTaskStep, ensureTask, readTaskArtifactSlice, readTaskState, setTaskCursor, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE } from './server/taskLedger';
 import { changelogFromActions, effectedFromApply, effectedLine, mediaRunState, mediaStatusLabel, parseRunStates, turnLabelCollapsed } from './core/effectLedger';
 import { AskCardView } from './ui/AskCardView';
 import { AskPager } from './ui/AskPager';
@@ -359,6 +359,10 @@ assert.throws(() => readTaskArtifactSlice(taskConversation, 'draft', -1, 2), /of
 assert.throws(() => readTaskArtifactSlice(taskConversation, 'draft', 0, 0), /length 必须是 1\.\.20000 的整数/);
 assert.throws(() => readTaskArtifactSlice('no-such-task', 'draft'), /还没有账本/);
 ensureTask('empty-task-test', { title: '空账本' });
+const prepTask = ensureTask('prep-task-test', { title: '准备态', preparing: true });
+assert.match(taskStatePrompt(prepTask), /当前位置：准备阶段（尚未进入定稿/);
+setTaskPreparing('prep-task-test', false);
+assert.match(taskStatePrompt(readTaskState('prep-task-test')), /当前位置：定稿/);
 assert.throws(() => readTaskArtifactSlice('empty-task-test', 'draft'), /还没有 draft\.md/);
 assert.throws(
   () => completeTaskStep('empty-task-test', 'draft'),
@@ -372,7 +376,7 @@ completeTaskStep(taskConversation, 'draft');
 const taskState = readTaskState(taskConversation);
 assert.equal(taskState?.current, 'anchors');
 assert.equal(taskState?.artifacts.storyboard?.chars, 3);
-assert.match(taskStatePrompt(taskState), /当前位置（第一条未划掉）：锚点登记与创建/);
+assert.match(taskStatePrompt(taskState), /当前位置：锚点登记与创建/);
 assert.match(taskStatePrompt(taskState), /文件是唯一权威源/);
 assert.match(
   readFileSync(path.join(String(process.env.CANVAS_AGENT_TASK_DIR), taskConversation, 'task.md'), 'utf8'),
@@ -3812,6 +3816,7 @@ assert.match(promptSource, /不要用纯文本停在这里/);
 assert.match(promptSource, /allContinuable/);
 assert.match(promptSource, /lastNonEmptyContent/);
 assert.match(promptSource, /已发卡，请在卡片上选择/);
+assert.match(promptSource, /准备阶段先确认角色参考/);
 assert.equal(textFromChatResponse({
   choices: [{
     message: {
