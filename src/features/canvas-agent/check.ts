@@ -1854,6 +1854,10 @@ for (const id of ['canvas-video-piece', 'canvas-opening-animation', 'canvas-comb
   assert.match(loaded, /Planning files:/);
   assert.match(loaded, /裁决规则（越权）/);
   assert.match(loaded, /裁决规则（专业）/);
+  assert.match(loaded, /以制作编排为准/);
+  assert.match(loaded, /本 skill 自己的流程步骤/);
+  assert.match(loaded, /逐项核对它的全部步骤和要求/);
+  assert.match(loaded, /不另立文件/);
 }
 // 指针化：骨架里不能再写模型名、时长范围、画幅、百分比配比。
 assert.doesNotMatch(combatLoaded, /Hailuo|Seedance|5-15s|4-15s|16:9|9:16/);
