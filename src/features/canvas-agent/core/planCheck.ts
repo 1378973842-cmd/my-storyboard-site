@@ -90,17 +90,41 @@ function normalize(text: string): string {
   return String(text || '').replace(/\s+/g, '');
 }
 
-/** 核对只找「漏情节」，不找「标题没抄」：去掉 markdown 标题与分节线。 */
-function stripNonNarrative(text: string): string {
-  return String(text || '')
+/** 核对只找「漏情节」，不找「标题没抄」。 */
+const DRAFT_BODY_MARKER = '<!-- 正文开始 -->';
+
+function isNonNarrativeLine(value: string): boolean {
+  const line = value.trim();
+  if (!line) return true;
+  if (/^#{1,6}\s/.test(line)) return true;
+  if (/^([-*_])\1{2,}$/.test(line)) return true;
+  if (line.startsWith('【')) return true;
+  if (line.startsWith('>')) return true;
+  if (/^第\s*[0-9一二三四五六七八九十百千]+\s*[章节回幕卷]\s*$/.test(line)) return true;
+  if (/^[-*]\s*(主角|对手|场景|设定|角色|备注|说明|注)\s*[：:]/.test(line)) return true;
+  if (/^[（(]\s*(场景|设定|注|备注|说明)\s*[：:]/.test(line)) return true;
+  return false;
+}
+
+// 代笔稿常见的镜头前缀：- 镜头1（0-3s）：正文
+function stripShotPrefix(value: string): string {
+  return value
+    .replace(/^[-*]\s*/, '')
+    .replace(/^(?:镜头|分镜)\s*\d+[^：:]{0,48}[：:]\s*/, '')
+    .replace(/^第\s*[0-9一二三四五六七八九十百千]+\s*[章节回幕卷]\s*[：:]?\s*/, '');
+}
+
+function draftNarrativeBody(text: string): string {
+  const source = String(text || '');
+  const markerAt = source.indexOf(DRAFT_BODY_MARKER);
+  // 有新契约：标记之前是设定/角色/场景，不参与逐字核对。
+  if (markerAt >= 0) return source.slice(markerAt + DRAFT_BODY_MARKER.length);
+  // 旧稿兜底：被分镜引用的行留下；已知非叙事格式去掉；其余未知行留下，
+  // 拼不上就报错，不静默放行（否则真漏一条会被当成设定块）。
+  return source
     .split(/\r?\n/)
-    .filter((line) => {
-      const value = line.trim();
-      if (!value) return true;
-      if (/^#{1,6}\s/.test(value)) return false;
-      if (/^([-*_])\1{2,}$/.test(value)) return false;
-      return true;
-    })
+    .filter((line) => !isNonNarrativeLine(line))
+    .map((line) => stripShotPrefix(line))
     .join('\n');
 }
 
@@ -163,7 +187,7 @@ export function checkStoryboardAgainstDraft(
   options: { requireCapacity?: boolean } = {},
 ): PlanCheckResult {
   const requireCapacity = options.requireCapacity !== false;
-  const draftText = normalize(stripNonNarrative(draft));
+  const draftText = normalize(draftNarrativeBody(draft));
   const fragments = parseStoryboardFragments(storyboard);
   const joined = normalize(fragments.map((item) => item.source).join(''));
   const totalDuration = fragments.reduce((sum, item) => sum + (item.duration || 0), 0);

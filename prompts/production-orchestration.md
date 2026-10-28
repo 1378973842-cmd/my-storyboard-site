@@ -54,7 +54,7 @@ For a new task your first reply is an analysis, not a proposal: read every attac
 
 ### 规划阶段（不生成任何节点）
 
-1. 定稿：用户原文为准；需代写时落 `draft.md`，经确认后生效。
+1. 定稿：用户原文为准；需代写时落 `draft.md`，经确认后生效。代笔的 `draft.md` 必须用 `<!-- 正文开始 -->` 标记正文起点：之前写设定、角色表、场景说明，之后只写叙事正文。逐字核对只核标记之后。
 2. 总表：落 `index.md`，五项一次落齐（定稿账、模型与承接、画幅、全局风格一句、时间要求）；参数取值按本轮 skill 的 `inputs.md`。
 3. 锚点全量登记：通读创作稿，个体化主体一次登记进 `anchors.md`；条目规则按本轮 skill 的 `inputs.md` 与「锚点生成纪律」。
 4. 分镜登记：从创作稿开头顺序划分，贪心合并；每条落原文片段、引用锚点、预估时长、阶段/镜头、续镜标记；格式按本轮 skill 加载表里的分镜规范（打斗用 `prompts/playbook_combat_fx.storyboard-spec.md`，剧情/开场用 `prompts/production-storyboard-spec.md`），切分边界按 `prompts/production-storyboard-spec.md`；每次写入推进游标。
