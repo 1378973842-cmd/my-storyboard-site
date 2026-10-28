@@ -1278,6 +1278,75 @@ export function registerCanvasAgentRoutes(
           first = await callModel(model, messages, false, controller.signal);
         }
       }
+      // 写入/推进自动续跑：这两类不扣费、不需要批准；回填 tool result 后再让模型走一步，
+      // 直到它返回纯文本或需要画布/审批的动作。上限 4 轮，和读回循环同族。
+      const MAX_WRITE_ROUNDS = 4;
+      const safeCompleteSteps = new Set<TaskStep>(['draft', 'anchors', 'storyboard']);
+      const taskStepLabel = (step: TaskStep) => TASK_STEPS.find((item) => item.step === step)?.label || step;
+      for (let writeRound = 0; writeRound < MAX_WRITE_ROUNDS; writeRound += 1) {
+        const writeCalls = parseToolCalls(first);
+        if (!writeCalls.length) break;
+        const allContinuable = writeCalls.every((call) => (
+          call.function.name === 'write_task_artifact'
+          || (call.function.name === 'complete_task_step'
+            && safeCompleteSteps.has(String(safeArgs(call).step || '') as TaskStep))
+        ));
+        if (!allContinuable || !conversation) break;
+        const toolResults = writeCalls.map((call) => {
+          const args = safeArgs(call);
+          try {
+            let content = '';
+            if (call.function.name === 'write_task_artifact') {
+              const kind = String(args.kind || '') as TaskArtifactKind;
+              if (!['draft', 'index', 'anchors', 'storyboard'].includes(kind)) throw new Error('未知的产物类型');
+              const written = writeTaskArtifact(conversation.id, kind, String(args.content || ''), Boolean(args.append));
+              if (kind === 'storyboard' && args.cursor_last_line) {
+                setTaskCursor(conversation.id, { lastLine: String(args.cursor_last_line) });
+              }
+              content = `已写入 ${kind}.md（${written.chars} 字）。当前位置：${taskStepLabel(written.state.current)}。下一步：如果该产物已完成，立刻调用 complete_task_step('${kind}')；不要用纯文本停在这里。`;
+              const log = { id: `task-ledger-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: 'task_ledger', label: `文件账本：${content}`, state: 'done' as const };
+              persistedToolLogs.push(log);
+              sendEvent(res, { type: 'tool', log });
+            } else {
+              const step = String(args.step || '') as TaskStep;
+              const state = completeTaskStep(conversation.id, step);
+              content = `已完成「${taskStepLabel(step)}」。当前位置：${taskStepLabel(state.current)}。下一步：继续下一个未完成 todo；需要用户确认或审批时再停。`;
+              const log = { id: `task-ledger-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: 'task_ledger', label: `文件账本：${content}`, state: 'done' as const };
+              persistedToolLogs.push(log);
+              sendEvent(res, { type: 'tool', log });
+            }
+            return { role: 'tool', tool_call_id: call.id, content };
+          } catch (err) {
+            const message = `账本操作失败：${err instanceof Error ? err.message : String(err)}`;
+            const log = { id: `task-ledger-fail-${Date.now()}`, name: 'task_ledger', label: message, state: 'failed' as const };
+            persistedToolLogs.push(log);
+            sendEvent(res, { type: 'tool', log });
+            return { role: 'tool', tool_call_id: call.id, content: message };
+          }
+        });
+        const assistantToolMessage = {
+          role: 'assistant',
+          content: '',
+          tool_calls: writeCalls.map((call) => ({
+            id: call.id,
+            type: 'function',
+            function: { name: call.function.name, arguments: call.function.arguments },
+          })),
+        };
+        first = await callModel(
+          model,
+          [...messages, assistantToolMessage, ...toolResults],
+          true,
+          controller.signal,
+        );
+      }
+      if (parseToolCalls(first).some((call) => (
+        call.function.name === 'write_task_artifact'
+        || (call.function.name === 'complete_task_step' && safeCompleteSteps.has(String(safeArgs(call).step || '') as TaskStep))
+      ))) {
+        // 达到上限仍在写：已经执行的写入保留，停止自动续跑，不重复执行最后一批。
+        first = { choices: [{ message: { role: 'assistant', content: `已连续写入 ${MAX_WRITE_ROUNDS} 轮，停在当前步骤；请查看账本后继续。` } }] };
+      }
       // 通用读回：模型可单独调 read_task_artifact 读账本；把文件内容作为 tool result
       // 回给它，再让它继续本轮的动作。最多 3 轮；每批可并行多个 read，只限串行往返。
       const MAX_READ_ROUNDS = 3;
