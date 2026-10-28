@@ -430,12 +430,20 @@ export const agentPlaybooks: AgentPlaybook[] = [
     title: '剧情动画',
     when: '用户要多段剧情片时（每段 25–40 秒，分 2–3 段，主角跨段存活）',
     path: 'prompts/playbook_video_content.md',
+    knowledgePath: 'prompts/playbook_video_content.knowledge.md',
+    knowledgeFiles: [
+      { path: 'prompts/playbook_video_content.knowledge.md', when: 'video create/update', needsRead: false, use: 'prompt' },
+    ],
   },
   {
     id: 'canvas-opening-animation',
     title: '开场动画',
     when: '用户要一条游戏开场动画时（单段，15 秒内，可选配乐）',
     path: 'prompts/playbook_opening_animation.md',
+    knowledgePath: 'prompts/playbook_opening_animation.knowledge.md',
+    knowledgeFiles: [
+      { path: 'prompts/playbook_opening_animation.knowledge.md', when: 'video create/update', needsRead: false, use: 'prompt' },
+    ],
   },
   {
     id: 'canvas-combat-fx',

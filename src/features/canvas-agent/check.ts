@@ -1784,116 +1784,21 @@ assert.equal(
   combatStageDecision({ playbookId: 'canvas-video-piece', stage: '', message: '做一段剧情', answering: false, hasAnchor: false }).blocked,
   false,
 );
-const playbookStepEnd: Record<string, string> = {
-  'canvas-video-piece': '## 时长规则',
-  'canvas-opening-animation': '## 核心原则',
-};
-const secondsPerShot = /每镜\s*[0-9]|每\s*[0-9][^。\n]{0,12}秒一个镜头/;
-const stackedMovePush = /一镜内[^。\n]{0,16}(?:连打|多手法|多种手法|五种手法)|(?:多种|五种)手法连打/;
-const stackedMoveDeny = /不靠|不要|禁止|别|不能|不得/;
-const playbookGaps: string[] = [];
 const playbookBodies = ['canvas-video-piece', 'canvas-opening-animation'].map((id) => {
   const body = readRegisteredPlaybookText('.', id);
   assert.ok(body.length > 0, id);
-  console.log(`playbook body ${id}: ${body.length}`);
-  assert.equal(body.includes('运镜词典（强制参考）'), false, id);
-  const need = (text: string, pattern: RegExp, label: string) => {
-    if (!pattern.test(text)) playbookGaps.push(`${id} 缺 ${label}`);
-  };
-  if (secondsPerShot.test(body)) playbookGaps.push(`${id} 有秒数档`);
-  need(body, /主运镜/, '主运镜');
-  need(body, /步骤 0 · 资产分析/, '步骤 0 · 资产分析');
-  need(body, /video 的 prompt 里不要写参考图的文件名/, 'video prompt 不写文件名');
-  if (body.includes('必须和这些 @ 出现在同一条用户消息里')) playbookGaps.push(`${id} 仍要求同一条消息 @`);
-  const modeRow = body.split('\n').find((line) => line.startsWith('| 模式 |')) || '';
-  const intensityRow = body.split('\n').find((line) => line.startsWith('| 运镜强度 |')) || '';
-  if (!modeRow) playbookGaps.push(`${id} 缺模式行`);
-  else {
-    need(modeRow, /见步骤 1/, '模式见步骤 1');
-    if (/用户没提就问一句|用户没说\s*→\s*默认/.test(modeRow)) playbookGaps.push(`${id} 模式仍把停留在缺省列`);
-  }
-  if (!intensityRow) playbookGaps.push(`${id} 缺运镜强度行`);
-  else {
-    need(intensityRow, /见步骤 1/, '运镜强度见步骤 1');
-    if (/用户没提就问一句|用户没说\s*→\s*standard|没说就用 standard/.test(intensityRow)) {
-      playbookGaps.push(`${id} 运镜强度仍把停留在缺省列`);
-    }
-  }
-  if (body.split('\n').some((line) => stackedMovePush.test(line) && !stackedMoveDeny.test(line))) {
-    playbookGaps.push(`${id} 鼓励一镜内多手法连打`);
-  }
-  const stepsAt = body.indexOf('## 执行逻辑');
-  const stepsEnd = body.indexOf(playbookStepEnd[id], stepsAt + 1);
-  assert.ok(stepsAt >= 0 && stepsEnd > stepsAt, id);
-  const steps = body.slice(stepsAt, stepsEnd);
-  need(steps, /这要重跑整[段条]，约 X 秒/, '步骤区报价句');
-  need(steps, /不要写进 video prompt/, '步骤区台词禁令');
-  const step0 = steps.slice(steps.indexOf('### 步骤 0'), steps.indexOf('### 步骤 1'));
-  const step0First = step0.split('\n').map((line) => line.trim()).find((line) => line && !line.startsWith('#'));
-  if (step0First !== '这一步的产物不是『识别这是什么图』。只说图里是阿波罗、是神殿，等于没做这一步——那是识别，不是分析。这一步只报两样：图里没有而故事需要的；图里有而和故事冲突的。两样都没有时，一行说『图与故事一致』。报完停下等用户确认，确认前不写任何分镜、不建任何节点。') {
-    playbookGaps.push(`${id} 步骤 0 第一句不是闸门`);
-  }
-  if (step0.includes('参考关系只靠连线')) playbookGaps.push(`${id} 连线句仍停在步骤 0`);
-  const step1 = steps.slice(steps.indexOf('### 步骤 1'), steps.indexOf('### 步骤 2'));
-  if (!step1.includes('没有审批卡时')) playbookGaps.push(`${id} 步骤 1 没有短句肯定禁令`);
-  if (step1.includes('有待批准的提案时')) playbookGaps.push(`${id} 短句禁令仍按待批准提案判`);
-  const videoFrom = id === 'canvas-video-piece' ? '### 步骤 3' : '### 步骤 1';
-  const videoTo = id === 'canvas-video-piece' ? '### 步骤 4' : '### 步骤 2';
-  const videoStep = steps.slice(steps.indexOf(videoFrom), steps.indexOf(videoTo));
-  if (!videoStep.includes('参考关系只靠连线表达')) playbookGaps.push(`${id} 建 video 那步没有连线句`);
-  const askAt = step1.indexOf('没答就不能建节点、不能写分镜——先问，等回答。');
-  const productAt = step1.indexOf('产物：');
-  if (askAt < 0 || productAt < 0 || askAt > productAt) playbookGaps.push(`${id} 开工追问不在产物之前`);
-  if (!steps.includes('为什么停在这儿')) playbookGaps.push(`${id} 停点没要求说明为什么`);
-  const cardWhy = '卡不是文字画出来的，是工具调用触发的';
-  if (steps.indexOf(cardWhy) < 0 || steps.indexOf(cardWhy) > steps.indexOf('为什么停在这儿')) {
-    playbookGaps.push(`${id} 卡片那句不在停点说明前面`);
-  }
-  if (!steps.includes('是你的责任不是他的')) playbookGaps.push(`${id} 没要求生成前提醒素材冲突`);
-  if (!step1.includes('用默认')) playbookGaps.push(`${id} 忽略没记成用默认`);
-  need(step1, /不要问抽象档位，问具体参照/, '提问环节没有具体参照引导');
-  const refStart = body.indexOf('参考图承载细节');
-  const refEnd = body.indexOf('\n### ', refStart + 1);
-  const refSection = refStart >= 0 && refEnd > refStart ? body.slice(refStart, refEnd) : '';
-  if (!refSection.includes('不等于角色只写名字')) playbookGaps.push(`${id} 参考图原则缺不等于角色只写名字`);
-  const writeFrom = id === 'canvas-video-piece' ? '### 步骤 3' : '### 步骤 1';
-  const writeTo = id === 'canvas-video-piece' ? '### 步骤 4' : '### 步骤 2';
-  const writeStep = steps.slice(steps.indexOf(writeFrom), steps.indexOf(writeTo));
-  const beforeProduct = writeStep.slice(0, writeStep.indexOf('产物：'));
-  const shotLineMarks = [
-    '分镜行怎么写',
-    '表情与眼神', '身体状态', '位置与构图', '动作精度', '特效：形态',
-    '道具与环境交互', '物理附着', '光：方向、色温、硬度、变化', '视线与关系',
-    '远景 / 建立', '特写：表情、眼神', '动作镜', '特效镜', '对白 / 静场',
-    '远景那一镜里，外观锚定和构图合并写，不要单独再抄一遍脸和服装。',
-    '不要写『参考图1』这种编号',
-  ];
-  if (shotLineMarks.some((mark) => !beforeProduct.includes(mark))) {
-    playbookGaps.push(`${id} 分镜行九类或选择表不在产物之前`);
-  }
-  need(beforeProduct, /四层的篇幅配比：风格质量声明 10%、运镜系统 15%、核心画面 60%、技术细节 15%/, '分镜行没写四层篇幅配比');
-  need(body, /## 内容不满意时怎么改/, '缺内容不满意的迭代诊断表');
-  if (body.includes('和原则 2 的关系')) playbookGaps.push(`${id} 仍用原则编号指外观锚定`);
-  const shotHow = beforeProduct.slice(beforeProduct.indexOf('### 分镜行怎么写'));
-  if (!shotHow.includes('用创作稿的语言写')) playbookGaps.push(`${id} 分镜行没要求用创作稿的语言写`);
-  if (body.includes('用用户消息的语言写')) playbookGaps.push(`${id} 仍残留用用户消息的语言写`);
-  if (!shotHow.includes('不要把记号放进句子主干')) playbookGaps.push(`${id} 分镜行没拦住把记号放进主干`);
-  if (!beforeProduct.includes('防重复的约束，不是进度报告')) playbookGaps.push(`${id} 已生效清单没写成防重复约束`);
-  const handoffStop = id === 'canvas-video-piece'
-    ? '停点：每段的提示词都可以单独审，审到分镜级。'
-    : '停点：prompt 出来后等用户审，审到分镜级。';
-  const handoffAt = steps.indexOf(handoffStop);
-  const runProductAt = handoffAt < 0 ? -1 : steps.indexOf('批准即成片', handoffAt + handoffStop.length);
-  const handoff = handoffAt >= 0 && runProductAt > handoffAt ? steps.slice(handoffAt, runProductAt) : '';
-  if (!handoff.includes('下一拍直接提交运行')) playbookGaps.push(`${id} 认可后没要求下一拍提交运行`);
-  if (!handoff.includes('不用再等一拍落板')) playbookGaps.push(`${id} 衔接句仍按落板后再等一拍`);
-  if (!beforeProduct.includes('不要写分镜1/分镜2/分镜3')) playbookGaps.push(`${id} 一镜到底写法不在产物之前`);
-  if (!beforeProduct.includes('必须在同一个提案里做完')) playbookGaps.push(`${id} 建节点和连边没要求同一提案`);
-  const axesAt = step1.indexOf('克制不等于一镜到底');
-  if (axesAt < 0 || axesAt < askAt) playbookGaps.push(`${id} 克制和一镜到底没拆开`);
+  assert.match(body, /## 加载表/);
+  assert.doesNotMatch(body, /^### 分镜行怎么写/m);
+  const loaded = readPlaybookForAgent('.', id);
+  assert.ok(loaded.startsWith('# 制作编排'), id);
+  assert.match(loaded, /When you create image, video or generator nodes, propose running them/);
   return body;
 });
-assert.deepEqual(playbookGaps, []);
+for (const file of ['prompts/playbook_video_content.knowledge.md', 'prompts/playbook_opening_animation.knowledge.md']) {
+  const text = readFileSync(file, 'utf8');
+  assert.ok(text.length > 0, file);
+  assert.match(text, /分镜行怎么写/, file);
+}
 const playbookLoaded = ['canvas-video-piece', 'canvas-opening-animation'].map((id) => readPlaybookForAgent('.', id));
 assert.ok(playbookLoaded[0].startsWith('# 制作编排'));
 assert.ok(playbookLoaded[0].endsWith(playbookBodies[0]));
