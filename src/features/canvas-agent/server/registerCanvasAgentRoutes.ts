@@ -2598,6 +2598,14 @@ export function registerCanvasAgentRoutes(
         persistedAsks = [anchorCard];
         sendEvent(res, { type: 'ask', asks: [anchorCard] });
       }
+      if (forceAsk && !stagePassed && !anchorsRegistered && !persistedAsks.length && !persistedProposal && conversation) {
+        // 即使因为「本会话已有卡」不再补卡，也要把下一步计划落账：
+        // 下一轮应继续收集剩余参数，而不是只回任务状态。
+        setTaskNextAction(conversation.id, 'ask_user', {
+          stage: 'preparation',
+          missing: '对手、场景、画幅、时长',
+        }, []);
+      }
       // 所有退出路径的兜底：只要有正文而这一轮还没推送过，就推一次。
       if (!(res.locals as Record<string, unknown>).__agentTextStreamed) {
         if (!persistedText.trim()) {
