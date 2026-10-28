@@ -22,6 +22,7 @@ import { sortBatchExecutions } from './core/executionOrder';
 import { approveRunCard, defaultAskAnswer, normalizeAskCards, parseAskAnswer, parseInlineAskCards, withRunApproval } from './core/askCard';
 import { actionDisplayLabel, actionProposalNeedsApproval, derivedStepTitle, interpretCanvasProposalText, listedNodeIds, listedRecords, normalizeCanvasActions, openBatchProgress, partialBatchUpdate, pendingExecutionFeedback, proposalWaitsForClick, settleBatchProposal, stripCreatesOnShortYes, unknownCanvasActionMessage } from './core/proposal';
 import { actionsReleasedForApproval, runScopeDigest, runScopeMatches } from './core/runApproval';
+import { applyRunCardSettlement, settleRunCardAnswer } from './core/runCardSettlement';
 import { turnStatePrefix } from './core/turnState';
 import { checkStoryboardAgainstDraft } from './core/planCheck';
 import { assembleKnowledgeForTurn, selectKnowledgeForUse } from './core/knowledgeContext';
@@ -744,6 +745,21 @@ const cardHtml = renderToStaticMarkup(createElement(ProposalPreviewCard, {
 assert.match(cardHtml, /部分完成/);
 assert.doesNotMatch(cardHtml, /已应用/);
 assert.match(cardHtml, /1 个节点被跳过，没有产出/);
+const discardedCardHtml = renderToStaticMarkup(createElement(ProposalPreviewCard, {
+  proposal: {
+    ...failedProposal('discarded-card', '', 1),
+    status: 'discarded',
+    actions: [{ type: 'execute_node_skill', nodeId: 'vid_a' }],
+  },
+  onApply() {},
+  onDiscard() {},
+}));
+assert.match(discardedCardHtml, /已放弃/);
+assert.doesNotMatch(discardedCardHtml, /等审批卡/);
+assert.equal(proposalOnReopen({
+  status: 'discarded',
+  actions: [{ type: 'execute_node_skill', nodeId: 'vid_a' }],
+}).status, 'discarded');
 const execOnly = settleBatchProposal(1, 0, { nodeId: 'gen_1', message: '节点 gen_1 没有内容，无法执行。' });
 assert.equal(execOnly.status, 'exec_failed');
 if (execOnly.status === 'exec_failed') {
@@ -2075,6 +2091,15 @@ appendCanvasAgentMessage(approvalDb, 'user', approvalConversation.id, 'user', ''
   askAnswer: { cardId: 'ask-run', mode: 'approve_run_node', question: '批准运行这些节点？', selected: ['批准'] },
 });
 assert.equal(hasPendingRunApproval(approvalDb, 'user', approvalConversation.id), false);
+await new Promise((resolve) => setTimeout(resolve, 5));
+appendCanvasAgentMessage(approvalDb, 'user', approvalConversation.id, 'assistant', '', {
+  asks: [{ id: 'ask-run-2', mode: 'approve_run_node', question: '批准运行这些节点？', options: [], node_keys: ['vid_b'] }],
+});
+assert.equal(hasPendingRunApproval(approvalDb, 'user', approvalConversation.id), true);
+appendCanvasAgentMessage(approvalDb, 'user', approvalConversation.id, 'user', '', {
+  askAnswer: { cardId: 'ask-run-2', mode: 'approve_run_node', question: '批准运行这些节点？', selected: ['已过期'] },
+});
+assert.equal(hasPendingRunApproval(approvalDb, 'user', approvalConversation.id), false);
 approvalDb.close();
 
 // ---- 审批范围：卡绑的是「那一刻这批节点、这份内容」 ----
@@ -2085,6 +2110,37 @@ const scopeNodes = [
 const scope = { nodeIds: ['gen_a', 'gen_b'], digest: runScopeDigest(scopeNodes, ['gen_a', 'gen_b']) };
 assert.equal(runScopeMatches(scope, scopeNodes, ['gen_b', 'gen_a']), true);
 assert.equal(runScopeMatches(undefined, scopeNodes, ['gen_a', 'gen_b']), false);
+const expiredRunAnswer = settleRunCardAnswer({
+  cardId: 'ask-run', mode: 'approve_run_node', selected: ['批准'], question: '',
+}, false);
+assert.deepEqual(expiredRunAnswer.answer.selected, ['已过期']);
+assert.equal(expiredRunAnswer.discard, true);
+assert.equal(expiredRunAnswer.send, true);
+assert.equal(expiredRunAnswer.expired, true);
+const writes = { discard: 0, send: 0 };
+applyRunCardSettlement(expiredRunAnswer, {
+  discard: () => { writes.discard += 1; },
+  send: () => { writes.send += 1; },
+});
+assert.equal(writes.discard, 1);
+assert.equal(writes.send, 1);
+const liveRunAnswer = settleRunCardAnswer({
+  cardId: 'ask-run', mode: 'approve_run_node', selected: ['批准'], question: '',
+}, true);
+assert.equal(liveRunAnswer.discard, false);
+assert.equal(liveRunAnswer.send, true);
+const liveWrites = { discard: 0, send: 0 };
+applyRunCardSettlement(liveRunAnswer, {
+  discard: () => { liveWrites.discard += 1; },
+  send: () => { liveWrites.send += 1; },
+});
+assert.equal(liveWrites.discard, 0);
+assert.equal(liveWrites.send, 1);
+const rejectRunAnswer = settleRunCardAnswer({
+  cardId: 'ask-run', mode: 'approve_run_node', selected: ['拒绝'], question: '',
+}, false);
+assert.equal(rejectRunAnswer.discard, true);
+assert.equal(rejectRunAnswer.send, true);
 assert.equal(runScopeMatches(scope, scopeNodes, ['gen_a']), false);
 assert.equal(runScopeMatches(scope, scopeNodes.map((node) => ({ ...node, x: 900 })), ['gen_a', 'gen_b']), true);
 assert.equal(runScopeMatches(scope, scopeNodes.map((node) => (
@@ -2460,6 +2516,9 @@ assert.match(approvalPanelSource, /useState<AgentMode>\('auto'\)/);
 assert.match(approvalPanelSource, /setMode\('auto'\)/);
 assert.match(approvalPanelSource, /手动确认：建\/连\/改直接落板/);
 assert.match(approvalPanelSource, /运行在任何模式下都要审批卡/);
+assert.match(approvalPanelSource, /settleRunCardAnswer/);
+assert.match(approvalPanelSource, /persistProposalOutcome\(proposal\.id, \{/);
+assert.match(approvalPanelSource, /status: 'discarded'/);
 assert.match(approvalPanelSource, /approveRunCard\(nodeIds\)/);
 assert.match(approvalPanelSource, /runScopeMatches\(/);
 assert.match(approvalPanelSource, /cancelAgentTurn\(/);

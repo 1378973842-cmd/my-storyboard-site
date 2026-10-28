@@ -99,6 +99,7 @@ import type {
 } from '../types';
 import type { AskAnswer, AskCard } from '../core/askCard';
 import { runScopeDigest, runScopeMatches, actionsReleasedForApproval, type RunScope } from '../core/runApproval';
+import { settleRunCardAnswer } from '../core/runCardSettlement';
 import './canvas-agent.css';
 
 const spring = { type: 'spring' as const, stiffness: 300, damping: 30 };
@@ -1368,28 +1369,53 @@ export function AgentFloatingPanel({
     if (streaming || askedRef.current.has(key)) return;
     askedRef.current.add(key);
     setAskAnswers((current) => ({ ...current, [key]: answer }));
-    const runNodes = answer.mode === 'approve_run_node' && answer.selected[0] === '批准'
-      ? (messages.find((item) => item.id === messageId)?.asks?.find((card) => card.id === answer.cardId)?.node_keys || [])
+    const card = messages.find((item) => item.id === messageId)?.asks?.find((item) => item.id === answer.cardId);
+    const cardNodeKeys = [...(card?.node_keys || [])].filter(Boolean);
+    let runNodes = answer.mode === 'approve_run_node' && answer.selected[0] === '批准'
+      ? cardNodeKeys
       : [];
     // 批准的对象是「那一刻看到的内容」。卡上的节点集或内容在批准前变过，这张卡就作废，
-    // 不跑、也不假装批过。这一判必须在开流之前，否则会留下一条永不结束的空回复。
-    if (runNodes.length) {
+    // 不跑、也不假装批过。过期/拒绝都要结算提案，并且把答复发出去：
+    // 只结算不发，服务端会一直以为卡还在等；只发不结算，本地 proposal 仍 pending。
+    let effectiveAnswer = answer;
+    if (answer.mode === 'approve_run_node') {
       const approvalSnapshot = getCanvasSnapshot();
-      const live = runScopeMatches(
-        runScopeRef.current.get(key),
-        approvalSnapshot.nodes,
-        runNodes,
-        approvalSnapshot.connections,
-      );
-      if (!live) {
-        // 卡上写的「批准」不能留着当已批准。把它标成已过期，并说明为什么没跑。
-        setAskAnswers((current) => ({ ...current, [key]: { ...answer, selected: ['已过期'] } }));
-        setNotice('这张审批卡已过期：页面刷新过，或节点内容在批准前变过。请让 Agent 重新提交运行再批。');
-        return;
+      const live = runNodes.length
+        ? runScopeMatches(
+          runScopeRef.current.get(key),
+          approvalSnapshot.nodes,
+          runNodes,
+          approvalSnapshot.connections,
+        )
+        : false;
+      const settlement = settleRunCardAnswer(answer, live);
+      effectiveAnswer = settlement.answer;
+      if (settlement.discard) {
+        const proposal = proposalsRef.current.find((item) => (
+          item.messageId === messageId
+          && item.status === 'pending'
+          && item.actions.some((action) => (
+            action.type === 'execute_node_skill' && cardNodeKeys.includes(action.nodeId)
+          ))
+        ));
+        if (proposal) {
+          discardProposal(proposal);
+          void persistProposalOutcome(proposal.id, {
+            ...diskProposalOutcome(proposal),
+            status: 'discarded',
+          }).catch(() => { /* 写不上也不能阻塞答复 */ });
+        }
       }
-      // 批准后立刻给反馈：运行已经开始了，别让用户以为没点上。
-      setNotice('已批准，开始生成…');
-      runNodes.forEach((nodeId) => autoWatchRef.current.add(nodeId));
+      if (settlement.expired) {
+        setAskAnswers((current) => ({ ...current, [key]: effectiveAnswer }));
+        setNotice('这张审批卡已过期：页面刷新过，或节点内容在批准前变过。已按「已过期」结算，Agent 可以重新提交运行。');
+        runNodes = [];
+      } else if (settlement.discard) {
+        setAskAnswers((current) => ({ ...current, [key]: effectiveAnswer }));
+      } else {
+        setNotice('已批准，开始生成…');
+        runNodes.forEach((nodeId) => autoWatchRef.current.add(nodeId));
+      }
     }
     // 答卡会发一次新请求；上一轮的作业到这里就算结束，别留成永远「等用户」。
     const previousJob = jobIdRef.current;
@@ -1404,7 +1430,7 @@ export function AgentFloatingPanel({
       role: 'user',
       content: '',
       createdAt: Date.now(),
-      askAnswer: answer,
+      askAnswer: effectiveAnswer,
     };
     const prior = askHistoryRef.current;
     askHistoryRef.current = [...prior, historyItem];
@@ -1444,7 +1470,7 @@ export function AgentFloatingPanel({
       }
       await streamCanvasAgent({
         message: '',
-        askAnswer: answer,
+        askAnswer: effectiveAnswer,
         messages: [...messages, ...prior],
         snapshot,
         conversationId: conversationId || undefined,
@@ -1467,6 +1493,7 @@ export function AgentFloatingPanel({
   }, [
     askAnswers,
     conversationId,
+    discardProposal,
     finishTurn,
     handleAgentEvent,
     messages,
