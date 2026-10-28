@@ -2467,7 +2467,18 @@ export function registerCanvasAgentRoutes(
       }
       // 准备阶段的服务端兜底：模型只建任务、没发 ask_user 时，必须补一张卡。
       // 这是唯一不依赖模型自觉的闸；卡形状与模型自己发的单卡一致。
-      if (forceAsk && !persistedAsks.length && !persistedProposal) {
+      // 准备阶段兜底也要看「阶段是否已经过去」：锚点已登记/已生成，或 current 已到
+      // storyboard 之后，就不能再问「角色参考怎么定」。
+      const taskNow = conversation ? readTaskState(conversation.id) : null;
+      const stagePassed = Boolean(taskNow && !['draft', 'anchors'].includes(taskNow.current));
+      const anchorsRegistered = Boolean(
+        gateFacts.character_anchor
+        || gateFacts.opponent_anchor
+        || gateFacts.scene_anchor
+        || taskNow?.artifacts.anchors?.chars
+        || taskForTurn?.artifacts.anchors?.chars,
+      );
+      if (forceAsk && !stagePassed && !anchorsRegistered && !persistedAsks.length && !persistedProposal) {
         const anchorCard: AskCard = {
           id: `anchor-${Date.now()}`,
           mode: 'single',
