@@ -3820,6 +3820,8 @@ assert.match(promptSource, /已发卡，请在卡片上选择/);
 assert.match(promptSource, /准备阶段先确认角色参考/);
 assert.match(promptSource, /MAX_READ_ROUNDS = 5/);
 assert.match(promptSource, /读回延后/);
+assert.match(promptSource, /lastSafeAction !== 'storyboard'/);
+assert.match(promptSource, /继续下一步：按 task_state 的 current 执行/);
 assert.match(promptSource, /stagePassed/);
 assert.match(promptSource, /anchorsRegistered/);
 assert.equal(textFromChatResponse({

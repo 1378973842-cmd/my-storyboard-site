@@ -1291,9 +1291,31 @@ export function registerCanvasAgentRoutes(
       const taskStepLabel = (step: TaskStep) => TASK_STEPS.find((item) => item.step === step)?.label || step;
       let lastNonEmptyContent = extractTextLlmMessageContent(model, first).trim();
       let continuationRounds = 0;
+      let lastSafeAction = '';
       for (let writeRound = 0; writeRound < MAX_WRITE_ROUNDS; writeRound += 1) {
         const writeCalls = parseToolCalls(first);
-        if (!writeCalls.length) break;
+        if (!writeCalls.length) {
+          // 刚执行完 safe 动作后模型只回了状态文本：用一句明确的继续指令再推一步。
+          // storyboard 完成后停，review 是硬闸，不能自动过。
+          if (lastSafeAction && lastSafeAction !== 'storyboard') {
+            const nudge = '继续下一步：按 task_state 的 current 执行，不要只回复状态。完成当前 todo 后继续，直到 review 或需要用户确认/审批。';
+            const lastText = extractTextLlmMessageContent(model, first).trim();
+            first = await callModel(
+              model,
+              [
+                ...messages,
+                ...(lastText ? [{ role: 'assistant', content: lastText }] : []),
+                { role: 'user', content: nudge },
+              ],
+              true,
+              controller.signal,
+            );
+            const nudgedContent = extractTextLlmMessageContent(model, first).trim();
+            if (nudgedContent) lastNonEmptyContent = nudgedContent;
+            continue;
+          }
+          break;
+        }
         const allContinuable = writeCalls.every((call) => (
           call.function.name === 'write_task_artifact'
           || (call.function.name === 'complete_task_step'
@@ -1309,6 +1331,7 @@ export function registerCanvasAgentRoutes(
               const kind = String(args.kind || '') as TaskArtifactKind;
               if (!['draft', 'index', 'anchors', 'storyboard'].includes(kind)) throw new Error('未知的产物类型');
               const written = writeTaskArtifact(conversation.id, kind, String(args.content || ''), Boolean(args.append));
+              lastSafeAction = kind;
               if (kind === 'storyboard' && args.cursor_last_line) {
                 setTaskCursor(conversation.id, { lastLine: String(args.cursor_last_line) });
               }
@@ -1319,6 +1342,7 @@ export function registerCanvasAgentRoutes(
             } else {
               const step = String(args.step || '') as TaskStep;
               const state = completeTaskStep(conversation.id, step);
+              lastSafeAction = step;
               content = `已完成「${taskStepLabel(step)}」。当前位置：${taskStepLabel(state.current)}。下一步：继续下一个未完成 todo；需要用户确认或审批时再停。`;
               const log = { id: `task-ledger-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: 'task_ledger', label: `文件账本：${content}`, state: 'done' as const };
               persistedToolLogs.push(log);
