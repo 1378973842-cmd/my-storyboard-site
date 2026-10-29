@@ -426,9 +426,12 @@ export function taskStatePrompt(state: TaskState | null): string {
     ? '准备阶段（尚未进入定稿；先确认参数，不要预设下一步）'
     : (TASK_STEPS.find((item) => item.step === state.current)?.label || state.current);
   const action = nextActionForStep(state.current);
+  const stageRule = state.current === 'anchors'
+    ? '\n- 硬性顺序：先 create_canvas_nodes 建真实锚点节点，再把真实节点 id 写进 anchors.md，最后 complete_task_step(\'anchors\')；不要先写文件再完成。'
+    : '';
   const currentPlan = state.nextAction?.step === state.current ? state.nextAction : null;
   const nextAction = currentPlan
     ? `\n- 下一步动作（由 current 推）：${action.actionType}\n- 下一步计划（上一轮落账）：intent=${currentPlan.intent} ${JSON.stringify(currentPlan.params)} 依赖:${currentPlan.nodeIds.join('、') || '无'}`
     : `\n- 下一步动作（由 current 推）：${action.actionType}\n- 下一步计划（上一轮落账）：（上一轮计划属于旧阶段，已忽略）`;
-  return `\n\n[task_state]\n- 任务：${state.title}（${state.id}）\n- 当前位置：${position}\n- todo：${todo}${cursor}${nextAction}\n- 产物：${artifacts || '（尚未写入）'}${reviewStatus}\n- 文件是唯一权威源：写产物用 write_task_artifact，完成一步用 complete_task_step，主动读回用 read_task_artifact（kind + offset/length，单独一批调用）；核对所需的创作稿/分镜会自动附上，不要凭记忆推进。${reviewFiles}`;
+  return `\n\n[task_state]\n- 任务：${state.title}（${state.id}）\n- 当前位置：${position}\n- todo：${todo}${cursor}${nextAction}${stageRule}\n- 产物：${artifacts || '（尚未写入）'}${reviewStatus}\n- 文件是唯一权威源：写产物用 write_task_artifact，完成一步用 complete_task_step，主动读回用 read_task_artifact（kind + offset/length，单独一批调用）；核对所需的创作稿/分镜会自动附上，不要凭记忆推进。${reviewFiles}`;
 }

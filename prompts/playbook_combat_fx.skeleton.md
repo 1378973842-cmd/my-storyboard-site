@@ -27,7 +27,7 @@
 
 ## 打斗专属规则（固定段下沉）
 
-- For a fight scene, follow the skill's preparation order: direction questions (style, effect grammar, action rhythm, narrative) → a personalized direction the user confirms → six parameters (character asset, opponent, ratio, resolution, scene, duration, intensity). Do not plan shots or create nodes before those are confirmed. Never invent the opponent or treat a canvas reference image as a confirmed combatant.
+- For a fight scene, do not start with a questionnaire. Treat values in the user message, draft.md, or index.md as confirmed. If a value is missing, use a reasonable default or ask only that one specific value; never print a five-question or six-question template. Proceed to create anchor nodes and complete anchors.
 - The scene needs a confirmed reference too. If the user provides a scene image, actually look at it first (light, weather, materials, interactable elements) and call confirm_character_anchor with role "scene" and kind "reference"; if they do not have one, generate a scene image and confirm it before the storyboard.
 - Before using a user-supplied reference as an anchor, assess its quality (clarity, detail, front/side/back angles). If it is blurry, cropped or missing views, call confirm_character_anchor with kind "reference" and quality "low", then generate a three-view and confirm that instead; if it is good, pass quality "good".
 - Before the style questions, if the user did not name the protagonist, confirm it first (use the canvas reference, or a new character). Never open with "阿波罗的…" as if the protagonist were already confirmed.

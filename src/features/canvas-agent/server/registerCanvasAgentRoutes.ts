@@ -1223,7 +1223,8 @@ export function registerCanvasAgentRoutes(
         title: turnMessage.replace(/^\[\[自动\]\]\s*/, '').slice(0, 40) || '制作任务',
         goal: turnMessage.slice(0, 2000),
         skill: effectivePlaybookId,
-        preparing: true,
+        // 已经 @ 了角色参考图，角色参考这步不再是未知；直接进入定稿。
+        preparing: !hasAnchor,
       })
       : null;
     const taskForTurn = autoTask || taskBefore;
@@ -2574,9 +2575,16 @@ export function registerCanvasAgentRoutes(
           persistedText = '方案正文我还没给全，先不让你确认；我补写后再发卡。';
           streamText(res, persistedText);
         } else {
-          persistedText = lead;
-          streamText(res, persistedText);
-          publishAsks();
+          const runApprovalWithoutProposal = asks.some((card) => card.mode === 'approve_run_node')
+            && !persistedProposal;
+          if (runApprovalWithoutProposal) {
+            persistedText = '这一轮没有可运行的节点：没有生成任何画布提案。先建节点，再发运行审批卡。';
+            streamText(res, persistedText);
+          } else {
+            persistedText = lead;
+            streamText(res, persistedText);
+            publishAsks();
+          }
         }
       } else if (interpreted?.unknownTypes.length) {
         persistedText = `动作类型无法识别：${interpreted.unknownTypes.join('、')}。这轮没有生成提案。`;
