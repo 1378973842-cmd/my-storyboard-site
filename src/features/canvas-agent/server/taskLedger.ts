@@ -38,7 +38,6 @@ export type TaskState = {
   preparing?: boolean;
   /** 上一轮落账的下一步计划；跨轮存活，不依赖 thinking。 */
   nextAction?: {
-    actionType: string;
     /** advance = 推进制作；answer = 回答用户。 */
     intent: 'advance' | 'answer';
     params: Record<string, unknown>;
@@ -282,16 +281,27 @@ export function setTaskPreparing(conversationId: string, preparing: boolean): Ta
   return state;
 }
 
+export function nextActionForStep(step: TaskStep): { actionType: string; params: Record<string, unknown> } {
+  const actions: Record<TaskStep, { actionType: string; params: Record<string, unknown> }> = {
+    draft: { actionType: 'write_task_artifact', params: { kind: 'draft' } },
+    anchors: { actionType: 'write_task_artifact', params: { kind: 'anchors' } },
+    storyboard: { actionType: 'write_task_artifact', params: { kind: 'storyboard' } },
+    review: { actionType: 'none', params: { todo: 'review' } },
+    anchor_runs: { actionType: 'execute_node_skill', params: { todo: 'anchor_runs' } },
+    storyboard_runs: { actionType: 'create_node', params: { todo: 'storyboard_runs', nodeType: 'video' } },
+    compose: { actionType: 'none', params: { todo: 'compose' } },
+  };
+  return actions[step];
+}
+
 export function setTaskNextAction(
   conversationId: string,
-  actionType: string,
   params: Record<string, unknown>,
   nodeIds: string[],
   intent: 'advance' | 'answer' = 'advance',
 ): TaskState {
   const state = ensureTask(conversationId, {});
   state.nextAction = {
-    actionType: String(actionType || '').trim().slice(0, 80),
     intent: intent === 'answer' ? 'answer' : 'advance',
     params: params && typeof params === 'object' ? params : {},
     nodeIds: nodeIds.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 40),
@@ -396,8 +406,9 @@ export function taskStatePrompt(state: TaskState | null): string {
   const position = state.preparing
     ? '准备阶段（尚未进入定稿；先确认参数，不要预设下一步）'
     : (TASK_STEPS.find((item) => item.step === state.current)?.label || state.current);
+  const action = nextActionForStep(state.current);
   const nextAction = state.nextAction
-    ? `\n- 下一步计划（上一轮落账）：intent=${state.nextAction.intent} ${state.nextAction.actionType} ${JSON.stringify(state.nextAction.params)} 依赖:${state.nextAction.nodeIds.join('、') || '无'}`
-    : '\n- 下一步计划（上一轮落账）：（未写）';
+    ? `\n- 下一步动作（由 current 推）：${action.actionType}\n- 下一步计划（上一轮落账）：intent=${state.nextAction.intent} ${JSON.stringify(state.nextAction.params)} 依赖:${state.nextAction.nodeIds.join('、') || '无'}`
+    : `\n- 下一步动作（由 current 推）：${action.actionType}\n- 下一步计划（上一轮落账）：（未写）`;
   return `\n\n[task_state]\n- 任务：${state.title}（${state.id}）\n- 当前位置：${position}\n- todo：${todo}${cursor}${nextAction}\n- 产物：${artifacts || '（尚未写入）'}${reviewStatus}\n- 文件是唯一权威源：写产物用 write_task_artifact，完成一步用 complete_task_step，主动读回用 read_task_artifact（kind + offset/length，单独一批调用）；核对所需的创作稿/分镜会自动附上，不要凭记忆推进。${reviewFiles}`;
 }

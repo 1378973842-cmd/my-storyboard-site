@@ -19,7 +19,7 @@ import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRec
 import { operatingPrompt, assertCanvasVideoShotTimelines } from '../core/operatingModel.js';
 import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
 import { canvasAgentStagePrefix } from '../core/stageLedger.js';
-import { completeTaskStep, ensureTask, readTaskArtifact, readTaskArtifactSlice, readTaskState, setTaskCursor, setTaskNextAction, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
+import { completeTaskStep, ensureTask, nextActionForStep, readTaskArtifact, readTaskArtifactSlice, readTaskState, setTaskCursor, setTaskNextAction, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
 import { checkStoryboardAgainstDraft, parseStoryboardFragments } from '../core/planCheck.js';
 import { assembleKnowledgeForTurn, selectKnowledgeForUse } from '../core/knowledgeContext.js';
 import { declaredNodeIds, missingDeclaredNodes, missingNodeIds, type CanvasNodeLike } from '../core/declaredNodes.js';
@@ -644,7 +644,7 @@ export function registerCanvasAgentRoutes(
               if (action.type === 'execute_node_skill' && action.nodeId) return [action.nodeId];
               return [];
             });
-            setTaskNextAction(cid, 'proposal_actions', { actions: summary }, nodeIds);
+            setTaskNextAction(cid, { actions: summary }, nodeIds);
           }
         }
       }
@@ -1323,18 +1323,6 @@ export function registerCanvasAgentRoutes(
       const MAX_WRITE_ROUNDS = 4;
       const safeCompleteSteps = new Set<TaskStep>(['draft', 'anchors', 'storyboard']);
       const taskStepLabel = (step: TaskStep) => TASK_STEPS.find((item) => item.step === step)?.label || step;
-      const nextActionForStep = (step: TaskStep) => {
-        const actions: Record<TaskStep, { actionType: string; params: Record<string, unknown> }> = {
-          draft: { actionType: 'write_task_artifact', params: { kind: 'draft' } },
-          anchors: { actionType: 'write_task_artifact', params: { kind: 'anchors' } },
-          storyboard: { actionType: 'write_task_artifact', params: { kind: 'storyboard' } },
-          review: { actionType: 'none', params: { todo: 'review' } },
-          anchor_runs: { actionType: 'execute_node_skill', params: { todo: 'anchor_runs' } },
-          storyboard_runs: { actionType: 'create_node', params: { todo: 'storyboard_runs', nodeType: 'video' } },
-          compose: { actionType: 'none', params: { todo: 'compose' } },
-        };
-        return actions[step];
-      };
       const nextActionNodeIds = [
         gateFacts.character_anchor,
         gateFacts.opponent_anchor,
@@ -1404,6 +1392,8 @@ export function registerCanvasAgentRoutes(
               if (!['draft', 'index', 'anchors', 'storyboard'].includes(kind)) throw new Error('未知的产物类型');
               const written = writeTaskArtifact(conversation.id, kind, String(args.content || ''), Boolean(args.append));
               lastSafeAction = kind;
+              const nextForWrite = nextActionForStep(written.state.current);
+              setTaskNextAction(conversation.id, nextForWrite.params, nextActionNodeIds);
               if (kind === 'storyboard' && args.cursor_last_line) {
                 setTaskCursor(conversation.id, { lastLine: String(args.cursor_last_line) });
               }
@@ -1417,7 +1407,7 @@ export function registerCanvasAgentRoutes(
               const state = completeTaskStep(conversation.id, step);
               lastSafeAction = step;
               const next = nextActionForStep(state.current);
-              setTaskNextAction(conversation.id, next.actionType, next.params, nextActionNodeIds);
+              setTaskNextAction(conversation.id, next.params, nextActionNodeIds);
               content = `已完成「${taskStepLabel(step)}」。当前位置：${taskStepLabel(state.current)}。下一步：继续下一个未完成 todo；需要用户确认或审批时再停。`;
               const log = { id: `task-ledger-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: 'task_ledger', label: `文件账本：${content}`, state: 'done' as const };
               persistedToolLogs.push(log);
@@ -1724,7 +1714,7 @@ export function registerCanvasAgentRoutes(
                 }
               }
               const intent = String(args.intent || '') === 'answer' ? 'answer' : 'advance';
-              setTaskNextAction(conversation.id, actionType, params, nodeIds, intent);
+              setTaskNextAction(conversation.id, params, nodeIds, intent);
               label = `下一步计划：${actionType}`;
             } else if (call.function.name === 'write_task_artifact') {
               const kind = String(args.kind || '') as TaskArtifactKind;
@@ -2649,8 +2639,7 @@ export function registerCanvasAgentRoutes(
       if (forceAsk && !stagePassed && !anchorsRegistered && !persistedAsks.length && !persistedProposal && conversation) {
         // 即使因为「本会话已有卡」不再补卡，也要把下一步计划落账：
         // 下一轮应继续收集剩余参数，而不是只回任务状态。
-        setTaskNextAction(conversation.id, 'ask_user', {
-          stage: 'preparation',
+        setTaskNextAction(conversation.id, {
           missing: '对手、场景、画幅、时长',
         }, []);
       }
