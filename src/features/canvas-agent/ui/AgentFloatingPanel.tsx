@@ -1212,19 +1212,6 @@ export function AgentFloatingPanel({
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
-  useEffect(() => {
-    const last = [...messages].reverse().find((message) => message.role === 'assistant');
-    if (streaming || !last) return;
-    if ((last.asks || []).length) return;
-    if (proposalsRef.current.some((proposal) => proposal.status === 'pending')) return;
-    if (autoContinueRef.current >= 2) return;
-    if (!/^(任务已建立|已完成|已写入|上一批已完成)/.test(last.content.trim())) return;
-    autoContinueRef.current += 1;
-    const timer = window.setTimeout(() => {
-      void sendTextRef.current?.('继续下一步', messagesRef.current, jobIdRef.current || undefined, false, true);
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [messages, streaming]);
 
   const sendText = useCallback(
     async (raw: string, history: ChatTurn[], continueJobId?: string, regenerate = false, silent = false) => {
