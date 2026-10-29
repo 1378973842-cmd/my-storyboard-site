@@ -1752,6 +1752,7 @@ export function registerCanvasAgentRoutes(
               return;
             } else {
               const step = String(args.step || '') as TaskStep;
+              if (step === 'anchors') assertAnchorNodesOnCanvas();
               if (['review', 'storyboard_runs', 'compose'].includes(step)
                 && String(gateFacts.prompt_structure_error || '').trim()) {
                 throw new Error(`prompt 结构核对未通过：${String(gateFacts.prompt_structure_error)}。先补齐分镜行/时长，再继续。`);
