@@ -362,6 +362,7 @@ export const coreCanvasTools: AIToolDefinition[] = [
       parameters: objectSchema(
         {
           action_type: { type: 'string', enum: ['create_node', 'connect_nodes', 'update_node_params', 'execute_node_skill', 'ask_user', 'review', 'none'] },
+          intent: { type: 'string', enum: ['advance', 'answer'] },
           params: {
             type: 'object',
             properties: {

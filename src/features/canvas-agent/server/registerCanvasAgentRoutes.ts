@@ -1694,7 +1694,8 @@ export function registerCanvasAgentRoutes(
                 ? args.params as Record<string, unknown>
                 : {};
               const nodeIds = Array.isArray(args.node_ids) ? args.node_ids.map(String) : [];
-              setTaskNextAction(conversation.id, actionType, params, nodeIds);
+              const intent = String(args.intent || '') === 'answer' ? 'answer' : 'advance';
+              setTaskNextAction(conversation.id, actionType, params, nodeIds, intent);
               label = `下一步计划：${actionType}`;
             } else if (call.function.name === 'write_task_artifact') {
               const kind = String(args.kind || '') as TaskArtifactKind;

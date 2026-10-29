@@ -367,8 +367,10 @@ setTaskPreparing('prep-task-test', false);
 assert.match(taskStatePrompt(readTaskState('prep-task-test')), /当前位置：定稿/);
 ensureTask('next-action-test', { title: '下一步计划' });
 setTaskNextAction('next-action-test', 'create_node', { title: '成片', duration: 15 }, ['gen_a', 'gen_b']);
-assert.match(taskStatePrompt(readTaskState('next-action-test')), /下一步计划（上一轮落账）：create_node/);
+assert.match(taskStatePrompt(readTaskState('next-action-test')), /下一步计划（上一轮落账）：intent=advance create_node/);
 assert.match(taskStatePrompt(readTaskState('next-action-test')), /gen_a、gen_b/);
+setTaskNextAction('next-action-test', 'ask_user', { question: '贴梗概' }, [], 'answer');
+assert.match(taskStatePrompt(readTaskState('next-action-test')), /intent=answer ask_user/);
 assert.throws(() => readTaskArtifactSlice('empty-task-test', 'draft'), /还没有 draft\.md/);
 assert.throws(
   () => completeTaskStep('empty-task-test', 'draft'),
