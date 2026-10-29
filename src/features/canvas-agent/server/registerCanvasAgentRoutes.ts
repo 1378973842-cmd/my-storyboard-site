@@ -22,6 +22,7 @@ import { canvasAgentStagePrefix } from '../core/stageLedger.js';
 import { completeTaskStep, ensureTask, readTaskArtifact, readTaskArtifactSlice, readTaskState, setTaskCursor, setTaskNextAction, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
 import { checkStoryboardAgainstDraft, parseStoryboardFragments } from '../core/planCheck.js';
 import { assembleKnowledgeForTurn, selectKnowledgeForUse } from '../core/knowledgeContext.js';
+import { declaredNodeIds, missingDeclaredNodes, missingNodeIds, type CanvasNodeLike } from '../core/declaredNodes.js';
 import { turnStatePrefix } from '../core/turnState.js';
 import { VISION_IMAGE_CAP } from '../core/contextSerializer.js';
 import type {
@@ -1339,27 +1340,23 @@ export function registerCanvasAgentRoutes(
         gateFacts.opponent_anchor,
         gateFacts.scene_anchor,
       ].map((value) => String(value || '').split(':').pop() || '').filter(Boolean);
+      const readCanvasNodes = (): CanvasNodeLike[] => {
+        if (!conversation) throw new Error('没有会话，无法校验画布节点。');
+        try {
+          const canvas = getCanvas(conversation.canvas_id, true);
+          return Array.isArray(canvas.nodes) ? canvas.nodes as CanvasNodeLike[] : [];
+        } catch {
+          throw new Error('读不到画布，不能确认声明的节点已经创建。');
+        }
+      };
       const assertAnchorNodesOnCanvas = () => {
         if (!conversation) return;
         const anchorsText = readTaskArtifact(conversation.id, 'anchors');
-        const anchorIds = [...anchorsText.matchAll(/节点[：:]\s*([A-Za-z0-9_-]+)/g)]
-          .map((match) => String(match[1] || '').trim())
-          .filter(Boolean);
+        const anchorIds = declaredNodeIds(anchorsText);
         if (!anchorIds.length) {
           throw new Error('anchors.md 没有声明锚点节点 id；先把每个锚点的节点 id 写进文件，再完成锚点。');
         }
-        let nodes: Array<{ id?: unknown; type?: unknown }> = [];
-        try {
-          const canvas = getCanvas(conversation.canvas_id, true);
-          nodes = Array.isArray(canvas.nodes) ? canvas.nodes as Array<{ id?: unknown; type?: unknown }> : [];
-        } catch {
-          throw new Error('读不到画布，不能确认锚点节点已经创建；先检查画布再完成锚点。');
-        }
-        const existing = new Set(nodes
-          .filter((node) => node.type === 'generator' || node.type === 'image')
-          .map((node) => String(node.id || ''))
-          .filter(Boolean));
-        const missing = [...new Set(anchorIds)].filter((id) => !existing.has(id));
+        const missing = missingDeclaredNodes(anchorsText, readCanvasNodes());
         if (missing.length) {
           throw new Error(`anchors.md 声明的节点在画布上不存在：${missing.join('、')}。先创建锚点节点，再完成「锚点登记与创建」。`);
         }
@@ -1720,6 +1717,12 @@ export function registerCanvasAgentRoutes(
                 ? args.params as Record<string, unknown>
                 : {};
               const nodeIds = Array.isArray(args.node_ids) ? args.node_ids.map(String) : [];
+              if (nodeIds.length) {
+                const missing = missingNodeIds(nodeIds, readCanvasNodes());
+                if (missing.length) {
+                  throw new Error(`next_action 的 nodeIds 在画布上不存在：${missing.join('、')}。只写已创建节点的 id。`);
+                }
+              }
               const intent = String(args.intent || '') === 'answer' ? 'answer' : 'advance';
               setTaskNextAction(conversation.id, actionType, params, nodeIds, intent);
               label = `下一步计划：${actionType}`;
@@ -2605,12 +2608,22 @@ export function registerCanvasAgentRoutes(
       // storyboard 之后，就不能再问「角色参考怎么定」。
       const taskNow = conversation ? readTaskState(conversation.id) : null;
       const stagePassed = Boolean(taskNow && !['draft', 'anchors'].includes(taskNow.current));
+      const anchorsTextNow = taskNow?.artifacts.anchors?.chars
+        ? readTaskArtifact(taskNow.id, 'anchors')
+        : '';
+      let anchorsCreatedOnCanvas = false;
+      if (declaredNodeIds(anchorsTextNow).length) {
+        try {
+          anchorsCreatedOnCanvas = missingDeclaredNodes(anchorsTextNow, readCanvasNodes()).length === 0;
+        } catch {
+          anchorsCreatedOnCanvas = false;
+        }
+      }
       const anchorsRegistered = Boolean(
         gateFacts.character_anchor
         || gateFacts.opponent_anchor
         || gateFacts.scene_anchor
-        || taskNow?.artifacts.anchors?.chars
-        || taskForTurn?.artifacts.anchors?.chars,
+        || anchorsCreatedOnCanvas,
       );
       const askHistoryExists = Boolean(
         db && conversation && hasConversationAskHistory(db, req.authUser?.id || '', conversation.id),

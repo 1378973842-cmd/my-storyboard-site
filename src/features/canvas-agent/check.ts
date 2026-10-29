@@ -84,6 +84,7 @@ import { COMBAT_ANCHOR_NOTICE, combatStageDecision } from './core/combatStage';
 import { isRunningHubChatModel, textFromChatResponse } from '../../services/canvasTextLlmBridge';
 import { splitPromptSections } from './core/promptIndex';
 import { appendRunProposalForNewGenerativeNodes, collapseMultiVideoProposal } from './core/runProposal';
+import { declaredNodeIds, missingDeclaredNodes, missingNodeIds } from './core/declaredNodes';
 import { pruneCanvasSnapshots } from '../../services/infiniteCanvasStore';
 import { memoryHitsPrompt, memoryPromptPrefix, searchMemoryHits } from './core/memory';
 import { compactHistory } from './core/history';
@@ -2673,8 +2674,11 @@ assert.equal(
   '使用资产库中已有的角色（推荐）',
 );
 assert.match(approvalRouteSource, /海螺 H3 支持 5-15s/);
-const multiVideo = collapseMultiVideoProposal([
-  { type: 'create_node', tempId: 'v1', nodeType: 'video' },
+assert.deepEqual(declaredNodeIds('- 节点：char_a\n- 节点：char_b'), ['char_a', 'char_b']);
+assert.deepEqual(missingDeclaredNodes('- 节点：char_a', [{ id: 'char_a', type: 'generator' }]), []);
+assert.deepEqual(missingDeclaredNodes('- 节点：char_a', [{ id: 'other', type: 'generator' }]), ['char_a']);
+assert.deepEqual(missingNodeIds(['char_a', 'ghost'], [{ id: 'char_a', type: 'image' }]), ['ghost']);
+const multiVideo = collapseMultiVideoProposal([  { type: 'create_node', tempId: 'v1', nodeType: 'video' },
   { type: 'create_node', tempId: 'v2', nodeType: 'video' },
   { type: 'create_node', tempId: 'v3', nodeType: 'video' },
   { type: 'execute_node_skill', nodeId: 'v1' },
