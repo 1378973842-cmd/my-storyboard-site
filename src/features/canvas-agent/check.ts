@@ -2541,7 +2541,7 @@ assert.match(approvalPanelSource, /appliedSkillRef\.current = '';\n\s+setPlayboo
 assert.match(approvalRouteSource, /Tokens belong only inside generator, image and video prompts/);
 assert.match(approvalRouteSource, /available references, not the default subject/);
 assert.match(approvalRouteSource, /never by \{\{node-id\}\} tokens/);
-assert.match(readFileSync(new URL('../../../prompts/playbook_combat_fx.skeleton.md', import.meta.url), 'utf8'), /Do not plan shots or create nodes before those are confirmed/);
+assert.match(readFileSync(new URL('../../../prompts/playbook_combat_fx.skeleton.md', import.meta.url), 'utf8'), /do not start with a questionnaire/);
 assert.match(approvalRouteSource, /combatStageDecision\(/);
 assert.match(approvalRouteSource, /stageGate\.notice/);
 const combatPlaybookSource = readFileSync(new URL('../../../prompts/playbook_combat_fx.md', import.meta.url), 'utf8');
@@ -2550,7 +2550,7 @@ assert.match(combatPlaybookSource, /不要写 `\{\{节点\}\}` 引用/);
 // 共享运镜词典不能压过技能自身的分镜/节奏
 assert.match(combatPlaybookSource, /两者冲突时\*\*以本技能为准\*\*/);
 assert.match(combatPlaybookSource, /打斗至少两个角色/);
-assert.match(combatPlaybookSource, /六项没确认之前，只做分析和提问/);
+assert.match(combatPlaybookSource, /只阻塞缺失项/);
 assert.match(approvalRouteSource, /\[stage_rule\] 第一张提问卡先确认主角/);
 // 准备阶段强制 ask_user：问题只能走卡片
 assert.match(approvalRouteSource, /forceAsk/);
@@ -2816,7 +2816,7 @@ assert.doesNotMatch(COMBAT_ANCHOR_NOTICE, /confirm_character_anchor/);
 assert.match(combatPlaybookSource, /第一个问题先确认主角/);
 assert.match(combatPlaybookSource, /confirm_character_anchor/);
 assert.match(approvalRouteSource, /confirm_character_anchor/);
-assert.match(combatLoaded, /follow the skill's preparation order/);
+assert.match(combatLoaded, /do not start with a questionnaire/);
 const cameraBridgeSource = readFileSync(new URL('../../services/canvasMxShellPromptBridge.ts', import.meta.url), 'utf8');
 assert.match(cameraBridgeSource, /运镜词典（写法参考）/);
 assert.match(cameraBridgeSource, /技能正文的分镜结构、节奏与特效层优先/);
