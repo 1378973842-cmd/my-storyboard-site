@@ -1326,7 +1326,9 @@ export function registerCanvasAgentRoutes(
       const readCanvasNodes = (): CanvasNodeLike[] => {
         if (!conversation) throw new Error('没有会话，无法校验画布节点。');
         try {
-          const canvas = getCanvas(conversation.canvas_id, true);
+          const canvas = getCanvas(conversation.canvas_id, true, {
+            userId: req.authUser?.id || '',
+          });
           return Array.isArray(canvas.nodes) ? canvas.nodes as CanvasNodeLike[] : [];
         } catch {
           throw new Error('读不到画布，不能确认声明的节点已经创建。');
@@ -1698,14 +1700,16 @@ export function registerCanvasAgentRoutes(
                 ? args.params as Record<string, unknown>
                 : {};
               const nodeIds = Array.isArray(args.node_ids) ? args.node_ids.map(String) : [];
+              let realNodeIds = nodeIds;
               if (nodeIds.length) {
                 const missing = missingNodeIds(nodeIds, readCanvasNodes());
+                realNodeIds = nodeIds.filter((id) => !missing.includes(id));
                 if (missing.length) {
-                  throw new Error(`next_action 的 nodeIds 在画布上不存在：${missing.join('、')}。只写已创建节点的 id。`);
+                  label = `下一步计划：已剔除画布不存在的节点 ${missing.join('、')}`;
                 }
               }
               const intent = String(args.intent || '') === 'answer' ? 'answer' : 'advance';
-              setTaskNextAction(conversation.id, params, nodeIds, intent);
+              setTaskNextAction(conversation.id, params, realNodeIds, intent);
               label = `下一步计划：${actionType}`;
             } else if (call.function.name === 'write_task_artifact') {
               const kind = String(args.kind || '') as TaskArtifactKind;

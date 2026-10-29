@@ -301,7 +301,7 @@ export function setTaskPreparing(conversationId: string, preparing: boolean): Ta
 export function nextActionForStep(step: TaskStep): { actionType: string; params: Record<string, unknown> } {
   const actions: Record<TaskStep, { actionType: string; params: Record<string, unknown> }> = {
     draft: { actionType: 'write_task_artifact', params: { kind: 'draft' } },
-    anchors: { actionType: 'write_task_artifact', params: { kind: 'anchors' } },
+    anchors: { actionType: 'create_node', params: { todo: 'anchors', nodeType: 'generator' } },
     storyboard: { actionType: 'write_task_artifact', params: { kind: 'storyboard' } },
     review: { actionType: 'none', params: { todo: 'review' } },
     anchor_runs: { actionType: 'execute_node_skill', params: { todo: 'anchor_runs' } },
