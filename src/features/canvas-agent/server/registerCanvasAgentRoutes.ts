@@ -1263,7 +1263,7 @@ export function registerCanvasAgentRoutes(
       && !hasAnchor
       ? '\n\n[stage_rule] 第一张提问卡先确认主角（用画布里的参考，还是新角色），同一轮可以继续问画风、特效、动作、叙事；不要默认画布里的角色。'
       : combatSession && gateStage === 'proposal'
-        ? '\n\n[stage_rule] 方向已答完：先给一套具体方案（风格/特效/动作节奏/叙事结构 + 1-2 个建议），让用户确认这个方向；确认后再收六项参数，不要跳步。方案阶段可以给 4 段叙事表（段落/占比/内容/冲击帧），但不要写镜头、时间码和逐镜拆解；这些等主角/对手/场景三张锚点图确认后再写。'
+        ? '\n\n[stage_rule] 方向已答完：用户消息、draft.md、index.md 里已有的风格/角色/对手/比例/场景/时长/强度都算确认，不要再发六项问卷。直接进入锚点创建：先 create_canvas_nodes 建真实锚点节点，再写 anchors.md 并 complete。'
         : '';
     // 锚点版本锁：生成节点必须引用当前锚点，不能再用旧版本。
     const anchorEntries = [
@@ -1343,8 +1343,60 @@ export function registerCanvasAgentRoutes(
           throw new Error('读不到画布，不能确认声明的节点已经创建。');
         }
       };
+      const ensureAnchorNodesFromArtifact = () => {
+        if (!conversation) return;
+        const text = readTaskArtifact(conversation.id, 'anchors');
+        if (declaredNodeIds(text).length) return;
+        const sections = text.split(/^##\s+/m).slice(1);
+        if (!sections.length) return;
+        let canvas: ReturnType<typeof getCanvas>;
+        try {
+          canvas = getCanvas(conversation.canvas_id, true, { userId: req.authUser?.id || '' });
+        } catch {
+          return;
+        }
+        const existing = Array.isArray(canvas.nodes) ? canvas.nodes as Array<Record<string, unknown>> : [];
+        const now = Date.now();
+        const created: Array<{ id: string; title: string; prompt: string }> = sections.slice(0, 6).map((section, index) => {
+          const titleLine = section.split('\n')[0]?.trim() || `锚点 ${index + 1}`;
+          const prompt = section.split('\n').slice(1).join(' ').replace(/节点[：:]\s*\S+/g, '').trim().slice(0, 1200);
+          return {
+            id: `anchor_auto_${now}_${index}`,
+            title: titleLine.replace(/^[#\s]+/, '').slice(0, 40),
+            prompt: prompt || titleLine,
+          };
+        });
+        const nodes = [
+          ...existing,
+          ...created.map((item, index) => ({
+            id: item.id,
+            type: 'generator',
+            x: 200 + index * 340,
+            y: 200,
+            w: 260,
+            apiProvider: 'runninghub',
+            model: 'nano-banana-pro-稳定',
+            prompt: `${item.title}：${item.prompt}`,
+            previewRoundUrls: [],
+            history: [],
+            previewLayout: 'time',
+            ratio: '1:1',
+            resolution: '1k',
+            inputs: [],
+            count: 1,
+            quality: 'auto',
+            _displayW: 496,
+            _displayH: 496,
+            _baseFrameH: 96,
+          })),
+        ];
+        saveCanvas(conversation.canvas_id, { nodes, allow_empty_nodes: true });
+        const lines = created.map((item) => `- ${item.title} 节点：${item.id}`).join('\n');
+        writeTaskArtifact(conversation.id, 'anchors', `${text.trimEnd()}\n\n${lines}\n`, false);
+      };
       const assertAnchorNodesOnCanvas = () => {
         if (!conversation) return;
+        ensureAnchorNodesFromArtifact();
         const anchorsText = readTaskArtifact(conversation.id, 'anchors');
         const anchorIds = declaredNodeIds(anchorsText);
         if (!anchorIds.length) {
@@ -1718,7 +1770,13 @@ export function registerCanvasAgentRoutes(
                 }
               }
               const intent = String(args.intent || '') === 'answer' ? 'answer' : 'advance';
-              setTaskNextAction(conversation.id, params, realNodeIds, intent);
+              if (intent === 'advance') {
+                // 推进类下一步由 current 统一推导；模型只补 answer 类计划，避免旧问卷覆盖新阶段。
+                label = '下一步计划：推进动作由 current 统一生成';
+              } else {
+                setTaskNextAction(conversation.id, params, realNodeIds, 'answer');
+                label = '下一步计划：answer';
+              }
               label = `下一步计划：${actionType}`;
             } else if (call.function.name === 'write_task_artifact') {
               const kind = String(args.kind || '') as TaskArtifactKind;
@@ -2648,7 +2706,7 @@ export function registerCanvasAgentRoutes(
         persistedAsks = [anchorCard];
         sendEvent(res, { type: 'ask', asks: [anchorCard] });
       }
-      if (forceAsk && !stagePassed && !anchorsRegistered && !persistedAsks.length && !persistedProposal && conversation) {
+      if (forceAsk && taskNow?.preparing && !stagePassed && !anchorsRegistered && !persistedAsks.length && !persistedProposal && conversation) {
         // 即使因为「本会话已有卡」不再补卡，也要把下一步计划落账：
         // 下一轮应继续收集剩余参数，而不是只回任务状态。
         setTaskNextAction(conversation.id, {

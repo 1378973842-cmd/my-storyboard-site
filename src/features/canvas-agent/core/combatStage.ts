@@ -22,6 +22,7 @@ export type CombatStageReason =
   | 'production'
   | 'storyboard'
   | 'answered'
+  | 'params-ready'
   | 'escape'
   | 'blocked-direction'
   | 'blocked-params'
@@ -70,16 +71,9 @@ export const COMBAT_STAGE_NOTICES: Record<CombatStage, string> = {
     '方向确认前，不建节点、不写分镜。',
   ].join('\n'),
   params: [
-    '方向定了，收最后六项参数——这些必须你明确回答，不能由我推断：',
+    '用户消息、draft.md、index.md 里已有的参数都算确认，不再打印六项问卷。',
     '',
-    '1. 角色资产：用画布里的参考图，还是先出三视图给你确认',
-    '2. 对手（打斗至少两个角色）',
-    '3. 画面比例：1:1 / 16:9 / 9:16',
-    '4. 分辨率：480p / 720p / 1080p',
-    '5. 场景：你指定，还是我来设计',
-    '6. 时长与特效强度：10s / 15s / 20s，轻微 / 中等 / 极致',
-    '',
-    '六项齐了我就进分镜。不想走准备阶段，直接说「跳过准备」。',
+    '只补问确实缺失的项；没有缺失就直接 create_canvas_nodes 建锚点节点，然后写 anchors.md 并完成锚点。',
   ].join('\n'),
   storyboard: '分镜阶段：先排 SB-01～04 和节拍，再写提示词。',
   production: '制作阶段：提示词与生成。运行仍然要审批卡。',
@@ -177,6 +171,10 @@ export function combatStageDecision(input: {
     }
     // 每答完一轮提问，往前推一段：方向 → 方案 → 参数 → 分镜
     return { blocked: false, advanceTo: NEXT_STAGE[stage], reason: 'answered', notice };
+  }
+  if (stage === 'params') {
+    // 参数阶段不再用服务端文案阻塞：已有参数由模型/账本判断缺失，直接允许建锚点。
+    return { blocked: false, advanceTo: null, reason: 'params-ready', notice };
   }
   return {
     blocked: true,

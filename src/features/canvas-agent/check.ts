@@ -1796,7 +1796,7 @@ assert.equal(
 );
 assert.equal(
   combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '对手是宙斯', answering: false, hasAnchor: false }).blocked,
-  true,
+  false,
 );
 assert.equal(
   combatStageDecision({ playbookId: 'canvas-video-piece', stage: '', message: '做一段剧情', answering: false, hasAnchor: false }).blocked,
@@ -2742,7 +2742,7 @@ assert.match(approvalRouteSource, /anchor_history/);
 assert.match(approvalRouteSource, /锚点版本：/);
 assert.match(approvalRouteSource, /hasCanvasMedia/);
 assert.match(approvalRouteSource, /先改提示词/);
-assert.match(approvalRouteSource, /4 段叙事表/);
+assert.match(approvalRouteSource, /直接进入锚点创建/);
 assert.match(combatPlaybookSource, /每张卡都要有推荐/);
 assert.match(approvalPanelSource, /visionImages 会带上它们|visionImages 会/);
 assert.match(approvalRouteSource, /blockedAssetTitles/);
