@@ -1339,6 +1339,31 @@ export function registerCanvasAgentRoutes(
         gateFacts.opponent_anchor,
         gateFacts.scene_anchor,
       ].map((value) => String(value || '').split(':').pop() || '').filter(Boolean);
+      const assertAnchorNodesOnCanvas = () => {
+        if (!conversation) return;
+        const anchorsText = readTaskArtifact(conversation.id, 'anchors');
+        const anchorIds = [...anchorsText.matchAll(/节点[：:]\s*([A-Za-z0-9_-]+)/g)]
+          .map((match) => String(match[1] || '').trim())
+          .filter(Boolean);
+        if (!anchorIds.length) {
+          throw new Error('anchors.md 没有声明锚点节点 id；先把每个锚点的节点 id 写进文件，再完成锚点。');
+        }
+        let nodes: Array<{ id?: unknown; type?: unknown }> = [];
+        try {
+          const canvas = getCanvas(conversation.canvas_id, true);
+          nodes = Array.isArray(canvas.nodes) ? canvas.nodes as Array<{ id?: unknown; type?: unknown }> : [];
+        } catch {
+          throw new Error('读不到画布，不能确认锚点节点已经创建；先检查画布再完成锚点。');
+        }
+        const existing = new Set(nodes
+          .filter((node) => node.type === 'generator' || node.type === 'image')
+          .map((node) => String(node.id || ''))
+          .filter(Boolean));
+        const missing = [...new Set(anchorIds)].filter((id) => !existing.has(id));
+        if (missing.length) {
+          throw new Error(`anchors.md 声明的节点在画布上不存在：${missing.join('、')}。先创建锚点节点，再完成「锚点登记与创建」。`);
+        }
+      };
       let lastNonEmptyContent = extractTextLlmMessageContent(model, first).trim();
       let continuationRounds = 0;
       let lastSafeAction = '';
@@ -1391,6 +1416,7 @@ export function registerCanvasAgentRoutes(
               sendEvent(res, { type: 'tool', log });
             } else {
               const step = String(args.step || '') as TaskStep;
+              if (step === 'anchors') assertAnchorNodesOnCanvas();
               const state = completeTaskStep(conversation.id, step);
               lastSafeAction = step;
               const next = nextActionForStep(state.current);

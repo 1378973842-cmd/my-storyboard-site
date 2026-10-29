@@ -3844,6 +3844,7 @@ assert.match(promptSource, /setTaskNextAction\(conversation\.id, next\.actionTyp
 assert.match(promptSource, /setTaskNextAction\(conversation\.id, 'ask_user'/);
 assert.match(promptSource, /方案正文我还没给全/);
 assert.match(promptSource, /要求用户确认方案时/);
+assert.match(promptSource, /anchors\.md 声明的节点在画布上不存在/);
 assert.match(promptSource, /__agentTextStreamed/);
 assert.match(promptSource, /stagePassed/);
 assert.match(promptSource, /anchorsRegistered/);
