@@ -19,7 +19,7 @@ import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRec
 import { operatingPrompt, assertCanvasVideoShotTimelines } from '../core/operatingModel.js';
 import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
 import { canvasAgentStagePrefix } from '../core/stageLedger.js';
-import { completeTaskStep, ensureTask, readTaskArtifact, readTaskArtifactSlice, readTaskState, setTaskCursor, setTaskNextAction, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
+import { completeTaskStep, ensureTask, nextActionForStep, readTaskArtifact, readTaskArtifactSlice, readTaskState, setTaskCursor, setTaskNextAction, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
 import { checkStoryboardAgainstDraft, parseStoryboardFragments } from '../core/planCheck.js';
 import { assembleKnowledgeForTurn, selectKnowledgeForUse } from '../core/knowledgeContext.js';
 import { declaredNodeIds, missingDeclaredNodes, missingNodeIds, type CanvasNodeLike } from '../core/declaredNodes.js';
@@ -1232,6 +1232,14 @@ export function registerCanvasAgentRoutes(
     if (conversation && taskBefore?.preparing && (askAnswer || askBatch.length)) {
       setTaskPreparing(conversation.id, false);
       taskForTurn!.preparing = false;
+    }
+    // 答完准备卡后，服务端把「当前该做的动作」落账，避免模型只回一句任务状态。
+    if (conversation && taskForTurn && (askAnswer || askBatch.length)) {
+      const plan = nextActionForStep(taskForTurn.current);
+      if (!taskForTurn.nextAction || taskForTurn.nextAction.step !== taskForTurn.current) {
+        const saved = setTaskNextAction(conversation.id, plan.params, []);
+        taskForTurn.nextAction = saved.nextAction;
+      }
     }
     // 清单确认轮：目标时长超出所选模型容量且没有制作清单时，
     // 自动拼 collect-params + estimate 两段知识，模型才能给出可确认的分段方案。
