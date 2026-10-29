@@ -2810,7 +2810,8 @@ const cameraBridgeSource = readFileSync(new URL('../../services/canvasMxShellPro
 assert.match(cameraBridgeSource, /运镜词典（写法参考）/);
 assert.match(cameraBridgeSource, /技能正文的分镜结构、节奏与特效层优先/);
 assert.match(approvalRouteSource, /proposal\.jobId = jobId/);
-assert.match(approvalRouteSource, /sendEvent\(res, \{ type: 'thinking', text: safeFirstText \}\)/);
+assert.match(approvalRouteSource, /const bodyLead = safeFirstText/);
+assert.match(approvalRouteSource, /explanation = bodyLead/);
 assert.match(approvalPanelSource, /TurnTimeline steps=\{steps\}/);
 assert.match(approvalRouteSource, /if \(!regenerate\) \{/);
 assert.match(approvalPanelSource, /sendText\(previous\.content, messages\.slice\(0, index - 1\), undefined, true\)/);

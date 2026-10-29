@@ -2075,11 +2075,8 @@ export function registerCanvasAgentRoutes(
         : firstText;
       // 只出提问卡、没有画布动作时，前面那段是方案/分析，应该当正文，不要塞进思考过程。
       const askOnly = calls.length > 0 && actionCalls.length === 0;
-      // 调工具之前的那段是模型的推演，归到「思考过程」折叠里；正文只放后续说明。
-      if (calls.length && safeFirstText && !inlineAsks.length && !askOnly) {
-        persistedThinking = [persistedThinking, safeFirstText].filter(Boolean).join('\n\n').slice(0, 6000);
-        sendEvent(res, { type: 'thinking', text: safeFirstText });
-      }
+      // 调工具前写下的说明也是用户可见正文，不能折进 thinking 里消失。
+      const bodyLead = safeFirstText;
       let proposalText = inlineAsks.length ? '' : safeFirstText;
       let interpreted = actionCalls.length || inlineAsks.length ? null : interpretCanvasProposalText(proposalText);
       if (!actionCalls.length && interpreted?.unknownTypes.length) {
@@ -2339,7 +2336,10 @@ export function registerCanvasAgentRoutes(
             false,
             controller.signal,
           );
-          explanation = extractTextLlmMessageContent(model, followup).trim();
+          const followupText = extractTextLlmMessageContent(model, followup).trim();
+          explanation = bodyLead
+            ? (followupText.includes(bodyLead) ? followupText : [bodyLead, followupText].filter(Boolean).join('\n\n'))
+            : followupText;
         }
         persistedText = explanation || `已落到画布：${proposal.summary}。运行仍要在审批卡上批准。`;
         // 前面的推演已经在思考过程里，这里只推后续说明。
