@@ -182,6 +182,20 @@ export function ensureTask(
   return state;
 }
 
+function applyNextActionForCurrent(state: TaskState): void {
+  const action = nextActionForStep(state.current);
+  const nodeIds = [state.facts?.character_anchor, state.facts?.opponent_anchor, state.facts?.scene_anchor]
+    .map((value) => String(value || '').split(':').pop() || '')
+    .filter(Boolean);
+  state.nextAction = {
+    step: state.current,
+    intent: 'advance',
+    params: action.params,
+    nodeIds,
+    at: Date.now(),
+  };
+}
+
 export function writeTaskArtifact(
   conversationId: string,
   kind: TaskArtifactKind,
@@ -201,6 +215,7 @@ export function writeTaskArtifact(
     chars: clipped.length,
     updatedAt: Date.now(),
   };
+  applyNextActionForCurrent(state);
   state.updatedAt = Date.now();
   atomicWrite(statePath(conversationId), JSON.stringify(state, null, 2));
   atomicWrite(path.join(taskDir(conversationId), 'task.md'), renderTaskMarkdown(state));
@@ -346,6 +361,7 @@ export function completeTaskStep(
   target.at = target.at || Date.now();
   state.preparing = false;
   state.current = currentOf(state.todos);
+  applyNextActionForCurrent(state);
   state.updatedAt = Date.now();
   atomicWrite(statePath(conversationId), JSON.stringify(state, null, 2));
   atomicWrite(path.join(taskDir(conversationId), 'task.md'), renderTaskMarkdown(state));

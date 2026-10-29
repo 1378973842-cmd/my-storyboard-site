@@ -373,6 +373,10 @@ assert.match(taskStatePrompt(readTaskState('next-action-test')), /下一步计�
 assert.match(taskStatePrompt(readTaskState('next-action-test')), /gen_a、gen_b/);
 setTaskNextAction('next-action-test', { question: '贴梗概' }, [], 'answer');
 assert.match(taskStatePrompt(readTaskState('next-action-test')), /intent=answer/);
+writeTaskArtifact('next-action-test', 'draft', '草稿正文');
+assert.equal(readTaskState('next-action-test')?.nextAction?.step, 'draft');
+completeTaskStep('next-action-test', 'draft');
+assert.equal(readTaskState('next-action-test')?.nextAction?.step, 'anchors');
 assert.throws(() => readTaskArtifactSlice('empty-task-test', 'draft'), /还没有 draft\.md/);
 assert.throws(
   () => completeTaskStep('empty-task-test', 'draft'),
@@ -3845,7 +3849,6 @@ assert.match(promptSource, /MAX_READ_ROUNDS = 5/);
 assert.match(promptSource, /读回延后/);
 assert.match(promptSource, /lastSafeAction !== 'storyboard'/);
 assert.match(promptSource, /继续下一步：按 task_state 的 current 执行/);
-assert.match(promptSource, /setTaskNextAction\(conversation\.id, next\.params/);
 assert.match(promptSource, /setTaskNextAction\(conversation\.id, \{/);
 assert.match(promptSource, /方案正文我还没给全/);
 assert.match(promptSource, /要求用户确认方案时/);

@@ -19,7 +19,7 @@ import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRec
 import { operatingPrompt, assertCanvasVideoShotTimelines } from '../core/operatingModel.js';
 import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
 import { canvasAgentStagePrefix } from '../core/stageLedger.js';
-import { completeTaskStep, ensureTask, nextActionForStep, readTaskArtifact, readTaskArtifactSlice, readTaskState, setTaskCursor, setTaskNextAction, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
+import { completeTaskStep, ensureTask, readTaskArtifact, readTaskArtifactSlice, readTaskState, setTaskCursor, setTaskNextAction, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
 import { checkStoryboardAgainstDraft, parseStoryboardFragments } from '../core/planCheck.js';
 import { assembleKnowledgeForTurn, selectKnowledgeForUse } from '../core/knowledgeContext.js';
 import { declaredNodeIds, missingDeclaredNodes, missingNodeIds, type CanvasNodeLike } from '../core/declaredNodes.js';
@@ -1323,11 +1323,6 @@ export function registerCanvasAgentRoutes(
       const MAX_WRITE_ROUNDS = 4;
       const safeCompleteSteps = new Set<TaskStep>(['draft', 'anchors', 'storyboard']);
       const taskStepLabel = (step: TaskStep) => TASK_STEPS.find((item) => item.step === step)?.label || step;
-      const nextActionNodeIds = [
-        gateFacts.character_anchor,
-        gateFacts.opponent_anchor,
-        gateFacts.scene_anchor,
-      ].map((value) => String(value || '').split(':').pop() || '').filter(Boolean);
       const readCanvasNodes = (): CanvasNodeLike[] => {
         if (!conversation) throw new Error('没有会话，无法校验画布节点。');
         try {
@@ -1392,8 +1387,6 @@ export function registerCanvasAgentRoutes(
               if (!['draft', 'index', 'anchors', 'storyboard'].includes(kind)) throw new Error('未知的产物类型');
               const written = writeTaskArtifact(conversation.id, kind, String(args.content || ''), Boolean(args.append));
               lastSafeAction = kind;
-              const nextForWrite = nextActionForStep(written.state.current);
-              setTaskNextAction(conversation.id, nextForWrite.params, nextActionNodeIds);
               if (kind === 'storyboard' && args.cursor_last_line) {
                 setTaskCursor(conversation.id, { lastLine: String(args.cursor_last_line) });
               }
@@ -1406,8 +1399,6 @@ export function registerCanvasAgentRoutes(
               if (step === 'anchors') assertAnchorNodesOnCanvas();
               const state = completeTaskStep(conversation.id, step);
               lastSafeAction = step;
-              const next = nextActionForStep(state.current);
-              setTaskNextAction(conversation.id, next.params, nextActionNodeIds);
               content = `已完成「${taskStepLabel(step)}」。当前位置：${taskStepLabel(state.current)}。下一步：继续下一个未完成 todo；需要用户确认或审批时再停。`;
               const log = { id: `task-ledger-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: 'task_ledger', label: `文件账本：${content}`, state: 'done' as const };
               persistedToolLogs.push(log);
