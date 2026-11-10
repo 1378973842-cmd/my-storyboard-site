@@ -341,6 +341,7 @@ async function callModel(
   tools: boolean,
   signal: AbortSignal,
   forceAsk = false,
+  allowedTools: typeof allCanvasAITools = allCanvasAITools,
 ): Promise<Record<string, unknown>> {
   const { apiBase, apiKey } = resolveTextLlmEnv(model);
   if (!apiBase || !apiKey) throw new Error(textLlmConfigError(model));
@@ -351,7 +352,7 @@ async function callModel(
     stream: false,
     ...(tools
       ? {
-        tools: allCanvasAITools,
+        tools: allowedTools,
         // Google 系（RunningHub）对 tool_choice=对象/required 支持不好：
         // 会变成 length 截断 + 用正文描述调用。这里只给它 auto，靠提示词约束。
         tool_choice: forceAsk && !/^google\//i.test(model)
@@ -1242,6 +1243,27 @@ export function registerCanvasAgentRoutes(
       setTaskPreparing(conversation.id, false);
       taskForTurn!.preparing = false;
     }
+    const stageAllowedTools: Record<string, string[]> = {
+      draft: ['write_task_artifact', 'read_task_artifact', 'ask_user', 'complete_task_step', 'set_next_action', 'remember_project_fact'],
+      anchors: ['create_canvas_nodes', 'confirm_character_anchor', 'write_task_artifact', 'read_task_artifact', 'ask_user', 'complete_task_step', 'set_next_action', 'remember_project_fact'],
+      storyboard: ['write_task_artifact', 'read_task_artifact', 'ask_user', 'complete_task_step', 'set_next_action', 'remember_project_fact'],
+      review: ['read_task_artifact', 'read_skill_file', 'ask_user', 'complete_task_step', 'set_next_action', 'remember_project_fact'],
+      anchor_runs: ['trigger_skill_execution', 'create_canvas_nodes', 'ask_user', 'complete_task_step', 'set_next_action', 'read_task_artifact'],
+      storyboard_runs: ['create_canvas_nodes', 'connect_workflow_edges', 'trigger_skill_execution', 'update_node_config', 'ask_user', 'complete_task_step', 'set_next_action', 'read_task_artifact'],
+      compose: ['complete_task_step', 'read_task_artifact', 'ask_user', 'set_next_action'],
+    };
+    const allowedForTurn = taskForTurn?.preparing
+      ? allCanvasAITools
+      : allCanvasAITools.filter((tool) => (
+        (stageAllowedTools[taskForTurn?.current || ''] || []).includes(tool.function.name)
+      ));
+    const callTurnModel = (
+      modelArg: string,
+      turnMessages: Array<Record<string, unknown>>,
+      useTools: boolean,
+      signal: AbortSignal,
+      ask = false,
+    ) => callModel(modelArg, turnMessages, useTools, signal, ask, allowedForTurn);
     // 答完准备卡后，服务端把「当前该做的动作」落账，避免模型只回一句任务状态。
     if (conversation && taskForTurn && (askAnswer || askBatch.length)) {
       const plan = nextActionForStep(taskForTurn.current);
@@ -1320,20 +1342,20 @@ export function registerCanvasAgentRoutes(
         && !hasAnchor
         && (gateStage === '' || gateStage === 'direction' || gateStage === 'params');
       try {
-        first = await callModel(model, messages, true, controller.signal, forceAsk);
+        first = await callTurnModel(model, messages, true, controller.signal, forceAsk);
       } catch (toolCallError) {
         console.warn(
           '[canvas-agent] forced ask_user unavailable, retrying auto tools:',
           toolCallError instanceof Error ? toolCallError.message : String(toolCallError),
         );
         try {
-          first = await callModel(model, messages, true, controller.signal);
+          first = await callTurnModel(model, messages, true, controller.signal);
         } catch (fallbackError) {
           console.warn(
             '[canvas-agent] native tools unavailable, retrying structured fallback:',
             fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
           );
-          first = await callModel(model, messages, false, controller.signal);
+          first = await callTurnModel(model, messages, false, controller.signal);
         }
       }
       // 写入/推进自动续跑：这两类不扣费、不需要批准；回填 tool result 后再让模型走一步，
@@ -1392,7 +1414,7 @@ export function registerCanvasAgentRoutes(
           if (lastSafeAction && lastSafeAction !== 'storyboard') {
             const nudge = '继续下一步：按 task_state 的 current 执行，不要只回复状态。完成当前 todo 后继续，直到 review 或需要用户确认/审批。';
             const lastText = extractTextLlmMessageContent(model, first).trim();
-            first = await callModel(
+            first = await callTurnModel(
               model,
               [
                 ...messages,
@@ -1462,7 +1484,7 @@ export function registerCanvasAgentRoutes(
             function: { name: call.function.name, arguments: call.function.arguments },
           })),
         };
-        first = await callModel(
+        first = await callTurnModel(
           model,
           [...messages, assistantToolMessage, ...toolResults],
           true,
@@ -1561,7 +1583,7 @@ export function registerCanvasAgentRoutes(
             function: { name: call.function.name, arguments: call.function.arguments },
           })),
         };
-        first = await callModel(
+        first = await callTurnModel(
           model,
           [...messages, assistantToolMessage, ...toolResults],
           false,
@@ -1573,7 +1595,7 @@ export function registerCanvasAgentRoutes(
         || (/"question"\s*:/.test(previewText) && /"options"\s*:/.test(previewText));
       if (parseToolCalls(first).length === 0 && previewJson) {
         try {
-          const retried = await callModel(model, [
+          const retried = await callTurnModel(model, [
             ...messages,
             { role: 'assistant', content: previewText },
             { role: 'user', content: '你上一轮把工具调用写成了 JSON 文本。请重新用原生工具调用返回；不要输出 JSON 文本。' },
@@ -1920,7 +1942,7 @@ export function registerCanvasAgentRoutes(
             const storyboardBlock = storyboardForRefine
               ? `\n\n[storyboard]\n${storyboardForRefine.slice(0, 8_000)}`
               : '';
-            const refine = await callModel(model, [
+            const refine = await callTurnModel(model, [
               ...messages,
               {
                 role: 'user',
@@ -2032,7 +2054,7 @@ export function registerCanvasAgentRoutes(
                   validationErrors.push(`语义覆盖未通过：原文片段「${pasted.source.slice(0, 40)}」整段贴进了 prompt，不能算转写`);
                 } else {
                   try {
-                    const semanticResponse = await callModel(model, [
+                    const semanticResponse = await callTurnModel(model, [
                       ...messages,
                       {
                         role: 'user',
@@ -2147,7 +2169,7 @@ export function registerCanvasAgentRoutes(
       let proposalText = inlineAsks.length ? '' : safeFirstText;
       let interpreted = actionCalls.length || inlineAsks.length ? null : interpretCanvasProposalText(proposalText);
       if (!actionCalls.length && interpreted?.unknownTypes.length) {
-        const retry = await callModel(model, [
+        const retry = await callTurnModel(model, [
           ...messages,
           { role: 'assistant', content: proposalText },
           { role: 'user', content: unknownCanvasActionMessage(interpreted.unknownTypes) },
@@ -2397,7 +2419,7 @@ export function registerCanvasAgentRoutes(
             tool_call_id: call.id,
             content: JSON.stringify(toolResultContent(call.function.name, toolNames)),
           }));
-          const followup = await callModel(
+          const followup = await callTurnModel(
             model,
             [...messages, assistantMessage, ...toolResults],
             false,
@@ -2606,7 +2628,7 @@ export function registerCanvasAgentRoutes(
         // thinking 不是用户可见正文。没有正文就必须补写，不能因为有 thinking 就跳过。
         if (!lead) {
           try {
-            const written = await callModel(model, [
+            const written = await callTurnModel(model, [
               ...messages,
               {
                 role: 'user',
@@ -2786,4 +2808,5 @@ export function registerCanvasAgentRoutes(
     }
   });
 }
+
 
