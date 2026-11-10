@@ -172,8 +172,8 @@ export function combatStageDecision(input: {
     // 每答完一轮提问，往前推一段：方向 → 方案 → 参数 → 分镜
     return { blocked: false, advanceTo: NEXT_STAGE[stage], reason: 'answered', notice };
   }
-  if (stage === 'params' || stage === 'proposal') {
-    // 参数/方案阶段不再用服务端文案阻塞：已有参数由模型/账本判断缺失，直接允许建锚点。
+  if (stage === 'params' || stage === 'proposal' || (stage === 'direction' && input.hasAnchor)) {
+    // 参数/方案阶段或已有角色参考时，不再用服务端文案阻塞。
     return { blocked: false, advanceTo: null, reason: 'params-ready', notice };
   }
   return {
