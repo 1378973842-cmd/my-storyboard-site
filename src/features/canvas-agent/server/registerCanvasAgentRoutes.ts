@@ -21,6 +21,7 @@ import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
 import { canvasAgentStagePrefix } from '../core/stageLedger.js';
 import { completeTaskStep, ensureTask, nextActionForStep, readTaskArtifact, readTaskArtifactSlice, readTaskState, restoreTaskStateFromBackup, setTaskCursor, setTaskNextAction, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
 import { checkStoryboardAgainstDraft, parseStoryboardFragments } from '../core/planCheck.js';
+import { deriveStoryboardFromDraft } from '../core/storyboardDerive.js';
 import { assembleKnowledgeForTurn, selectKnowledgeForUse } from '../core/knowledgeContext.js';
 import { declaredNodeIds, missingDeclaredNodes, missingNodeIds, type CanvasNodeLike } from '../core/declaredNodes.js';
 import { turnStatePrefix } from '../core/turnState.js';
@@ -1311,6 +1312,17 @@ export function registerCanvasAgentRoutes(
           taskForTurn.current = completed.current;
           deterministicAnchorsCreated = true;
         }
+      }
+    }
+    // storyboard 只从 draft 原文派生，禁止模型重写剧情。
+    if (conversation && taskForTurn?.current === 'storyboard'
+      && !readTaskArtifact(conversation.id, 'storyboard').trim()) {
+      const draftText = readTaskArtifact(conversation.id, 'draft');
+      const derived = deriveStoryboardFromDraft(draftText, 15);
+      if (derived.storyboard) {
+        writeTaskArtifact(conversation.id, 'storyboard', derived.storyboard, false);
+        const done = completeTaskStep(conversation.id, 'storyboard');
+        taskForTurn.current = done.current;
       }
     }
     // review 是代码硬闸：storboard 已写完时由服务端直接核对并推进，不靠模型自觉。

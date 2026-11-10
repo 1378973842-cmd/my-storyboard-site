@@ -114,7 +114,7 @@ function stripShotPrefix(value: string): string {
     .replace(/^第\s*[0-9一二三四五六七八九十百千]+\s*[章节回幕卷]\s*[：:]?\s*/, '');
 }
 
-function draftNarrativeBody(text: string): string {
+export function draftNarrativeBody(text: string): string {
   const source = String(text || '');
   const markerAt = source.indexOf(DRAFT_BODY_MARKER);
   // 有新契约：标记之前是设定/角色/场景，不参与逐字核对。
