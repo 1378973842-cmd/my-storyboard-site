@@ -1313,6 +1313,23 @@ export function registerCanvasAgentRoutes(
         }
       }
     }
+    // review 是代码硬闸：storboard 已写完时由服务端直接核对并推进，不靠模型自觉。
+    let deterministicReviewCompleted = false;
+    if (conversation && taskForTurn?.current === 'review') {
+      const check = checkStoryboardAgainstDraft(
+        readTaskArtifact(conversation.id, 'draft'),
+        readTaskArtifact(conversation.id, 'storyboard'),
+        readTaskArtifact(conversation.id, 'index'),
+        requestedPlaybookId && readPlaybookKnowledgeText
+          ? readPlaybookKnowledgeText(requestedPlaybookId)
+          : '',
+      );
+      if (check.ok) {
+        const reviewed = completeTaskStep(conversation.id, 'review');
+        taskForTurn.current = reviewed.current;
+        deterministicReviewCompleted = true;
+      }
+    }
     const stageAllowedTools: Record<string, string[]> = {
       draft: ['write_task_artifact', 'read_task_artifact', 'ask_user', 'complete_task_step', 'set_next_action', 'remember_project_fact'],
       anchors: ['create_canvas_nodes', 'confirm_character_anchor', 'write_task_artifact', 'read_task_artifact', 'ask_user', 'complete_task_step', 'set_next_action', 'remember_project_fact'],
