@@ -143,15 +143,24 @@ export const TASK_STAGE: Record<TaskStep, string> = {
 };
 
 export function readTaskState(conversationId: string): TaskState | null {
+  const file = statePath(conversationId);
+  if (!existsSync(file)) return null;
+  let raw = '';
   try {
-    const file = statePath(conversationId);
-    if (!existsSync(file)) return null;
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as TaskState;
-    if (!parsed || !Array.isArray(parsed.todos) || !parsed.todos.length) return null;
-    return parsed;
-  } catch {
-    return null;
+    raw = readFileSync(file, 'utf8');
+  } catch (error) {
+    throw new Error(`账本读取失败：${file} 无法读取（${error instanceof Error ? error.message : String(error)}）。`);
   }
+  let parsed: TaskState;
+  try {
+    parsed = JSON.parse(raw) as TaskState;
+  } catch {
+    throw new Error(`账本损坏：${file} 不是合法 JSON。先修复或从 .bak 恢复，不要重建空账本覆盖现场。`);
+  }
+  if (!parsed || !Array.isArray(parsed.todos) || !parsed.todos.length) {
+    throw new Error(`账本损坏：${file} 缺少 todos。先修复或从 .bak 恢复，不要重建空账本覆盖现场。`);
+  }
+  return parsed;
 }
 
 export function ensureTask(
