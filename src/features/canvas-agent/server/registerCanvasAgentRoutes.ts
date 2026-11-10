@@ -1703,8 +1703,6 @@ export function registerCanvasAgentRoutes(
               label = `任务账本：${state.title}（当前 ${state.preparing ? '准备阶段' : stepLabel(state.current)}）`;
               taskNotice = `任务已建立：${state.title}。当前位置：${state.preparing ? '准备阶段（先确认参数）' : stepLabel(state.current)}。`;
             } else if (call.function.name === 'set_next_action') {
-              const actionType = String(args.action_type || '').trim();
-              if (!actionType) throw new Error('set_next_action 缺少 action_type');
               const params = args.params && typeof args.params === 'object'
                 ? args.params as Record<string, unknown>
                 : {};
@@ -1725,7 +1723,6 @@ export function registerCanvasAgentRoutes(
                 setTaskNextAction(conversation.id, params, realNodeIds, 'answer');
                 label = '下一步计划：answer';
               }
-              label = `下一步计划：${actionType}`;
             } else if (call.function.name === 'write_task_artifact') {
               const kind = String(args.kind || '') as TaskArtifactKind;
               if (!['draft', 'index', 'anchors', 'storyboard'].includes(kind)) throw new Error('未知的产物类型');

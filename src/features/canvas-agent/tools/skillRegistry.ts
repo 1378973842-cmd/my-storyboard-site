@@ -358,7 +358,7 @@ export const coreCanvasTools: AIToolDefinition[] = [
     function: {
       name: 'set_next_action',
       description:
-        'Persist the next planned canvas action to the task ledger before ending a turn: action type, key params, and dependent node ids. The next turn reads this from task-state instead of relying on thinking/history.',
+        'Persist only the current step-specific plan (params and dependent node ids) to the task ledger. The action type is derived from task current, so action_type is optional/legacy.',
       parameters: objectSchema(
         {
           action_type: { type: 'string', enum: ['create_node', 'connect_nodes', 'update_node_params', 'execute_node_skill', 'ask_user', 'review', 'none'] },
@@ -376,7 +376,7 @@ export const coreCanvasTools: AIToolDefinition[] = [
           },
           node_ids: { type: 'array', items: { type: 'string' } },
         },
-        ['action_type'],
+        [],
       ),
     },
   },
