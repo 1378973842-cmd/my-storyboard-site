@@ -678,9 +678,6 @@ export function AgentFloatingPanel({
   const [localRunCards, setLocalRunCards] = useState<Record<string, AskCard>>({});
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const messagesRef = useRef<ChatTurn[]>([]);
-  const sendTextRef = useRef<((raw: string, history: ChatTurn[], continueJobId?: string, regenerate?: boolean, silent?: boolean) => Promise<void>) | null>(null);
-  const autoContinueRef = useRef(0);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -1209,12 +1206,8 @@ export function AgentFloatingPanel({
   );
 
   // 流结束后，如果只是状态行、没有卡/提案，自动再推一步；最多两次，避免死循环。
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
-
   const sendText = useCallback(
-    async (raw: string, history: ChatTurn[], continueJobId?: string, regenerate = false, silent = false) => {
+    async (raw: string, history: ChatTurn[], continueJobId?: string, regenerate = false) => {
       const text = raw.trim();
       if (streaming || (!text && !playbookId && !continueJobId)) return;
       if (playbookId) sessionPlaybookRef.current = playbookId;
@@ -1248,8 +1241,7 @@ export function AgentFloatingPanel({
         createdAt: Date.now(),
       };
       if (title === '探索创作方向' && text) setTitle(text.slice(0, 16));
-      setMessages((items) => (text && !regenerate && !silent ? [...items, userMessage, assistantMessage] : [...items, assistantMessage]));
-      if (!silent) autoContinueRef.current = 0;
+      setMessages((items) => (text && !regenerate ? [...items, userMessage, assistantMessage] : [...items, assistantMessage]));
       setInput('');
       setMentionQuery(null);
       setError('');
@@ -1314,8 +1306,6 @@ export function AgentFloatingPanel({
       updateProposal,
     ],
   );
-
-  sendTextRef.current = sendText;
 
   // 批准后盯着运行结果：全部生成完/失败后自动给模型发一条系统通知，
   // 避免模型在图片还没出来时就问「是否满意」。

@@ -184,5 +184,3 @@ export function combatStageDecision(input: {
   };
 }
 
-/** 兼容旧引用：默认阶段提示。 */
-export const COMBAT_STAGE_NOTICE = COMBAT_STAGE_NOTICES.direction;

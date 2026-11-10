@@ -1343,60 +1343,8 @@ export function registerCanvasAgentRoutes(
           throw new Error('读不到画布，不能确认声明的节点已经创建。');
         }
       };
-      const ensureAnchorNodesFromArtifact = () => {
-        if (!conversation) return;
-        const text = readTaskArtifact(conversation.id, 'anchors');
-        if (declaredNodeIds(text).length) return;
-        const sections = text.split(/^##\s+/m).slice(1);
-        if (!sections.length) return;
-        let canvas: ReturnType<typeof getCanvas>;
-        try {
-          canvas = getCanvas(conversation.canvas_id, true, { userId: req.authUser?.id || '' });
-        } catch {
-          return;
-        }
-        const existing = Array.isArray(canvas.nodes) ? canvas.nodes as Array<Record<string, unknown>> : [];
-        const now = Date.now();
-        const created: Array<{ id: string; title: string; prompt: string }> = sections.slice(0, 6).map((section, index) => {
-          const titleLine = section.split('\n')[0]?.trim() || `锚点 ${index + 1}`;
-          const prompt = section.split('\n').slice(1).join(' ').replace(/节点[：:]\s*\S+/g, '').trim().slice(0, 1200);
-          return {
-            id: `anchor_auto_${now}_${index}`,
-            title: titleLine.replace(/^[#\s]+/, '').slice(0, 40),
-            prompt: prompt || titleLine,
-          };
-        });
-        const nodes = [
-          ...existing,
-          ...created.map((item, index) => ({
-            id: item.id,
-            type: 'generator',
-            x: 200 + index * 340,
-            y: 200,
-            w: 260,
-            apiProvider: 'runninghub',
-            model: 'nano-banana-pro-稳定',
-            prompt: `${item.title}：${item.prompt}`,
-            previewRoundUrls: [],
-            history: [],
-            previewLayout: 'time',
-            ratio: '1:1',
-            resolution: '1k',
-            inputs: [],
-            count: 1,
-            quality: 'auto',
-            _displayW: 496,
-            _displayH: 496,
-            _baseFrameH: 96,
-          })),
-        ];
-        saveCanvas(conversation.canvas_id, { nodes, allow_empty_nodes: true });
-        const lines = created.map((item) => `- ${item.title} 节点：${item.id}`).join('\n');
-        writeTaskArtifact(conversation.id, 'anchors', `${text.trimEnd()}\n\n${lines}\n`, false);
-      };
       const assertAnchorNodesOnCanvas = () => {
         if (!conversation) return;
-        ensureAnchorNodesFromArtifact();
         const anchorsText = readTaskArtifact(conversation.id, 'anchors');
         const anchorIds = declaredNodeIds(anchorsText);
         if (!anchorIds.length) {
