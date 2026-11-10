@@ -19,7 +19,7 @@ import { actionReasonText, interpretCanvasProposalText, listedNodeIds, listedRec
 import { operatingPrompt, assertCanvasVideoShotTimelines } from '../core/operatingModel.js';
 import { parseEffectedNodes, parseRunStates } from '../core/effectLedger.js';
 import { canvasAgentStagePrefix } from '../core/stageLedger.js';
-import { completeTaskStep, ensureTask, nextActionForStep, readTaskArtifact, readTaskArtifactSlice, readTaskState, setTaskCursor, setTaskNextAction, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
+import { completeTaskStep, ensureTask, nextActionForStep, readTaskArtifact, readTaskArtifactSlice, readTaskState, restoreTaskStateFromBackup, setTaskCursor, setTaskNextAction, setTaskPreparing, taskStatePrompt, updateTaskFacts, writeTaskArtifact, TASK_STAGE, TASK_STEPS, type TaskArtifactKind, type TaskStep } from './taskLedger.js';
 import { checkStoryboardAgainstDraft, parseStoryboardFragments } from '../core/planCheck.js';
 import { assembleKnowledgeForTurn, selectKnowledgeForUse } from '../core/knowledgeContext.js';
 import { declaredNodeIds, missingDeclaredNodes, missingNodeIds, type CanvasNodeLike } from '../core/declaredNodes.js';
@@ -664,6 +664,15 @@ export function registerCanvasAgentRoutes(
           return Array.isArray(stage.facts.anchor_history) ? stage.facts.anchor_history : [];
         })(),
       });
+    });
+    app.post('/api/canvas-agent/conversations/:id/task/restore', ...protectedRoute, (req, res) => {
+      const conversation = getOwnedCanvasAgentConversation(db, req.authUser?.id || '', req.params.id);
+      if (!conversation) return res.status(404).json({ error: 'Agent 会话不存在' });
+      try {
+        return res.json({ task: restoreTaskStateFromBackup(conversation.id) });
+      } catch (error) {
+        return res.status(409).json({ error: error instanceof Error ? error.message : String(error) });
+      }
     });
     app.patch('/api/canvas-agent/conversations/:id', ...protectedRoute, (req, res) => {
       const conversation = renameCanvasAgentConversation(
@@ -1332,6 +1341,9 @@ export function registerCanvasAgentRoutes(
       const MAX_WRITE_ROUNDS = 4;
       const safeCompleteSteps = new Set<TaskStep>(['draft', 'anchors', 'storyboard']);
       const taskStepLabel = (step: TaskStep) => TASK_STEPS.find((item) => item.step === step)?.label || step;
+      const writeNextInstruction = (kind: TaskArtifactKind) => kind === 'anchors'
+        ? '下一步必须先 create_canvas_nodes 建真实锚点节点，不要先 complete_task_step(\'anchors\')；建完后把真实节点 id 写回 anchors.md，再完成。'
+        : `如果该产物已完成，立刻调用 complete_task_step('${kind}')；不要用纯文本停在这里。`;
       const readCanvasNodes = (): CanvasNodeLike[] => {
         if (!conversation) throw new Error('没有会话，无法校验画布节点。');
         try {
@@ -1362,6 +1374,11 @@ export function registerCanvasAgentRoutes(
         const missingFacts = anchorIds.filter((id) => !confirmedIds.has(id));
         if (missingFacts.length) {
           throw new Error(`anchors.md 声明的节点没有对应确认事实：${missingFacts.join('、')}。先确认角色/对手/场景锚点，再完成锚点。`);
+        }
+        const lowQuality = ['character_quality', 'opponent_quality', 'scene_quality']
+          .filter((key) => gateFacts[key] === 'low');
+        if (lowQuality.length) {
+          throw new Error(`锚点质量仍为 low：${lowQuality.join('、')}。先重生成并确认，再完成锚点。`);
         }
       };
       let lastNonEmptyContent = extractTextLlmMessageContent(model, first).trim();
@@ -1410,7 +1427,7 @@ export function registerCanvasAgentRoutes(
               if (kind === 'storyboard' && args.cursor_last_line) {
                 setTaskCursor(conversation.id, { lastLine: String(args.cursor_last_line) });
               }
-              content = `已写入 ${kind}.md（${written.chars} 字）。当前位置：${taskStepLabel(written.state.current)}。下一步：如果该产物已完成，立刻调用 complete_task_step('${kind}')；不要用纯文本停在这里。`;
+              content = `已写入 ${kind}.md（${written.chars} 字）。当前位置：${taskStepLabel(written.state.current)}。${writeNextInstruction(kind)}`;
               const log = { id: `task-ledger-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: 'task_ledger', label: `文件账本：${content}`, state: 'done' as const };
               persistedToolLogs.push(log);
               sendEvent(res, { type: 'tool', log });
@@ -1755,7 +1772,7 @@ export function registerCanvasAgentRoutes(
                 });
               }
               label = `文件账本：已写入 ${kind}.md（${written.chars} 字）`;
-              taskNotice = `已写入 ${kind}.md（${written.chars} 字）。当前位置：${stepLabel(written.state.current)}。`;
+              taskNotice = `已写入 ${kind}.md（${written.chars} 字）。当前位置：${stepLabel(written.state.current)}。${writeNextInstruction(kind)}`;
             } else if (call.function.name === 'read_task_artifact' || call.function.name === 'read_skill_file') {
               // 读回和写/推进同批时，不把整轮打死：先执行写/推进，读回留到下一批。
               // 读回循环已经把纯读批次读完；这里跳过的只是同批里多出来的读。

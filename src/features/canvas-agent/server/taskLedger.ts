@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync, copyFileSync } from 'node:fs';
 import path from 'node:path';
 import { checkStoryboardAgainstDraft } from '../core/planCheck.js';
 
@@ -97,6 +97,13 @@ function statePath(conversationId: string): string {
 
 function atomicWrite(filePath: string, content: string): void {
   mkdirSync(path.dirname(filePath), { recursive: true });
+  if (filePath.endsWith('task-state.json') && existsSync(filePath)) {
+    try {
+      copyFileSync(filePath, `${filePath}.bak`);
+    } catch {
+      // 备份失败不阻断主写入；恢复入口会报明确的读失败。
+    }
+  }
   const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(tmp, content, 'utf8');
   renameSync(tmp, filePath);
@@ -160,6 +167,27 @@ export function readTaskState(conversationId: string): TaskState | null {
   if (!parsed || !Array.isArray(parsed.todos) || !parsed.todos.length) {
     throw new Error(`账本损坏：${file} 缺少 todos。先修复或从 .bak 恢复，不要重建空账本覆盖现场。`);
   }
+  return parsed;
+}
+
+export function restoreTaskStateFromBackup(conversationId: string): TaskState {
+  const file = statePath(conversationId);
+  const backup = `${file}.bak`;
+  if (!existsSync(backup)) {
+    throw new Error(`账本损坏，且没有备份：${backup}。`);
+  }
+  let parsed: TaskState;
+  try {
+    parsed = JSON.parse(readFileSync(backup, 'utf8')) as TaskState;
+  } catch {
+    throw new Error(`账本备份也损坏：${backup} 不是合法 JSON。`);
+  }
+  if (!parsed || !Array.isArray(parsed.todos) || !parsed.todos.length) {
+    throw new Error(`账本备份损坏：${backup} 缺少 todos。`);
+  }
+  const tmp = `${file}.${process.pid}.restore.tmp`;
+  writeFileSync(tmp, JSON.stringify(parsed, null, 2), 'utf8');
+  renameSync(tmp, file);
   return parsed;
 }
 
@@ -242,10 +270,12 @@ export function readTaskArtifact(
 ): string {
   const state = readTaskState(conversationId);
   if (!state) return '';
+  const file = path.join(taskDir(conversationId), ARTIFACT_FILES[kind]);
+  if (!existsSync(file)) return '';
   try {
-    return readFileSync(path.join(taskDir(conversationId), ARTIFACT_FILES[kind]), 'utf8');
-  } catch {
-    return '';
+    return readFileSync(file, 'utf8');
+  } catch (error) {
+    throw new Error(`读取 ${ARTIFACT_FILES[kind]} 失败：${file} 无法读取（${error instanceof Error ? error.message : String(error)}）。`);
   }
 }
 
