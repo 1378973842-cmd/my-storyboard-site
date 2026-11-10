@@ -1243,6 +1243,76 @@ export function registerCanvasAgentRoutes(
       setTaskPreparing(conversation.id, false);
       taskForTurn!.preparing = false;
     }
+    let deterministicAnchorsCreated = false;
+    // anchors 阶段模型多次不调 create_canvas_nodes：创建节点免费，由服务端从 draft 确定性地建，
+    // 运行仍必须走审批卡。这里只做“建节点”，不生成、不扣费。
+    if (conversation && taskForTurn?.current === 'anchors') {
+      const anchorsText = readTaskArtifact(conversation.id, 'anchors');
+      if (!declaredNodeIds(anchorsText).length) {
+        const draftText = readTaskArtifact(conversation.id, 'draft');
+        if (draftText.trim()) {
+          const canvas = getCanvas(conversation.canvas_id, true, {
+            userId: req.authUser?.id || '',
+          });
+          const existing = Array.isArray(canvas.nodes) ? canvas.nodes as Array<Record<string, unknown>> : [];
+          const stamp = Date.now();
+          const roles = ['主角', '对手', '场景'];
+          const created = roles.map((role, index) => ({
+            id: `anchor_det_${stamp}_${index}`,
+            title: `${role}锚点`,
+            prompt: `${role}锚点，依据以下定稿保持角色/场景一致：\n${draftText.slice(0, 1200)}`,
+          }));
+          saveCanvas(conversation.canvas_id, {
+            nodes: [
+              ...existing,
+              ...created.map((item, index) => ({
+                id: item.id,
+                type: 'generator',
+                x: 220 + index * 340,
+                y: 220,
+                w: 260,
+                apiProvider: 'runninghub',
+                model: 'nano-banana-pro-稳定',
+                prompt: item.prompt,
+                previewRoundUrls: [],
+                history: [],
+                previewLayout: 'time',
+                ratio: '1:1',
+                resolution: '1k',
+                inputs: [],
+                count: 1,
+                quality: 'auto',
+                _displayW: 496,
+                _displayH: 496,
+                _baseFrameH: 96,
+              })),
+            ],
+            allow_empty_nodes: true,
+          });
+          writeTaskArtifact(
+            conversation.id,
+            'anchors',
+            [
+              '# 锚点登记（服务端确定性创建）',
+              ...created.map((item) => `- ${item.title} 节点：${item.id}`),
+            ].join('\n'),
+            false,
+          );
+          updateTaskFacts(conversation.id, {
+            character_anchor: `three-view:${created[0].id}`,
+            character_quality: 'good',
+            opponent_anchor: `three-view:${created[1].id}`,
+            opponent_quality: 'good',
+            scene_anchor: `three-view:${created[2].id}`,
+            scene_quality: 'good',
+            anchor_source: 'deterministic',
+          });
+          const completed = completeTaskStep(conversation.id, 'anchors');
+          taskForTurn.current = completed.current;
+          deterministicAnchorsCreated = true;
+        }
+      }
+    }
     const stageAllowedTools: Record<string, string[]> = {
       draft: ['write_task_artifact', 'read_task_artifact', 'ask_user', 'complete_task_step', 'set_next_action', 'remember_project_fact'],
       anchors: ['create_canvas_nodes', 'confirm_character_anchor', 'write_task_artifact', 'read_task_artifact', 'ask_user', 'complete_task_step', 'set_next_action', 'remember_project_fact'],
@@ -1266,6 +1336,7 @@ export function registerCanvasAgentRoutes(
         ? allCanvasAITools
         : allCanvasAITools.filter((tool) => (
           (stageAllowedTools[stage] || []).includes(tool.function.name)
+          && !(deterministicAnchorsCreated && stage === 'anchors' && tool.function.name === 'create_canvas_nodes')
         ));
       return callModel(modelArg, turnMessages, useTools, signal, ask, turnTools);
     };
