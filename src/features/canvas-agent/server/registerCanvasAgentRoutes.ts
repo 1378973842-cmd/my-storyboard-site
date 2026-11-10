@@ -1336,6 +1336,26 @@ export function registerCanvasAgentRoutes(
           first = await callModel(model, messages, false, controller.signal);
         }
       }
+      // 只有 start_production_task、没有进入内容动作时，服务端补一次明确的写稿重试。
+      // 这不是 UI 自动续跑，也不伪造文件；模型第二次仍不动就停下。
+      {
+        const initialCalls = parseToolCalls(first);
+        const startOnly = initialCalls.length > 0
+          && initialCalls.every((call) => call.function.name === 'start_production_task');
+        const draftEmpty = taskForTurn && !taskForTurn.preparing
+          && taskForTurn.current === 'draft'
+          && !readTaskArtifact(conversation?.id || '', 'draft').trim();
+        if (startOnly && draftEmpty && !forceAsk) {
+          try {
+            first = await callModel(model, [
+              ...messages,
+              { role: 'user', content: '账本已建立，不要重复 start_production_task。现在调用 write_task_artifact，kind="draft"，把完整定稿写入 draft.md；不要只回复状态。' },
+            ], true, controller.signal);
+          } catch {
+            // 保留第一次响应，后续仍按普通路径处理。
+          }
+        }
+      }
       // 写入/推进自动续跑：这两类不扣费、不需要批准；回填 tool result 后再让模型走一步，
       // 直到它返回纯文本或需要画布/审批的动作。上限 4 轮，和读回循环同族。
       const MAX_WRITE_ROUNDS = 4;
