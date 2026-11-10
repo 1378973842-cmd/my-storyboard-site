@@ -1288,7 +1288,7 @@ export function registerCanvasAgentRoutes(
               })),
             ],
             allow_empty_nodes: true,
-          });
+          }, { userId: req.authUser?.id || '' });
           writeTaskArtifact(
             conversation.id,
             'anchors',
