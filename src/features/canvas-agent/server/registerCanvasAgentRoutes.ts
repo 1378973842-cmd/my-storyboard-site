@@ -1463,6 +1463,35 @@ export function registerCanvasAgentRoutes(
           first = await callTurnModel(model, messages, false, controller.signal);
         }
       }
+      // anchor_runs 阶段模型不主动发运行动作时，服务端按已确认 facts 生成运行提案；
+      // 仍然只生成 proposal，不执行、不扣费，必须用户批准。
+      const liveForRun = conversation ? readTaskState(conversation.id) : null;
+      if (liveForRun?.current === 'anchor_runs' && !parseToolCalls(first).length) {
+        const liveFacts = liveForRun.facts || gateFacts;
+        const anchorIds = [
+          liveFacts.character_anchor,
+          liveFacts.opponent_anchor,
+          liveFacts.scene_anchor,
+        ].map((value) => String(value || '').split(':').pop() || '').filter(Boolean);
+        if (anchorIds.length) {
+          first = {
+            choices: [{
+              message: {
+                role: 'assistant',
+                content: '已按当前账本生成锚点运行提案，等待批准。',
+                tool_calls: anchorIds.map((nodeId, index) => ({
+                  id: `call_anchor_run_${index}_${Date.now()}`,
+                  type: 'function',
+                  function: {
+                    name: 'trigger_skill_execution',
+                    arguments: JSON.stringify({ nodeId }),
+                  },
+                })),
+              },
+            }],
+          };
+        }
+      }
       // 写入/推进自动续跑：这两类不扣费、不需要批准；回填 tool result 后再让模型走一步，
       // 直到它返回纯文本或需要画布/审批的动作。上限 4 轮，和读回循环同族。
       const MAX_WRITE_ROUNDS = 4;
@@ -1715,6 +1744,13 @@ export function registerCanvasAgentRoutes(
       let toolArgNotice = '';
       const parsedCalls = parseToolCalls(first);
       const knownNodeIds = new Set(effectedNodes.map((node) => node.id));
+      try {
+        for (const node of readCanvasNodes()) {
+          if (node.id) knownNodeIds.add(String(node.id));
+        }
+      } catch {
+        // 画布读取失败时保留原有 effectedNodes 校验。
+      }
       const tempNodeIds = new Set<string>();
       for (const call of parsedCalls) {
         if (call.function.name !== 'create_canvas_nodes') continue;
