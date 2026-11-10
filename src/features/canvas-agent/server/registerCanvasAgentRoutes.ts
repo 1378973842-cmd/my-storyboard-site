@@ -1422,6 +1422,9 @@ export function registerCanvasAgentRoutes(
             if (call.function.name === 'write_task_artifact') {
               const kind = String(args.kind || '') as TaskArtifactKind;
               if (!['draft', 'index', 'anchors', 'storyboard'].includes(kind)) throw new Error('未知的产物类型');
+              if (kind === 'anchors' && !declaredNodeIds(String(args.content || '')).length) {
+                throw new Error('anchors.md 没有真实节点 id：先 create_canvas_nodes 建锚点节点，再把真实 id 写进 anchors.md。');
+              }
               const written = writeTaskArtifact(conversation.id, kind, String(args.content || ''), Boolean(args.append));
               lastSafeAction = kind;
               if (kind === 'storyboard' && args.cursor_last_line) {
@@ -1759,6 +1762,9 @@ export function registerCanvasAgentRoutes(
             } else if (call.function.name === 'write_task_artifact') {
               const kind = String(args.kind || '') as TaskArtifactKind;
               if (!['draft', 'index', 'anchors', 'storyboard'].includes(kind)) throw new Error('未知的产物类型');
+              if (kind === 'anchors' && !declaredNodeIds(String(args.content || '')).length) {
+                throw new Error('anchors.md 没有真实节点 id：先 create_canvas_nodes 建锚点节点，再把真实 id 写进 anchors.md。');
+              }
               const written = writeTaskArtifact(
                 conversation.id,
                 kind,
