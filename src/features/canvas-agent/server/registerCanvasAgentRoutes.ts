@@ -1252,18 +1252,23 @@ export function registerCanvasAgentRoutes(
       storyboard_runs: ['create_canvas_nodes', 'connect_workflow_edges', 'trigger_skill_execution', 'update_node_config', 'ask_user', 'complete_task_step', 'set_next_action', 'read_task_artifact'],
       compose: ['complete_task_step', 'read_task_artifact', 'ask_user', 'set_next_action'],
     };
-    const allowedForTurn = taskForTurn?.preparing
-      ? allCanvasAITools
-      : allCanvasAITools.filter((tool) => (
-        (stageAllowedTools[taskForTurn?.current || ''] || []).includes(tool.function.name)
-      ));
     const callTurnModel = (
       modelArg: string,
       turnMessages: Array<Record<string, unknown>>,
       useTools: boolean,
       signal: AbortSignal,
       ask = false,
-    ) => callModel(modelArg, turnMessages, useTools, signal, ask, allowedForTurn);
+    ) => {
+      const live = conversation ? readTaskState(conversation.id) : null;
+      const stage = live?.current || taskForTurn?.current || '';
+      const preparing = live?.preparing ?? taskForTurn?.preparing;
+      const turnTools = preparing
+        ? allCanvasAITools
+        : allCanvasAITools.filter((tool) => (
+          (stageAllowedTools[stage] || []).includes(tool.function.name)
+        ));
+      return callModel(modelArg, turnMessages, useTools, signal, ask, turnTools);
+    };
     // 答完准备卡后，服务端把「当前该做的动作」落账，避免模型只回一句任务状态。
     if (conversation && taskForTurn && (askAnswer || askBatch.length)) {
       const plan = nextActionForStep(taskForTurn.current);
