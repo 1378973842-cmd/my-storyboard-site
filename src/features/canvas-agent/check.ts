@@ -1795,6 +1795,10 @@ assert.equal(
   'storyboard',
 );
 assert.equal(
+  combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'proposal', message: '继续', answering: false, hasAnchor: true }).blocked,
+  false,
+);
+assert.equal(
   combatStageDecision({ playbookId: 'canvas-combat-fx', stage: 'params', message: '对手是宙斯', answering: false, hasAnchor: false }).blocked,
   false,
 );

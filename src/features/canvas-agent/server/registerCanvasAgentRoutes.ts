@@ -1354,6 +1354,15 @@ export function registerCanvasAgentRoutes(
         if (missing.length) {
           throw new Error(`anchors.md 声明的节点在画布上不存在：${missing.join('、')}。先创建锚点节点，再完成「锚点登记与创建」。`);
         }
+        const confirmedIds = new Set([
+          gateFacts.character_anchor,
+          gateFacts.opponent_anchor,
+          gateFacts.scene_anchor,
+        ].map((value) => String(value || '').split(':').pop() || '').filter(Boolean));
+        const missingFacts = anchorIds.filter((id) => !confirmedIds.has(id));
+        if (missingFacts.length) {
+          throw new Error(`anchors.md 声明的节点没有对应确认事实：${missingFacts.join('、')}。先确认角色/对手/场景锚点，再完成锚点。`);
+        }
       };
       let lastNonEmptyContent = extractTextLlmMessageContent(model, first).trim();
       let continuationRounds = 0;
@@ -1716,9 +1725,16 @@ export function registerCanvasAgentRoutes(
                 }
               }
               const intent = String(args.intent || '') === 'answer' ? 'answer' : 'advance';
+              const currentStep = readTaskState(conversation.id)?.current;
+              const requestedStep = String(args.step || '');
               if (intent === 'advance') {
-                // 推进类下一步由 current 统一推导；模型只补 answer 类计划，避免旧问卷覆盖新阶段。
-                label = '下一步计划：推进动作由 current 统一生成';
+                // 只有模型明确标注当前 step 的推进计划才接，防旧问卷覆盖新阶段。
+                if (requestedStep && requestedStep === currentStep) {
+                  setTaskNextAction(conversation.id, params, realNodeIds, 'advance');
+                  label = '下一步计划：advance';
+                } else {
+                  label = '下一步计划：advance 缺当前 step，未覆盖账本';
+                }
               } else {
                 setTaskNextAction(conversation.id, params, realNodeIds, 'answer');
                 label = '下一步计划：answer';

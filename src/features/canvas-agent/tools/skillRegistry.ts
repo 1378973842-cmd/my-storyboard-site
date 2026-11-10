@@ -358,11 +358,12 @@ export const coreCanvasTools: AIToolDefinition[] = [
     function: {
       name: 'set_next_action',
       description:
-        'Persist only the current step-specific plan (params and dependent node ids) to the task ledger. The action type is derived from task current, so action_type is optional/legacy.',
+        'Persist only the current step-specific plan (params and dependent node ids) to the task ledger. The action type is derived from task current; action_type is optional/legacy. For advance, pass step equal to the current todo or the plan is ignored.',
       parameters: objectSchema(
         {
           action_type: { type: 'string', enum: ['create_node', 'connect_nodes', 'update_node_params', 'execute_node_skill', 'ask_user', 'review', 'none'] },
           intent: { type: 'string', enum: ['advance', 'answer'] },
+          step: { type: 'string', enum: ['draft', 'anchors', 'storyboard', 'review', 'anchor_runs', 'storyboard_runs', 'compose'] },
           params: {
             type: 'object',
             properties: {
