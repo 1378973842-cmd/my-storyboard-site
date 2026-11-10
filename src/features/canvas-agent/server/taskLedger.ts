@@ -208,7 +208,12 @@ export function writeTaskArtifact(
   const nextText = append && existsSync(file)
     ? `${readFileSync(file, 'utf8')}\n${String(content || '')}`
     : String(content || '');
-  const clipped = nextText.slice(0, ARTIFACT_MAX_CHARS);
+  if (nextText.length > ARTIFACT_MAX_CHARS) {
+    throw new Error(
+      `写入 ${ARTIFACT_FILES[kind]} 失败：当前 ${nextText.length} 字，超过 ${ARTIFACT_MAX_CHARS} 字上限。请分段写，不要静默截断。`,
+    );
+  }
+  const clipped = nextText;
   atomicWrite(file, clipped);
   state.artifacts[kind] = {
     path: ARTIFACT_FILES[kind],
