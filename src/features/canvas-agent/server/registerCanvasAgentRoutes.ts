@@ -1342,6 +1342,68 @@ export function registerCanvasAgentRoutes(
         deterministicReviewCompleted = true;
       }
     }
+    // anchor_runs 直接发运行提案与审批卡，不再依赖模型发 trigger_skill_execution。
+    if (conversation && taskForTurn?.current === 'anchor_runs') {
+      const live = readTaskState(conversation.id);
+      const facts = live?.facts || {};
+      const ids = [facts.character_anchor, facts.opponent_anchor, facts.scene_anchor]
+        .map((value) => String(value || '').split(':').pop() || '')
+        .filter(Boolean);
+      if (ids.length) {
+        const actions: CanvasAction[] = ids.map((nodeId) => ({
+          type: 'execute_node_skill',
+          nodeId,
+        }));
+        const proposal = proposalFor(actions, turnMessage);
+        proposal.generative = true;
+        if (jobId) proposal.jobId = jobId;
+        const ask = {
+          id: `run-anchors-${Date.now()}`,
+          mode: 'approve_run_node' as const,
+          question: '批准运行这些锚点节点？',
+          options: [
+            { type: 'text' as const, label: '批准' },
+            { type: 'text' as const, label: '拒绝' },
+            { type: 'text' as const, label: '先改提示词' },
+          ],
+          node_keys: ids,
+        };
+        const text = `已按当前账本准备 ${ids.length} 个锚点节点的运行提案。生成会产生费用，请在卡上批准。`;
+        const log = {
+          id: `run-proposal-${Date.now()}`,
+          name: 'trigger_skill_execution',
+          label: `运行提案：${ids.length} 个锚点节点`,
+          state: 'done' as const,
+        };
+        streamText(res, text);
+        sendEvent(res, { type: 'tool', log });
+        sendEvent(res, { type: 'proposal', proposal });
+        sendEvent(res, { type: 'ask', asks: [ask] });
+        if (db) {
+          appendCanvasAgentMessage(db, req.authUser?.id || '', conversation.id, 'assistant', text, {
+            proposal,
+            asks: [ask],
+            toolLogs: [log],
+          });
+        }
+        if (db && jobId) {
+          transitionAgentJob(db, req.authUser?.id || '', jobId, 'ask', {
+            step: (getAgentJob(db, req.authUser?.id || '', jobId)?.step || 0) + 1,
+            result: { proposalId: proposal.id, proposalStatus: proposal.status, asks: 1, replyChars: text.length },
+          });
+        }
+        if (db && turnId) {
+          finishAgentTurn(db, turnId, {
+            status: 'ok',
+            replyChars: text.length,
+            proposalActions: actions.length,
+          });
+        }
+        sendEvent(res, { type: 'done' });
+        res.end();
+        return;
+      }
+    }
     const stageAllowedTools: Record<string, string[]> = {
       draft: ['write_task_artifact', 'read_task_artifact', 'ask_user', 'complete_task_step', 'set_next_action', 'remember_project_fact'],
       anchors: ['create_canvas_nodes', 'confirm_character_anchor', 'write_task_artifact', 'read_task_artifact', 'ask_user', 'complete_task_step', 'set_next_action', 'remember_project_fact'],
