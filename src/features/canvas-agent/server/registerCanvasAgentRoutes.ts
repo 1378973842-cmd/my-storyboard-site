@@ -1466,7 +1466,7 @@ export function registerCanvasAgentRoutes(
       // anchor_runs 阶段模型不主动发运行动作时，服务端按已确认 facts 生成运行提案；
       // 仍然只生成 proposal，不执行、不扣费，必须用户批准。
       const liveForRun = conversation ? readTaskState(conversation.id) : null;
-      if (liveForRun?.current === 'anchor_runs' && !parseToolCalls(first).length) {
+      if (liveForRun?.current === 'anchor_runs') {
         const liveFacts = liveForRun.facts || gateFacts;
         const anchorIds = [
           liveFacts.character_anchor,
